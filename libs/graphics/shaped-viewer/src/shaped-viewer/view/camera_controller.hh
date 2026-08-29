@@ -35,6 +35,23 @@ struct sv::orbit_state
     [[nodiscard]] static orbit_state from_camera(camera const& cam, f64 distance = 4.5);
 };
 
+/// Which built-in controller drives a view's camera.
+///
+/// A view has exactly one, and the choice is the caller's: `sv::viewer` runs it, routes the view's events to it and calls its
+/// per-frame update, so nothing about picking one requires a hand-rolled event pump.
+/// Switching between them mid-session keeps the camera — each controller is re-seeded from where the other left it, so the
+/// image restarts on the move rather than on the switch.
+enum class sv::camera_style
+{
+    /// Left-drag orbits, middle-drag pans, the wheel dollies.
+    /// The default, and what a subject-centred view wants.
+    orbit,
+
+    /// Mouse-look plus WASD, integrated over time — see `fps_camera_controller`.
+    /// What a view you want to walk INTO wants: a scene laid out on a floor rather than one held at arm's length.
+    fly,
+};
+
 /// Sensitivities and limits for orbit_camera_controller.
 struct sv::camera_controller_config
 {

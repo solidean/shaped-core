@@ -134,6 +134,13 @@ TEST("symbolize - this test's own name is in its own stack", nx::config::recorde
     // has failed on arm64 CI — a machine no one attaches a debugger to.
     // `nx::config::recorded` means a failure writes the whole stream to `test-recording-*.ccrec` beside the JUnit XML,
     // and CI uploads it, so the next red run explains itself instead of needing another guess.
+    //
+    // It paid off: a Windows x64 failure under `dev.py check`'s parallel load left a recording showing every frame
+    // walked and resolved, and only frame 0 — this helper's own — naming a function from another translation unit.
+    // That is `cc::symbolizer` taking no lock around DbgHelp, which is documented single-threaded, while the sibling
+    // symbolize tests resolve concurrently.
+    // So a red run here is most likely that race rather than a stack-walking regression; clean-core's ../../docs/TODO.md
+    // carries the evidence and the fix.
     CC_RECORD("frames_walked", count);
     CC_RECORD("helper_address", reinterpret_cast<void const*>(&capture_here_for_symbolize_test));
 

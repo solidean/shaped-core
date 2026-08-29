@@ -1,6 +1,7 @@
 #include "material_library.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/thread/mutex.hh>
 
 namespace sv
 {
@@ -119,19 +120,26 @@ cc::result<material_library*> impl::acquire_default_material_library()
 cc::result<material_library*> acquire_material_library()
 {
     // One library for the process: whoever answers is asked once, and every later caller gets that same pointer.
-    static material_library* cached = nullptr;
-    if (cached != nullptr)
-        return cached;
+    // Under a lock for the same reason `acquire_shader_library` is — a memoized process-wide accessor that two threads can
+    // reach has to be one, or "asked once" is only true when nobody asks twice at the same moment.
+    static auto cached = cc::mutex<material_library*>(nullptr);
 
-    auto r = g_acquire_material_library ? g_acquire_material_library() : impl::acquire_default_material_library();
+    return cached.lock(
+        [](material_library*& lib) -> cc::result<material_library*>
+        {
+            if (lib != nullptr)
+                return lib;
 
-    // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_material_library` and try again.
-    if (r.has_error())
-        return r;
-    if (r.value() == nullptr)
-        return cc::error("shaped-viewer: the material library provider returned no library");
+            auto r = g_acquire_material_library ? g_acquire_material_library() : impl::acquire_default_material_library();
 
-    cached = r.value();
-    return cached;
+            // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_material_library` and try again.
+            if (r.has_error())
+                return r;
+            if (r.value() == nullptr)
+                return cc::error("shaped-viewer: the material library provider returned no library");
+
+            lib = r.value();
+            return lib;
+        });
 }
 } // namespace sv

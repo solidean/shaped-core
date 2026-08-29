@@ -31,6 +31,25 @@ enum class sv::material_frequency : sv::u8
     mesh_texture,     ///< uv-sampled, offered by the mesh
 };
 
+/// How an attribute's three corner values are blended into the one the hit reads.
+///
+/// A property of the DECLARATION rather than of the mesh: what a value means is the type's to say, and the mesh only supplies
+/// numbers.
+/// It picks the generated interpolation code, so it is part of the permutation — which it already is, through the type's hash.
+enum class sv::attribute_interpolation : sv::u8
+{
+    /// the barycentric weighted sum, which is what every ordinary quantity wants
+    linear,
+
+    /// a unit quaternion, blended as a rotation: each corner aligned into the first's hemisphere, then summed and normalized
+    ///
+    /// The alignment is the whole point.
+    /// `q` and `-q` are the same rotation, so two corners can describe neighbouring frames and still be antipodal as
+    /// 4-vectors; summing those cancels toward zero and the normalized result belongs to neither.
+    /// Requires a 4-component f32 format, which `material_type::create` checks.
+    rotation,
+};
+
 /// What kind of thing an attribute is bound to.
 enum class sv::material_source_kind : sv::u8
 {
@@ -64,6 +83,9 @@ struct sv::material_signature_entry
 
     bool is_final = false;
 
+    /// how the three corners of a hit triangle are blended when a mesh attribute supplies this
+    attribute_interpolation interpolation = attribute_interpolation::linear;
+
     /// The declaration of `name` defaulting to `value`, deducing `format` from its type.
     /// The type must be a scalar or a tg vector / matrix over one — whatever `attribute_format_of` names.
     template <class T>
@@ -73,6 +95,18 @@ struct sv::material_signature_entry
                 .format = attribute_format_of<T>,
                 .default_value = impl::attribute_value_bytes(value),
                 .is_final = is_final};
+    }
+
+    /// The same, for a declaration whose value is a unit quaternion and blends as a rotation.
+    /// `T` must be a 4-component f32 — a `tg::vec4f` or a `tg::quat_f` — which `material_type::create` rechecks.
+    template <class T>
+    [[nodiscard]] static material_signature_entry of_rotation(cc::string name, T const& value, bool is_final = false)
+    {
+        return {.name = cc::move(name),
+                .format = attribute_format_of<T>,
+                .default_value = impl::attribute_value_bytes(value),
+                .is_final = is_final,
+                .interpolation = attribute_interpolation::rotation};
     }
 };
 

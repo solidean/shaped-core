@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/thread/mutex.hh>
 #include <shaped-viewer/context.hh>
 
 #if SV_HAS_DEFAULT_BACKEND
@@ -47,20 +48,27 @@ cc::result<sg::context_handle> acquire_viewer_context()
     // resources rather than duplicating every upload.
     //
     // The memoization lives here rather than inside a provider, so a caller writing one needs no static of their own.
-    static sg::context_handle cached;
-    if (cached != nullptr)
-        return cached;
+    // Under a lock for the same reason `acquire_shader_library` is: two threads racing this would each build a device,
+    // which is the one outcome the memoization exists to prevent.
+    static auto cached = cc::mutex<sg::context_handle>(nullptr);
 
-    auto r = g_acquire_context ? g_acquire_context() : impl::acquire_default_context();
+    return cached.lock(
+        [](sg::context_handle& ctx) -> cc::result<sg::context_handle>
+        {
+            if (ctx != nullptr)
+                return ctx;
 
-    // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_context` and try again, which is
-    // exactly what someone who hit the no-backend error is about to do.
-    if (r.has_error())
-        return r;
-    if (r.value() == nullptr)
-        return cc::error("shaped-viewer: the context provider returned no context");
+            auto r = g_acquire_context ? g_acquire_context() : impl::acquire_default_context();
 
-    cached = r.value();
-    return cached;
+            // A failure is deliberately not cached: it leaves a caller free to call `set_acquire_context` and try again,
+            // which is exactly what someone who hit the no-backend error is about to do.
+            if (r.has_error())
+                return r;
+            if (r.value() == nullptr)
+                return cc::error("shaped-viewer: the context provider returned no context");
+
+            ctx = r.value();
+            return ctx;
+        });
 }
 } // namespace sv

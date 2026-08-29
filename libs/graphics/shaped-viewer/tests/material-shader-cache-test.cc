@@ -28,7 +28,11 @@ namespace
     return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
 }
 
-/// Drives a permutation's compile to completion and fails the test with DXC's own message when it did not build.
+/// Drives a permutation's compiles to completion and fails the test with DXC's own message when one did not build.
+///
+/// BOTH nodes, because a permutation whose material can cut out carries an any-hit as well.
+/// A compile left undriven is async work still holding this test's context when it ends, which nexus reports as a failure of
+/// the test itself — intermittently, since a node that happens to settle first is never noticed.
 void require_compiled(sv::material_permutation const& p)
 {
     REQUIRE(p.shader != nullptr);
@@ -38,6 +42,28 @@ void require_compiled(sv::material_permutation const& p)
     REQUIRE(p.shader->has_value());
     CHECK(p.shader->try_value()->stage == sg::shader_stage::closest_hit);
     CHECK(p.shader->try_value()->bytecode.size() > 0);
+
+    // A material that never writes `geometry_opacity` deliberately has no any-hit: one that could reject nothing would
+    // still cost the hardware its opaque path on every intersection.
+    if (!p.can_cut_out)
+    {
+        CHECK(p.any_hit == nullptr);
+        CHECK(p.shadow_any_hit == nullptr);
+        return;
+    }
+
+    // Two of them, because the ray that shades and the ray that shadows carry different payloads and an any-hit declares
+    // exactly one — so a permutation that can cut out gets a record and an entry point for each.
+    for (auto const* const node : {&p.any_hit, &p.shadow_any_hit})
+    {
+        REQUIRE(*node != nullptr);
+        (void)cc::try_async_blocking_get(*node);
+        if ((*node)->has_error())
+            FAIL(cc::format("{}\n--- source ---\n{}", (*node)->try_error()->underlying().to_string(), p.source));
+        REQUIRE((*node)->has_value());
+        CHECK((*node)->try_value()->stage == sg::shader_stage::any_hit);
+        CHECK((*node)->try_value()->bytecode.size() > 0);
+    }
 }
 } // namespace
 

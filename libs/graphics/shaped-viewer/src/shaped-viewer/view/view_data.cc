@@ -41,13 +41,13 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         if (!is_traceable(v.layers[i]))
             continue;
 
-        // rgba16_float and the view's own resolution: the estimator's running mean needs the range, and an
-        // accumulator sized to anything but the image it accumulates would have nothing to blend into.
-        out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba16_float});
-
-        // Half floats carry ~3 decimal digits at any magnitude, and every disocclusion test on `hit_t` is relative,
-        // so the depth here is as precise as the comparison needs at any scene scale.
-        out.push_back({.id = temporal_id::gbuffer(u8(i)), .format = sg::pixel_format::rgba16_float});
+        // The view's own resolution: an accumulator sized to anything but the image it accumulates would have
+        // nothing to blend into.
+        //
+        // rgba32_float rather than half, because the accumulation is uncapped.
+        // The raygen weights a frame by 1 / (n + 1) and half floats carry ~3 decimal digits, so the mean would stop
+        // moving a couple of thousand frames in — right where an uncapped estimate is still converging.
+        out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba32_float});
     }
 
     return out;

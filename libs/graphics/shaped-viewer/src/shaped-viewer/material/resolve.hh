@@ -26,6 +26,10 @@ struct sv::resolved_attribute
     /// which rank won
     material_frequency frequency = material_frequency::material_type;
 
+    /// the declaration's own, copied here because the generator sees the resolution rather than the signature
+    /// It only changes anything when `frequency == mesh_attribute`; every other rank reads one value and blends nothing.
+    attribute_interpolation interpolation = attribute_interpolation::linear;
+
     /// live when `frequency <= mesh_instance`
     cc::span<byte const> constant;
 
