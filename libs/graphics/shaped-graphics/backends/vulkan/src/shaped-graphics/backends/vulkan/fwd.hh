@@ -20,6 +20,7 @@ class vulkan_download_inline_system; // the readback ring
 struct vulkan_descriptor_functions;  // the VK_EXT_descriptor_buffer entry points, loaded per device
 struct vulkan_descriptor_range;      // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;        // host-visible memory descriptors are written into
+class vulkan_image_view_cache;       // VkImageViews for bound texture views, keyed by view identity
 class vulkan_binding_group_layout;
 using vulkan_binding_group_layout_handle = std::shared_ptr<vulkan_binding_group_layout const>;
 class vulkan_pipeline_layout;

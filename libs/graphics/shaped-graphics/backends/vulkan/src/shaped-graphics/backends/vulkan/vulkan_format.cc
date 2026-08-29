@@ -183,6 +183,11 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
     // Vulkan rejects a zero-usage buffer, so a usage-less non-empty buffer keeps a benign transfer-dst bit and stays valid.
     if (flags == 0)
         flags = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    return flags;
+
+    // Every buffer carries a device address, because that is what a descriptor names under VK_EXT_descriptor_buffer:
+    // VkDescriptorAddressInfoEXT takes an address rather than a VkBuffer handle.
+    // Unconditional rather than usage-gated — a buffer's usages say how a shader reads it, not whether it may be bound
+    // at all, and there is no cost to the bit on a buffer nothing binds.
+    return flags | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 }
 } // namespace sg::backend::vulkan

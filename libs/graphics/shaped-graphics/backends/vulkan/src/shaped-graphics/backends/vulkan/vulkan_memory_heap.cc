@@ -37,8 +37,14 @@ cc::result<vulkan_memory_heap_handle> vulkan_memory_heap::create(vulkan_context&
     if (type == UINT32_MAX)
         return cc::error("no device-local memory type for a memory heap");
 
+    // Buffers placed here take their device address like any other, so the backing allocation needs the flag too.
+    auto const alloc_flags = VkMemoryAllocateFlagsInfo{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+        .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
+    };
     auto const alloc = VkMemoryAllocateInfo{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &alloc_flags,
         .allocationSize = VkDeviceSize(size_in_bytes),
         .memoryTypeIndex = type,
     };

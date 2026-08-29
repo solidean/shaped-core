@@ -6,6 +6,11 @@
 
 namespace sg::backend::vulkan
 {
+VkDevice ctx_device_of(vulkan_context& ctx)
+{
+    return ctx._device;
+}
+
 
 vulkan_buffer::~vulkan_buffer()
 {
@@ -78,8 +83,15 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
             return cc::error("no device-local memory type for buffer");
         }
 
+        // The device-address flag is required on any allocation backing a buffer whose address is taken, which is
+        // every buffer here — see to_vk_buffer_usage.
+        auto const alloc_flags = VkMemoryAllocateFlagsInfo{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
+            .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
+        };
         auto const alloc_info = VkMemoryAllocateInfo{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext = &alloc_flags,
             .allocationSize = req.size,
             .memoryTypeIndex = type,
         };

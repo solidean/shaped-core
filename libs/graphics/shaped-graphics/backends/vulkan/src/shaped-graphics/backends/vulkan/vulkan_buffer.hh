@@ -7,6 +7,13 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
+namespace sg::backend::vulkan
+{
+/// The VkDevice of a context, for a header that cannot see vulkan_context's definition.
+/// Defined in vulkan_buffer.cc, where the context is complete.
+[[nodiscard]] VkDevice ctx_device_of(vulkan_context& ctx);
+} // namespace sg::backend::vulkan
+
 /// Vulkan implementation of sg::raw_buffer.
 /// Holds the VkBuffer and its backing device-local VkDeviceMemory — sg exposes no host-visible buffers.
 /// Both are VK_NULL_HANDLE for an empty (size 0) buffer.
@@ -27,6 +34,14 @@ public:
         _memory(memory),
         _heap(cc::move(heap))
     {
+        if (_buffer != VK_NULL_HANDLE)
+        {
+            auto const info = VkBufferDeviceAddressInfo{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+                .buffer = _buffer,
+            };
+            _device_address = vkGetBufferDeviceAddress(ctx_device_of(ctx), &info);
+        }
     }
 
     // Deferred deletion: hands the GPU handles and finalizers to the context, freed once the owning epoch retires.
@@ -84,6 +99,10 @@ public:
     sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
     VkBuffer _buffer = VK_NULL_HANDLE;
     VkDeviceMemory _memory = VK_NULL_HANDLE; // owned allocation; null for a placed buffer, which owns no memory
+
+    /// The buffer's device address, which is what a descriptor names; 0 for an empty buffer.
+    /// Read once at creation rather than per descriptor write, since it cannot change.
+    VkDeviceAddress _device_address = 0;
 
     // The heap a placed buffer sits in, held so the heap outlives the placement; null for a dedicated buffer.
     sg::memory_heap_handle _heap;
