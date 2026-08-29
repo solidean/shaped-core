@@ -357,6 +357,10 @@ protected:
     /// gone, so calling it at the right point is the backend's job.
     void release_transient_heap() { transient.release_heap_at_shutdown(); }
 
+    /// Drops every cached binding-group layout, pipeline layout and pipeline.
+    /// Same rule as the two above: they are device objects, and the cache outlives every caller that held one.
+    void release_cached_pipelines();
+
     /// Allocates a GPU-resident buffer; size must be >= 0, and 0 is a valid empty buffer.
     /// `alloc` selects the backing memory (see allocation_info).
     [[nodiscard]] virtual cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,

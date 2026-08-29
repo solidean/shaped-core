@@ -222,6 +222,13 @@ constexpr u32 k_required_api_version = VK_API_VERSION_1_3;
 // the machine it is developed on.
 constexpr char const* k_descriptor_buffer_extension = VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME;
 
+// What makes an *empty* descriptor writable.
+// sg has two of them — a vacant array element, and the null acceleration structure every ray misses — and both are
+// contract rather than convenience, so this is required alongside descriptor_buffer rather than probed.
+// Without nullDescriptor a zeroed descriptor is undefined rather than empty, and vkGetDescriptorEXT rejects a null
+// acceleration-structure address outright.
+constexpr char const* k_robustness2_extension = VK_EXT_ROBUSTNESS_2_EXTENSION_NAME;
+
 // The ray-tracing device extensions, which are optional above the floor.
 // A device without them still comes up; cmd.raytracing.is_supported() then answers false.
 constexpr char const* k_raytracing_extensions[] = {
@@ -388,9 +395,12 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (auto const missing = missing_required_capability(best_device); !missing.empty())
         return cc::error(cc::format("selected Vulkan device does not support {}", missing));
 
-    char const* const descriptor_buffer_names[] = {k_descriptor_buffer_extension};
-    if (!device_extensions_available(best_device, descriptor_buffer_names))
-        return cc::error(cc::format("selected Vulkan device does not support {}", k_descriptor_buffer_extension));
+    for (auto const* name : {k_descriptor_buffer_extension, k_robustness2_extension})
+    {
+        char const* const names[] = {name};
+        if (!device_extensions_available(best_device, names))
+            return cc::error(cc::format("selected Vulkan device does not support {}", name));
+    }
 
     // Ray tracing is optional above the floor: enable the extensions where the device has them, and record the
     // answer so cmd.raytracing.is_supported() reports the device rather than a hardcoded false.
@@ -398,6 +408,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     cc::vector<char const*> device_extensions;
     device_extensions.push_back(k_descriptor_buffer_extension);
+    device_extensions.push_back(k_robustness2_extension);
     if (raytracing_supported)
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
@@ -422,9 +433,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pNext = &accel_features,
         .rayTracingPipeline = VK_TRUE,
     };
+    auto robustness2_features = VkPhysicalDeviceRobustness2FeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_features) : nullptr,
+        // Only nullDescriptor: robustBufferAccess2 and robustImageAccess2 define what an out-of-bounds access
+        // returns, which sg does not promise and which costs performance to guarantee.
+        .nullDescriptor = VK_TRUE,
+    };
     auto descriptor_buffer_features = VkPhysicalDeviceDescriptorBufferFeaturesEXT{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
-        .pNext = raytracing_supported ? static_cast<void*>(&rt_pipeline_features) : nullptr,
+        .pNext = &robustness2_features,
         .descriptorBuffer = VK_TRUE,
     };
     auto vk13_features = VkPhysicalDeviceVulkan13Features{

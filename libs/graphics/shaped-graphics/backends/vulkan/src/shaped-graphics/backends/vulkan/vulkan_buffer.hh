@@ -49,6 +49,12 @@ public:
     // Body in vulkan_buffer.cc.
     ~vulkan_buffer() override;
 
+protected:
+    // A transient buffer expires when its epoch advances, and its storage goes then rather than at destruction:
+    // the heap reuses those bytes for the next epoch either way, so holding a handle must not hold the memory.
+    void on_expired() const override;
+
+public:
     /// Accumulate one declared access for `slot`'s next op, seeding a fresh slot from the canonical state.
     /// Call once per binding; several declares for one op merge into a single barrier at flush.
     /// Thread-safe.
@@ -95,10 +101,16 @@ public:
         _access.lock([&](vulkan_buffer_access& a) { a.discard(slot); });
     }
 
+    /// Stages the GPU handles for deferred deletion and clears them; idempotent.
+    /// Both expiry and destruction run it, and whichever comes first owns the release.
+    void release_storage() const;
+
     vulkan_context& _ctx;      // creating context — outlives this buffer
     sg::epoch _creation_epoch; // epoch this buffer was created in (immutable identity / diagnostics)
-    VkBuffer _buffer = VK_NULL_HANDLE;
-    VkDeviceMemory _memory = VK_NULL_HANDLE; // owned allocation; null for a placed buffer, which owns no memory
+    // Mutable because release_storage() is const: expiry is a lifetime event on a const handle, the same reason
+    // sg::raw_buffer::expire() is const.
+    mutable VkBuffer _buffer = VK_NULL_HANDLE;
+    mutable VkDeviceMemory _memory = VK_NULL_HANDLE; // owned allocation; null for a placed buffer, which owns no memory
 
     /// The buffer's device address, which is what a descriptor names; 0 for an empty buffer.
     /// Read once at creation rather than per descriptor write, since it cannot change.

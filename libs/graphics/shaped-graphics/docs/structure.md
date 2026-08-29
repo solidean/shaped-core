@@ -52,20 +52,20 @@ src/shaped-graphics/
                                                  producing one is shaped-shader-library's job — see docs/shaders.md)
                                                 deferred: the reflected vertex-input / I-O signatures
     binding.hh/.cc                [done]        backend-agnostic reflection: binding + binding_type ((set,index); maps to view)
-    sampler.hh                    [in progress] sampler value type + filter/address/border/compare vocabulary; dx12 real, vulkan pending
-    binding_group_layout.hh/.cc   [in progress] abstract: one group's schema; dx12 = descriptor-table schema (vulkan stub)
+    sampler.hh                    [done]        sampler value type + filter/address/border/compare vocabulary; both backends real
+    binding_group_layout.hh/.cc   [done]        abstract: one group's schema; dx12 = descriptor-table schema, vulkan = VkDescriptorSetLayout
     pipeline_layout.hh/.cc        [in progress] abstract: ordered group layouts (bind slots); dx12 = root signature (vulkan stub)
-    binding_group.hh/.cc          [in progress] abstract: group-layout instance bound to raw_views (named_view); dx12 = heap range + views (vulkan stub)
-    staging_binding_group.hh/.cc  [in progress] abstract: mutable descriptor image that mints immutable groups (binding_slot -> slot table, shape-named setters, snapshot);
-                                                dx12 = private non-shader-visible heap + CopyDescriptorsSimple (vulkan stub)
+    binding_group.hh/.cc          [done]        abstract: group-layout instance bound to raw_views (named_view); a descriptor-heap range in both backends
+    staging_binding_group.hh/.cc  [done]        abstract: mutable descriptor image that mints immutable groups (binding_slot -> slot table, shape-named setters, snapshot);
+                                                dx12 = private non-shader-visible heap + CopyDescriptorsSimple, vulkan = a host descriptor image + one memcpy
     bindless_array.hh/.cc         [done]        non-owning view identity -> element index map over ONE array binding of a staging group
                                                 (impl/slot_table.hh is the fixed-capacity table with the per-epoch stale sweep)
 
   command_list/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
-    upload.hh/.cc                 [in progress] cmd.upload: inline host→device buffer + texture writes (dx12 real; vulkan stub)
-    download.hh/.cc               [in progress] cmd.download: inline readback of buffers + textures -> bytes_future (dx12 real; vulkan stub)
-    copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (dx12 real; vulkan stub); texture copies pending
+    upload.hh/.cc                 [done]        cmd.upload: inline host→device buffer + texture writes (both backends real)
+    download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
+    copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
     compute.hh/.cc                [in progress] cmd.compute: bind_pipeline / bind_group / dispatch (dx12 real; vulkan stub)
     raster.hh/.cc                 [in progress] cmd.raster: rendering scope, bindings, viewport/scissor state, draws (dx12 real; vulkan stub)
     raytracing.hh/.cc             [in progress] cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12 real; vulkan stub)
@@ -86,7 +86,7 @@ src/shaped-graphics/
 
   memory/
     allocation_info.hh            [done]        value type: placement handle (heap/offset/size + scope); null heap = dedicated
-    memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; dx12 places buffers, textures + vulkan still dedicated-only
+    memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; both backends place buffers, textures still dedicated-only
 
   present/
     swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire_backbuffer / present / resize / HDR flag); dx12 real (vulkan stub)

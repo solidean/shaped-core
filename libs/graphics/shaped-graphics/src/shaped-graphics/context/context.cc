@@ -80,6 +80,11 @@ bool context::accepts_shader_format(shader_format format) const
     return false;
 }
 
+void context::release_cached_pipelines()
+{
+    _pipeline_cache->release_at_shutdown();
+}
+
 pipeline_cache& context::pipeline_cache_ref()
 {
     return *_pipeline_cache;
@@ -123,6 +128,9 @@ void context::shutdown()
 
     // Same rule, one layer down: the transient heap is GPU memory from the device about to be destroyed.
     transient.release_heap_at_shutdown();
+
+    // And the same again for the pipeline cache, which holds layouts and pipelines built on that device.
+    release_cached_pipelines();
 
     _is_shut_down = true;
 }

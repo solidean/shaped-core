@@ -21,6 +21,15 @@ struct vulkan_descriptor_functions;  // the VK_EXT_descriptor_buffer entry point
 struct vulkan_descriptor_range;      // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;        // host-visible memory descriptors are written into
 class vulkan_image_view_cache;       // VkImageViews for bound texture views, keyed by view identity
+class vulkan_sampler_cache;          // VkSamplers for bound sampler states, keyed by sampler identity
+struct vulkan_hazard_view;           // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)
+struct vulkan_texture_hazard_view;   // the texture analogue
+struct vulkan_array_element;         // one element of an array binding
+struct vulkan_array_binding;         // an array binding's per-element resources
+class vulkan_binding_group;
+using vulkan_binding_group_handle = std::shared_ptr<vulkan_binding_group const>;
+class vulkan_staging_binding_group;
+using vulkan_staging_binding_group_handle = std::shared_ptr<vulkan_staging_binding_group>;
 class vulkan_binding_group_layout;
 using vulkan_binding_group_layout_handle = std::shared_ptr<vulkan_binding_group_layout const>;
 class vulkan_pipeline_layout;

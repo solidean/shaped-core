@@ -12,6 +12,8 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
     src/shaped-graphics/backends/vulkan/vulkan_barrier.cc
+    src/shaped-graphics/backends/vulkan/vulkan_binding_group.cc
+    src/shaped-graphics/backends/vulkan/vulkan_staging_binding_group.cc
     src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.cc
     src/shaped-graphics/backends/vulkan/vulkan_pipeline_layout.cc
     src/shaped-graphics/backends/vulkan/vulkan_buffer.cc

@@ -138,6 +138,30 @@ TEST("test cli - positionals become filters, comma-split")
         CHECK(config.filters[0] == "alpha");
         CHECK(config.filters[1] == "beta");
     }
+
+    SECTION("a backslash escapes a comma, so a test name may contain one")
+    {
+        // Without this a test named "a, b" cannot be addressed at all — and an exact name is the only thing that
+        // selects a test the schedule would otherwise skip.
+        auto const config = parse({"a staging binding must be set\\, even to nothing"});
+        REQUIRE(config.filters.size() == 1);
+        CHECK(config.filters[0] == "a staging binding must be set, even to nothing");
+    }
+
+    SECTION("an escaped and an unescaped comma in one argument")
+    {
+        auto const config = parse({"alpha\\,one,beta"});
+        REQUIRE(config.filters.size() == 2);
+        CHECK(config.filters[0] == "alpha,one");
+        CHECK(config.filters[1] == "beta");
+    }
+
+    SECTION("a backslash before anything else is literal")
+    {
+        auto const config = parse({"alpha\\beta"});
+        REQUIRE(config.filters.size() == 1);
+        CHECK(config.filters[0] == "alpha\\beta");
+    }
 }
 
 // --- the Catch2 compatibility surface, which C++ TestMate drives ---------------------------------------
@@ -183,12 +207,14 @@ TEST("test cli - a Catch2-escaped bracket is unescaped in the compat modes")
         CHECK(other.filters[0] == "a\\b");
     }
 
-    SECTION("but a comma still separates, escaped or not")
+    SECTION("an escaped comma is one filter, as Catch2 reads it")
     {
-        // Splitting happens before unescaping, so `\,` is two filters rather than one literal comma.
-        // Catch2 would read it as one; nexus has always split first, and changing that is its own change.
+        // Splitting knows about `\\,` rather than running before unescaping, so this is one literal comma.
+        // It has to be: a test whose name contains a comma is otherwise unaddressable, and an exact name is the only
+        // thing that selects a test the schedule would skip.
         auto const split = parse({"--reporter", "xml", "a\\,b"});
-        CHECK(split.filters.size() == 2);
+        REQUIRE(split.filters.size() == 1);
+        CHECK(split.filters[0] == "a,b");
     }
 
     SECTION("and nothing is unescaped in an ordinary run")

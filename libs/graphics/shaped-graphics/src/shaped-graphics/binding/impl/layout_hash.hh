@@ -21,6 +21,11 @@ namespace sg::impl
 [[nodiscard]] cc::hash128 binding_group_layout_hash(cc::span<binding const> bindings,
                                                     cc::span<named_sampler const> static_samplers);
 
+/// Identity of one sampler state, over its fields.
+/// Exists so a backend that caches sampler objects keys them the same way a layout's identity does — two samplers a
+/// layout hash calls equal must not be two objects in a cache, or the cache is answering a different question.
+[[nodiscard]] cc::hash128 sampler_hash(sampler const& s);
+
 /// Identity of a pipeline_layout: its groups' own identities, its register-bound static samplers, and its inline constants.
 /// All three change the root signature, so all three are part of it.
 [[nodiscard]] cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> groups,

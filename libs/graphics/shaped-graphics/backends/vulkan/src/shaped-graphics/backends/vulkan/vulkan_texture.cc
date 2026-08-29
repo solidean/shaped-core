@@ -8,18 +8,40 @@
 namespace sg::backend::vulkan
 {
 
-vulkan_texture::~vulkan_texture()
+std::shared_ptr<vulkan_texture> vulkan_context::register_if_transient(std::shared_ptr<vulkan_texture> texture,
+                                                                      sg::lifetime_scope scope)
+{
+    if (scope == sg::lifetime_scope::transient)
+        _transient_expiring_textures.lock([&](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+                                          { v.push_back(texture); });
+    return texture;
+}
+
+void vulkan_texture::release_storage() const
 {
     // Stage the GPU handles and finalizers for deletion once the current epoch retires.
-    if (_image != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
-    {
-        vulkan_expiring_resource expiring;
-        expiring.image = _image;
-        expiring.memory = _memory;
-        expiring.finalizers = cc::move(_finalizers);
-        _ctx.schedule_deferred_deletion(cc::move(expiring));
-    }
+    // Idempotent: the handles are cleared here, so expiry and destruction cannot stage the same ones twice.
+    if (_image == VK_NULL_HANDLE && _memory == VK_NULL_HANDLE && _finalizers.empty())
+        return;
+
+    vulkan_expiring_resource expiring;
+    expiring.image = _image;
+    expiring.memory = _memory;
+    expiring.finalizers = cc::move(_finalizers);
+    _image = VK_NULL_HANDLE;
+    _memory = VK_NULL_HANDLE;
+    _ctx.schedule_deferred_deletion(cc::move(expiring));
 }
+
+void vulkan_texture::on_expired() const
+{
+    release_storage();
+}
+
+vulkan_texture::~vulkan_texture()
+{
+    release_storage();
+} // no-op if expire() already released the storage
 
 cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
                                                                         sg::allocation_info const& alloc)
@@ -90,6 +112,7 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         return vulkan_error(r, "vkBindImageMemory failed");
     }
 
-    return vulkan_texture_handle(std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, memory));
+    return vulkan_texture_handle(register_if_transient(
+        std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, memory), alloc.scope));
 }
 } // namespace sg::backend::vulkan

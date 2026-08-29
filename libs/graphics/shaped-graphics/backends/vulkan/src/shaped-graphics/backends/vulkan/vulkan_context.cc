@@ -126,6 +126,10 @@ void vulkan_context::shutdown()
     // heap's destruction staged.
     release_transient_heap();
 
+    // The pipeline cache holds binding-group layouts and pipelines, which are device objects with no reference to the
+    // device — so the cache, not the caller, is what would outlive it.
+    release_cached_pipelines();
+
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
     // resource (in-flight and staged) and running finalizers — before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
@@ -140,6 +144,10 @@ void vulkan_context::shutdown()
         _upload_inline.shutdown();
         _download_inline.shutdown(); // drains its actor first, which memcpys out of the ring
         _descriptor_heap.shutdown();
+
+        // Views and samplers are device objects a descriptor names, so they go before the device too.
+        _image_views.shutdown();
+        _samplers.shutdown();
 
         // Every command pool is idle now (the drain retired every in-flight epoch, returning pools to
         // the free set); destroy them before the device.

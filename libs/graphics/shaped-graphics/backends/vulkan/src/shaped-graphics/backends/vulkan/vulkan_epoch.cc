@@ -55,6 +55,32 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
     _download_inline.on_epoch_advance(last);
     _descriptor_heap.on_epoch_advance(last);
 
+    // Auto-expire `last`'s transient resources: the transient heap reuses their storage for the new epoch, so a
+    // handle held past it must report itself expired rather than name recycled bytes.
+    // Done before the staged drain below, so each release is attributed to `last`.
+    // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
+    auto const expiring_buffers = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto const& w : expiring_buffers)
+        if (auto const b = w.lock())
+            b->expire();
+
+    auto const expiring_textures = _transient_expiring_textures.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto const& t : expiring_textures)
+        if (auto const tex = t.lock())
+            tex->expire();
+
     // Package everything `last` owns and push it onto the in-flight FIFO.
     // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
     vulkan_epoch_data data;

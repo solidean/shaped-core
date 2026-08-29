@@ -50,6 +50,11 @@ void write_view_descriptor(vulkan_context& ctx,
                            sg::raw_view const& view,
                            byte* dst);
 
+/// Writes `sampler`'s descriptor into `dst`.
+/// A sampler descriptor always names an object, so `sampler` must be non-null — there is no vacant sampler, since an
+/// unsupplied dynamic sampler is the default sampler state rather than an absence.
+void write_sampler_descriptor(vulkan_context& ctx, VkSampler sampler, byte* dst);
+
 /// The device's descriptor size for a binding's type, which is what a set layout reserves per element.
 [[nodiscard]] isize descriptor_size_of(vulkan_context const& ctx, sg::binding_type type);
 } // namespace sg::backend::vulkan

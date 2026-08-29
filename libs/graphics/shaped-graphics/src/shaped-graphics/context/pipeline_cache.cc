@@ -213,6 +213,15 @@ void pipeline_cache::add_default_in_memory_providers(isize max_entries)
     _raytracing_cache.add_default_in_memory_provider(max_entries);
 }
 
+void pipeline_cache::release_at_shutdown()
+{
+    _binding_group_layout_cache.release_providers();
+    _pipeline_layout_cache.release_providers();
+    _compute_cache.release_providers();
+    _raster_cache.release_providers();
+    _raytracing_cache.release_providers();
+}
+
 void pipeline_cache::apply_bookkeeping()
 {
     _binding_group_layout_cache.apply_bookkeeping();

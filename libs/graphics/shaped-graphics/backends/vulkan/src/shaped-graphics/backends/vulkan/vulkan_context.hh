@@ -4,6 +4,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_command_list.hh>
@@ -14,8 +15,11 @@
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_inline.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
@@ -238,18 +242,28 @@ public:
     {
         return cc::error("vulkan raytracing_shader_table creation is not implemented yet");
     }
-    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle,
-                                                                                cc::span<sg::named_view const>,
-                                                                                cc::span<sg::named_sampler const>,
-                                                                                sg::lifetime_scope) override
+    [[nodiscard]] cc::result<vulkan_binding_group_handle> create_vulkan_binding_group(
+        sg::binding_group_layout_handle const& layout,
+        cc::span<sg::named_view const> views,
+        cc::span<sg::named_sampler const> samplers,
+        sg::lifetime_scope scope);
+
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                                cc::span<sg::named_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
+                                                                                sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan binding_group creation is not implemented yet");
+        return cc::result<sg::binding_group_handle>(create_vulkan_binding_group(layout, views, samplers, scope));
     }
+    [[nodiscard]] cc::result<vulkan_staging_binding_group_handle> create_vulkan_staging_binding_group(
+        sg::binding_group_layout_handle const& layout,
+        sg::lifetime_scope scope);
+
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
-        sg::binding_group_layout_handle,
-        sg::lifetime_scope) override
+        sg::binding_group_layout_handle layout,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan staging_binding_group creation is not implemented yet");
+        return cc::result<sg::staging_binding_group_handle>(create_vulkan_staging_binding_group(layout, scope));
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
@@ -395,8 +409,27 @@ public:
     /// The readback ring behind cmd.download, and the actor that drains it.
     vulkan_download_inline_system _download_inline;
 
+    /// Registers a transient resource for auto-expiry at the next epoch advance, and hands it straight back.
+    /// A pass-through so a creation path stays one return statement; a persistent resource passes through untouched.
+    /// Bodies in vulkan_buffer.cc / vulkan_texture.cc, where the type is complete.
+    [[nodiscard]] std::shared_ptr<vulkan_buffer> register_if_transient(std::shared_ptr<vulkan_buffer> buffer,
+                                                                       sg::lifetime_scope scope);
+    [[nodiscard]] std::shared_ptr<vulkan_texture> register_if_transient(std::shared_ptr<vulkan_texture> texture,
+                                                                        sg::lifetime_scope scope);
+
+    /// The transient resources of the open epoch, expired when it advances.
+    /// Weak, so a registration never keeps a resource alive: a transient handle nobody holds is simply gone by then.
+    mutable cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
+    mutable cc::mutex<cc::vector<std::weak_ptr<sg::raw_texture const>>> _transient_expiring_textures;
+
     /// Descriptors live here, and a binding group is a range of it.
     vulkan_descriptor_heap _descriptor_heap;
+
+    /// The objects a descriptor can only name, rather than describe inline.
+    /// Both are caches for the context's life: a view or sampler an sg value type describes has no lifetime of its
+    /// own, and giving each group its own objects would mean deferring their destruction behind every group.
+    vulkan_image_view_cache _image_views = vulkan_image_view_cache(*this);
+    vulkan_sampler_cache _samplers = vulkan_sampler_cache(*this);
 
     /// The descriptor-buffer entry points, loaded once at creation.
     vulkan_descriptor_functions _descriptor_functions;

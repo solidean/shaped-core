@@ -46,6 +46,21 @@ A declared group index then propagates, so that it cannot be declared and quietl
 - **Every backend's `bind_group` asserts the slot matches**, next to the assert that the layout matches the pipeline layout's slot at all.
   A layout that pins no group index binds anywhere, which is the HLSL path and stays free.
 
+### An index is unique within its group
+
+**Two bindings of one layout must not share an `index`**, whatever their spaces or types say.
+
+The reason it needs stating is that HLSL makes the collision look normal.
+`t0, space1` and `t0, space2` are two registers, and so are `t0` and `b0` — HLSL numbers registers in a space *and* in a class, so a reflected binding list routinely holds several bindings at index 0.
+D3D12 keeps both namespaces and resolves them at layout build, which is why a dx12 backend never notices.
+
+A descriptor set has neither.
+SPIR-V, WGSL and Metal all number every binding of a group in one namespace, so a colliding index is not a layout those APIs can express.
+The vulkan backend rejects one by name rather than leaving it to the validation layer, which reports a binding number and not which two bindings own it.
+
+The portable rule is the one `binding`'s own documentation already implies: `index` is the address *within its group*, and two things at one address are one thing.
+A layout reflected from HLSL for a Vulkan target does not hit this, because `[[vk::binding]]` annotations make the shader state its own set and binding — see [shaders](../shaders.md).
+
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.

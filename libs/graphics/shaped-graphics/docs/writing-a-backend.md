@@ -145,6 +145,15 @@ Recorded as each is met, because this is what the next backend most wants to kno
   dx12 seeds its texture tracker's canonical state with `general`, because a D3D12 resource is created in COMMON and that is what `general` means.
   A Vulkan image can only be created `UNDEFINED` or `PREINITIALIZED`, so the same seed would have the first barrier declare an old layout the image is not in — which Vulkan rejects.
   Check what your API's creation call actually leaves the resource in, and seed the tracker with that rather than inheriting the reference backend's answer.
+- **A register-based API namespaces a binding address twice; a descriptor set does not.**
+  HLSL numbers a register in a *space* and in a *class* (`t`/`s`/`u`/`b`), so a reflected binding list routinely holds
+  several bindings at index 0 and D3D12 resolves them at layout build.
+  SPIR-V, WGSL and Metal have one namespace per group, so the same list is not a set layout at all.
+  sg's rule — `index` is the address within its group, and two bindings must not share one — was implicit until a
+  second backend needed it; see [concepts/bindings.md](concepts/bindings.md).
+  **Expect the reference backend's own tests to encode its namespacing**, and read a shared test's layout before
+  assuming your backend is what is wrong.
+
 - **`used_cached_pipeline()` cannot be answered exactly on every API.**
   dx12 reports it precisely because D3D12 never silently ignores a cached PSO, and `VkPipelineCache` does.
   This is an sg-surface question rather than a backend detail, so raise it rather than approximating.
@@ -169,6 +178,23 @@ Recorded as each is met, because this is what the next backend most wants to kno
   sg's transient bump heap was not, and the validation layer reported it as a leaked `VkDeviceMemory` at `vkDestroyDevice`.
   The fix belonged in sg rather than the backend: `context::shutdown` already clears routines for exactly this reason, and the transient heap now goes the same way.
   Wherever the reference backend gets a lifetime for free, check whether yours does.
+- **A reference-counted device hides teardown-order bugs, and it hides more than one.**
+  The first was the transient heap; the second was the pipeline cache, which holds binding-group layouts and pipelines
+  that no caller still references.
+  The pattern generalizes: **anything sg caches for the context's life is a teardown-order bug waiting on a backend
+  whose device is not reference counted.**
+  Both fixes belonged in sg rather than the backend — `context::shutdown` now releases the cache the way it already
+  cleared routines — so look for the *category* on the first one rather than fixing them one validation message at a
+  time.
+
+- **Objects a descriptor merely names want a per-context cache, not per-group ownership.**
+  A dx12 sampler descriptor leaves no object behind, and D3D12 creates a view straight into a heap.
+  Vulkan needs a VkSampler and a VkImageView that outlive every group holding them, and giving each group its own
+  would mean deferring their destruction behind every group's epoch.
+  Caching them per context makes the lifetime trivial and a re-minted group free.
+  Key the cache on sg's own identity for the value — `sg::impl::sampler_hash`, `hash(raw_texture_view)` — rather than
+  on one the backend invents, or the cache answers a different question than the layout identity does.
+
 - **Keep translation logic device-free, and it becomes testable everywhere.**
   Barrier translation and access tracking are pure logic with no device in them, so their tests run on any machine rather than only where a device exists.
   On a platform with no software adapter that is the difference between covered and skipped, and it is worth splitting files along that line deliberately.
@@ -190,6 +216,9 @@ Small, and each costs a build cycle to rediscover.
 - **A precompiled header hides a missing include.** A header that compiles inside its `.cc` can still fail standalone, and clang-tidy or a `nopch-*` preset is what catches it.
 - **The prose linter enforces one semantic point per line** in comments as strictly as in docs, and a reflowed comment block trips it.
   See [prose](../../../../docs/guides/prose.md).
+- **A test name containing a comma needs the comma escaped** on the command line (`dev.py test 'sg - a\, b'`), because
+  a filter argument is comma-separated the way Catch2's is.
+  It matters here because an exact name is the only thing that selects a test a disabled driver would otherwise skip.
 
 ---
 

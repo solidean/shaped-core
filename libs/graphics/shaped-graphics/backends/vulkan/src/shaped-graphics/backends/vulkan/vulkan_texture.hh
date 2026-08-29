@@ -32,6 +32,15 @@ public:
     // Body in vulkan_texture.cc.
     ~vulkan_texture() override;
 
+    /// Stages the GPU handles for deferred deletion and clears them; idempotent.
+    /// Both expiry and destruction run it, and whichever comes first owns the release.
+    void release_storage() const;
+
+protected:
+    // A transient texture expires when its epoch advances — dedicated storage today, but the contract is the same.
+    void on_expired() const override;
+
+public:
     /// Accumulate one declared access over `range`, seeding from the canonical layout on first touch.
     /// Thread-safe.
     void declare_access(sg::command_list_slot slot,
@@ -75,8 +84,9 @@ public:
 
     vulkan_context& _ctx;      // creating context — outlives this texture
     sg::epoch _creation_epoch; // epoch this texture was created in (immutable identity / diagnostics)
-    VkImage _image = VK_NULL_HANDLE;
-    VkDeviceMemory _memory = VK_NULL_HANDLE;
+    // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
+    mutable VkImage _image = VK_NULL_HANDLE;
+    mutable VkDeviceMemory _memory = VK_NULL_HANDLE;
 
     // Guarded because concurrent command lists may record against the same texture.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the texture, not a change to it.

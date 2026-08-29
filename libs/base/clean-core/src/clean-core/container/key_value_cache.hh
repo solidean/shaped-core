@@ -107,6 +107,17 @@ struct cc::key_value_cache
             });
     }
 
+    /// Drops every tier, releasing whatever the in-memory ones hold.
+    ///
+    /// For teardown: a cached value may own something that must die before the subsystem that made it, and the cache
+    /// is the last thing still referencing it.
+    /// Afterwards `acquire` still answers, by calling the factory every time — a cache with no tiers stores nothing.
+    /// A persistent tier is only unregistered here, never emptied; what it wrote stays written.
+    void release_providers()
+    {
+        _state.lock([](state& s) { s.providers.clear(); });
+    }
+
     /// Runs apply_bookkeeping on all providers (e.g. to trigger in-memory eviction).
     void apply_bookkeeping()
     {

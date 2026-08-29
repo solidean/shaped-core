@@ -165,9 +165,8 @@ void write_view_descriptor(vulkan_context& ctx,
     if (sg::is_vacant(view))
     {
         // A vacant array element still occupies a descriptor, and an unwritten one in a bound set is undefined.
-        // Vulkan spells "a descriptor that reads as nothing" as a null data pointer, which needs the nullDescriptor
-        // feature of VK_EXT_robustness2 to be legal — so what this actually writes is a zeroed descriptor, which is
-        // what the extension defines a null descriptor to be.
+        // Vulkan spells "a descriptor that reads as nothing" as an all-zero descriptor, which is defined only with
+        // the nullDescriptor feature of VK_EXT_robustness2 — required at device creation for exactly this.
         //
         // The binding is the only source of shape here: the element carries no resource, which is exactly why the
         // declared type and dimension have to be on the binding rather than inferred from the view.
@@ -207,6 +206,8 @@ void write_view_descriptor(vulkan_context& ctx,
     {
         // A null TLAS is legal and binds the null acceleration structure, which every ray misses — so address 0 is a
         // valid descriptor rather than an error, and there is nothing to keep alive for it.
+        // It is the nullDescriptor feature that makes it writable at all; vkGetDescriptorEXT rejects address 0 without
+        // it, which is why device creation requires VK_EXT_robustness2.
         //
         // A non-null one cannot occur yet: cmd.raytracing.is_supported() answers false until the ray-tracing
         // milestone, so nothing can build the acceleration structure this would need the address of.
@@ -217,5 +218,19 @@ void write_view_descriptor(vulkan_context& ctx,
         CC_UNREACHABLE("unhandled raw_view arm in write_view_descriptor");
 
     ctx._descriptor_functions.get_descriptor(ctx._device, &info, size, dst);
+}
+
+void write_sampler_descriptor(vulkan_context& ctx, VkSampler sampler, byte* dst)
+{
+    CC_ASSERT(dst != nullptr, "no destination for a descriptor write");
+    CC_ASSERT(sampler != VK_NULL_HANDLE, "a sampler descriptor needs a sampler");
+
+    auto const info = VkDescriptorGetInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+        .type = VK_DESCRIPTOR_TYPE_SAMPLER,
+        .data = {.pSampler = &sampler},
+    };
+    ctx._descriptor_functions.get_descriptor(ctx._device, &info,
+                                             size_t(descriptor_size_of(ctx, sg::binding_type::sampler)), dst);
 }
 } // namespace sg::backend::vulkan

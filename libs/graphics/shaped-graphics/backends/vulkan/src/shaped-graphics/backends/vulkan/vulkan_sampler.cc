@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
+#include <shaped-graphics/binding/impl/layout_hash.hh>
 
 namespace sg::backend::vulkan
 {
@@ -97,5 +99,45 @@ VkSamplerCreateInfo to_vk_sampler_info(sg::sampler const& s)
         .borderColor = to_vk_border_color(s.border_color),
         .unnormalizedCoordinates = VK_FALSE,
     };
+}
+} // namespace sg::backend::vulkan
+
+namespace sg::backend::vulkan
+{
+vulkan_sampler_cache::~vulkan_sampler_cache()
+{
+    shutdown();
+}
+
+void vulkan_sampler_cache::shutdown()
+{
+    // Called from context teardown before the device goes, since a VkSampler outliving its VkDevice is a leak the
+    // validation layer reports at vkDestroyDevice.
+    _samplers.lock(
+        [&](cc::map<cc::hash128, VkSampler>& samplers)
+        {
+            for (auto const& [key, sampler] : samplers)
+                vkDestroySampler(_ctx._device, sampler, nullptr);
+            samplers.clear();
+        });
+}
+
+VkSampler vulkan_sampler_cache::acquire(sg::sampler const& s)
+{
+    auto const key = sg::impl::sampler_hash(s);
+    return _samplers.lock(
+        [&](cc::map<cc::hash128, VkSampler>& samplers)
+        {
+            if (auto const* existing = samplers.get_ptr(key); existing != nullptr)
+                return *existing;
+
+            auto const info = to_vk_sampler_info(s);
+            VkSampler sampler = VK_NULL_HANDLE;
+            if (VkResult const r = vkCreateSampler(_ctx._device, &info, nullptr, &sampler); r != VK_SUCCESS)
+                return VkSampler(VK_NULL_HANDLE);
+
+            samplers[key] = sampler;
+            return sampler;
+        });
 }
 } // namespace sg::backend::vulkan

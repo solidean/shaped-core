@@ -12,19 +12,40 @@ VkDevice ctx_device_of(vulkan_context& ctx)
 }
 
 
-vulkan_buffer::~vulkan_buffer()
+std::shared_ptr<vulkan_buffer> vulkan_context::register_if_transient(std::shared_ptr<vulkan_buffer> buffer,
+                                                                     sg::lifetime_scope scope)
+{
+    if (scope == sg::lifetime_scope::transient)
+        _transient_expiring.lock([&](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v) { v.push_back(buffer); });
+    return buffer;
+}
+
+void vulkan_buffer::release_storage() const
 {
     // Stage the GPU handles and finalizers for deletion once the current epoch retires.
     // An empty buffer with no finalizers owns nothing GPU-side, so it needs no deferral.
-    if (_buffer != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
-    {
-        vulkan_expiring_resource expiring;
-        expiring.buffer = _buffer;
-        expiring.memory = _memory;
-        expiring.finalizers = cc::move(_finalizers);
-        _ctx.schedule_deferred_deletion(cc::move(expiring));
-    }
+    // Idempotent: the handles are cleared here, so expiry and destruction cannot stage the same ones twice.
+    if (_buffer == VK_NULL_HANDLE && _memory == VK_NULL_HANDLE && _finalizers.empty())
+        return;
+
+    vulkan_expiring_resource expiring;
+    expiring.buffer = _buffer;
+    expiring.memory = _memory;
+    expiring.finalizers = cc::move(_finalizers);
+    _buffer = VK_NULL_HANDLE;
+    _memory = VK_NULL_HANDLE;
+    _ctx.schedule_deferred_deletion(cc::move(expiring));
 }
+
+void vulkan_buffer::on_expired() const
+{
+    release_storage();
+}
+
+vulkan_buffer::~vulkan_buffer()
+{
+    release_storage();
+} // no-op if expire() already released the storage
 
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
                                                                       sg::buffer_usages usage,
@@ -72,8 +93,10 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
                 return vulkan_error(r, "vkBindBufferMemory (placed) failed");
             }
 
-            return vulkan_buffer_handle(std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage,
-                                                                        buffer, VK_NULL_HANDLE, alloc.heap));
+            return vulkan_buffer_handle(
+                register_if_transient(std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage,
+                                                                      buffer, VK_NULL_HANDLE, alloc.heap),
+                                      alloc.scope));
         }
 
         u32 const type = find_memory_type(u32(req.memoryTypeBits), VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -109,7 +132,7 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
         }
     }
 
-    return vulkan_buffer_handle(
-        std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage, buffer, memory));
+    return vulkan_buffer_handle(register_if_transient(
+        std::make_shared<vulkan_buffer>(*this, current_epoch(), size_in_bytes, usage, buffer, memory), alloc.scope));
 }
 } // namespace sg::backend::vulkan

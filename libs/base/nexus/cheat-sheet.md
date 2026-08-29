@@ -275,7 +275,7 @@ TEST("sg backend - vulkan")
 
 ```bash
 # NEVER run the *-test binary directly — always go through the repo driver:
-uv run dev.py test "group - what"        # auto-build + run matching test(s); substring match, comma-OR
+uv run dev.py test "group - what"        # auto-build + run matching test(s); substring match, comma-OR (`\,` is a literal comma)
 uv run dev.py test vector-test.cc        # matching no name, the filter is retried as a glob over the tests' source files
 uv run dev.py test "libs/base/**/tests/memory/*"   # …so a path or a directory selects everything declared under it
 uv run dev.py test                       # build + run the whole suite

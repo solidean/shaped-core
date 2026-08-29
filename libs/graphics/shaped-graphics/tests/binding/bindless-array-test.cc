@@ -38,15 +38,19 @@ namespace
     return sg::buffer<byte>::from_raw(raw).as_readonly_buffer();
 }
 
-// Two bindless tables in one group, each in its own register space (index 0 each), the way a bindless group
-// is laid out: a category is addressed with no register-offset math.
+// Two bindless tables in one group, each in its own register space, the way a bindless group is laid out:
+// a category is addressed with no register-offset math.
+//
+// Their `index` values differ, which is what makes this layout portable.
+// HLSL would number both 0 and let the space and the register class tell them apart, but a binding's index is its
+// address *within its group*, and only a register-based API has a second namespace to disambiguate a collision with.
 [[nodiscard]] sg::staging_binding_group_handle make_group(sg::context_handle const& ctx, u32 count)
 {
     sg::binding const bindings[]
         = {{.name = "Buffers", .space = 1, .index = 0, .count = count, .type = sg::binding_type::readonly_raw_buffer},
            {.name = "Textures",
             .space = 2,
-            .index = 0,
+            .index = 1,
             .count = count,
             .type = sg::binding_type::readonly_texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d}};
