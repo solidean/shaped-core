@@ -27,6 +27,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
     src/shaped-graphics/backends/vulkan/vulkan_buffer.hh
+    src/shaped-graphics/backends/vulkan/vulkan_buffer_access.hh
     src/shaped-graphics/backends/vulkan/vulkan_format.hh
     src/shaped-graphics/backends/vulkan/vulkan_texture.hh
 )
@@ -57,6 +58,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-vulkan-test
         tests/main.cc
         tests/vulkan-barrier-test.cc
+        tests/vulkan-buffer-access-test.cc
         tests/vulkan-test.cc
     )
 

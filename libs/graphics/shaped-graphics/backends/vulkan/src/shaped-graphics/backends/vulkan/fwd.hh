@@ -11,6 +11,7 @@ class vulkan_context;
 enum class vulkan_message_severity;
 class vulkan_command_list;
 class vulkan_buffer;
+struct vulkan_buffer_access; // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
 class vulkan_texture;
 
 /// Backend-typed resource handles.
