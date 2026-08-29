@@ -57,8 +57,10 @@ It is worth naming separately anyway, because its immutable base image ships a r
 - **`std::stacktrace` does not link**, so clean-core configures the empty stub and `CC_HAS_STACKTRACE` is 0.
   The image carries `libstdc++.so` but not the `libstdc++exp` that implements `<stacktrace>`, and the LLVM toolchain's libc++ ships no `<stacktrace>` header at all.
   An assert therefore reports "stacktrace unavailable on this platform" instead of frames.
-- **No dx12, and vulkan builds without registering a test driver**, so the cross-backend sg API tests are not compiled here — see shaped-graphics' `_sg_test_drivers`.
+- **No dx12, so vulkan is the only backend the cross-backend sg API tests run against here** — see shaped-graphics' `_sg_test_drivers`.
+  Its driver is registered but disabled while the backend is built out, so a test runs against vulkan by being named exactly rather than by a sweep.
   A Vulkan SDK being present is what makes SteamOS the first platform to separate "a backend builds" from "a backend can be driven".
+  It is also the first platform where the API suite runs against something other than dx12.
 - **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
   `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
 

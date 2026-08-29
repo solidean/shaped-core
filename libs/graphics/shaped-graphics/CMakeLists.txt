@@ -161,9 +161,13 @@ target_compile_options(shaped-graphics
 # Vulkan SDK on a non-web target. Enabled backends are collected so the test binary link-checks them.
 #
 # _sg_test_drivers is the narrower list: the backends that also register an entry-point driver in the API test
-# binary. It is not the same question as "does this backend build" — vulkan builds wherever the SDK is, and its
-# driver stays unregistered while its transfer ops abort (see tests/backends/vulkan-entry.cc). A backend that
-# builds without registering can invoke nothing, so it must not switch the cross-backend API tests on.
+# binary. It is not the same question as "does this backend build" — a backend that builds without registering can
+# invoke nothing, so it must not switch the cross-backend API tests on.
+#
+# vulkan registers while it is still being built out, which is what makes its two test flags do different jobs:
+# registering builds the per-invocable aliases, so one API test can be run by name against vulkan, while the
+# nx::config::disabled on its driver keeps a full sweep from reaching the recording stubs that still abort.
+# See tests/backends/vulkan-entry.cc.
 set(_sg_backends "")
 set(_sg_test_drivers "")
 
@@ -179,6 +183,7 @@ if(NOT EMSCRIPTEN)
     if(Vulkan_FOUND)
         add_subdirectory(backends/vulkan)
         list(APPEND _sg_backends shaped-graphics-vulkan)
+        list(APPEND _sg_test_drivers vulkan)
     else()
         message(STATUS "shaped-graphics: Vulkan SDK not found, skipping the vulkan backend")
     endif()

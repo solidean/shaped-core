@@ -1,3 +1,5 @@
+#include "sg_backends.hh"
+
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
 
@@ -6,10 +8,11 @@
 // When a device is present it invokes every sg::context_handle API test against it.
 // Compiled only where the vulkan backend builds, so where the SDK is present.
 //
-// Disabled + unregistered for now, because the vulkan backend's transfer ops abort.
-// So it must not run in a sweep (disabled), and must not be aliased into the per-invocable runs (unregistered).
-// Otherwise naming an sg API test by its alias, which enables disabled tests, would dispatch into the stub and abort.
-// When the backend is real, restore the register_backend call below and drop nx::config::disabled.
+// The backend is registered but its driver is disabled, and the two flags do different jobs while it is built out.
+// Registering is what makes backends.cc build an alias per invocable, so `dev.py test "sg - <name>"` can run one API test against vulkan.
+// nx::config::disabled keeps a full sweep out, because the recording paths vulkan has not reached yet abort rather than fail.
+// Naming a test by its alias enables it deliberately, which is exactly the by-name run the build-out wants.
+// Drop the disabled once no recording seam aborts.
 
 TEST("sg vulkan backend", nx::config::disabled)
 {
@@ -19,3 +22,5 @@ TEST("sg vulkan backend", nx::config::disabled)
     else
         nx::invoke_tests("vulkan", ctx.value());
 }
+
+static bool const sg_vulkan_registered = sg_test::register_backend("sg vulkan backend", "vulkan");

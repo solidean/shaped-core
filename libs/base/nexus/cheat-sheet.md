@@ -265,6 +265,7 @@ TEST("sg backend - vulkan")
   `s.invocables_with<Args...>()` / `find_test(name)` help build them.
   Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already name-selected is dropped.
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
+  One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 

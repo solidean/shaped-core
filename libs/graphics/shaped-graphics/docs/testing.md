@@ -39,7 +39,10 @@ It becomes runnable against each backend by two pieces working together:
 
 - **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
   A backend that cannot come up `SKIP`s.
-  A backend that is not mature yet stays **unregistered**, so it is neither swept nor aliased — see [`vulkan-entry.cc`](../tests/backends/vulkan-entry.cc).
+  A backend still being built out **registers but disables its driver** — see [`vulkan-entry.cc`](../tests/backends/vulkan-entry.cc).
+  Registering defines the aliases, so any one API test runs against it by being named exactly; the `nx::config::disabled` keeps a sweep out of the seams it has not reached.
+  Nexus's orphan check exempts an alias-reachable invocable for exactly this case, so the suite stays green while the backend grows.
+  [`backends/vulkan/tests/tier1-status.md`](../backends/vulkan/tests/tier1-status.md) tracks which tests pass today.
 - **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
   So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 
