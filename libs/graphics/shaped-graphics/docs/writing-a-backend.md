@@ -154,6 +154,16 @@ Recorded as each is met, because this is what the next backend most wants to kno
   **Expect the reference backend's own tests to encode its namespacing**, and read a shared test's layout before
   assuming your backend is what is wrong.
 
+- **A barrier may be illegal where the reference backend flushes one.**
+  dx12 flushes a draw's barriers inside the render pass, right before the draw, exactly as it does for a dispatch.
+  Vulkan forbids `vkCmdPipelineBarrier2` inside a dynamic-rendering instance outright (VUID-vkCmdPipelineBarrier2-None-09553), so the same code is a validation error.
+  The answer that keeps sg's API intact is to close the instance around the barrier and reopen it with every load op
+  forced to LOAD — cheap when it never happens, and a tile flush when it does.
+  Bound pipelines, descriptors, vertex buffers and dynamic state are command-buffer scoped rather than instance
+  scoped, so none of it has to be replayed.
+  **A frame that transitions its resources before the scope opens never pays this**, which is worth saying in the
+  backend's own docs rather than leaving as a surprise.
+
 - **`used_cached_pipeline()` looked like an sg-surface gap and was not.**
   dx12 answers it precisely because D3D12 fails PSO creation on a blob it cannot use, while Vulkan silently starts
   from an empty cache — so "did creation succeed" carries no information there.
@@ -229,6 +239,35 @@ So the reference backend's tier-2 suite is the specification for those, and your
 - **Size a resource-exhaustion test so that it actually exhausts**, then check that it does by breaking it on purpose.
   A free-list test on a region large enough to fit every allocation passes without touching the free list, and reads
   exactly like one that works.
+- **Write the test for the path you invented, not only for the path that works.**
+  The raster suspend/reopen above was written, and a first raster test passed without ever reaching it — every draw in
+  it needed no barrier.
+  The test that did reach it found a dangling `pName` in the pipeline's stage array on its first run, which the
+  passing test had been getting away with.
+
+- **Run every milestone against the single-threaded preset, not only the default one.**
+  `SC_THREADS=OFF` is a whole-build switch that `check` exercises, and it changes who drives an async graph.
+  Raster's first run there found a finished pipeline still referenced by the no-threads pool's queue, so a
+  `VkPipelineLayout` outlived `vkDestroyDevice` — a clean-core fix, found only because the mode is gated.
+  A backend leans on `ctx.cached.acquire_*` for every pipeline, which makes it the consumer most exposed to how that
+  tier behaves in each mode.
+
+## The pointer-into-a-growing-vector trap
+
+Vulkan's create-info structs are a graph of pointers into caller memory, all of which must stay valid until the create
+call returns.
+That makes one C++ mistake unusually easy and unusually quiet:
+
+```cpp
+modules.push_back(...);
+stages.push_back({.pName = modules.back().entry_point.c_str()}); // dangles once `modules` grows
+```
+
+The freed memory is usually still readable, so the wrong thing often *works* — the failure surfaced here as a
+validation message about an entry point that was in fact present, and then a segfault, in the second test to use the
+path.
+**Collect every owner first, then build the structs that point into them**, and keep that shape even where the counts
+look small enough not to matter.
 
 ## House conventions that bite a newcomer
 

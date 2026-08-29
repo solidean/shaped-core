@@ -35,6 +35,8 @@ using vulkan_binding_group_layout_handle = std::shared_ptr<vulkan_binding_group_
 struct vulkan_array_buffer_declare;  // one declare_array_buffer_access, held until the next dispatch
 struct vulkan_array_texture_declare; // the texture analogue
 class vulkan_compute_pipeline;
+class vulkan_raster_pipeline;
+using vulkan_raster_pipeline_handle = std::shared_ptr<vulkan_raster_pipeline const>;
 using vulkan_compute_pipeline_handle = std::shared_ptr<vulkan_compute_pipeline const>;
 class vulkan_pipeline_layout;
 using vulkan_pipeline_layout_handle = std::shared_ptr<vulkan_pipeline_layout const>;

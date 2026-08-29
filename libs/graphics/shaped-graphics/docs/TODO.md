@@ -17,7 +17,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **indirect draws** — `draw_indirect` and count buffers;
   - **dynamic primitive topology** and **dynamic depth bias**, both baked into the PSO for now;
   - **mesh / task** stages;
-  - the **vulkan** implementation — `VkPipeline` plus dynamic-rendering formats and the `vkCmdDraw*` seams, currently `CC_UNREACHABLE`.
+  - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
+    The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
+    That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, flags, the storage handle.
   Still open:

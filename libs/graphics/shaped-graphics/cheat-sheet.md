@@ -10,8 +10,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
-> The **vulkan** backend is real through the device, resources, memory heaps, inline transfer and copies, the whole bind path, and compute dispatch.
-> Raster, ray tracing, presentation and both async transfer scopes are still stubs there.
+> The **vulkan** backend is real through the device, resources, memory heaps, inline transfer and copies, the whole bind path, compute dispatch and raster.
+> Ray tracing, presentation and both async transfer scopes are still stubs there.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
@@ -241,7 +241,7 @@ cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a poin
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
 
 // raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops,
-// then bind a raster_pipeline and draw. vulkan is a stub. dx12 real on WARP.
+// then bind a raster_pipeline and draw. Both backends real (dx12 on WARP).
 auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
                                   .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)

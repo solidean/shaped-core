@@ -31,11 +31,23 @@ public:
     /// descriptor — so this never conflates two views that would produce different descriptors.
     [[nodiscard]] VkImageView acquire(sg::raw_texture_view const& view);
 
+    /// The image view for a rendering-scope attachment, created on first request.
+    ///
+    /// A render-target or depth-stencil view never enters a descriptor, so it is keyed in its own map rather than
+    /// sharing the shader views' one — and it is cached at all, where dx12 allocates an RTV/DSV slot per scope and
+    /// frees it epoch-deferred at end_rendering.
+    /// Caching removes that entire dance: a scope's attachments are the same few views frame after frame.
+    [[nodiscard]] VkImageView acquire_attachment(sg::raw_texture_handle const& texture,
+                                                 sg::texture_view_dimension dimension,
+                                                 sg::pixel_format format,
+                                                 sg::subresource_range const& range);
+
     void shutdown();
 
 private:
     vulkan_context& _ctx;
     cc::mutex<cc::map<u64, VkImageView>> _views;
+    cc::mutex<cc::map<u64, VkImageView>> _attachment_views;
 };
 
 namespace sg::backend::vulkan

@@ -251,9 +251,20 @@ void vulkan_command_list::flush_barriers()
 
     _pending_barrier_buffers.clear();
     _pending_barrier_textures.clear();
+
+    // A barrier is illegal inside a dynamic-rendering instance, so an open one is closed around it and reopened.
+    // Nothing here decides whether that is cheap: a frame that transitions its resources before the scope opens
+    // never reaches this, and one that does not pays a tile flush on a tiler.
+    bool const suspend = _in_render_pass && !(_pending_buffer_barriers.empty() && _pending_image_barriers.empty());
+    if (suspend)
+        vkCmdEndRendering(_buffer);
+
     submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers);
     _pending_buffer_barriers.clear();
     _pending_image_barriers.clear();
+
+    if (suspend)
+        reopen_rendering();
 }
 
 namespace

@@ -16,6 +16,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_epoch.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_raster_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -238,10 +239,15 @@ public:
         CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
         return cc::result<sg::compute_pipeline_handle>(create_vulkan_compute_pipeline(desc));
     }
-    [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(sg::raster_pipeline_description const&,
-                                                                                    sg::lifetime_scope) override
+    [[nodiscard]] cc::result<vulkan_raster_pipeline_handle> create_vulkan_raster_pipeline(
+        sg::raster_pipeline_description const& desc);
+
+    [[nodiscard]] cc::result<sg::raster_pipeline_handle> try_create_raster_pipeline(
+        sg::raster_pipeline_description const& desc,
+        sg::lifetime_scope scope) override
     {
-        return cc::error("vulkan raster_pipeline creation is not implemented yet");
+        CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
+        return cc::result<sg::raster_pipeline_handle>(create_vulkan_raster_pipeline(desc));
     }
     [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> try_create_raytracing_pipeline(
         sg::raytracing_pipeline_description const&,

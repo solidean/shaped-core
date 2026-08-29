@@ -75,13 +75,58 @@ vulkan_image_view_cache::~vulkan_image_view_cache()
 
 void vulkan_image_view_cache::shutdown()
 {
-    _views.lock(
-        [&](cc::map<u64, VkImageView>& views)
+    auto const destroy_all = [&](cc::mutex<cc::map<u64, VkImageView>>& guarded)
+    {
+        guarded.lock(
+            [&](cc::map<u64, VkImageView>& views)
+            {
+                for (auto const& [key, view] : views)
+                    if (view != VK_NULL_HANDLE)
+                        vkDestroyImageView(_ctx._device, view, nullptr);
+                views.clear();
+            });
+    };
+    destroy_all(_views);
+    destroy_all(_attachment_views);
+}
+
+VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle const& texture,
+                                                        sg::texture_view_dimension dimension,
+                                                        sg::pixel_format format,
+                                                        sg::subresource_range const& range)
+{
+    CC_ASSERT(texture != nullptr, "an attachment view needs a texture");
+    auto const& vk_texture = static_cast<vulkan_texture const&>(*texture);
+
+    // The identity of an attachment view is its resource plus everything that reaches vkCreateImageView.
+    auto const key = cc::make_hash(texture.get(), dimension, format, range);
+
+    return _attachment_views.lock(
+        [&](cc::map<u64, VkImageView>& views) -> VkImageView
         {
-            for (auto const& [key, view] : views)
-                if (view != VK_NULL_HANDLE)
-                    vkDestroyImageView(_ctx._device, view, nullptr);
-            views.clear();
+            if (auto const* existing = views.get_ptr(key); existing != nullptr)
+                return *existing;
+
+            auto const info = VkImageViewCreateInfo{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .image = vk_texture._image,
+                .viewType = to_vk_image_view_type(dimension),
+                .format = to_vk_format(format),
+                .subresourceRange =
+                    {
+                        .aspectMask = vk_aspect_mask_from(range),
+                        .baseMipLevel = u32(range.mip_range.start),
+                        .levelCount = u32(range.mip_range.end - range.mip_range.start),
+                        .baseArrayLayer = u32(range.array_range.start),
+                        .layerCount = u32(range.array_range.end - range.array_range.start),
+                    },
+            };
+
+            VkImageView created = VK_NULL_HANDLE;
+            VkResult const r = vkCreateImageView(_ctx._device, &info, nullptr, &created);
+            CC_ASSERT(r == VK_SUCCESS, "vkCreateImageView failed for a rendering-scope attachment");
+            views[key] = created;
+            return created;
         });
 }
 

@@ -67,7 +67,7 @@ src/shaped-graphics/
     download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
     copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
-    raster.hh/.cc                 [in progress] cmd.raster: rendering scope, bindings, viewport/scissor state, draws (dx12 real; vulkan stub)
+    raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [in progress] cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12 real; vulkan stub)
     query.hh/.cc                  [in progress] cmd.query: record_gpu_timestamp / is_supported (dx12 real; vulkan stub)
 
@@ -95,7 +95,7 @@ src/shaped-graphics/
     gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp
 
   raster/
-    raster_pipeline.hh/.cc        [in progress] abstract graphics PSO + raster_pipeline_description; dx12 real (vulkan stub)
+    raster_pipeline.hh/.cc        [done]        abstract graphics PSO + raster_pipeline_description; dx12 = PSO, vulkan = a dynamic-rendering VkPipeline
     primitive_topology.hh         [done]        topology + topology_type
     rasterization_state.hh        [done]        fill/cull/front-face + depth bias
     blend_state.hh                [done]        blend factors/ops, per-target blend + write mask

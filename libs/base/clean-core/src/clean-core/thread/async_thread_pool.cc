@@ -653,6 +653,16 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         _queue.pop_back();
         impl::async_poll_work_item(*n);
     }
+
+    // Drop the entries that are already finished.
+    //
+    // A node submitted before it is driven — which is what a scheduled async does — is resolved by the `root.poll()`
+    // above without its queue entry ever being popped, and the loop then skips because the root is ready.
+    // The entry is a strong reference, so a finished node's VALUE stays alive until the pool itself dies: for a graph
+    // whose result owns a GPU object, that is the object outliving the device that made it.
+    //
+    // Cheap where it matters: the queue is empty on the common path, so this is one size check.
+    _queue.remove_all_where([](async_node_ptr const& n) { return n == nullptr || n->is_ready(); });
 }
 
 #endif // CC_HAS_THREADS

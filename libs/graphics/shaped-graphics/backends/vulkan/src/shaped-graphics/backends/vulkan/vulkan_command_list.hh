@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
@@ -90,6 +91,30 @@ public:
     // Set inside a rendering scope; a dispatch inside one is rejected because Vulkan forbids it outright.
     bool _in_render_pass = false;
 
+    // The open rendering instance, kept so it can be closed around a barrier and reopened.
+    // Vulkan forbids vkCmdPipelineBarrier2 inside a dynamic-rendering instance outright (VUID-...-09553), where
+    // D3D12 lets a draw's barriers be flushed in place — so this is what a mid-pass hazard costs here.
+    // The load ops are the caller's on the first open and LOAD on every reopen, since the contents are now real.
+    cc::fixed_vector<VkRenderingAttachmentInfo, sg::max_color_targets> _rendering_color_attachments;
+    VkRenderingAttachmentInfo _rendering_depth_attachment = {};
+    VkRenderingAttachmentInfo _rendering_stencil_attachment = {};
+    bool _rendering_has_depth = false;
+    bool _rendering_has_stencil = false;
+    VkRect2D _rendering_area = {};
+
+    // Opens the rendering instance from the stored attachments, forcing every load op to LOAD.
+    // Body in vulkan_command_list.raster.cc.
+    void reopen_rendering();
+
+    // The graphics bind + input-assembly state, all scoped to the rendering scope that set it up.
+    vulkan_pipeline_layout const* _bound_raster_layout = nullptr;
+    cc::vector<vulkan_binding_group const*> _bound_raster_groups;
+    cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
+    vulkan_buffer const* _bound_index_buffer = nullptr;
+
+    // The hazard declares a draw owes: the bound groups' shader accesses plus the input-assembly reads.
+    void declare_raster_draw_barriers(bool indexed);
+
     // Resolves the pending array declares against the bound groups and tracks each named element.
     // Also the accounting pass: a bound array binding with no declaration is an error.
     void declare_array_accesses();
@@ -135,44 +160,21 @@ protected:
                                               cc::span<sg::array_texture_access const> elements) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
 
-    // Raster rendering scope + draws (reached through cmd.raster / cmd.raster.manual) — not implemented yet.
-    void raster_begin_rendering(sg::rendering_info const&) override
-    {
-        CC_UNREACHABLE("vulkan raster rendering is not implemented yet");
-    }
-    void raster_end_rendering() override { CC_UNREACHABLE("vulkan raster rendering is not implemented yet"); }
-    void raster_bind_pipeline(sg::raster_pipeline const&) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_bind_group(int, sg::binding_group const&) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_bind_vertex_buffers(int, cc::span<sg::vertex_buffer_view const>) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_bind_index_buffer(sg::index_buffer_view const&) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_set_viewport(sg::viewport const&) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_set_scissor(tg::aabb2i const&) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_set_stencil_reference(u32) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_set_blend_constants(tg::vec4f) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_set_inline_constants(cc::span<byte const>, cc::optional<isize>) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
-    void raster_draw(sg::draw_config const&) override { CC_UNREACHABLE("vulkan raster draw is not implemented yet"); }
-    void raster_draw_indexed(sg::draw_indexed_config const&) override
-    {
-        CC_UNREACHABLE("vulkan raster draw is not implemented yet");
-    }
+    // Raster rendering scope + draws (reached through cmd.raster / cmd.raster.manual).
+    // Bodies in vulkan_command_list.raster.cc.
+    void raster_begin_rendering(sg::rendering_info const& info) override;
+    void raster_end_rendering() override;
+    void raster_bind_pipeline(sg::raster_pipeline const& pipeline) override;
+    void raster_bind_group(int group_index, sg::binding_group const& group) override;
+    void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
+    void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_set_viewport(sg::viewport const& vp) override;
+    void raster_set_scissor(tg::aabb2i const& rect) override;
+    void raster_set_stencil_reference(u32 reference) override;
+    void raster_set_blend_constants(tg::vec4f constants) override;
+    void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
+    void raster_draw(sg::draw_config const& config) override;
+    void raster_draw_indexed(sg::draw_indexed_config const& config) override;
 
     // Ray tracing (reached through cmd.raytracing) — the recording paths are not implemented yet.
     // is_supported() reports the device's extensions rather than a hardcoded answer, so it already tells the truth
