@@ -9,43 +9,62 @@ using namespace cc::primitive_defines;
 
 TEST("cc network_devices - every interface has an id to key a sampler on")
 {
+    // Counted rather than checked per interface, so the test asserts the property itself and still says something on a
+    // platform that enumerates nothing.
+    auto without_id = 0;
     for (auto const& n : cc::enumerate_network_interfaces())
     {
-        CHECK(!n.id.empty());
+        if (n.id.empty())
+            ++without_id;
         if (n.link_speed_bps.has_value())
             CHECK(n.link_speed_bps.value() > 0);
     }
+
+    CHECK(without_id == 0);
 }
 
 TEST("cc network_devices - interface ids are unique")
 {
-    // A repeated id would make two samplers silently share one interface's counters.
     auto const interfaces = cc::enumerate_network_interfaces();
+
+    auto repeats = 0;
     for (isize i = 0; i < interfaces.size(); ++i)
         for (isize j = i + 1; j < interfaces.size(); ++j)
-            CHECK(interfaces[i].id != interfaces[j].id);
+            if (interfaces[i].id == interfaces[j].id)
+                ++repeats;
+
+    // A repeated id would make two samplers silently share one interface's counters.
+    CHECK(repeats == 0);
 }
 
 TEST("cc network_devices - every enumerated interface answers for its own counters")
 {
+    auto unanswered = 0;
+    for (auto const& n : cc::enumerate_network_interfaces())
+        if (cc::read_net_counters(n.id).has_error())
+            ++unanswered;
+
     // Enumeration and lookup must agree: an id that comes out of one and is rejected by the other is the bug that makes
     // a dashboard show a permanently empty panel.
-    for (auto const& n : cc::enumerate_network_interfaces())
-    {
-        auto const counters = cc::read_net_counters(n.id);
-        CHECK(counters.has_value());
-    }
+    CHECK(unanswered == 0);
 }
 
 TEST("cc network_devices - counters are monotone")
 {
     auto const interfaces = cc::enumerate_network_interfaces();
     if (interfaces.empty())
+    {
+        // Nothing to difference, and nothing invented in its place: a lookup here fails rather than returning zeroes.
+        CHECK(cc::read_net_counters("cc-no-such-interface-7f3a").has_error());
         return;
+    }
 
     auto first = cc::read_net_counters(interfaces[0].id);
     if (first.has_error())
+    {
+        CHECK(!first.error().detail.empty());
         return;
+    }
 
     auto second = cc::read_net_counters(interfaces[0].id);
     REQUIRE(second.has_value());
@@ -60,12 +79,18 @@ TEST("cc network_devices - a sampled rate is non-negative")
 {
     auto const interfaces = cc::enumerate_network_interfaces();
     if (interfaces.empty() || !cc::net_traffic_sampler::is_supported())
+    {
+        CHECK(cc::read_net_counters("cc-no-such-interface-7f3a").has_error());
         return;
+    }
 
     auto sampler = cc::net_traffic_sampler(interfaces[0].id);
     auto const rate = sampler.sample();
     if (rate.has_error())
+    {
+        CHECK(!rate.error().detail.empty());
         return;
+    }
 
     CHECK(rate.value().sent_bytes_per_sec >= 0);
     CHECK(rate.value().received_bytes_per_sec >= 0);

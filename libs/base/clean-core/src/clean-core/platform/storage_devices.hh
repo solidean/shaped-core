@@ -116,6 +116,10 @@ namespace cc
 [[nodiscard]] cc::result<cc::vector<cc::mount_point>, cc::query_error> query_mounts();
 
 /// The physical storage devices, or empty where the platform will not enumerate them.
+///
+/// Whole disks only, and only ones holding media: a partition inherits its parent's traffic and would double-count it,
+/// and an empty slot — an unbound loop device, a card reader with no card — reports a zero size and is left out for the
+/// same reason a zero-sized mount is.
 [[nodiscard]] cc::vector<cc::disk_device> enumerate_disks();
 
 /// The raw monotone counters for one device, for a caller that wants to difference them itself.

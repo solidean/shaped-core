@@ -182,7 +182,8 @@ namespace
 {
 cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
 {
-    statfs* mounts = nullptr;
+    // `struct` is load-bearing: statfs names both a type and a function, and the bare tag resolves to the function.
+    struct statfs* mounts = nullptr;
     auto const count = ::getmntinfo(&mounts, MNT_NOWAIT);
     if (count <= 0)
         return cc::error(storage_failed("getmntinfo"));
@@ -317,13 +318,20 @@ cc::vector<cc::disk_device> read_disks()
         if (!cc::impl::read_text_file(cc::format("/sys/block/{}/queue/hw_sector_size", name)).has_value())
             continue;
 
+        // `size` is always in 512-byte sectors, whatever the device's own sector size.
+        auto const sectors = cc::impl::read_int_file(cc::format("/sys/block/{}/size", name));
+
+        // A zero-sized whole disk is an empty slot — an unbound loop device, a card reader with no card — which is the
+        // same nothing the mount loop above filters out, and holds no media to report or to sample.
+        if (sectors.has_value() && sectors.value() <= 0)
+            continue;
+
         auto device = cc::disk_device{.id = cc::string(name)};
 
         if (auto model = cc::impl::read_trimmed_file(cc::format("/sys/block/{}/device/model", name)); model.has_value())
             device.model = cc::move(model.value());
 
-        // `size` is always in 512-byte sectors, whatever the device's own sector size.
-        if (auto const sectors = cc::impl::read_int_file(cc::format("/sys/block/{}/size", name)); sectors.has_value())
+        if (sectors.has_value())
             device.capacity_bytes = sectors.value() * 512;
 
         device.removable = cc::impl::read_int_file(cc::format("/sys/block/{}/removable", name)).value_or(0) != 0;

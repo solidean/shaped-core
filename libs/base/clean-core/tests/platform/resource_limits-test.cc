@@ -23,6 +23,9 @@ TEST("cc resource_limits - the affinity mask never exceeds the machine")
     auto const limits = cc::query_resource_limits();
     auto const machine = cc::get_system_info().logical_cores();
 
+    // Zero means "no mask reported", which is the absence of a limit rather than a limit of no cores.
+    CHECK(limits.affinity_cores >= 0);
+
     if (limits.affinity_cores > 0 && machine > 0)
         CHECK(limits.affinity_cores <= machine);
 }

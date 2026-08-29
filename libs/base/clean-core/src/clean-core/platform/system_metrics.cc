@@ -184,7 +184,9 @@ namespace cc
 {
 namespace
 {
-cc::cpu_counters counters_from(natural_t const* ticks, f64 per_tick)
+/// The machine-wide ticks come back as natural_t and the per-core ones as integer_t, so the type is a parameter.
+template <class Tick>
+cc::cpu_counters counters_from(Tick const* ticks, f64 per_tick)
 {
     return {.user_secs = f64(ticks[CPU_STATE_USER] + ticks[CPU_STATE_NICE]) * per_tick,
             .system_secs = f64(ticks[CPU_STATE_SYSTEM]) * per_tick,

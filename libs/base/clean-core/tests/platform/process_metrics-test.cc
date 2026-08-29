@@ -39,7 +39,10 @@ TEST("cc process_metrics - the peak is the OS's own high-water mark")
 {
     auto const before = cc::query_process_usage();
     if (before.has_error())
+    {
+        CHECK(!cc::process_cpu_sampler::is_supported());
         return;
+    }
 
     // Allocate and release, so the spike is gone by the time the second reading happens.
     // A peak derived from samples would miss it entirely, which is exactly why the field is read from the OS.
@@ -62,7 +65,10 @@ TEST("cc process_metrics - cpu counters are monotone and bounded by wall time")
 {
     auto first = cc::read_process_cpu_counters();
     if (first.has_error())
+    {
+        CHECK(!cc::process_cpu_sampler::is_supported());
         return;
+    }
 
     cc::this_thread_sleep_secs(0.02);
 
@@ -80,7 +86,11 @@ TEST("cc process_metrics - cpu counters are monotone and bounded by wall time")
 TEST("cc process_metrics - a sampled load is cores, not a percentage")
 {
     if (!cc::process_cpu_sampler::is_supported())
+    {
+        // Never a zero that reads like a process using no CPU at all.
+        CHECK(cc::process_cpu_sampler().sample().has_error());
         return;
+    }
 
     auto sampler = cc::process_cpu_sampler();
     cc::this_thread_sleep_secs(0.02);

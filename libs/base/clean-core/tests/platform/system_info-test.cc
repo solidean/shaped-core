@@ -93,18 +93,15 @@ TEST("cc system_info - memory and page size are absent or positive")
 {
     auto const& info = cc::get_system_info();
 
-    if (info.ram_total_bytes.has_value())
-        CHECK(info.ram_total_bytes.value() > 0);
+    // Absence is a valid answer for every field here, so each check folds it into a value that trivially passes.
+    // Skipping instead would leave the test with nothing to assert on a platform that reports none of it.
+    CHECK(info.ram_total_bytes.value_or(1) > 0);
 
-    if (info.page_size_bytes.has_value())
-    {
-        auto const page = info.page_size_bytes.value();
-        CHECK(page > 0);
-        CHECK((page & (page - 1)) == 0);
-    }
+    auto const page = info.page_size_bytes.value_or(1);
+    CHECK(page > 0);
+    CHECK((page & (page - 1)) == 0);
 
-    if (info.ram_speed_mts.has_value())
-        CHECK(info.ram_speed_mts.value() > 0);
+    CHECK(info.ram_speed_mts.value_or(1) > 0);
 }
 
 TEST("cc system_info - uptime is derived from the boot time and never runs backwards")
@@ -139,10 +136,20 @@ TEST("cc system_info - the architecture is the one this binary was built for")
 
 TEST("cc system_info - a NUMA node is absent or coherent")
 {
-    for (auto const& node : cc::get_system_info().numa_nodes)
+    auto const& info = cc::get_system_info();
+
+    auto reported = i64(0);
+    for (auto const& node : info.numa_nodes)
     {
         CHECK(node.index >= 0);
         if (node.memory_bytes.has_value())
+        {
             CHECK(node.memory_bytes.value() > 0);
+            reported += node.memory_bytes.value();
+        }
     }
+
+    // The nodes partition the machine's memory rather than each describing all of it, so they never add up to more than
+    // it has — and a machine without a NUMA topology reports no nodes at all rather than one standing in for it.
+    CHECK(reported <= info.ram_total_bytes.value_or(reported));
 }

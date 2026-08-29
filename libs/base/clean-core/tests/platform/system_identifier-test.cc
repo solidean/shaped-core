@@ -50,6 +50,15 @@ TEST("cc system_identifier - a gathered field is either absent or non-empty")
 
     for (auto const& serial : id.disk_serials)
         CHECK(!serial.empty());
+
+    // A machine that can answer none of this is a valid machine, so the test still pins something there: the query
+    // describes the machine rather than the call, and asking twice sees the same fields present.
+    auto const again = cc::query_system_identifier(which);
+    CHECK(again.hostname.has_value() == id.hostname.has_value());
+    CHECK(again.username.has_value() == id.username.has_value());
+    CHECK(again.machine_id.has_value() == id.machine_id.has_value());
+    CHECK(again.mac_addresses.size() == id.mac_addresses.size());
+    CHECK(again.disk_serials.size() == id.disk_serials.size());
 }
 
 TEST("cc system_identifier - the query is not memoized")

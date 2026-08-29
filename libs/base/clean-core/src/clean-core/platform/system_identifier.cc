@@ -46,7 +46,7 @@ namespace cc
 {
 namespace
 {
-#if !defined(CC_OS_WINDOWS)
+#if !defined(CC_OS_WINDOWS) && !defined(CC_OS_ANDROID)
 /// Six bytes as the colon-separated spelling everyone recognizes.
 cc::string mac_as_text(unsigned char const* bytes, isize count)
 {
@@ -293,6 +293,15 @@ cc::optional<cc::string> query_machine_id()
     return cc::impl::read_trimmed_file("/var/lib/dbus/machine-id");
 }
 
+#if defined(CC_OS_ANDROID)
+/// Android has no hardware address to give.
+/// getifaddrs only entered Bionic in API 24, and every route to a MAC above that level hands back a constant
+/// placeholder rather than the real one, so the field stays absent instead of reporting something that identifies
+/// nothing.
+void query_mac_addresses(cc::vector<cc::string>&)
+{
+}
+#else
 void query_mac_addresses(cc::vector<cc::string>& out)
 {
     ifaddrs* list = nullptr;
@@ -313,6 +322,7 @@ void query_mac_addresses(cc::vector<cc::string>& out)
 
     ::freeifaddrs(list);
 }
+#endif
 
 void query_disk_serials(cc::vector<cc::string>& out)
 {

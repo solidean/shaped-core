@@ -42,7 +42,11 @@ TEST("cc system_metrics - cpu counters are monotone across two readings")
 TEST("cc system_metrics - a sampled load is a ratio, and says what it covers")
 {
     if (!cc::cpu_load_sampler::is_supported())
+    {
+        // The sampler and the metric probe describe one capability, so a dashboard may ask either one.
+        CHECK(!cc::is_metric_supported(cc::metric::cpu_load));
         return;
+    }
 
     auto sampler = cc::cpu_load_sampler();
     cc::this_thread_sleep_secs(0.02);
@@ -74,7 +78,11 @@ TEST("cc system_metrics - a sampled load is a ratio, and says what it covers")
 TEST("cc system_metrics - a sample taken immediately is still in range")
 {
     if (!cc::cpu_load_sampler::is_supported())
+    {
+        // An unsupported sampler fails rather than handing back a zero that reads like a perfectly idle machine.
+        CHECK(cc::cpu_load_sampler().sample().has_error());
         return;
+    }
 
     // The degenerate case: two readings microseconds apart, where the counters have barely moved.
     // The ratio is meaningless but must still be a ratio, not a divide-by-zero or a value off the end of a bar.
@@ -94,7 +102,10 @@ TEST("cc system_metrics - a sample taken immediately is still in range")
 TEST("cc system_metrics - two samplers do not interfere")
 {
     if (!cc::cpu_load_sampler::is_supported())
+    {
+        CHECK(!cc::is_metric_supported(cc::metric::cpu_load));
         return;
+    }
 
     // The reason the baseline lives in the object: two subsystems sampling at different cadences must each get their
     // own interval, which a hidden process-wide previous reading could not give them.
@@ -115,7 +126,10 @@ TEST("cc system_metrics - two samplers do not interfere")
 TEST("cc system_metrics - per-core loads line up with the machine's core count")
 {
     if (!cc::cpu_load_sampler::is_supported())
+    {
+        CHECK(!cc::is_metric_supported(cc::metric::cpu_load));
         return;
+    }
 
     auto sampler = cc::cpu_load_sampler();
     cc::this_thread_sleep_secs(0.01);
