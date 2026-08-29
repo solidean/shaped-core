@@ -7,7 +7,7 @@ A local godbolt over the object code the current preset produced:
     assembly trace <symbol>     record what a function ACTUALLY executed at run time
 
 search/show answer the static question, and read objects rather than the linked binary — tools/dev/lib/toolchain/disasm.py says why.
-trace answers the dynamic one, driving tools/instruction-tracer (Windows x64 only), whose readme.md is the flag reference.
+trace answers the dynamic one, driving tools/instruction-tracer (Windows x64 only); tools/instruction-tracer/readme.md is the flag reference.
 docs/guides/disassembly.md is the workflow around all three.
 
 Only `search` and `show` are untied from this repo: --build-dir/--objects scan any build tree and skip preset resolution entirely.

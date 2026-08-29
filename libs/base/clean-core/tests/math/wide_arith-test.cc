@@ -73,12 +73,18 @@ TEST("wide_arith - imul128")
         CHECK(r.hi == i64(1));
     }
 
-    SECTION("low half equals the wrapping product")
+    SECTION("the low half does not depend on signedness")
     {
+        // The expected value is computed in unsigned arithmetic because the signed one cannot be: most of these pairs
+        // overflow i64, and signed overflow is undefined, so `u64(a * b)` would be the test committing the bug rather
+        // than checking for it — it only ever agreed because clang happens to wrap.
+        //
+        // Unsigned multiplication is defined as modular, and the low 64 bits of a product are the same whether the operands are read as signed or unsigned.
+        // That is a property of two's complement rather than a workaround, and it is the one wide_imul128 relies on to build the signed product out of the unsigned one.
         i64 const xs[] = {0, 1, -1, 2, -2, i64(0x7FFFFFFFFFFFFFFFull), i64(0x8000000000000000ull), -123456789};
         for (i64 const a : xs)
             for (i64 const b : xs)
-                CHECK(cc::imul128(a, b).lo == u64(a * b));
+                CHECK(cc::imul128(a, b).lo == u64(a) * u64(b));
     }
 }
 

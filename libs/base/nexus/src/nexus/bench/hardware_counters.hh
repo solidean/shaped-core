@@ -74,14 +74,16 @@ void print_hw_counters();
 struct nx::bench::hw_measure_config
 {
     /// Which counters to measure; absent (nullopt) means default_hw_counter_set().
-    /// Order matters when the requested set exceeds the hardware's simultaneous-counter budget, but how is per-backend.
-    /// Windows keeps the earliest-requested counters and drops the rest; Linux multiplexes the group and time-scales the values.
+    /// Order matters when the requested set exceeds the hardware's simultaneous-counter budget, and put the ones you care about first.
+    /// What the excess costs is per-backend: Windows keeps the earliest-requested counters and drops the rest, while Linux refuses the whole group at read time and returns nothing.
     /// Set measure_all rather than relying on either.
     cc::optional<cc::vector<hw_counter>> counters;
 
-    /// Measure EVERY requested counter, even when they exceed the hardware's simultaneous-counter budget.
-    /// Only a few PMU counters can be programmed at once, so a single pass silently drops the rest (invalid).
-    /// With this set, `body` is invoked once per fitting subset and the results are combined — nothing is left unmeasured.
+    /// Measure EVERY requested counter, by re-invoking `body` over subsets until each one has a value.
+    /// The budget is never the reason a counter comes back invalid with this set: too wide a subset is narrowed and retried, however small the machine's real budget turns out to be.
+    /// A counter can still come back invalid because this machine cannot deliver it at all: an event the PMU does not implement, or no PMU access.
+    /// One pass carrying that counter alone is what establishes it, so the loop gives up on it rather than on the ones behind it.
+    /// The budget cannot be queried up front and is not the PMU's nominal counter count, so it is discovered by narrowing rather than assumed.
     /// The body must be repeatable and deterministic for the combined values to be comparable.
     /// It runs once per pass, so a slow body costs proportionally more.
     /// The always-on baseline (elapsed/cycles) is taken from the first pass.
@@ -93,7 +95,8 @@ namespace nx::bench
 {
 
 /// Measure counters across invocation(s) of `body`.
-/// With the default config `body` runs exactly once, and counters that do not fit the hardware budget come back invalid.
+/// With the default config `body` runs exactly once and the result is whatever one call could get: counters that did not fit the hardware budget come back invalid.
+/// hw_measure_config::measure_all trades passes for completeness — it keeps going until the budget is no longer what is missing, so only unavailability leaves a counter invalid.
 /// See hw_measure_config to override the counter set, or to measure everything across multiple passes.
 [[nodiscard]] hw_measurement measure_hw_counters(cc::function_ref<void()> body, hw_measure_config const& config = {});
 } // namespace nx::bench

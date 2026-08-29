@@ -17,7 +17,7 @@ struct bless_includes_options;
 } // namespace scl
 
 /// Parsed command line for the shaped-linter executable.
-/// See usage_text() for the flags and readme.md for what they mean.
+/// See usage_text() for the flags and tools/shaped-linter/readme.md for what they mean.
 struct scl::options
 {
     /// Source files to lint.

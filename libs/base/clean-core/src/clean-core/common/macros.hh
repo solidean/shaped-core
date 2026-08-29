@@ -67,11 +67,11 @@
 // Compilation modes
 // =========================================================================================================
 // Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
-// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS
-// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED
+// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC
+// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED, CC_NO_MIMALLOC
 //
 // CMake only ever defines inputs; this header owns every derivation and defines the outputs unconditionally.
-// So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, and CC_SINGLE_THREADED feeds CC_HAS_THREADS.
+// So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, CC_SINGLE_THREADED feeds CC_HAS_THREADS, and CC_NO_MIMALLOC feeds CC_HAS_MIMALLOC.
 // None of the derived macros is itself overridable.
 
 #ifdef CC_COMPILER_MSVC
@@ -181,6 +181,24 @@
 #endif
 #else
 #define CC_HAS_THREADS 1
+#endif
+
+// =========================================================================================================
+// Allocator behind the default memory resource
+// =========================================================================================================
+// CC_HAS_MIMALLOC - whether cc::default_memory_resource is backed by mimalloc (0 or 1).
+//
+// CC_NO_MIMALLOC (from CMake: SC_MIMALLOC=OFF) selects the global operator new instead, and absent the define this is
+// 1 — which is also the path when clean-core is consumed via add_subdirectory without our root CMakeLists.
+//
+// This gates no API and no layout: both are cc::memory_resource implementations reached through the same pointer.
+// What it tells you is whether a tool can see our allocations, because sanitizers, Valgrind and heap profilers hook
+// operator new and not mi_malloc — so a test asserting anything about leak reporting has to branch on it.
+
+#if defined(CC_NO_MIMALLOC)
+#define CC_HAS_MIMALLOC 0
+#else
+#define CC_HAS_MIMALLOC 1
 #endif
 
 // =========================================================================================================

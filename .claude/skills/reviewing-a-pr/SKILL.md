@@ -92,11 +92,28 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
 ## The flow
 
 1. **Fetch and pin.**
+
+   **Which ref you review is decided by the goal, and getting it wrong is only visible once the fixes exist.**
+   A review that will never commit takes the PR's synthetic head ref; a `land-changes` review takes the **real head branch**, because `pr-<n>` is not a branch anything can push.
+
+   `land-changes`, alone or combined with another goal:
+   ```bash
+   git fetch origin main --quiet
+   head=$(gh pr view <n> --json headRefName --jq .headRefName)
+   git fetch origin "$head" --quiet
+   git checkout "$head"
+   uv run review.py init pr-<n> --range "origin/main..$head" --goal land-changes
+   ```
+   Name the review `pr-<n>` regardless — that is the review folder, not a git ref.
+   Where the head branch is already checked out, which is the normal case for your own PR, the fetch and checkout are already done.
+
+   `pr-comment` or `design` on someone else's branch, with no intention of committing:
    ```bash
    git fetch origin main --quiet
    git fetch origin refs/pull/<n>/head:pr-<n>
-   uv run review.py init pr-<n> --range origin/main..pr-<n> --goal <goal>
+   uv run review.py init pr-<n> --range origin/main..pr-<n> --goal pr-comment
    ```
+
    `init` resolves the merge base and pins it as a sha, so a moving `main` cannot change what the review is accountable for.
    **Never diff against local `main`** — it only moves when someone pulls.
 
@@ -124,8 +141,8 @@ Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment 
    The reason is the honest part.
    It is what makes "I did not read this" a decision the maintainer can see and overrule.
 
-3. **Check the branch out and read the code, not just the diff.**
-   `git checkout pr-<n>`, then read whole files around the hunks.
+3. **Read the code, not just the diff.**
+   Standing on the branch step 1 checked out, read whole files around the hunks.
    A diff shows what moved; only the file shows whether the result still hangs together.
 
 4. **Verify every claim against the final tree.**

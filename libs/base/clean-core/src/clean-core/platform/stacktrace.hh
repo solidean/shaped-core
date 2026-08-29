@@ -6,9 +6,12 @@
 // Emscripten / WASI libc++ currently ship no <stacktrace>, yet code that captures a trace — the default assert handler, cc::any_error payloads — must still compile and link there.
 //
 // CC_HAS_STACKTRACE reflects which path is active.
+// Our CMake defines it from a link probe (clean-core/cmake/DetectStacktraceLib.cmake) and that verdict wins:
+// the header alone can only prove <stacktrace> exists, never that anything implements it — a libstdc++ without libstdc++exp has the header and none of the symbols.
 // The stub is a complete, allocatable value type that reports an empty trace, so storing or passing a cc::stacktrace needs no #ifdef.
 // Only code that *renders* a trace, by calling description() or to_string, must guard on CC_HAS_STACKTRACE — a real std::stacktrace is the only thing that can produce frame text.
 
+#ifndef CC_HAS_STACKTRACE
 #if defined(__has_include)
 #if __has_include(<stacktrace>)
 #define CC_HAS_STACKTRACE 1
@@ -17,6 +20,7 @@
 #endif
 #else
 #define CC_HAS_STACKTRACE 0
+#endif
 #endif
 
 #if CC_HAS_STACKTRACE

@@ -171,6 +171,14 @@ What is left is narrower than it was:
   Turning the light down and lowering the elevation a little would put three distinguishable colours in frame; `uv run dev.py example shaped-viewer/hello-cube --capture` is the loop for it.
   Left as it is on purpose — the image shows the viewer working, which is what it is mainly for.
 
+- **The default shader library is leaked on purpose, and the shape that forces it is not settled.**
+  `impl::acquire_default_shader_library` allocates an `slib::shader_library` it never frees.
+  The generated package symbols an asset is reached through are process-wide globals, so destroying the library at exit would leave them naming freed assets.
+  So the lifetime is dictated by slib's package globals rather than chosen here, and sv is where the consequence lands.
+  The construction is wrapped in a `cc::leak_scope` so LeakSanitizer reads the decision instead of reporting it, which is an annotation and not a fix — it also hides any real leak in that window.
+  What would settle it is slib owning the library's lifetime itself, with the package globals resolving through it rather than caching raw pointers into it.
+  Not urgent: one library per process is slib's rule either way, so the leak is bounded and constant.
+
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.

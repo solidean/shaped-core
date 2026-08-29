@@ -29,7 +29,7 @@ namespace itrace
 /// Pure Zydis — no debuggee, no symbols.
 /// Empty when the bytes do not decode, or the instruction touches no memory.
 ///
-/// gs/fs segment-relative operands (TLS) resolve without their segment base, so their address is the offset alone — a known limitation, see readme.md.
+/// gs/fs segment-relative operands (TLS) resolve without their segment base, so their address is the offset alone — a known limitation, see tools/instruction-tracer/readme.md.
 cc::vector<mem_operand> decode_memory_operands(recorded_instruction const& insn, register_snapshot const& regs);
 
 /// Classify an address as heap / frame / stack.

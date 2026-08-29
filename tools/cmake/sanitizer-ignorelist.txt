@@ -1,0 +1,11 @@
+# Sanitizer special-case list, applied by Sanitizers.cmake whenever SANITIZE is set.
+#
+# Vendored third-party code is excluded from instrumentation-time checks because we cannot fix what it reports without
+# diverging from upstream, and a finding we will never act on is worse than no finding: it trains the reader to scroll
+# past a sanitizer block that might, next time, be ours.
+#
+# stb_image_write.h's JPEG encoder is the current occupant, shifting a value out of int's range in its bit packer.
+#
+# This silences reports ATTRIBUTED to these files only. Our own code stays fully instrumented, including the calls it
+# makes into these libraries, so a bad pointer or size we hand them is still caught here.
+src:*/extern/*

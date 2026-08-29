@@ -106,3 +106,10 @@ constinit cc::memory_resource const cc::system_memory_resource = {
     .try_resize_bytes_in_place = system_try_resize_bytes_in_place,
     .userdata = nullptr,
 };
+
+#if !CC_HAS_MIMALLOC
+/// Without mimalloc in the build the default resource IS the system one, since mimalloc_resource.cc — which otherwise
+/// owns this definition — is not compiled at all.
+/// So the opt-out and the default are the same object here, and code that compares the two must ask CC_HAS_MIMALLOC.
+constinit cc::memory_resource const* const cc::default_memory_resource = &cc::system_memory_resource;
+#endif

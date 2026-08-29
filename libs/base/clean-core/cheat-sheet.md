@@ -433,6 +433,8 @@ auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_fille
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
+// CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
+// Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
 
 #include <clean-core/memory/node_allocation.hh>   // cc::node_allocation<T> — move-only single-object slab handle
 auto na = cc::node_allocation<T>::create_from(cc::default_node_allocator(), args...);
@@ -1283,6 +1285,11 @@ cc::scoped_environment_variable const s("K", "v");  // set for a scope, restored
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
+
+#include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
+cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)
+auto const g = cc::leak_scope();                    // ...and this for what it OWNS: LSan cannot see through a cc::
+                                                    // container (mimalloc), so a singleton's ctor needs the scope
 
 #include <clean-core/error/crash_handler.hh>
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace

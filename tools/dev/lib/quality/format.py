@@ -63,15 +63,26 @@ _FALLBACK_PATHS = (
 _VIOLATION_RE = re.compile(r"^(?P<file>.+?):\d+:\d+:\s+(?:error|warning):", re.MULTILINE)
 
 
-def find_clang_format(explicit: str | None = None) -> str | None:
-    """Locate the clang-format executable: an explicit path or name, then PATH, then the common LLVM install locations.
+def repo_clang_format(root: Path) -> Path:
+    """Where tools/bin/fetch-clang-format.py installs the pinned clang-format, whether or not it is there yet."""
+    return root / "tools" / "bin" / ("clang-format.exe" if os.name == "nt" else "clang-format")
 
+
+def find_clang_format(explicit: str | None = None, root: Path | None = None) -> str | None:
+    """Locate the clang-format executable: an explicit path or name, then the repo-local pinned one, then PATH, then the common LLVM install locations.
+
+    The repo-local copy outranks PATH because it is the only one whose version we chose — see ensure_pinned_clang_format.
+    It exists only once something fetched it, so a machine whose PATH clang-format is already the right major never grows one.
     None when nothing usable is found.
     """
     if explicit:
         if Path(explicit).is_file():
             return explicit
         return shutil.which(explicit)
+    if root is not None:
+        pinned = repo_clang_format(root)
+        if pinned.is_file():
+            return str(pinned)
     found = shutil.which("clang-format")
     if found:
         return found
@@ -79,6 +90,33 @@ def find_clang_format(explicit: str | None = None) -> str | None:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def ensure_pinned_clang_format(root: Path) -> str | None:
+    """Fetch the pinned clang-format into tools/bin and return its path, or None if that could not be done.
+
+    Called only once the resolved clang-format is missing or the wrong major, so the common case never runs it.
+    Set SC_SKIP_CLANG_FORMAT_FETCH=1 to keep it from reaching the network, which then leaves the version error to be reported as before.
+    """
+    if os.environ.get("SC_SKIP_CLANG_FORMAT_FETCH"):
+        return None
+    script = root / "tools" / "bin" / "fetch-clang-format.py"
+    if not script.is_file():
+        return None
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(script)], cwd=str(root), capture_output=True, text=True, timeout=300
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    # The script narrates itself on stderr, success or failure — a download worth seconds, or why it could not be done.
+    # Passed through either way, so the pause is never unexplained and a failure is not restated in worse words.
+    if completed.stderr.strip():
+        print(completed.stderr.strip(), file=sys.stderr)
+    if completed.returncode != 0:
+        return None
+    pinned = repo_clang_format(root)
+    return str(pinned) if pinned.is_file() else None
 
 
 def clang_format_version(exe: str) -> tuple[int, ...] | None:
@@ -268,19 +306,28 @@ def run_format(
     `allow_different_version` downgrades that last one to a yellow warning instead.
     Returns a FormatResult describing what happened, including the "no files in scope" success; the caller prints the summary (see report.summarize_format).
     """
-    clang_format = find_clang_format()
-    if clang_format is None:
-        raise FormatSetupError(
-            f"clang-format not found on PATH. Install LLVM/clang-format (>= {required_major(root)}) "
-            "or add it to PATH."
-        )
+    need = required_major(root)
+    clang_format = find_clang_format(root=root)
+    have = clang_format_version(clang_format) if clang_format is not None else None
 
     # clang-format output is not stable across major versions, so enforce the major declared by .clang-format.
-    # allow_different_version downgrades the mismatch to a warning instead of failing.
-    have = clang_format_version(clang_format)
-    need = required_major(root)
+    # Nothing usable means fetch the pinned build rather than send the caller off to install LLVM by hand — that is
+    # what tools/bin/fetch-clang-format.py is for, and it is a ~1.5 MB download that happens once per machine.
+    if clang_format is None or have is None or have[0] != need:
+        fetched = ensure_pinned_clang_format(root)
+        if fetched is not None:
+            clang_format = fetched
+            have = clang_format_version(clang_format)
+
+    if clang_format is None:
+        raise FormatSetupError(
+            f"clang-format not found, and the pinned {need}.x could not be fetched into tools/bin. "
+            "Install LLVM/clang-format or add it to PATH."
+        )
     if have is None:
         raise FormatSetupError(f"could not determine clang-format version from {clang_format!r}")
+
+    # allow_different_version downgrades a surviving mismatch to a warning instead of failing.
     if have[0] != need:
         have_str = ".".join(str(p) for p in have)
         msg = (f"clang-format major version {have[0]} != required {need} "
@@ -289,7 +336,8 @@ def run_format(
             print(console.yellow(f"WARNING: {msg}"), file=sys.stderr)
         else:
             raise FormatSetupError(
-                f"{msg}. Install clang-format {need}.x, or pass --allow-different-version to proceed anyway."
+                f"{msg}. Run tools/bin/fetch-clang-format.py to install the pinned {need}.x, "
+                "or pass --allow-different-version to proceed anyway."
             )
 
     files = discover_files(root, scope=scope)
