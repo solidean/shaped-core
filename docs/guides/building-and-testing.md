@@ -613,6 +613,19 @@ But **clang-cl's ASan is broken with C++ exceptions**: any `throw`/`catch` fault
 Since nexus catches test exceptions, the suite can never be green under ASan on Windows, so `sanitize-clang` is **excluded from the `check` gate** there.
 It stays available for manually ASan-checking exception-free code paths.
 
+Two things these presets change beyond turning the sanitizers on, both worth knowing before you read a report.
+
+**The allocator is different.** They set `SC_MIMALLOC=OFF`, so `cc::default_memory_resource` is `cc::system_memory_resource`.
+Every allocation then goes through the global `operator new`, which is what these tools actually intercept.
+Without that, LeakSanitizer never scans mimalloc memory and reports anything owned only by a `cc::` container as a direct leak.
+The cost is that allocation behaviour is not what the other presets do — in-place resize always declines — so a bug that only reproduces here may be the allocator rather than the code.
+[platforms.md](../platforms.md#default-allocator-sc_mimalloc) owns the knob, and it is independent of `SANITIZE`: sanitizing a mimalloc build stays available for when mimalloc itself is the suspect.
+
+**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt](../../tools/cmake/sanitizer-ignorelist.txt) suppresses findings attributed to `extern/`.
+We cannot fix those without diverging from upstream, and a finding nobody will ever act on trains the reader to scroll past the next one.
+Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
+The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.
+
 ## Useful flags
 
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
