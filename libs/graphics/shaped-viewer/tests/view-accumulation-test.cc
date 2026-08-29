@@ -63,7 +63,7 @@ TEST("sv - a view accumulates across frames under its id")
     };
     auto const accumulated = [&](sv::view_id id) { return store.accumulated_frames(id); };
 
-    SECTION("an unchanged view keeps counting, alternating its ping-pong pair")
+    SECTION("an unchanged view keeps counting into the one target")
     {
         auto const v = view_named("steady");
         auto const first = trace(v);
@@ -71,11 +71,10 @@ TEST("sv - a view accumulates across frames under its id")
         CHECK(first.width() == 64);
         CHECK(accumulated(v.id) == 1);
 
-        // The pair alternates: a reprojecting read cannot alias its own write, so the texture handed back is the
-        // half written *this* frame.
-        // It returns to the first one every second frame.
+        // One texture, not a pair: the raygen blends at the pixel it is about to write, so the same target comes
+        // back every frame and its content is the running mean of everything traced into it.
         auto const second = trace(v);
-        CHECK(second.raw().get() != first.raw().get());
+        CHECK(second.raw().get() == first.raw().get());
         CHECK(accumulated(v.id) == 2);
 
         auto const third = trace(v);
@@ -98,10 +97,11 @@ TEST("sv - a view accumulates across frames under its id")
         CHECK(accumulated(v.id) == 3);
     }
 
-    // The point of reprojection, and the assertion that inverted when it landed.
-    // A camera move used to throw the converged image away and start from noise.
-    // Now the estimator is per pixel and the history is reprojected, so the view keeps counting through the move.
-    SECTION("a changed camera keeps the accumulation rather than restarting it")
+    // The trade the accumulator makes: every sample it holds was drawn through one eye, so the mean it converges to
+    // is the image this frame is asking for and no other.
+    // Moving the camera therefore throws the estimate away — and buys, in exchange, an uncapped exact mean with no
+    // reprojection heuristic to smear or to reject.
+    SECTION("a changed camera restarts the accumulation")
     {
         auto const v = view_named("orbited");
         (void)trace(v);
@@ -112,16 +112,20 @@ TEST("sv - a view accumulates across frames under its id")
         auto orbited = v;
         orbited.camera.position = tg::pos3d(2.6, 1.8, -3.2);
         (void)trace(orbited);
-        CHECK(accumulated(v.id) == 4); // carried through, not reset
+        CHECK(accumulated(v.id) == 1);
 
-        // And it keeps going while the camera keeps moving — each frame reprojects the last one's image.
+        // Parked at the new eye, it converges again from there.
+        (void)trace(orbited);
+        CHECK(accumulated(v.id) == 2);
+
+        // And every further move restarts it again, which is what makes an orbit render at the per-frame sample
+        // count and settle the moment it stops.
         orbited.camera.position = tg::pos3d(2.8, 1.8, -3.2);
         (void)trace(orbited);
-        CHECK(accumulated(v.id) == 5);
+        CHECK(accumulated(v.id) == 1);
     }
 
-    // The scene changing is the one thing reprojection cannot rescue: the pixels may still line up, but what they
-    // show is a different image, so the whole estimate has to go.
+    // The other half of the rule: what the trace uploads decides the image just as much as where it is seen from.
     SECTION("changed render settings restart the accumulation")
     {
         auto const v = view_named("settings");
@@ -142,7 +146,7 @@ TEST("sv - a view accumulates across frames under its id")
         (void)trace(v);
         REQUIRE(accumulated(v.id) == 2);
 
-        // A resize reallocates both halves of the pair, so there is no history to reproject at all.
+        // A resize reallocates the target, so there is nothing left to blend into.
         auto bigger = v;
         bigger.resolution = tg::vec2i(96, 64);
         auto const after = trace(bigger);
@@ -155,9 +159,9 @@ TEST("sv - a view accumulates across frames under its id")
     SECTION("a resize at constant aspect still restarts")
     {
         // The sharp case: resolution reaches the upload only through the camera's aspect ratio, so 64x64 and
-        // 128x128 bake identical constants — and the camera is no longer hashed at all.
-        // What catches it is the resize check on the pair itself, which is why the textures are reallocated rather
-        // than pooled.
+        // 128x128 bake identical constants — the camera is hashed, and hashes the same either way.
+        // What catches it is the resize check on the target itself, which is why it is reallocated rather than
+        // pooled.
         auto const v = view_named("rescaled");
         (void)trace(v);
         (void)trace(v);
@@ -260,22 +264,15 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
         CHECK(store.accumulated_frames(traced_id) == u32(i));
     }
 
-    // Every slot the trace writes must rotate, not just the one whose counter is read above.
+    // The accumulator is the view's only temporal resource, and the one texture the estimate lives in.
     //
-    // The G-buffer has no counter of its own — nothing increments it — so deciding rotation per slot froze its pair:
-    // the history half stayed the texture nothing had ever written, every pixel failed the disocclusion test against
-    // garbage geometry, and the whole image rejected its history on every frame.
-    // The counter above kept climbing throughout, which is exactly why it could not catch this.
+    // A second slot beside it used to exist for the reprojection's G-buffer, together with a history half each; the
+    // blend is in place now, so a resolve that hands back anything but a single allocated target is a regression.
     auto const* const rec = store.peek_ptr(traced_id);
     REQUIRE(rec != nullptr);
+    CHECK(rec->temporal.size() == 1);
 
-    for (auto const tid : {sv::temporal_id::accumulation(0), sv::temporal_id::gbuffer(0)})
-    {
-        auto const* const slot = rec->temporal.get_ptr(tid);
-        REQUIRE(slot != nullptr);
-
-        CHECK(slot->has_history);                          // it carries a previous frame
-        CHECK(slot->texture.raw() != slot->history.raw()); // as a genuine pair, not one texture twice
-        CHECK(slot->history.raw() != nullptr);
-    }
+    auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
+    REQUIRE(slot != nullptr);
+    CHECK(slot->texture.raw() != nullptr);
 }

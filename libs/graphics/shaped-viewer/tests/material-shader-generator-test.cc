@@ -35,7 +35,8 @@ namespace
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     return sv::material_type::create("test", cc::move(signature),
-                                     "    surface.roughness = roughness;\n    surface.albedo = base_color;");
+                                     "    surface.specular_roughness = roughness;\n    surface.base_color = "
+                                     "base_color;");
 }
 
 [[nodiscard]] sv::material bare_material()
@@ -73,19 +74,26 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
     auto const type = make_type();
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
 
-    CHECK(g.source.contains("sv_surface sv_evaluate_material(sv_shading_context ctx)"));
+    CHECK(g.source.contains("sv::surface sv_evaluate_material(sv::shading_context ctx)"));
     CHECK(g.source.contains("#include \"material_runtime.hlsli\""));
 
-    // One local per signature attribute, at the type the format names.
-    CHECK(g.source.contains("float roughness = asfloat(sv_params.Load(ctx.param_offset + 0));"));
-    CHECK(g.source.contains("float3 base_color = asfloat(sv_params.Load3(ctx.param_offset + 4));"));
+    // One local per signature attribute, at the type the format names, filled from the block that holds the loads.
+    CHECK(g.source.contains("float roughness = 0;"));
+    CHECK(g.source.contains("float3 base_color = 0;"));
+    CHECK(g.source.contains("ByteAddressBuffer params = gBindlessBuffers[NonUniformResourceIndex(ctx.param_buffer)];"));
+    CHECK(g.source.contains("roughness = asfloat(params.Load(ctx.param_offset + 0));"));
+    CHECK(g.source.contains("base_color = asfloat(params.Load3(ctx.param_offset + 4));"));
 
     // The fragment is emitted verbatim, after every local it reads.
-    CHECK(g.source.contains("surface.roughness = roughness;"));
-    CHECK(g.source.find("float3 base_color") < g.source.find("surface.albedo = base_color;"));
+    CHECK(g.source.contains("surface.specular_roughness = roughness;"));
+    CHECK(g.source.find("float3 base_color") < g.source.find("surface.base_color = base_color;"));
 
     // No texture is sampled, so no texture table is declared at all — the reflection stays as small as the material is.
     CHECK(!g.source.contains("gBindlessTextures2D"));
+
+    // Nothing supplied either attribute, so the fragment's defaults are what came through — and the epilogue can tell.
+    CHECK(g.source.contains("#define SV_ATTR_SUPPLIED_roughness 0"));
+    CHECK(g.source.contains("#define SV_ATTR_SUPPLIED_base_color 0"));
     CHECK(!g.source.contains("SamplerState"));
     CHECK(g.source.contains("ByteAddressBuffer gBindlessBuffers[4096] : register(t0, space8);"));
 
@@ -134,11 +142,10 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
     per_vertex.attributes.push_back(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, values));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_vertex));
-        CHECK(g.source.contains("sv_attribute_desc sv_desc_roughness = sv_load_attribute_desc(sv_params, "
-                                "ctx.param_offset + 0);"));
+        CHECK(g.source.contains("sv::attribute_desc desc = sv::load_attribute_desc(params, ctx.param_offset + 0);"));
         CHECK(g.source.contains(
-            "float roughness = sv_interpolate_f1(gBindlessBuffers[NonUniformResourceIndex(sv_desc_roughness.buffer)], "
-            "sv_desc_roughness, ctx.corner, ctx.barycentrics);"));
+            "roughness = sv::interpolate_f1(gBindlessBuffers[NonUniformResourceIndex(desc.buffer)], desc, ctx.corner, "
+            "ctx.barycentrics);"));
         CHECK(slot_named(g.layout, "roughness").kind == sv::material_slot_kind::attribute_descriptor);
         CHECK(slot_named(g.layout, "roughness").size_bytes == 12);
     }
@@ -148,8 +155,8 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
     per_corner.attributes.push_back(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_corner, values));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_corner));
-        CHECK(g.source.contains("sv_interpolate_f1"));
-        CHECK(g.source.contains("sv_corner_elements(ctx)"));
+        CHECK(g.source.contains("sv::interpolate_f1"));
+        CHECK(g.source.contains("sv::corner_elements(ctx)"));
     }
 
     // per_triangle is flat — one element for the whole primitive, so it loads rather than interpolates.
@@ -158,8 +165,8 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
         sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f}));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_triangle));
-        CHECK(g.source.contains("sv_load_element_f1"));
-        CHECK(!g.source.contains("sv_interpolate_f1"));
+        CHECK(g.source.contains("sv::load_element_f1"));
+        CHECK(!g.source.contains("sv::interpolate_f1"));
         CHECK(g.source.contains("ctx.primitive"));
     }
 }
@@ -176,10 +183,10 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
 
     CHECK(g.source.contains("Texture2D gBindlessTextures2D[4096] : register(t0, space3);"));
     CHECK(g.source.contains("SamplerState sv_sampler_0 : register(s0, space0);"));
-    CHECK(g.source.contains("float2 sv_uvv_base_color = sv_interpolate_f2("));
-    CHECK(g.source.contains("uint sv_tex_base_color = sv_params.Load(ctx.param_offset + "));
+    CHECK(g.source.contains("float2 uv = sv::interpolate_f2("));
+    CHECK(g.source.contains("uint tex = params.Load(ctx.param_offset + "));
     // SampleLevel, because a ray tracing hit shader has no derivatives to pick a mip from.
-    CHECK(g.source.contains("SampleLevel(sv_sampler_0, sv_uvv_base_color, 0).rgb;"));
+    CHECK(g.source.contains("SampleLevel(sv_sampler_0, uv, 0).rgb;"));
 
     // A sampled attribute takes two slots: the texture index, and the uv descriptor it is sampled through.
     CHECK(slot_named(g.layout, "base_color").kind == sv::material_slot_kind::texture_index);
@@ -229,7 +236,7 @@ TEST("sv::generate_material_shader - two attributes sampled alike share one samp
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(sv::material_signature_entry::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
-    auto const type = sv::material_type::create("two", cc::move(signature), "    surface.albedo = base_color;");
+    auto const type = sv::material_type::create("two", cc::move(signature), "    surface.base_color = base_color;");
 
     auto mesh = make_mesh();
     mesh.attributes.push_back(make_uvs());
@@ -242,6 +249,39 @@ TEST("sv::generate_material_shader - two attributes sampled alike share one samp
 
     // Two textures, two uv descriptors — the texture id is a parameter, so the two ids do not multiply the permutations.
     CHECK(g.layout.slots.size() == 4);
+}
+
+TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion")
+{
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of_rotation("frame", tg::vec4f(0, 0, 0, 1)));
+    auto const type
+        = sv::material_type::create("framed", cc::move(signature), "    surface.geometry_tangent_frame = frame;");
+
+    // Nothing supplies it: the declaration's default is a constant, and a constant has no corners to blend.
+    auto const bare = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
+    CHECK(!bare.source.contains("sv::interpolate_rotation"));
+    CHECK(bare.source.contains("#define SV_ATTR_SUPPLIED_frame 0"));
+
+    // Supplied per vertex, it interpolates as a rotation rather than through sv::interpolate_f4 — which would blend the two
+    // hemispheres of the same rotation against each other.
+    auto mesh = make_mesh();
+    auto const frames = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1)};
+    mesh.attributes.push_back(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_vertex, frames));
+
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
+    CHECK(g.source.contains("sv::interpolate_rotation("));
+    CHECK(!g.source.contains("sv::interpolate_f4("));
+    CHECK(g.source.contains("#define SV_ATTR_SUPPLIED_frame 1"));
+
+    // A flat frequency reads one element, so there is nothing to blend and the mode changes no code.
+    auto flat = make_mesh();
+    auto const one = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1)};
+    flat.attributes.push_back(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_triangle, one));
+
+    auto const f = sv::generate_material_shader(sv::resolve_material(type, bare_material(), flat));
+    CHECK(!f.source.contains("sv::interpolate_rotation"));
+    CHECK(f.source.contains("sv::load_element_f4("));
 }
 
 TEST("sv::generate_material_shader - the builtin pbr type generates")

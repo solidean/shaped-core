@@ -231,6 +231,22 @@ void view_ref::initial_orbit(orbit_state const& o)
     }
 }
 
+void view_ref::initial_fps(fps_state const& pose)
+{
+    auto& st = _frame->state_of(_view);
+    if (!st.camera_seeded)
+    {
+        st.camera_seeded = true;
+        st.fly.pose = pose;
+        st.camera = pose.to_camera();
+
+        // The style has not been seeded yet either, and its seeding would re-derive this pose from the camera.
+        // Marking it done here is what keeps the authored yaw and pitch rather than the round-trip's.
+        st.style_seeded = true;
+        st.style_last_frame = camera_style::fly;
+    }
+}
+
 void view_ref::resolution(tg::vec2i r)
 {
     auto& v = target();
@@ -246,6 +262,11 @@ void view_ref::refresh_rate(float rate)
 void view_ref::movable(bool v)
 {
     _frame->state_of(_view).movable_this_frame = v;
+}
+
+void view_ref::camera_style(sv::camera_style style)
+{
+    _frame->state_of(_view).style_this_frame = style;
 }
 
 void view_ref::display_name(cc::string_view name)

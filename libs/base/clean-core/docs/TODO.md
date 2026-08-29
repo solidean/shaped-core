@@ -27,6 +27,36 @@ Add entries as we discover them, and remove them as they land.
   `babel::json`'s writer is the first, with an exponent-bit check in json_writer.cc — exact, and needing no `<cmath>`, which is not blessed there.
   A `cc::is_finite` / `is_nan` / `is_inf` trio next to the other scalar utilities would take all three call sites this will grow.
 
+## platform
+
+- **`cc::symbolizer` is not thread-safe, and the symbolize tests flake because of it.**
+  `platform/symbolize.cc` calls `SymInitialize`, `SymFromAddr` and `SymGetLineFromAddr64` with no lock of any kind.
+  Microsoft documents every DbgHelp entry point as single-threaded — concurrent calls give "unexpected behavior or memory corruption".
+  `platform/native.cc` right beside it already takes a process-wide mutex around the demanglers for exactly that reason, so the pattern is established and simply was not applied here.
+  Two symbolizers on two threads therefore race.
+  The symptom is a resolve that returns the WRONG function rather than an error, which is the failure mode hardest to recognize as a race.
+
+  Seen on 2026-08-26, on Windows x64 `relwithdebinfo`, during a full `dev.py check`.
+  That runs the four presets' test binaries in parallel, and nexus runs tests on a pool on top of that.
+  It failed once, passed on an immediate re-run, and passes on `--repeat 10` in isolation on the same tree.
+  The comment in `tests/platform/symbolize-test.cc` records an earlier failure on arm64 CI, so this is that one again rather than a new thing.
+  What is new is that it reproduces on x64 and has an explanation.
+
+  The `nx::config::recorded` sidecar is what settled it, and it is worth reading before touching this.
+  The failing run's `.ccrec` shows all 13 frames walked and resolved, and every one correct except frame 0.
+  That frame must be inside `capture_here_for_symbolize_test`, and it resolved instead to `cc::impl::unique_function_invoke<lambda ...>` — a function from an entirely different translation unit.
+  The failure message also names the two sibling symbolize tests running concurrently, which is the contention.
+
+  The fix is the one `native.cc` already uses: a process-wide mutex around the DbgHelp calls.
+  Held for the whole `resolve` rather than per call, since `SymFromAddr` and `SymGetLineFromAddr64` are two reads of one session's state.
+  It costs nothing anybody would notice, because symbolization is already the slow path.
+  It is also what makes a crash dump written from several threads trustworthy, which matters more than the test does.
+
+- **There is no way to read a `.ccrec` from the command line.**
+  Diagnosing the entry above meant scraping printable runs out of the file with a throwaway script.
+  `cc::rec::load_recording` is the whole reader and nothing exposes it.
+  A `dev.py` subcommand that dumps a recording's events is what would make the sidecar pay off the way `nx::config::recorded` intends.
+
 ## container
 
 - **`bitset` printing and allocation interop.**

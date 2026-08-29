@@ -30,6 +30,21 @@ struct sv::material_permutation
     /// broken shader edit, by not tracing with it.
     sg::async_compiled_shader shader;
 
+    /// The compiled any-hit, which is the cutout test — null unless `can_cut_out`.
+    ///
+    /// Attaching one to a hit group makes every intersection on it run a shader and costs the hardware its opaque fast path,
+    /// so a material that cannot cut out deliberately gets none rather than getting one that always accepts.
+    sg::async_compiled_shader any_hit;
+
+    /// The same test compiled against `ShadowPayload`, for the permutation's shadow hit record — null unless `can_cut_out`.
+    ///
+    /// A second entry point rather than a second hit group carrying the first: an any-hit is invoked with whatever payload
+    /// its caller passed and declares exactly one type, so the raygen's ray and a shadow ray cannot share one.
+    sg::async_compiled_shader shadow_any_hit;
+
+    /// Whether this permutation's material ever writes `geometry_opacity` — see `generated_material_shader::can_cut_out`.
+    bool can_cut_out = false;
+
     /// kept for diagnostics: a compile error names an offset in this text, and nothing else can reproduce it
     cc::string source;
 };
@@ -57,6 +72,12 @@ class sv::material_shader_cache
 public:
     /// The closest-hit entry point every generated permutation defines, in `shaders/pt_material_hit.hlsli`.
     static constexpr cc::string_view hit_entry_point = "PtClosestHit";
+
+    /// The any-hit entry point the same epilogue defines — the cutout test, compiled only where a material can cut out.
+    static constexpr cc::string_view any_hit_entry_point = "PtAnyHit";
+
+    /// The same test against `ShadowPayload`, for the shadow hit record.
+    static constexpr cc::string_view shadow_any_hit_entry_point = "PtShadowAnyHit";
 
     /// The epilogue that defines it — what `gpu_resource_manager` hands `create` as `epilogue_include`.
     static constexpr cc::string_view hit_epilogue_include = "pt_material_hit.hlsli";

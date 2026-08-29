@@ -11,6 +11,7 @@
 #include <typed-geometry/linalg/comp.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 #include <type_traits>
@@ -217,6 +218,13 @@ template <int C, int R, class T>
 struct attribute_format_trait<tg::mat<C, R, T>>
 {
     static constexpr attribute_format value = attribute_format::of_matrix(scalar_type_trait<T>::value, R, C);
+};
+/// A quaternion is stored as its four components in xyzw order, which is a 4-vector to everything downstream.
+/// What makes it a rotation is the DECLARATION reading it — `material_signature_entry::of_rotation` — never the storage.
+template <class T>
+struct attribute_format_trait<tg::quat<T>>
+{
+    static constexpr attribute_format value = attribute_format::of_vector(scalar_type_trait<T>::value, 4);
 };
 } // namespace impl
 

@@ -35,13 +35,17 @@ What is left is the interaction on top of it, in dependency order:
 - **A traced layer has no alpha.** `pathtrace.hlsl`'s raygen writes none, so a `scene_3d` layer is forced to
   `layer_blend::replace`. Writing coverage into `.a` is what would let a traced layer composite `over` another.
   Until then `view_ref::add_scene` can express two scene layers on one view but only the last is visible.
-- **The reprojection is unverified at the pixel level.** The temporal reuse landed — G-buffer, ping-pong pair,
-  disocclusion rejection, per-pixel estimator — and the tests pin the *policy* (a camera move keeps its counter, a
-  scene change resets it), but nothing checks that `reproject()` lands on the right texel.
-  A wrong sign or a transposed basis would still pass the suite and simply look smeared.
-  The cheap check is a readback test: converge a static view, translate the camera along its own right axis by
-  exactly one pixel's worth at the focal distance, and assert the image shifts by one texel.
+- **The accumulated image is never read back.** The tests pin the *policy* — a camera or scene change restarts the
+  counter, a relayout does not — but nothing checks that the blend itself produces the running mean it claims to.
+  The cheap check is a readback test: trace a converging static view twice at a known constant color and assert the
+  target holds the mean rather than the last frame.
   Until that exists, `pathtraced-window-manual-test` is the only real confirmation.
+- **A camera move throws the whole estimate away**, which is the deliberate trade behind an uncapped exact mean, and
+  it is what makes flying noisy.
+  Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
+  it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
+  A spatial filter over a moving frame (A-trous / SVGF) buys the same smoothness without touching the estimator, and
+  is the direction to take this if flying needs to look better.
 - **The GPU tests may still be passing vacuously.** `pathtrace_routine::init_declare` used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.
@@ -50,13 +54,24 @@ What is left is the interaction on top of it, in dependency order:
   facts, so none of them would notice tracing nothing at all.
   Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
   That assertion now reports the last trace rather than the routine, so it belongs AFTER the execute rather than before it.
-- **The disocclusion thresholds are guesses**: 1% of view depth on position, 0.9 on the normal dot.
-  They want tuning against real content, and probably want to be per-view rather than constants in the raygen.
-- **No spatial filter.** Reuse is purely temporal, so a freshly disoccluded pixel shows its raw estimate until it accumulates.
-  An A-trous / SVGF pass over the low-count pixels is the usual companion, and is not here.
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
+- **A path runs to completion inside one dispatch**, which is what makes a frame cost the DEEPEST path in it rather than
+  the average one.
+  `PathTraceRayGen` loops `samples_per_pixel` times over `max_bounces` and a pixel is not done until its whole path is, so
+  a scene with one deep corner pays for that corner everywhere — and it is the same property that makes a heavy dispatch
+  trip a driver watchdog rather than merely run slowly.
+  The wavefront answer is one dispatch per bounce, with the path's live state persisted between them rather than held in
+  registers, which also lets a frame carry a path forward instead of finishing it.
+  Two things have to be decided before that is worth starting.
+  The state is a G-buffer by another name — origin, direction, throughput, rng, the medium's three fields, the collapsed
+  wavelength and `prev_pdf`, all per pixel per sample — and this library has just finished deleting one for the
+  accumulation rework, so the trade wants making deliberately rather than by default.
+  And it changes what a frame means to the accumulator: `accum_frame` counts completed estimates and the mean is exact
+  because every sample folded in is a finished path, so either only terminated paths fold in, which makes the effective
+  sample count vary per pixel and gives back the "one eye, one mean" property, or partial radiance folds in and the target
+  is no longer a mean of anything.
 
 ## What the bindless lock does not cover
 
@@ -138,6 +153,217 @@ What is left is narrower than it was:
   Whatever lands has to account for tests running concurrently.
   `material-resolution-test.cc` already installs its own material library process-wide without `nx::exclusive`, hedging around the race with `CHECK(builds <= 1)`.
 
+## Known issue: the inline readback path fastfails on Windows on ARM
+
+`openpbr-bsdf-test` and `volumetric-furnace-test` are skipped there, under `CC_ARCH_ARM64 && _WIN32`.
+They are the only two tests in sv that use `cmd.download`.
+[structure.md](structure.md) had already noted that path was never exercised here, so this is the first time sv has asked for an inline readback at all.
+
+**What happens.**
+`shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
+Bisected with flushed markers to `ctx.advance_epoch_and_wait_for_idle()`, on the probe's ECHO dispatch.
+That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
+The workload is therefore not the cause, and neither is the closure.
+
+**What it is not.**
+Not an assertion: nexus installs clean-core's crash handler, which hooks an SEH filter and `SIGABRT` and prints the running test, and `abort()` raises `SIGABRT`.
+An earlier failure in the same binary proved that path works, arriving as a clean message.
+Not a lost device: the wait was wrapped in a `catch (sg::device_lost_exception const&)` that never fired.
+A `__fastfail` bypasses both handlers and loses buffered output, which is why this reads as a silent exit — and `/GS` uses exactly that for a genuine stack-cookie failure.
+
+**Where to look, with hardware.**
+The obvious first move is `ctx.download` instead of `cmd.download`.
+sg documents the context-level one for a bulk, off-the-frame-path read, which is what both tests actually want.
+It would say whether the inline staging ring is the part that breaks.
+`libs/base/clean-core/tests/record/record-async-scope-test.cc` records a separate MSVC ARM64 defect around coroutine resume.
+The completion machinery the epoch advance waits on is that same `cc::async`, so it is worth reading before assuming the two are unrelated.
+sg's own `transfer/download-async-test.cc` passes on that leg, so whatever this is, it needs the combination rather than the download alone.
+
+## What the OpenPBR surface still needs
+
+`sv::surface` is OpenPBR's parameter set and `shaders/openpbr.hlsli` is the layered BSDF over it: fuzz over coat over a base that
+mixes the metal against a dielectric specular layer over the diffuse substrate.
+The path tracer shades through it — the closest-hit evaluates the closure, estimates both light sources through it, and
+importance-samples the continuation — so what is left is coverage of the model rather than plumbing.
+
+- **Tangent frames are quaternions, and not yet quantized.**
+  A mesh supplies `tangent_frame` — a unit quaternion taking tangent space to object space — plus `tangent_handedness`, and the
+  hit builds its shading frame from that instead of the flat face normal.
+  The storage is an uncompressed `f32x4`.
+  The intended encoding is `quat10x3+i2` (see [zeux.io on quantizing tangent frames](https://zeux.io/2026/04/30/quantizing-tangent-frames/)),
+  which is a format change on one attribute plus a decode in the generated prologue — the same seam `attribute_interpolation`
+  already opened, and not a content migration, because handedness deliberately lives beside the quaternion rather than in the
+  sign of its `w`.
+  `quat10x3+i2` rather than the article's own `oct11x2+d9` pick, because a closest-hit decodes three corners per hit and then
+  blends them: the quaternion is the form the blend wants, where an octahedral normal plus a diamond angle would have to be
+  built into a basis per corner first.
+- **A non-uniform instance scale shears the tangent frame.**
+  The hit rotates the authored frame by `ObjectToWorld3x4` and renormalizes, which is exact for a rigid or uniformly scaled
+  placement and wrong for anything else — the normal wants the inverse transpose while the tangent wants the matrix itself.
+  Nothing in the tree scales non-uniformly yet.
+- **Nothing produces a frame but the sphere example.**
+  `openpbr-spheres` emits an analytic one per vertex.
+  A glTF import would carry `TANGENT` and a handedness in its `w`, and a mesh with uvs but no tangents wants them derived
+  rather than defaulted — neither exists.
+- **A normal map is still untested.** `geometry_normal` is applied through `sv::perturb_frame` now, so it has somewhere to land,
+  but no material in the tree binds it to a texture.
+  The same is true of `geometry_coat_normal`, which lands through the authored frame beside it.
+- **The parameter set is complete.**
+  Every group OpenPBR specifies is carried and shaded: base, specular, transmission, subsurface, coat, fuzz, emission, thin
+  film and geometry.
+  What is left below is fidelity and integration, not coverage.
+- **The thin film could stop aliasing now.**
+  Its higher orders alias because it samples three wavelengths, and the path can be collapsed onto one wavelength since
+  dispersion landed.
+  Evaluating the film at the collapsed wavelength instead of at all three is most of what Belcour and Barla's spectral
+  formulation would buy, for a path that has already paid the collapse.
+- **The walk is measured now**, by `tests/volumetric-furnace-test.cc`: a lossless object under a uniform environment is
+  invisible, so the traced image must come back at the environment's own radiance.
+  The cases separate what could otherwise pass vacuously — a clear index-matched interior isolating the interface, a clear
+  glass one at index 1.5 where total internal reflection is measured against a known answer, a purely scattering one which is
+  the walk itself, the same walk at optical depth about 36, and an absorbing one that must come back darker.
+  An 8% loss injected per scattering event moves the scattering case by 26% and leaves the clear one exact, which is what
+  says the assertion has teeth.
+  It runs in about 7 seconds on WARP, second only to the closure probe, which is the reason its resolution and frame count are
+  as low as they are.
+- **A scattering walk ends by Russian roulette now**, after 16 events, on the throughput's largest channel.
+  Because `q` is the throughput itself the walk is self-normalizing: a survivor returns to about 1 and the per-event
+  survival probability settles at the medium's albedo, so the expected length is `1 / (1 - albedo)`.
+  `pt_scatter_cap` is 4096 and is the guard behind it, for an albedo of exactly 1 that never rolls a losing draw.
+  What this bought is measured, and it is **cost rather than correctness**: the same subsurface capture runs in about 8-12
+  seconds against 35 for the old 256-event cap, while allowing a walk sixteen times longer.
+  The bias the old cap carried is real in principle and was not observable — a lossless furnace at optical depth 36 passes
+  against a 256-event cap as well, because the truncated paths are a thin enough tail to sit inside a 6% margin.
+  The surface bounces still have no roulette, and `max_bounces` is still a hard cut.
+- **A dense subsurface interior is still darker than its `subsurface_color`**, though far less so than it was.
+  `openpbr-spheres`' subsurface row is the case: black with sparse red speckle before roulette and after it, at 64 frames
+  and at 2048.
+  Index-matching that row's interface was what located it — the row went from black to a dark red, which said the interface
+  rather than the walk was taking it — and the total-internal-reflection entry below is now fixed, which is what the row's
+  present colour comes from.
+  What is left after that is the per-channel survival — `subsurface_color` (0.88, 0.52, 0.42) inverts to albedos of about
+  (0.995, 0.922, 0.865) against mean free paths of (0.010, 0.0035, 0.0020) at the sweep's low end, so red outlives green and
+  blue by an order of magnitude — plus the missing next-event estimation inside a medium.
+- **Next-event estimation never happens inside a medium.**
+  A scattering event turns and continues, picking up light only when it eventually exits, so a lit interior converges far
+  more slowly than a lit surface does.
+  It is the same gap as the shadow ray that cannot pass through glass, and equidistant sampling toward the light is the
+  usual answer.
+- **Dispersion collapses the whole path onto one wavelength**, and keeps it collapsed.
+  Everything after the collapse costs three times the samples for the same noise, including surfaces that have nothing to
+  do with the dispersive one.
+  Collapsing only the transmitted lobe's continuation — leaving a reflected one carrying all three — is what would bound
+  that, and it needs the closure to say which lobe a sample came from beyond the interior it entered.
+- **Next-event estimation does not pass through glass.**
+  A shadow ray is a visibility test with no closure on it, so a point inside a transmissive solid — or behind one — is lit
+  by BSDF sampling alone.
+  That is what makes a caustic converge slowly and a glass interior noisy.
+  The fix is a shadow ray that accumulates transmittance instead of stopping at the first hit, which needs the any-hit to
+  serve two purposes or a second traversal.
+- **The interface's two halves share one Fresnel now**, which they did not.
+  The reflection used Schlick through `spec_f0` while the refraction used the exact dielectric relation, so they did not
+  sum to 1 — invisible at the indices real glass has, where the two agree closely, and worth 12% of the light at an index
+  approaching 1 where Schlick's grazing tail still climbs to white.
+  `interface_transmittance` is the complement of the reflection by construction, and the probe carries an index-matched
+  case that fails without it.
+- **The transmitted lobe drops the radiance-compression factor**, deliberately: this tracer transports importance from the
+  camera rather than radiance from the light, and the two conventions differ by exactly the square of the index ratio.
+  A renderer that ever grows a light-side path — bidirectional, photon mapping — has to put it back on that side.
+- **A ray escaping while still inside a solid is dropped.**
+  It travelled an unbounded distance through an absorbing medium, so nothing survives — but that is only true for CLOSED
+  geometry, and an open shell authored as solid loses paths rather than being told it is wrong.
+- **Total internal reflection reflects now**, in all three of the closure's halves at once.
+  `bsdf_sample_direction` turns a failed `refract` into the reflection about the same microfacet, `bsdf_eval` returns the
+  full lobe there rather than Schlick's share of it — Schlick has no critical angle and its tail never reaches 1 — and
+  `bsdf_pdf` carries that density on the upper hemisphere, so the direction is scored by what drew it.
+  Ending the sample was worth **28% of the light** through a lossless glass object, which is what
+  `volumetric-furnace-test`'s index-1.5 case now measures and what it fails by against a build without this.
+  A thin wall is excluded throughout: it encloses nothing, so it has no critical angle.
+- **The thin film is sampled at three wavelengths**, one per output channel, rather than integrated over the spectrum.
+  Its first interference order is faithful and its higher orders alias into colors the spectrum would have averaged away, so
+  a film past roughly a micron drifts.
+  Belcour and Barla's spectral formulation is the replacement, and it wants the same hero-wavelength machinery dispersion
+  does — which is why the two are worth doing together rather than separately.
+- **The film's Fresnel does not reach the layer coupling.**
+  `spec_transmission` still reads the film-free `spec_f0`, so what the diffuse substrate is charged for the crossing ignores
+  the interference above it.
+  Averaged over the spectrum a film redistributes reflectance rather than adding it, so the error is small — and closing it
+  wants the same tabulated albedo the energy compensation does.
+- **The film treats the base as a real index.** A metal's absorption therefore does not shift the phase it reflects with,
+  which costs the slight hue rotation a real conductor's substrate adds.
+- **The coat's own normal is added as a BSDF about the BASE normal.**
+  `geometry_coat_normal` gives the coat its own frame and every cosine its lobe needs is measured there, but the result is
+  summed into a closure the integrator weights by the base's cosine.
+  The two frames disagree by a ratio no closed form absorbs; the alternative is a second integrator, and every renderer that
+  carries a coat normal makes the same trade.
+- **`geometry_coat_tangent` is absent.** An anisotropic coat is stretched along the base's tangent spun onto the coat's
+  normal, so it follows the same uv layout the base does and cannot point its own way.
+  It is `geometry_tangent`'s mechanism a second time over, and nothing needs it yet.
+- **A cutout is stochastic and its draw does not come from the path's own stream.**
+  `PtAnyHit` hashes the pixel, the frame seed and the primitive instead, because an any-hit writing the path's random state
+  would have to be granted access to it — and every ray would then carry a stream whose length depends on how many
+  alpha-tested triangles it happened to graze.
+  Independent draws per bounce are what it costs, which accumulation hides and a single-sample preview would not.
+- **No test traces a material that can cut out.**
+  `material-shader-cache-test` compiles the any-hit for a type that writes `geometry_opacity`, so the HLSL is covered; what
+  is not is a pipeline built with an any-hit attached and a trace through it.
+  Every tracing test drives the glTF type, which never writes opacity and so deliberately gets no any-hit.
+- **A GGX sample that reflects below the horizon is dropped rather than redistributed**, so `bsdf_pdf` legitimately claims
+  less than the full hemisphere — around a tenth of it for a rough lobe.
+  That is unbiased and standard, and the probe asserts the direction that matters (never MORE than 1) rather than equality.
+  Each reflective branch of `bsdf_sample_direction` drops it itself rather than letting it fall out at the bottom: below the
+  horizon is where a TRANSMISSION lives, so a reflection surviving that far was valued as a BTDF, scored against a
+  refraction density that never produced it, and reported as `medium_none` while pointing through the surface — which sent
+  the path into an interior it never entered.
+  `probe_medium` now counts that disagreement and the test requires zero, which is exact rather than statistical.
+  Multiple-scattering GGX sampling is what would put that mass back, and it is the same tabulated-albedo work as the
+  compensation entry below.
+- **Three lobes are approximations, named at the top of `openpbr.hlsli`.**
+  The fuzz is a Conty-Estevez sheen rather than the specified Zeltner microflake, the coat tints what passes through it once
+  rather than absorbing along the refracted path, and GGX energy compensation is Turquin's analytic fit rather than a tabulated
+  directional albedo.
+  Each is a self-contained replacement, and the sheen is the one that most visibly deviates.
+- **The closure is measured; the IMAGE still is not.**
+  `shaders/bsdf_probe.hlsl` plus `tests/openpbr-bsdf-test.cc` run estimators over `sv::bsdf` on the GPU and read the numbers
+  back — directional albedo, the mass `bsdf_pdf` claims against what `bsdf_sample_direction` draws, Helmholtz reciprocity,
+  which interior a sampled direction entered against the side it went to, the transmitted lobe's channel ratios, and a layout
+  echo pinning the struct against the GPU's own decode — over `surfaces_under_test` at three incidences each.
+  A lobe added to the closure goes in `surfaces_under_test` and is then held to all of them.
+  What that does not cover is anything above the closure: the integrator, the accumulation blend and the layout composite
+  still have no readback, and `pathtraced-window-manual-test` is the only confirmation of those.
+- **Two of the energy bounds are a fit's error rather than a lobe's.**
+  A white metal furnace overshoots by about 3% (Turquin's analytic compensation) and the fuzz by about 6% at grazing
+  (`sheen_albedo` charges the layers below it less than the Conty-Estevez lobe actually reflects).
+  The probe's `1.06` energy bound is exactly those two, so it is what tightens when the tabulated albedos above land.
+- **The environment cannot produce a sharp reflection.** The background is an order-3 SH probe, so a smooth specular lobe
+  reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.
+  An equirect HDR environment with 2D-CDF importance sampling is the fix, and it needs a Radiance `.hdr` reader in babel first —
+  `babel::image` has PNG and JPEG only.
+- **An emissive mesh lights nothing but the camera.** `emission_luminance` is authored and shaded, but next-event
+  estimation samples the analytic area light alone, so emissive geometry is direct-visibility only and contributes no
+  indirect light.
+  What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
+  balanced against the BSDF sampler the way `pt_light_intersect` already balances the rect.
+- **A partly-covered surface is expressible now**, through `PtAnyHit` in `shaders/pt_material_hit.hlsli`.
+  Reaching it takes two things, and for a while it only had one.
+  The hit group needs the any-hit attached, which `material_permutation::can_cut_out` decides — and that is now a
+  DECLARATION rather than a substring test: a type names its `opacity_attribute`, and a permutation can cut out only where
+  something other than the signature's own default supplied it.
+  The instance then has to be non-opaque, which `view_renderer` sets from the same flag through
+  `sg::tlas_instance::opaque_override`.
+  Without that second half every BLAS sv builds is opaque, and DXR behaves as if no any-hit were attached at all — so the
+  whole path was unreachable and `geometry_opacity` affected nothing.
+- **A cutout costs two hit records and two any-hit compiles per permutation**, which is what it takes for a shadow ray to
+  see through one.
+  An any-hit is invoked with whatever payload its caller passed and declares exactly one type, so the raygen's ray
+  (`PtPayload`) and a shadow ray (`ShadowPayload`) cannot share a record.
+  The primary record sits at `2 * i` and the shadow record at `2 * i + 1`; `pt_occluded` reaches the second with
+  `RayContributionToHitGroupIndex` 1, and the shadow record carries no closest hit because the trace skips it.
+  Two cheaper shapes were tried and neither works: an empty payload for the any-hit is rejected by DXC ("shader must
+  include inout payload structure parameter"), and putting `PtPayload` on the shadow trace as well compiles every shader
+  and then fails the pipeline build.
+  `pt_cutout_rejects` is the test itself, and the two entry points over it differ only in what they declare.
+
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
@@ -158,9 +384,13 @@ What is left is narrower than it was:
 - Give `view_ref` a conditional-override vocabulary (an `ImGuiCond`-style `when { always, first_use }`), so `camera` /
   `resolution` / placement stop needing a separate `initial_*` setter each.
   Only the first-use half is built today.
-- Let a view pick its controller: `sv::viewer` drives an orbit controller per view, so `fps_camera_controller` is only reachable by a caller running its own event pump.
-  A view losing the cursor or the window losing focus must reach the controller's `release_input`, or a held key keeps flying.
-  `pathtraced-window-manual-test.cc` still hand-rolls its own fly camera and can drop it once this lands.
+- **A view picks its controller now** — `view_ref::camera_style`, with `sv::viewer` routing to it and driving the fly one's
+  `update(dt)`, releasing input while the window is unfocused.
+  What is left of that entry is the cleanup: `pathtraced-window-manual-test.cc` still hand-rolls its own fly camera and can
+  drop it.
+  Losing the CURSOR is also still unhandled — only focus is — so a view whose cursor leaves the window mid-look keeps looking.
+- **Nothing tests `camera_style`.** The controllers have their own CPU tests, but the switch, the re-seeding across it and the
+  unfocused release all live in `sv::viewer`, which needs a window — so they are only exercised by running an example.
 - `render_settings::max_accumulated_frames`, replacing the process-wide `sv::accumulation_frame_cap` in `render_settings.hh`.
   It is public rather than file-scope because a caller waiting for convergence has to tell "not there yet" from "as good as it gets" — `view_ref::is_accumulation_converged` applies it.
   It must then be excluded from the trace hash — lowering the cap should not restart the image.

@@ -13,7 +13,7 @@
 enum class sv::material_slot_kind : sv::u8
 {
     constant,             ///< the attribute's value itself, in the layout `attribute_format` names
-    attribute_descriptor, ///< an `sv_attribute_desc` — where a mesh attribute's elements live
+    attribute_descriptor, ///< an `sv::attribute_desc` — where a mesh attribute's elements live
     texture_index,        ///< a `u32` index into the bindless texture table
 };
 
@@ -59,6 +59,17 @@ struct sv::generated_material_shader
     /// The generated text names a register, never a state, so nothing else can recover which state belongs to which register.
     cc::vector<sg::sampler> samplers;
 
+    /// Whether a cutout is possible on THIS permutation: its type declares an `opacity_attribute`, and something other
+    /// than the signature's own default supplied it.
+    ///
+    /// Both halves are load-bearing.
+    /// A type that never writes `geometry_opacity` leaves the default 1, and a permutation that left its opacity
+    /// attribute unbound writes a compile-time constant — an any-hit in either case runs at every intersection to reject
+    /// nothing, and costs the instance the hardware's opaque fast path to do it.
+    /// This is what `view_renderer` turns into `sg::tlas_instance::opaque_override`, so it decides whether the any-hit
+    /// can be invoked at all rather than only whether one is compiled.
+    bool can_cut_out = false;
+
     /// What the compile is cached on: the resolution's shape and how these options spell it (see `material_shader_key`).
     cc::hash128 key;
 };
@@ -92,6 +103,10 @@ namespace sv
 /// That function declares one local per signature attribute — a constant loaded from the parameter block, a mesh attribute
 /// interpolated across the hit triangle, or a texture sampled through its uv attribute — and then runs the type's fragment
 /// verbatim over them.
+///
+/// The loads themselves happen in a nested block, so the attribute names, `surface` and `ctx` are the only names the fragment
+/// shares a scope with.
+/// That is what lets a material type name an attribute `params` or `uv` without the generator having to know.
 ///
 /// Only what the permutation touches is declared: a material sampling no texture emits no texture table, so the reflection a
 /// caller binds against stays as small as the material is.

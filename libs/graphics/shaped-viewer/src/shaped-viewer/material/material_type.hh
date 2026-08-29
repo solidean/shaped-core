@@ -31,13 +31,25 @@ struct sv::material_type
 
     cc::string shader;
 
+    /// Which declared attribute this type's fragment writes `surface.geometry_opacity` from, or empty for a type that
+    /// cannot cut out at all.
+    ///
+    /// Declared rather than detected, because what the generator needs is not "does the fragment mention opacity" but
+    /// "can THIS permutation reject anything" — and only the attribute's resolved frequency answers that.
+    /// A permutation whose opacity attribute came through as the signature's own default is a constant the fragment
+    /// clamps to 1, so no any-hit could reject a thing; see `generated_material_shader::can_cut_out`.
+    /// Must name an attribute the signature declares.
+    cc::string opacity_attribute;
+
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature` and `shader` into the content key.
+    /// Hashes `name`, `signature`, `shader` and `opacity_attribute` into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
+    /// So does an `opacity_attribute` naming something the signature does not declare.
     [[nodiscard]] static material_type create(cc::string name,
                                               cc::vector<material_signature_entry> signature,
-                                              cc::string shader);
+                                              cc::string shader,
+                                              cc::string opacity_attribute = {});
 
     /// The declaration of `name`, or null if this type does not read it.
     [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;

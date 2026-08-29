@@ -29,19 +29,19 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A compute entry that reaches the generated function the way a closest-hit will: through an sv_instance read out of the
-/// instance table, so `sv_make_context` and the byte layout it walks are compiled too rather than only the material itself.
+/// A compute entry that reaches the generated function the way a closest-hit will: through an `sv::instance` read out of the
+/// instance table, so `sv::make_context` and the byte layout it walks are compiled too rather than only the material itself.
 constexpr cc::string_view test_entry = R"hlsl(
-StructuredBuffer<sv_instance> sv_test_instances : register(t0, space0);
+StructuredBuffer<sv::instance> sv_test_instances : register(t0, space0);
 RWStructuredBuffer<float4> sv_test_out : register(u0);
 
 [numthreads(1, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID)
 {
-    sv_instance inst = sv_test_instances[tid.x];
-    sv_shading_context ctx = sv_make_context(inst, gBindlessBuffers[NonUniformResourceIndex(inst.indices)], 0, float2(0.25, 0.25));
-    sv_surface s = sv_evaluate_material(ctx);
-    sv_test_out[0] = float4(s.albedo, s.roughness) + float4(s.emissive, s.metallic) + float4(s.normal, s.occlusion);
+    sv::instance inst = sv_test_instances[tid.x];
+    sv::shading_context ctx = sv::make_context(inst, gBindlessBuffers[NonUniformResourceIndex(inst.indices)], 0, float2(0.25, 0.25));
+    sv::surface s = sv_evaluate_material(ctx);
+    sv_test_out[0] = float4(s.base_color, s.specular_roughness) + float4(s.emission_color, s.base_metalness) + float4(s.geometry_normal, s.geometry_opacity);
 }
 )hlsl";
 
@@ -87,7 +87,7 @@ TEST("sv - every builtin material type compiles at its default frequencies")
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
 
-    for (auto const& name : {sv::builtin_material::pbr, sv::builtin_material::unlit})
+    for (auto const& name : {sv::builtin_material::openpbr, sv::builtin_material::pbr, sv::builtin_material::unlit})
     {
         auto const type = materials.acquire_type(name).value();
         auto const id = materials.acquire(sv::material::create(cc::string(name), type, {}));
@@ -160,7 +160,7 @@ TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
     auto const g = sv::generate_material_shader(resolved, {.epilogue_include = "pt_material_hit.hlsli"});
 
     // The epilogue lands after the function it calls, which is the whole reason it is an epilogue.
-    CHECK(g.source.find("sv_surface sv_evaluate_material") < g.source.find("#include \"pt_material_hit.hlsli\""));
+    CHECK(g.source.find("sv::surface sv_evaluate_material") < g.source.find("#include \"pt_material_hit.hlsli\""));
 
     auto const& lib = *sv_test::shared_env().lib;
     auto const shader
@@ -194,6 +194,68 @@ TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
     }
     CHECK(saw_instances);
     CHECK(saw_buffers);
+}
+
+/// Compiles one resolved material as the path tracer's real closest-hit, epilogue included.
+void check_hit_compiles(sv::resolved_material const& r, cc::string_view label)
+{
+    auto const& lib = *sv_test::shared_env().lib;
+
+    auto const g = sv::generate_material_shader(r, {.epilogue_include = "pt_material_hit.hlsli"});
+    auto const shader = lib.compile_source(g.source, sg::shader_stage::closest_hit, "PtClosestHit",
+                                           sg::shader_format::dxil, {.include_dir = "sv_shaders", .label = label});
+
+    REQUIRE(shader != nullptr);
+    (void)cc::try_async_blocking_get(shader);
+    if (shader->has_error())
+        FAIL(cc::format("{}\n--- source ---\n{}", shader->try_error()->underlying().to_string(), g.source));
+    REQUIRE(shader->has_value());
+    CHECK(shader->try_value()->bytecode.size() > 0);
+}
+
+TEST("sv - the openpbr closest-hit compiles with a supplied tangent frame")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return; // no DXC installed: nothing here can compile
+
+    // The epilogue's frame path is behind `#if SV_ATTR_SUPPLIED_tangent_frame`, so a mesh carrying no frame never compiles
+    // it — which is exactly how a broken quaternion path would sit unnoticed behind a green suite.
+    // This is the permutation that does compile it: the rotation interpolation, the object-to-world basis and the two-sided
+    // flip all land in the source only here.
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+
+    auto const type = materials.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = materials.acquire(sv::material::create("framed", type, {}));
+
+    auto mesh = make_mesh();
+    auto const frames = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1)};
+    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex, frames));
+
+    auto const resolved = sv::resolve_material(materials, id, mesh);
+    CHECK(sv::generate_material_shader(resolved).source.contains("SV_ATTR_SUPPLIED_tangent_frame 1"));
+
+    check_hit_compiles(resolved, "<generated framed closest-hit>");
+}
+
+TEST("sv - the openpbr closest-hit compiles with the full layered BSDF")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return; // no DXC installed: nothing here can compile
+
+    // The `openpbr` type is what puts every lobe in the source at once: the fragment writes all twenty parameters, so nothing
+    // in shaders/openpbr.hlsli is dead-stripped before the compiler has seen it.
+    // Compiling it as the real closest-hit is what covers the estimators and the sampling too, which the compute entry above
+    // never reaches.
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+
+    auto const type = materials.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = materials.acquire(sv::material::create("openpbr", type, {}));
+
+    auto const resolved = sv::resolve_material(materials, id, make_mesh());
+
+    check_hit_compiles(resolved, "<generated openpbr closest-hit>");
 }
 
 #endif // SLIB_HAS_DXC

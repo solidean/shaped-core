@@ -6,7 +6,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/shader_generator.hh> // material_slot_kind, which a slot carries
 
-/// One scene item as a closest-hit reads it, indexed by `InstanceID()` — mirrors `sv_instance` in shaders/material_runtime.hlsli.
+/// One scene item as a closest-hit reads it, indexed by `InstanceID()` — mirrors `sv::instance` in shaders/material_runtime.hlsli.
 ///
 /// Everything a hit needs to shade is reached from here: the material's parameter block, and the geometry the hit is on.
 /// Nothing the path tracer binds is per-mesh any more except the table itself, so a view may hold any number of meshes with any
@@ -35,7 +35,7 @@ struct sv::instance_gpu
 
 namespace sv
 {
-static_assert(sizeof(instance_gpu) == 32, "instance_gpu must match sv_instance in shaders/material_runtime.hlsli");
+static_assert(sizeof(instance_gpu) == 32, "instance_gpu must match sv::instance in shaders/material_runtime.hlsli");
 } // namespace sv
 
 /// One resolved parameter slot, as much of it as outlives the resolution it came from.
