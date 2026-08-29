@@ -254,7 +254,10 @@ uv run dev.py format --commit <rev>          # only the sources that commit or r
 `--commit` asks the same question of an already-committed change set instead — see [Re-checking a commit or a range](#re-checking-a-commit-or-a-range).
 
 clang-format output is not stable across major versions, so the command pins to the major version declared by `.clang-format`'s `Requires: clang-format >= N` header.
-It **errors** if the installed clang-format's major differs; `--allow-different-version` downgrades that to a warning and proceeds anyway.
+When the clang-format it finds is missing or a different major, it fetches the pinned build into `tools/bin/` and uses that.
+That is a ~1.5 MB download, once per machine, owned by [tools/bin/fetch-clang-format.py](../../tools/bin/fetch-clang-format.py).
+The fetched binary is gitignored, and it outranks PATH precisely because its version is the one we chose.
+It **errors** only when that fails too, and `--allow-different-version` downgrades the surviving mismatch to a warning; `SC_SKIP_CLANG_FORMAT_FETCH=1` opts out of the fetch entirely.
 Like every other step, the clang-format run is captured under `build/run-logs/`.
 Before committing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
 

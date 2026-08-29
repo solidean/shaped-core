@@ -102,6 +102,11 @@ MSVC uses its own linker.
 The repo's LLVM-based tooling tracks the **22** family.
 Pair `clang-format`, `clangd` and — on the clang path — the compiler from the same major version, to avoid format churn and stale diagnostics.
 
+**clang-format is the one you do not have to install.**
+`dev.py format` fetches the pinned build into `tools/bin/` when the one it finds is missing or the wrong major, so a toolchain on a different LLVM major is no longer a dead end.
+The binary is gitignored rather than committed, and [tools/bin/fetch-clang-format.py](../tools/bin/fetch-clang-format.py) owns the pin.
+Run that directly to install ahead of time, or set `SC_SKIP_CLANG_FORMAT_FETCH=1` to keep it off the network.
+
 ### diag-launcher
 
 Builds wrap the compiler and linker with [tools/bin/diag-launcher.exe](../tools/bin/diag-launcher.exe), set as `CMAKE_<LANG>_COMPILER_LAUNCHER` / `..._LINKER_LAUNCHER` in the presets.
