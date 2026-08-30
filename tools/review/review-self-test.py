@@ -329,6 +329,64 @@ def test_rest_only_claims_what_is_left(root: Path) -> None:
         assert len(again.reused) == 1 and again.skipped_covered == 1, (again.reused, again.skipped_covered)
 
 
+def test_a_reused_claim_follows_its_hunk_after_a_head_move(root: Path) -> None:
+    """A change id is content-derived and a claim is positional, so a shift moves one and not the other.
+
+    Left alone, the claim keeps the old line numbers: it covers atoms that no longer exist while the ones that do go
+    unaccounted, so coverage reads red for a review that is complete.
+    No later ingest can clear that, since the digest is already known and reuse is the branch it lands in.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(120)})
+    body = numbered(120).replace("line 100\n", "line 100 CHANGED\n")
+    head_one = commit(root, "edit", {"a.txt": body})
+
+    net_one = build_net(git, base, head_one)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        first = candidates_for(git, base, head_one, context=8, gap=20, net=net_one)
+        register(ledger, first, round_number=1, write_body=lambda *_: None)
+        assert net_one.subtract(ledger.covered()).is_empty
+
+        # Two lines inserted above the edit: every following line number moves, no hunk content does.
+        head_two = commit(root, "prelude", {"a.txt": "prelude a\nprelude b\n" + body})
+        net_two = build_net(git, base, head_two)
+        second = candidates_for(git, base, head_two, context=8, gap=20, net=net_two)
+
+        result = register(ledger, second, round_number=2, write_body=lambda *_: None)
+        assert result.repointed, "the shifted hunk's claim must follow it"
+
+        left = net_two.subtract(ledger.covered())
+        assert left.is_empty, f"a moved head left {len(left)} atoms unaccounted: {left.runs()}"
+
+        # Idempotent: a second pass over the same head re-points nothing.
+        again = register(ledger, second, round_number=2, write_body=lambda *_: None)
+        assert not again.repointed, [c.summary for c in again.repointed]
+
+
+def test_a_superseded_claim_is_not_re_pointed(root: Path) -> None:
+    """A superseded change records what WAS claimed, and re-pointing it would quietly bring it back to life."""
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(20)})
+    head = commit(root, "edit", {"a.txt": numbered(20).replace("line 5\n", "line 5 edited\n")})
+
+    net = build_net(git, base, head)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        candidates = candidates_for(git, base, head, context=8, gap=20, net=net)
+        created = register(ledger, candidates, round_number=1, write_body=lambda *_: None).created
+        assert len(created) == 1
+
+        change = created[0]
+        change.superseded = True
+        change.claim = net.__class__.empty()
+        ledger.append(change)
+
+        result = register(ledger, candidates, round_number=2, write_body=lambda *_: None)
+        assert not result.repointed, [c.summary for c in result.repointed]
+        assert ledger.get(change.id).claim.is_empty
+
+
 # ---- commit-local mapping ---------------------------------------------------
 
 

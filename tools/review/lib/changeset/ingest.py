@@ -41,6 +41,7 @@ class IngestResult:
 
     created: list[Change] = field(default_factory=list)
     reused: list[Change] = field(default_factory=list)
+    repointed: list[Change] = field(default_factory=list)
     candidates: list[Candidate] = field(default_factory=list)
     skipped_covered: int = 0
 
@@ -121,6 +122,13 @@ def register(
     """Turn candidates into ledger rows, reusing the id any already-known digest had.
 
     `write_body` takes (change_id, text) and is what puts a hunk on disk; a bulk or file change has none.
+
+    A reused change is also RE-POINTED at the candidate's claim when the two differ.
+    An id is derived from content and a claim from position, so a head move leaves a hunk the author never touched
+    with the same id at different line numbers — and a claim left in the old coordinates covers atoms that no longer
+    exist while the ones that do go unaccounted.
+    Coverage then reads red for a review that is complete, and no further ingest can clear it, since the digest is
+    already known and this branch is what it lands in.
     """
     result = IngestResult()
     known = ledger.by_digest()
@@ -130,6 +138,15 @@ def register(
     for candidate in candidates:
         existing_id = known.get(candidate.digest)
         if existing_id and (change := ledger.get(existing_id)) is not None:
+            # A superseded change is left alone: it is a record of something that WAS claimed, and re-pointing it
+            # would quietly bring it back to life.
+            if not change.superseded and change.claim != candidate.claim:
+                change.claim = candidate.claim
+                change.summary = candidate.summary
+                if candidate.body:
+                    write_body(change.id, candidate.body)
+                ledger.append(change)
+                result.repointed.append(change)
             result.reused.append(change)
             continue
         if only_uncovered and candidate.claim.subtract(covered).is_empty:

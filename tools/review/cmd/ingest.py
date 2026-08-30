@@ -202,11 +202,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         write_body=write_body, only_uncovered=args.rest,
     )
     review.record(
-        paths.log, "ingest", created=len(result.created), reused=len(result.reused),
+        paths.log, "ingest", created=len(result.created), reused=len(result.reused), repointed=len(result.repointed),
         bulk=args.bulk or "", rest=args.rest,
     )
 
     print(f"{len(result.created)} changes created, {len(result.reused)} already known")
+    if result.repointed:
+        # A head move leaves a claim in the old coordinates; saying so is what keeps a changed count explicable.
+        print(f"{len(result.repointed)} claim(s) re-pointed at their new line numbers")
     if result.skipped_covered:
         print(f"{result.skipped_covered} skipped as already covered (--rest)")
 
