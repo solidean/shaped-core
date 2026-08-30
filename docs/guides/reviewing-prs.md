@@ -211,6 +211,24 @@ The generalization the maintainer drew is worth keeping beside it: **trailer met
 "Seek to the end and read it properly" works only where the frame ends where the stream ends, which a blob embedded in a container never does.
 So the answer was that deflate has no streaming size hint at all, rather than a cleverer way to find one.
 
+### The `#ifdef` arm this machine does not compile is where the defect is
+
+A platform-guarded helper has two arms and only one is ever parsed.
+The unbuilt arm is invisible to every check the author can run: the compiler, clang-tidy, the prose linter, and `dev.py check` across all five presets.
+So a mistake there survives all of it and lands.
+It is the same blind spot as a doc claim, and it wants the same deliberate pass: when a change adds or edits an `#ifdef` arm, **read the arm this machine cannot build, symbol by symbol.**
+
+pr-159 is the worked case, on the branch that made a Windows-only shader compiler cross-platform.
+`dxc_compiler-test.cc` grew a two-arm `make_dxc_compiler`, and the `CC_OS_WINDOWS` arm returned `make_dxc_compiler()` — itself.
+The function has a deduced return type, so a use before that type is deduced is ill-formed and the test binary does not build on Windows at all; the unbounded recursion is what the error prevents.
+The `#else` arm beside it was correct, `check` was green on five presets, and nothing local could have said otherwise.
+
+The tell is mechanical rather than subtle, which is what makes the pass cheap.
+One arm called `slib::create_dxc_spirv_compiler()`, and the other called something whose name was the enclosing function's.
+
+The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
+That branch had two of them and its PR body named one, which is the ratio to expect.
+
 ### "No callers in the repo" is not evidence of dead code
 
 It is evidence only for something the repo alone can use.
@@ -350,6 +368,23 @@ When the branch already records it, there are only two honest moves.
 **Drop it**, if the author's call stands.
 Or **raise it as a disagreement with the recorded judgement**, quoting what they wrote and saying why this branch should not ship with it.
 That is a different finding, and a much harder one to write.
+
+### A test's comment is a claim about the test, checked the way a doc claim is
+
+Read what the test asserts, then read what its comment says it asserts.
+A comment that overstates is worse than no comment: it tells the next reader the property is covered, so nobody covers it.
+And it survives review, because the code beneath it is correct as far as it goes.
+
+pr-159 is the worked case.
+Its headless-present test said "a swapchain that handed out the same image every frame, or presented one and rendered into another, would fail".
+The loop clears the acquired view to a per-frame shade and reads back **that same view** before presenting.
+So a chain returning index 0 forever passed every check in it, and so would one that presented a different image than it rendered.
+What the test actually pinned was that the acquired target is renderable and readable, which is worth having and is not what the comment claimed.
+The missing property was three lines away: collect the acquired texture's address per frame, and require `buffer_count` distinct ones.
+
+This is the inverse of the rule above, and the two are worth holding together.
+There, the author's prose is evidence you can trust and re-deriving it is the mistake.
+Here it is a claim like any other, because nothing in the toolchain checks a comment against the code under it.
 
 ### A mechanism claim needs the line that proves it
 
