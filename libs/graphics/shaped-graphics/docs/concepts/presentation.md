@@ -71,6 +71,9 @@ That is deliberate: a handle is required exactly when the extent is unset, and i
 So a headless chain carrying a stale window handle is **unrepresentable** rather than merely invalid.
 `is_windowed()` is the question everything else asks.
 
+`ctx.supports_headless_present()` says whether this context can be given one, so a caller branches on the capability rather than on the backend.
+It is a device-and-build fact on vulkan — `VK_EXT_headless_surface` plus `VK_KHR_swapchain` — and unconditionally true on dx12, whose emulation asks the device for nothing.
+
 **Headless present is complete-the-frame-and-rotate.**
 The chain cycles, and the presented buffer stays readable until its epoch retires.
 That is what makes it pixel-verifiable, which is the entire reason for having it — a null presentation target would only prove the calls did not crash.
@@ -119,7 +122,6 @@ DXGI's Alt+Enter fullscreen handling is suppressed (`DXGI_MWA_NO_ALT_ENTER`); th
 - **Resize** waits on the present fence, releases the wrappers, calls `ResizeBuffers` and rebuilds.
   `ResizeBuffers` requires zero outstanding back-buffer references, which is exactly what the wait plus release provide.
 - **Device loss** during acquire, present or resize marks the context lost and throws `sg::device_lost_exception`; other failures throw a generic `sg::exception` carrying the `HRESULT`.
-
 
 ## Deferred
 

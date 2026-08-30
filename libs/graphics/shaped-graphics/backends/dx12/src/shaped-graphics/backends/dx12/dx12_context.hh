@@ -115,6 +115,11 @@ public:
     /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
+    /// Always true here, and it is a fact about the emulation rather than about the device.
+    /// DXGI needs a real presentation target, so a headless chain is `buffer_count` ordinary render-target textures
+    /// and a present that signals the fence and rotates the index — nothing in that asks the device for anything.
+    [[nodiscard]] bool supports_headless_present() const override { return true; }
+
     /// Routes this device's debug-layer messages to `callback` instead of stderr.
     /// Only ever called when the context was created with enable_debug_layer, and only for messages raised after creation returned.
     /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.

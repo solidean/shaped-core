@@ -159,19 +159,28 @@ public:
     /// transfer for a frame-time spike.
     [[nodiscard]] bool has_dedicated_transfer_queue() const { return _transfer_queue_family != _queue_family_index; }
 
-    void set_transfer_queues(u32 family, VkQueue upload, VkQueue download, u32 effective_family)
+    /// `family` is the family the queues actually came from, which is the graphics family where the device could
+    /// spare none — so `has_dedicated_transfer_queue` reads it rather than the family that was preferred.
+    void set_transfer_queues(u32 family, VkQueue upload, VkQueue download)
     {
-        _transfer_queue_family = effective_family;
+        _transfer_queue_family = family;
         _upload_queue = upload;
         _download_queue = download;
-        (void)family;
     }
 
     /// Whether this context can create a swapchain at all, and whether it can do so without a window.
     /// Both are instance/device facts settled at creation, so a create_swapchain failure is reported rather than
     /// discovered at the first present.
+    ///
+    /// Headless needs BOTH halves: VK_EXT_headless_surface for the surface, and VK_KHR_swapchain for the chain over
+    /// it — so the answer folds them rather than reporting the surface alone, which `create` would then refuse.
     [[nodiscard]] bool is_swapchain_supported() const { return _swapchain_supported; }
-    [[nodiscard]] bool is_headless_present_supported() const { return _headless_surface_supported; }
+    [[nodiscard]] bool is_headless_present_supported() const
+    {
+        return _headless_surface_supported && _swapchain_supported;
+    }
+
+    [[nodiscard]] bool supports_headless_present() const override { return is_headless_present_supported(); }
 
     /// Whether this instance can create a surface for `platform`.
     /// False for one whose extension the loader does not offer, and for one this build was compiled without — a
@@ -299,8 +308,8 @@ public:
         return cc::result<sg::raw_texture_handle>(create_vulkan_texture(desc, alloc));
     }
 
-    // Not implemented yet.
-    // These return an error rather than aborting, so the sg throwing façade turns each into a typed exception.
+    // Device-local memory a buffer can be placed into; textures are not placeable on either backend.
+    // Returns an error rather than aborting, so the sg throwing façade turns a failure into a typed exception.
     [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes);
 
     [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
@@ -594,7 +603,7 @@ public:
     bool _headless_surface_supported = false;
 
     // See is_window_platform_supported; indexed by sg::window_platform.
-    bool _window_platform_supported[4] = {false, false, false, false};
+    bool _window_platform_supported[sg::window_platform_count] = {};
 
     // See supports_host_query_reset.
     bool _host_query_reset = false;

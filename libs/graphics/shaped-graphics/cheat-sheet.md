@@ -471,12 +471,14 @@ sg::is_render_target_format(f) // bool — a renderable color format (not depth,
 #include <shaped-graphics/present/swapchain.hh>
 sg::swapchain_description       // { native_window window; int buffer_count=2 (>=2); pixel_format format=bgra8_unorm;
                                 //   present_mode present_mode=vsync; bool enable_hdr=false;
-                                //   cc::optional<tg::isize2> headless_extent (set => no window, fixed size) }
+                                //   cc::optional<tg::vec2i> headless_extent (set => no window, fixed size) }
 sg::native_window               // { window_platform platform; void* display; void* handle; u64 window_id; tg::vec2i client_size }
                                 //   win32: handle=HWND | xlib/xcb: display + window_id | wayland: display + handle
                                 //   .is_valid() states which slots that platform needs; ::from_win32(hwnd) is the shorthand
                                 //   client_size is REQUIRED on wayland (its surface has no size of its own), ignored elsewhere
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
+ctx.supports_headless_present()   // bool — may a swapchain_description carry a headless_extent here?
+                                  //   vulkan: VK_EXT_headless_surface + VK_KHR_swapchain. dx12: always (it emulates)
 auto sc = ctx.create_swapchain({.window = win->native_window()});  // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
 // per frame:
 sc->set_window_size({w, h});          // wayland only reads it (no size on the surface); harmless elsewhere — call it unconditionally

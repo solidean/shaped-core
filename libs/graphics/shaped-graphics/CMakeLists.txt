@@ -166,10 +166,10 @@ target_compile_options(shaped-graphics
 # binary. It is not the same question as "does this backend build" — a backend that builds without registering can
 # invoke nothing, so it must not switch the cross-backend API tests on.
 #
-# vulkan registers while it is still being built out, which is what makes its two test flags do different jobs:
-# registering builds the per-invocable aliases, so one API test can be run by name against vulkan, while the
-# nx::config::disabled on its driver keeps a full sweep from reaching the recording stubs that still abort.
-# See tests/backends/vulkan-entry.cc.
+# A backend still being built out registers but disables its driver, which is what makes its two test flags do
+# different jobs: registering builds the per-invocable aliases, so one API test runs against it by being named
+# exactly, while nx::config::disabled keeps a full sweep out of the seams that still abort.
+# Both backends are past that now and both sweep. See tests/backends/vulkan-entry.cc.
 set(_sg_backends "")
 set(_sg_test_drivers "")
 
@@ -220,7 +220,7 @@ if(SC_BUILD_TESTS)
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
     # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
-    # a compiled-but-unregistered backend leaves all 133 invocables orphaned, which fails the binary.
+    # a compiled-but-unregistered backend leaves every invocable orphaned (100+ of them), which fails the binary.
     #
     # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
     # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
@@ -248,6 +248,7 @@ if(SC_BUILD_TESTS)
             tests/error-handling/error-handling-test.cc
             tests/raytracing/raytracing-test.cc
             tests/query/query-test.cc
+            tests/present/present-test.cc
         )
         if(WIN32)
             target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

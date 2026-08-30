@@ -44,6 +44,15 @@ public:
     /// Whether this context can build pipelines from `format`.
     [[nodiscard]] bool accepts_shader_format(shader_format format) const;
 
+    /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
+    ///
+    /// A build-and-device fact rather than a preference, and it differs by backend for a real reason: vulkan needs
+    /// VK_EXT_headless_surface plus VK_KHR_swapchain, while dx12 emulates the whole thing with ordinary render-target
+    /// textures and therefore always can.
+    /// Defaults to false, so a backend that has not implemented headless present reports it rather than failing at
+    /// creation — which is what lets a test skip cleanly instead of asserting.
+    [[nodiscard]] virtual bool supports_headless_present() const { return false; }
+
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
