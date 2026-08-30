@@ -99,4 +99,7 @@ uv run dev.py test "sg "     # just the shaped-graphics tests (also "sr ", "sv "
 uv run dev.py build          # the whole repo, incl. platform-enabled backends
 ```
 
+Which backend, window and shader compiler a build ends up with is decided by what the machine has, and all of it is optional.
+[requirements.md](requirements.md#graphics--windowing) is the table of what each piece needs and what its absence costs; `uv run dev.py doctor` reports the machine's own answer.
+
 [guides/building-and-testing.md](guides/building-and-testing.md) has the full workflow, and [libraries.md](libraries.md) the full library catalog.
