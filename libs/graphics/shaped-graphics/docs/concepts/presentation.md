@@ -21,6 +21,17 @@ One check per epoch bounds that to the frame boundary the caller already owns.
 
 A minimized or zero-size window keeps the last valid extent rather than resizing to nothing, since a zero-size chain is not creatable.
 
+## Wayland is the one platform that cannot answer "how big is the window"
+
+Everywhere else the surface knows its own size, and a backend asks it — `IDXGISwapChain`'s window on dx12, `VkSurfaceCapabilitiesKHR::currentExtent` on vulkan.
+A `wl_surface` has none: the compositor takes whatever size the chain is built at, and vulkan reports `currentExtent` as `UINT32_MAX` to say so.
+
+So on wayland the **application** is the authority, and it says so twice.
+`native_window::client_size` gives the size at creation — a wayland chain built without it comes up at the 1x1 `minImageExtent`, which is why the description asserts on it.
+`swapchain::set_window_size` gives it afterwards, consumed by the next `acquire_backbuffer`, and is the only way a wayland chain learns the window grew.
+
+Both are ignored on every other platform, which is what lets a caller set them unconditionally instead of branching on `window_platform`.
+
 ## Back buffers are ordinary textures
 
 Each back buffer is wrapped as a **borrowed** `raw_texture` — the chain owns the storage, the wrapper only references it.

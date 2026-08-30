@@ -179,13 +179,21 @@ tg::vec2i vulkan_swapchain::current_extent() const
     if (!_desc.is_windowed())
         return _desc.headless_extent.value();
 
-    // A windowed chain follows its surface, which is the authority on the window's size — Vulkan reports it here
-    // rather than making the app ask the window system, which is one platform call fewer than dx12 needs.
+    // A windowed chain follows its surface where the surface knows its own size — Vulkan reports it here rather than
+    // making the app ask the window system, which is one platform call fewer than dx12 needs.
     VkSurfaceCapabilitiesKHR caps = {};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(_ctx._physical_device, _surface, &caps);
     if (caps.currentExtent.width != UINT32_MAX)
         return tg::vec2i(int(caps.currentExtent.width), int(caps.currentExtent.height));
-    return _size; // the surface defers to the swapchain's size, so keep what we have
+
+    // UINT32_MAX means the surface defers to us, which on wayland is always: a wl_surface has no size of its own, and
+    // the compositor takes whatever the chain is built at.
+    // So the application is the only authority, and `set_window_size` (seeded from native_window::client_size) is how
+    // it says so.
+    // Falling back to `_size` without one is what leaves a chain built with neither at the 1x1 minImageExtent.
+    if (_requested_size[0] > 0 && _requested_size[1] > 0)
+        return _requested_size;
+    return _size;
 }
 
 cc::result<cc::unit> vulkan_swapchain::build(tg::vec2i size)

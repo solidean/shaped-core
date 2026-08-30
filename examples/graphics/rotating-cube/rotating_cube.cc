@@ -386,6 +386,10 @@ EXAMPLE("shaped-graphics/rotating-cube")
 
             if (win->is_minimized())
                 continue; // 0x0 there, and the swapchain would resize to it
+
+            // Unconditional rather than on a resize event: only wayland reads it, where the surface has no size of
+            // its own, and every other platform's chain asks its surface and ignores this.
+            swapchain->set_window_size(tg::vec2i(win->width(), win->height()));
         }
 
         // The cube spins on its own while nobody is dragging it, so the example shows motion with no input at all.

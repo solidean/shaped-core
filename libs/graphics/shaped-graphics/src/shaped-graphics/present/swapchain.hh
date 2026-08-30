@@ -93,6 +93,18 @@ public:
     [[nodiscard]] bool is_windowed() const { return _desc.is_windowed(); }
     [[nodiscard]] swapchain_description const& description() const { return _desc; }
 
+    /// Tell the chain the window's current client size, in pixels.
+    ///
+    /// Only wayland needs this, and there it is not optional: its surface has no size of its own, so nothing else can
+    /// tell the chain the window grew.
+    /// Elsewhere the surface reports its own extent and this is ignored, which is what lets a caller call it
+    /// unconditionally rather than branching on the platform.
+    ///
+    /// Call it before `acquire_backbuffer`, which is where the value is consumed — the resize itself still happens at
+    /// most once per epoch, so calling this every frame costs nothing.
+    /// A zero or negative component is ignored, so a minimized window needs no special case.
+    void set_window_size(tg::vec2i size) { _requested_size = size; }
+
 protected:
     explicit swapchain(swapchain_description const& desc);
 
@@ -110,4 +122,8 @@ protected:
     virtual void present() = 0;
 
     swapchain_description _desc;
+
+    /// The client size the application last pushed, seeded from `_desc.window.client_size`.
+    /// Only a backend whose surface defers reads it; see set_window_size.
+    tg::vec2i _requested_size = tg::vec2i(0, 0);
 };

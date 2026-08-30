@@ -2,6 +2,7 @@
 
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh>
+#include <typed-geometry/linalg/vec.hh> // tg::vec2i (client_size)
 
 /// Which windowing system a `native_window`'s fields belong to.
 /// It decides which of them are meaningful, and which surface-creation call a backend makes.
@@ -41,6 +42,16 @@ struct sg::native_window
     /// The window itself where it is an integer: `Window` (xlib), `xcb_window_t` (xcb).
     /// Zero elsewhere.
     u64 window_id = 0;
+
+    /// Client-area size in pixels.
+    ///
+    /// **Required on wayland**, where a surface has no size of its own: the application is the authority and the
+    /// compositor takes whatever size the swapchain is built at.
+    /// A wayland chain built without it comes up 1x1.
+    /// Ignored on win32 and X11, whose surfaces report their own extent — a backend asks the surface there.
+    ///
+    /// This is the size at creation only; a resized window feeds `sg::swapchain::set_window_size`.
+    tg::vec2i client_size = tg::vec2i(0, 0);
 
     /// Whether this names a window at all, by its own platform's rules.
     /// A default-constructed one does not, which is what makes "no window backend" representable.

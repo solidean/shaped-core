@@ -110,14 +110,20 @@ u32 impl::backend_window_id(window const& w)
     if (windows == nullptr)
         return 0;
 
+    // SDL_GetWindows hands back an array the caller owns, not a view into SDL's own storage.
+    auto id = u32(0);
     for (int i = 0; i < count; ++i)
     {
         auto* const back_pointer
             = SDL_GetPointerProperty(SDL_GetWindowProperties(windows[i]), back_pointer_property, nullptr);
         if (back_pointer == &w)
-            return u32(SDL_GetWindowID(windows[i]));
+        {
+            id = u32(SDL_GetWindowID(windows[i]));
+            break;
+        }
     }
-    return 0;
+    SDL_free(windows);
+    return id;
 }
 
 window::~window()
@@ -131,7 +137,7 @@ window::~window()
 
 sg::native_window window::native_window() const
 {
-    auto* const props = SDL_GetWindowProperties(as_sdl(_native_window));
+    auto const props = SDL_GetWindowProperties(as_sdl(_native_window)); // an SDL_PropertiesID, not a pointer
 
     // Which set of properties carries the window is a runtime fact rather than a compile-time one: one SDL3 build
     // drives X11 and wayland both, and picks per session.
@@ -139,6 +145,7 @@ sg::native_window window::native_window() const
     auto const driver = cc::string_view(SDL_GetCurrentVideoDriver());
 
     sg::native_window win;
+    win.client_size = tg::vec2i(_width, _height); // wayland has no other source for it
     if (driver == "windows")
     {
         win.platform = sg::window_platform::win32;
