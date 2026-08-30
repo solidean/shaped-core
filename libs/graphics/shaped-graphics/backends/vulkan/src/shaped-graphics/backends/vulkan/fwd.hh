@@ -37,6 +37,7 @@ class vulkan_blas;
 class vulkan_tlas;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;      // host-visible memory descriptors are written into
+struct vulkan_image_view_key;      // the identity one cached VkImageView is keyed on
 class vulkan_image_view_cache;     // VkImageViews for bound texture views, keyed by view identity
 class vulkan_sampler_cache;        // VkSamplers for bound sampler states, keyed by sampler identity
 struct vulkan_hazard_view;         // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)

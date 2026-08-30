@@ -18,11 +18,39 @@
 /// Textures need a VkImageView, which is created here and cached by the view's own identity hash — sg already defines
 /// that hash over exactly the fields reaching a descriptor, so two equal views share one image view by construction.
 
+/// The identity of one cached VkImageView: the viewed texture plus every field that reaches vkCreateImageView.
+///
+/// A key rather than a bare hash, so a collision cannot hand back another view's VkImageView — and, since a view is
+/// forgotten by key when its texture dies, cannot let one texture's finalizer destroy another's live entry.
+/// `hash` and `operator==` fold exactly the same fields, which is the invariant a hash map keyed on this needs.
+///
+/// The texture is a raw pointer on purpose: a handle here would keep every viewed texture alive for the context's
+/// life, which is what the finalizer-driven eviction below exists to avoid.
+struct sg::backend::vulkan::vulkan_image_view_key
+{
+    sg::raw_texture const* texture = nullptr;
+    sg::view_class access = sg::view_class::readonly;
+    sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d;
+    sg::pixel_format format = sg::pixel_format::undefined;
+    sg::subresource_range range;
+    cc::start_end depth_slice_range = {.start = 0, .end = 0};
+
+    [[nodiscard]] friend bool operator==(vulkan_image_view_key const&, vulkan_image_view_key const&) = default;
+
+    /// Folds exactly what `operator==` compares; defaulting the operator is what keeps the two agreeing as fields
+    /// are added.
+    [[nodiscard]] friend u64 hash(vulkan_image_view_key const& k)
+    {
+        return cc::make_hash(k.texture, k.access, k.dimension, k.format, k.range, k.depth_slice_range.start,
+                             k.depth_slice_range.end);
+    }
+};
+
 /// Creates and owns the VkImageViews a texture descriptor needs.
 /// One per context; a view is created on first use and lives until its texture is released.
 ///
 /// **A cached view is dropped with its texture, and that is load-bearing rather than tidy.**
-/// Both keys hash the texture's address, and a transient texture is destroyed and recreated every frame — so a new
+/// Both keys name the texture by address, and a transient texture is destroyed and recreated every frame — so a new
 /// one landing on a freed one's address would otherwise inherit its entry and hand back a view of an image that no
 /// longer exists.
 /// The drop rides the texture's own finalizer, so it happens exactly when the VkImage does: at epoch retire, once
@@ -34,8 +62,8 @@ public:
     ~vulkan_image_view_cache();
 
     /// The image view for `view`, created on first request.
-    /// Keyed on the view's identity hash, which sg defines over the resource address plus every field that reaches a
-    /// descriptor — so this never conflates two views that would produce different descriptors.
+    /// Keyed on the view's identity — the resource address plus every field that reaches a descriptor — so this
+    /// never conflates two views that would produce different descriptors.
     [[nodiscard]] VkImageView acquire(sg::raw_texture_view const& view);
 
     /// The image view for a rendering-scope attachment, created on first request.
@@ -52,13 +80,15 @@ public:
     void shutdown();
 
 private:
+    using view_map = cc::map<vulkan_image_view_key, VkImageView>;
+
     /// Registers a finalizer on `texture` that erases `key` from `map` and destroys the view it named.
     /// Called once per entry, when the entry is created.
-    void forget_with_texture(sg::raw_texture const& texture, cc::mutex<cc::map<u64, VkImageView>>& map, u64 key);
+    void forget_with_texture(sg::raw_texture const& texture, cc::mutex<view_map>& map, vulkan_image_view_key key);
 
     vulkan_context& _ctx;
-    cc::mutex<cc::map<u64, VkImageView>> _views;
-    cc::mutex<cc::map<u64, VkImageView>> _attachment_views;
+    cc::mutex<view_map> _views;
+    cc::mutex<view_map> _attachment_views;
 };
 
 namespace sg::backend::vulkan

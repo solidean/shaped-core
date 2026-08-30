@@ -118,7 +118,7 @@ bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
 /// graphics submission would hold up an unrelated download queued after it.
 /// Where the family cannot give two, both directions share one and that stall is the cost; where there is no
 /// transfer family at all, they share the graphics queue and async transfer is asynchronous only in the CPU sense.
-/// Reporting which case applies is what keeps a surprise-free timing story: see vulkan_context::transfer_queue_note.
+/// Reporting which case applies is what keeps a surprise-free timing story: see vulkan_context::has_dedicated_transfer_queue.
 u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& out_queue_count)
 {
     uint32_t count = 0;
@@ -414,7 +414,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
     // One optional extension per windowing system this build can compile a surface call for.
     // Enabled only where the loader has it, since an instance extension that is not there fails creation outright.
-    bool platform_surface[4] = {false, false, false, false};
+    bool platform_surface[sg::window_platform_count] = {};
     auto const enable_platform_surface = [&](sg::window_platform platform, char const* name)
     {
         if (!has_surface || !instance_extension_available(name))
@@ -687,17 +687,17 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->set_host_query_reset(true);
     ctx->_query_system.initialize(*ctx);
     ctx->set_presentation_support(swapchain_supported, has_headless_surface);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < sg::window_platform_count; ++i)
         ctx->set_window_platform_supported(sg::window_platform(i), platform_surface[i]);
 
     // Both directions get their own queue where the family could give two, and share one otherwise.
     // A device with no spare queue at all falls back to the graphics queue, which keeps async transfer correct while
     // making it asynchronous only in the CPU sense.
-    ctx->set_transfer_queues(transfer_family, transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue,
+    ctx->set_transfer_queues(transfer_queues[0] != VK_NULL_HANDLE ? transfer_family : best_family,
+                             transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue,
                              transfer_queues[1] != VK_NULL_HANDLE
                                  ? transfer_queues[1]
-                                 : (transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue),
-                             transfer_queues[0] != VK_NULL_HANDLE ? transfer_family : best_family);
+                                 : (transfer_queues[0] != VK_NULL_HANDLE ? transfer_queues[0] : queue));
 
     // The staging ring is part of a usable context rather than something acquired lazily: without it cmd.upload has
     // nowhere to write, so a context that cannot allocate one is not worth handing back.

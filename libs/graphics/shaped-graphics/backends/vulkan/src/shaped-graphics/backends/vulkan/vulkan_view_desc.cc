@@ -76,10 +76,10 @@ vulkan_image_view_cache::~vulkan_image_view_cache()
 
 void vulkan_image_view_cache::shutdown()
 {
-    auto const destroy_all = [&](cc::mutex<cc::map<u64, VkImageView>>& guarded)
+    auto const destroy_all = [&](cc::mutex<view_map>& guarded)
     {
         guarded.lock(
-            [&](cc::map<u64, VkImageView>& views)
+            [&](view_map& views)
             {
                 for (auto const& [key, view] : views)
                     if (view != VK_NULL_HANDLE)
@@ -100,10 +100,12 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
     auto const& vk_texture = static_cast<vulkan_texture const&>(*texture);
 
     // The identity of an attachment view is its resource plus everything that reaches vkCreateImageView.
-    auto const key = cc::make_hash(texture.get(), dimension, format, range);
+    // An attachment is never a shader view, so the two access-class-carrying fields keep their defaults.
+    auto const key
+        = vulkan_image_view_key{.texture = texture.get(), .dimension = dimension, .format = format, .range = range};
 
     return _attachment_views.lock(
-        [&](cc::map<u64, VkImageView>& views) -> VkImageView
+        [&](view_map& views) -> VkImageView
         {
             if (auto const* existing = views.get_ptr(key); existing != nullptr)
                 return *existing;
@@ -136,10 +138,17 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
 {
     CC_ASSERT(view.texture != nullptr, "a texture view with no texture has no image view");
     auto const& texture = static_cast<vulkan_texture const&>(*view.texture);
-    auto const key = hash(view);
+    auto const key = vulkan_image_view_key{
+        .texture = view.texture.get(),
+        .access = view.access,
+        .dimension = view.view_dimension,
+        .format = view.format,
+        .range = view.range,
+        .depth_slice_range = view.depth_slice_range,
+    };
 
     return _views.lock(
-        [&](cc::map<u64, VkImageView>& views) -> VkImageView
+        [&](view_map& views) -> VkImageView
         {
             if (auto const* existing = views.get_ptr(key); existing != nullptr)
                 return *existing;
@@ -170,8 +179,8 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
 }
 
 void vulkan_image_view_cache::forget_with_texture(sg::raw_texture const& texture,
-                                                  cc::mutex<cc::map<u64, VkImageView>>& map,
-                                                  u64 key)
+                                                  cc::mutex<view_map>& map,
+                                                  vulkan_image_view_key key)
 {
     // Runs where the texture's own deferred release runs, so the view goes at the same moment the VkImage does.
     // `this` outlives every texture: the cache belongs to the context, and a texture cannot survive it.
@@ -180,7 +189,7 @@ void vulkan_image_view_cache::forget_with_texture(sg::raw_texture const& texture
         {
             VkImageView doomed = VK_NULL_HANDLE;
             map.lock(
-                [&](cc::map<u64, VkImageView>& views)
+                [&](view_map& views)
                 {
                     if (auto const* existing = views.get_ptr(key); existing != nullptr)
                     {

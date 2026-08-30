@@ -14,6 +14,14 @@ enum class sg::window_platform : sg::u8
     wayland, ///< `display` is a wl_display*, `handle` a wl_surface*
 };
 
+namespace sg
+{
+/// How many `window_platform` values there are.
+/// A backend indexing a per-platform table sizes it from this rather than from a literal, so adding an arm is a
+/// compile-time fact everywhere rather than a silent out-of-bounds write.
+inline constexpr int window_platform_count = int(window_platform::wayland) + 1;
+} // namespace sg
+
 /// An OS window, named in the terms its windowing system uses.
 ///
 /// **Why this is not just a `void*`.** It was, and an HWND fits one — but X11 needs a `Display*` **and** a `Window`
