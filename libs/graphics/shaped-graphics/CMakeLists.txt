@@ -38,6 +38,7 @@ add_library(shaped-graphics
     src/shaped-graphics/routine/render_routine.cc
     src/shaped-graphics/routine/routine_registry.cc
     src/shaped-graphics/context/context.cc
+    src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/persistent.cc
     src/shaped-graphics/context/transient.cc
     src/shaped-graphics/context/upload.cc
@@ -117,6 +118,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/binding_group_layout.hh
     src/shaped-graphics/binding/pipeline_layout.hh
     src/shaped-graphics/context/adapter_info.hh
+    src/shaped-graphics/context/gpu_metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
     src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh

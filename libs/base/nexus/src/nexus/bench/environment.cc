@@ -2,6 +2,7 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/platform/system_info.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/bench/impl/platform_load.hh>
@@ -72,16 +73,21 @@ nx::bench::system_summary const& nx::bench::describe_system()
         result.os = cc::string(os_name());
         result.arch = cc::string(arch_name());
 
-        // The one field nothing can fill yet.
-        // Named rather than omitted, so the shape a consumer parses does not change when it becomes fillable.
-        result.cpu = "unknown";
+        auto const& system = cc::get_system_info();
 
-        result.logical_cores = cc::num_hardware_threads();
+        // Empty where the platform will not say, which is honest in a way "unknown" was not: a reader can tell a
+        // missing answer from a CPU actually called that.
+        result.cpu = system.cpu_brand;
+
+        // The MACHINE's count, not cc::recommended_worker_count(): a benchmark report describes the hardware a number
+        // was measured on, and a container's quota is a property of the run rather than of the machine.
+        result.logical_cores = system.logical_cores();
+
         result.build = cc::string(build_name());
         result.assertions_enabled = CC_ASSERT_ENABLED != 0;
 
-        // Every run is provisional until there is a system-information library to ask.
-        result.is_provisional = true;
+        // No placeholders left: cc gained the system-information library this field was waiting on.
+        result.is_provisional = false;
         return result;
     }();
 

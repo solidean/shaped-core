@@ -115,12 +115,21 @@ CC_FORCE_INLINE void sink(cc::span<byte const> bytes) noexcept
 #endif
 }
 
+/// The floor for how much evict_data_caches streams, for a machine that will not report its cache sizes.
+inline constexpr isize min_evict_bytes = isize(64) * 1024 * 1024;
+
 /// How much evict_data_caches streams when it is not told.
 ///
-/// **Provisional.** A real answer is the last-level cache size, which needs system information shaped-core does not
-/// have yet; this is a constant picked to exceed the last-level cache of a typical desktop part with room to spare.
-/// Replace it, not its callers, when sysinfo lands.
-inline constexpr isize default_evict_bytes = isize(64) * 1024 * 1024;
+/// Twice the largest cache cc reports, floored at min_evict_bytes and capped at 1 GiB.
+///
+/// Twice, because streaming exactly the cache size leaves the start of the buffer resident by the time the end is
+/// reached, so the eviction only half works.
+/// The cap is for a server part whose last-level cache is measured in hundreds of megabytes, where a faithful buffer
+/// would cost more to allocate than the benchmark costs to run.
+///
+/// Resolved once, on first use: cc::system_info is memoized, but the multiply and the clamp are not worth repeating
+/// per call.
+[[nodiscard]] isize default_evict_bytes();
 
 /// Displaces cached data by streaming over a buffer, so the next access in a benchmark is a real miss.
 ///
@@ -134,7 +143,7 @@ inline constexpr isize default_evict_bytes = isize(64) * 1024 * 1024;
 /// it is meant to displace, and it works better on an inclusive last-level cache than on a victim cache.
 ///
 /// `bytes` of 0 means the whole buffer, and a negative one means no work at all rather than an error.
-/// The buffer is allocated once, at the first call, at default_evict_bytes; a larger request is clamped to it rather
-/// than growing it, which is a limitation of not knowing the cache size rather than a deliberate cap.
+/// The buffer is allocated once, at the first call, at default_evict_bytes(); a larger request is clamped to it rather
+/// than growing it.
 void evict_data_caches(isize bytes = 0);
 } // namespace nx::bench

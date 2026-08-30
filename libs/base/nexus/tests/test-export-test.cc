@@ -375,10 +375,10 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
 
     CHECK(root["suite"].as_string() == "my-suite");
 
-    // The machine, whose absence would make every number here uninterpretable — and the flag that says the fields are
-    // placeholders until sysinfo lands.
+    // The machine, whose absence would make every number here uninterpretable — and the flag that says whether any of
+    // it is still a placeholder, which it no longer is.
     CHECK(root["system"]["logical_cores"].as_double() >= 1);
-    CHECK(root["system"]["is_provisional"].as_bool());
+    CHECK(!root["system"]["is_provisional"].as_bool());
 
     auto const loops = root["loops"];
     REQUIRE(loops.size() == 1);

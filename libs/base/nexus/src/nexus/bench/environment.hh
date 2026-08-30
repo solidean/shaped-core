@@ -11,19 +11,20 @@
 
 /// What this run was measured on.
 ///
-/// **Provisional.** shaped-core has no system-information library yet, so the fields a real one would fill say
-/// `unknown` rather than being absent: the shape is what downstream tooling reads, and a schema that grows fields
-/// later would break every consumer written against it.
-/// `is_provisional` is what says so in the output, rather than leaving a reader to notice.
+/// Filled from cc's system-information library, so a field is empty only where the platform itself will not say.
+/// The shape is what downstream tooling reads, and a schema that grows fields later would break every consumer written
+/// against it, so a field it cannot fill stays present and empty rather than being dropped.
+/// `is_provisional` says in the output whether anything here is a placeholder.
 struct nx::bench::system_summary
 {
     cc::string os;
     cc::string arch;
 
-    /// The CPU model, or `unknown` until there is something to ask.
+    /// The CPU model as the hardware reports it, empty where it will not say.
     cc::string cpu;
 
-    /// Hardware threads the OS reports, which is the one hardware fact reachable today.
+    /// Hardware threads on the MACHINE, which is what a report about hardware wants.
+    /// Deliberately not the container-aware worker count: that describes the run, not what it ran on.
     isize logical_cores = 0;
 
     /// The build this binary is, and whether it is measuring its own assertions.
@@ -33,7 +34,9 @@ struct nx::bench::system_summary
     cc::string build;
     bool assertions_enabled = false;
 
-    /// True while any field above is a placeholder, which is every run until sysinfo lands.
+    /// True while any field above is a placeholder.
+    /// False since cc gained its system-information library, and kept in the schema so a consumer written against the
+    /// provisional runs still parses.
     bool is_provisional = true;
 };
 

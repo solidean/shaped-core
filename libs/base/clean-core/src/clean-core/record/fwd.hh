@@ -25,6 +25,7 @@ enum class level : u8;
 enum class category : u8;
 enum class type_code : u8;
 enum class overflow_policy : u8;
+enum class stamp_moment : u8;
 enum class aggregation : u8;
 enum class axis_scale : u8;
 enum class trace_id : u64;
@@ -66,6 +67,10 @@ enum class cc::rec::event_kind : cc::u8
     chunk_acquired, ///< the cold path ran, and how long it took
     late_event,     ///< an event surfaced below an ordered listener's emitted watermark
     dropped_span,   ///< a listener decimated a time span away, and knows it
+
+    /// What machine this recording was made on, and how loaded it was — see record/stamp.hh.
+    /// The payload is `key=value` lines, so a reader needs no schema and no codec.
+    stamp,
 
     count,
 };

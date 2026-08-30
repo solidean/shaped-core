@@ -38,6 +38,10 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     info.device_id = u32(desc.DeviceId);
     info.is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
 
+    // What the board has, which is NOT the budget this process gets — see adapter_info.
+    // Zero is a real answer for an integrated GPU, so it is reported rather than treated as absent.
+    info.dedicated_video_memory_bytes = i64(desc.DedicatedVideoMemory);
+
     LARGE_INTEGER umd = {};
     if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd)))
         info.driver_version = cc::format("{}.{}.{}.{}", u16(umd.HighPart >> 16), u16(umd.HighPart & 0xFFFF),
@@ -227,6 +231,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
+    // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
+    adapter.As(&ctx->_adapter);
+
     ctx->_factory = cc::move(factory);
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);

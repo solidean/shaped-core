@@ -60,7 +60,7 @@ struct cc::async_thread_pool final : async_scheduler
     /// Without threads nothing is started and the count is ignored.
     explicit async_thread_pool(int worker_count = default_worker_count());
 
-    /// num_hardware_threads() - 1, floored at 1 — see the constructor on why it is not the full count.
+    /// cc::recommended_worker_count() - 1, floored at 1 — see the constructor on why it is not the full count.
     /// 0 without threads: whoever drives a graph is the only worker there ever is.
     [[nodiscard]] static int default_worker_count();
 

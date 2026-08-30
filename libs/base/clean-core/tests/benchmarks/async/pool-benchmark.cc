@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/platform/resource_limits.hh>
 
 // The concurrent scheduler needs OS threads; this file compiles to nothing where they are unavailable (wasm).
 #if CC_HAS_THREADS
@@ -388,7 +389,7 @@ cc::vector<i32> make_random(isize n)
 // The top entry is P-1, NOT P: driving makes the calling thread participate as a worker, so a w-worker pool runs w+1 threads and P would oversubscribe the machine.
 cc::vector<int> sweep_workers()
 {
-    int const p = cc::num_hardware_threads() - 1;
+    int const p = cc::recommended_worker_count() - 1;
     cc::vector<int> ws;
     for (int w : {1, 2, 4, 8})
         if (w < p)
@@ -401,7 +402,7 @@ cc::vector<int> sweep_workers()
 // 1 worker anchors the scaling ratio and P-1 is the number that matters, so the intermediate points only shape the human-facing curve.
 cc::vector<int> guide_workers()
 {
-    int const p = cc::num_hardware_threads() - 1;
+    int const p = cc::recommended_worker_count() - 1;
     cc::vector<int> ws;
     ws.push_back(1);
     ws.push_back(p < 2 ? 2 : p);

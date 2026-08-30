@@ -192,6 +192,18 @@ sg::adapter_info describe_adapter(VkPhysicalDevice device)
     info.device_id = u32(props.deviceID);
     info.driver_version = cc::format("{}", props.driverVersion);
     info.is_software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+
+    // Vulkan reports heaps rather than a board size, so the card's memory is the sum of the DEVICE_LOCAL ones.
+    // On an integrated GPU every heap is host memory and the sum is 0, which is the honest answer there.
+    VkPhysicalDeviceMemoryProperties memory = {};
+    vkGetPhysicalDeviceMemoryProperties(device, &memory);
+
+    auto dedicated = i64(0);
+    for (u32 i = 0; i < memory.memoryHeapCount; ++i)
+        if ((memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0)
+            dedicated += i64(memory.memoryHeaps[i].size);
+    info.dedicated_video_memory_bytes = dedicated;
+
     return info;
 }
 
