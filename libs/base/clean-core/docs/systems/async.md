@@ -498,7 +498,7 @@ A shared, mutex-guarded injection queue takes work from foreign threads.
 It is deliberately not lock-free: only genuinely foreign submits reach it — a worker waking a node enqueues locally — so it is cold by construction.
 
 ```cpp
-cc::async_thread_pool pool(cc::num_hardware_threads());
+cc::async_thread_pool pool(cc::recommended_worker_count());
 cc::scoped_default_async_scheduler const ambient(pool);  // every async now belongs to this pool
 auto root = build_graph();
 int v = cc::async_blocking_get(root);                    // participate in the pool, block THIS thread

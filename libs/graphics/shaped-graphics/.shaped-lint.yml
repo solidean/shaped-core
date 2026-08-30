@@ -24,6 +24,11 @@ rules:
     files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_common.hh
 
   - kind: allow-include
+    value: [<pdh.h>, <pdhmsg.h>]
+    reason: the GPU Engine performance counters, which are the only route to GPU busy time on Windows — D3D12 exposes no utilization query at all
+    files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_gpu_load.cc
+
+  - kind: allow-include
     value: <d3d12sdklayers.h>
     reason: the debug layer, needed only where the device is created — it leaks past the gate above, and belongs behind it eventually
     files: backends/dx12/src/shaped-graphics/backends/dx12/dx12_context.create.cc

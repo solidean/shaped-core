@@ -116,7 +116,7 @@ TEST("bench - evict_data_caches accepts every size, including nonsense ones")
     nx::bench::evict_data_caches(-1);
 
     // Larger than the buffer clamps rather than growing it.
-    nx::bench::evict_data_caches(nx::bench::default_evict_bytes * 4);
+    nx::bench::evict_data_caches(nx::bench::default_evict_bytes() * 4);
 
     CHECK(true); // reaching here without a crash or a hang is the assertion
 }

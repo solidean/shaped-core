@@ -1,6 +1,7 @@
 #include "barriers.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/system_info.hh>
 
 using namespace cc::primitive_defines;
 
@@ -8,11 +9,12 @@ namespace
 {
 // Read-only after construction, so the sharing across threads is not a race.
 // A function-local static rather than a namespace one: the allocation happens at the first call rather than at static
-// init, and a binary that never evicts never pays the 64 MB.
+// init, so a binary that never evicts never pays default_evict_bytes() — 64 MiB at the floor, and several times that on
+// a machine with a large last-level cache.
 cc::vector<u64> const& evict_buffer()
 {
     static cc::vector<u64> const buffer
-        = cc::vector<u64>::create_defaulted(nx::bench::default_evict_bytes / isize(sizeof(u64)));
+        = cc::vector<u64>::create_defaulted(nx::bench::default_evict_bytes() / isize(sizeof(u64)));
     return buffer;
 }
 } // namespace
@@ -23,6 +25,26 @@ void nx::bench::impl::observe(void const volatile* p)
     // The whole construct is the CALL: an optimizer that cannot see this body cannot prove the pointed-at object is
     // unread, so everything feeding it stays live.
     (void)p;
+}
+
+isize nx::bench::default_evict_bytes()
+{
+    static auto const bytes = []
+    {
+        constexpr auto k_cap = isize(1024) * 1024 * 1024;
+
+        // The largest level any core class reports, which on a heterogeneous CPU is the P-cluster's.
+        auto largest = isize(0);
+        for (auto level = 1; level <= 4; ++level)
+            if (auto const size = cc::get_system_info().largest_cache_bytes(level); size.has_value())
+                largest = cc::max(largest, isize(size.value()));
+
+        if (largest <= 0)
+            return nx::bench::min_evict_bytes;
+
+        return cc::clamp(largest * 2, nx::bench::min_evict_bytes, k_cap);
+    }();
+    return bytes;
 }
 
 void nx::bench::evict_data_caches(isize bytes)

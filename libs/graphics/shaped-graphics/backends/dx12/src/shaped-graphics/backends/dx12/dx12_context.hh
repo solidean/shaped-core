@@ -444,12 +444,20 @@ public:
 
     void shutdown() override;
 
+    [[nodiscard]] cc::result<sg::gpu_memory_usage> query_gpu_memory() const override;
+    [[nodiscard]] cc::result<sg::gpu_counters> read_gpu_counters() const override;
+
     // create_dx12_context fills this in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
 
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
+
+    // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
+    // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard
+    // makes every frame.
+    ComPtr<IDXGIAdapter3> _adapter;
 
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.

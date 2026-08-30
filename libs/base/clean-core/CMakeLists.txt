@@ -36,6 +36,15 @@ add_library(clean-core
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
+    src/clean-core/platform/impl/text_file.cc
+    src/clean-core/platform/system_info.cc
+    src/clean-core/platform/system_identifier.cc
+    src/clean-core/platform/resource_limits.cc
+    src/clean-core/platform/system_metrics.cc
+    src/clean-core/platform/process_metrics.cc
+    src/clean-core/platform/storage_devices.cc
+    src/clean-core/platform/network_devices.cc
+    src/clean-core/platform/resource_snapshot.cc
     src/clean-core/memory/allocation.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
@@ -50,6 +59,8 @@ add_library(clean-core
     src/clean-core/record/value.cc
     src/clean-core/record/log.cc
     src/clean-core/record/console_listener.cc
+    src/clean-core/record/quantity_format.cc
+    src/clean-core/record/stamp.cc
     src/clean-core/record/impl/serialized_format.cc
     src/clean-core/record/serialize.cc
     src/clean-core/record/crash_dump.cc
@@ -131,6 +142,15 @@ target_sources(clean-core
     src/clean-core/platform/stack_capture.hh
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
+    src/clean-core/platform/impl/text_file.hh
+    src/clean-core/platform/system_info.hh
+    src/clean-core/platform/system_identifier.hh
+    src/clean-core/platform/resource_limits.hh
+    src/clean-core/platform/system_metrics.hh
+    src/clean-core/platform/process_metrics.hh
+    src/clean-core/platform/storage_devices.hh
+    src/clean-core/platform/network_devices.hh
+    src/clean-core/platform/resource_snapshot.hh
     src/clean-core/platform/win32_sanitized.hh
     src/clean-core/platform/intrinsics.hh
 
@@ -217,6 +237,8 @@ target_sources(clean-core
     src/clean-core/record/pinned_value.hh
     src/clean-core/record/value.hh
     src/clean-core/record/stat.hh
+    src/clean-core/record/quantity_format.hh
+    src/clean-core/record/stamp.hh
     src/clean-core/record/log.hh
     src/clean-core/record/scope.hh
     src/clean-core/record/console_listener.hh
@@ -293,6 +315,12 @@ target_link_libraries(clean-core PUBLIC Threads::Threads)
 # Windows link set. Private: nothing in our headers names it.
 if(WIN32)
     target_link_libraries(clean-core PRIVATE winmm)
+endif()
+
+# RegGetValueA (the OS build number cc::system_info reports) lives in advapi32, which is likewise not default.
+# GetAdaptersAddresses (the hardware addresses cc::system_identifier reports) lives in iphlpapi.
+if(WIN32)
+    target_link_libraries(clean-core PRIVATE advapi32 iphlpapi psapi)
 endif()
 
 # Enable conforming preprocessor for MSVC
@@ -458,6 +486,14 @@ if(SC_BUILD_TESTS)
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
         tests/platform/symbolize-test.cc
+        tests/platform/system_info-test.cc
+        tests/platform/system_identifier-test.cc
+        tests/platform/resource_limits-test.cc
+        tests/platform/system_metrics-test.cc
+        tests/platform/process_metrics-test.cc
+        tests/platform/storage_devices-test.cc
+        tests/platform/network_devices-test.cc
+        tests/platform/resource_snapshot-test.cc
 
         tests/algorithm/sort-test.cc
         tests/algorithm/select-test.cc
@@ -528,6 +564,8 @@ if(SC_BUILD_TESTS)
         tests/record/record-console-test.cc
         tests/record/record-adoption-test.cc
         tests/record/record-frontends-test.cc
+        tests/record/record-quantity-format-test.cc
+        tests/record/record-stamp-test.cc
         tests/record/record-query-test.cc
         tests/record/record-serialize-test.cc
         tests/record/record-trace-test.cc

@@ -6,6 +6,8 @@ sc_add_single_file_examples(clean-core
     string.cc
     result.cc
     map.cc
+    system-info.cc
+    system-monitor.cc
     LINK clean-core
     PCH CC_STD NEXUS
 )

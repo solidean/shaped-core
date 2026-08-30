@@ -7,6 +7,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/platform/resource_limits.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -1731,10 +1732,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             continue;
         }
 
-        // own_pool names its own width; everything else is capped by the run's --jobs, where 0 means the machine's hardware concurrency.
+        // own_pool names its own width; everything else is capped by the run's --jobs, where 0 means cc::recommended_worker_count() —
+        // the machine narrowed by the affinity mask and the cgroup quota, which inside a container is far below its core count.
         // Resolved here rather than at argument parsing, so a hand-built config means the same thing as a command line.
         auto const jobs = phase.mode == nx::config::scheduler_mode::own_pool ? phase.threads
-                        : config.jobs <= 0                                   ? cc::num_hardware_threads()
+                        : config.jobs <= 0                                   ? cc::recommended_worker_count()
                                                                              : config.jobs;
 
         // One node per test — the graph IS the phase, and which thread picks up which test is the scheduler's business.

@@ -540,6 +540,8 @@ public:
     // Body in vulkan_context.cc.
     bool note_device_lost_if_lost(VkResult r, char const* what);
 
+    [[nodiscard]] cc::result<sg::gpu_memory_usage> query_gpu_memory() const override;
+
     /// The staging ring behind cmd.upload; owned here because its space is reclaimed on the epoch cycle.
     vulkan_upload_inline_system _upload_inline;
 

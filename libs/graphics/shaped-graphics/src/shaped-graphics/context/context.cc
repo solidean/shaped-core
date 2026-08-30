@@ -1,5 +1,8 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/stamp.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
@@ -110,6 +113,55 @@ cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
     if (!ticks.has_value())
         return {};
     return double(ticks.value()) * timestamp._tick_to_seconds;
+}
+
+namespace
+{
+/// The GPU section of a recording's stamp.
+///
+/// **The FIRST context's adapter**, held in a string that is written once and never rewritten.
+/// A stamp provider hands back a span, so the bytes have to outlive the call, and a program creating several contexts
+/// would otherwise be rewriting a buffer a recorder is reading.
+/// One adapter is the overwhelmingly common case, and describing the first one is better than describing none.
+cc::string g_gpu_section;
+cc::atomic<bool> g_gpu_section_written = {false};
+
+cc::span<byte const> gpu_stamp_provider(cc::rec::stamp_moment)
+{
+    // Identical at open and at close: an adapter cannot change under a running context.
+    return cc::span<byte const>(reinterpret_cast<byte const*>(g_gpu_section.data()), g_gpu_section.size());
+}
+} // namespace
+
+void context::set_adapter_info(adapter_info info)
+{
+    _adapter = cc::move(info);
+
+    auto expected = false;
+    if (!g_gpu_section_written.compare_exchange_strong(expected, true, cc::memory_order_acq_rel))
+        return;
+
+    g_gpu_section.appendf("gpu.name={}\n", _adapter.name);
+    g_gpu_section.appendf("gpu.vendor_id={}\n", _adapter.vendor_id);
+    g_gpu_section.appendf("gpu.device_id={}\n", _adapter.device_id);
+    g_gpu_section.appendf("gpu.driver_version={}\n", _adapter.driver_version);
+    g_gpu_section.appendf("gpu.is_software={}\n", _adapter.is_software ? 1 : 0);
+    if (_adapter.dedicated_video_memory_bytes.has_value())
+        g_gpu_section.appendf("gpu.dedicated_video_memory_bytes={}\n", _adapter.dedicated_video_memory_bytes.value());
+
+    // cc knows nothing about GPUs; this is the whole of how a recording learns which one is in the machine.
+    (void)cc::rec::register_stamp_contributor("sg.gpu", gpu_stamp_provider);
+}
+
+cc::result<gpu_memory_usage> context::query_gpu_memory() const
+{
+    return cc::error("this backend does not report GPU memory");
+}
+
+cc::result<gpu_counters> context::read_gpu_counters() const
+{
+    // Not an empty counter set, which a sampler would difference into a confident 0% on a pinned GPU.
+    return cc::error("this backend does not report GPU busy counters");
 }
 
 context::~context()

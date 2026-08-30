@@ -11,6 +11,19 @@ The block grammar is the contract between the agent and the page, and it has to 
 What a *good entry about an API change* looks like is taste, it differs per repository, and it changes as we review more —
 so it belongs here, next to [reviewing-prs.md](../../../../docs/guides/reviewing-prs.md), rather than in `grammar.py`.
 
+## Which types your review has
+
+**Most of the types below assume a changeset**, so a `design` review — the one goal with no ledger, no coverage gate
+and no hunks — uses almost none of them.
+
+| goal | the types it uses |
+|---|---|
+| `pr-comment`, `land-changes` | orientation, glossary, api-surface, example-showcase, example-evidence, verdict, draft-artifact |
+| `design` | [design-topic](design-topic.md), and glossary where the design coins names |
+
+A design review's `framing` entry stands in for both orientation and verdict, and its groups differ too — `framing`,
+`topics`, `open-questions` rather than `meta`, `design`, `correctness` and the rest.
+
 ## How to use this folder
 
 **Read this index every review.**
@@ -46,6 +59,11 @@ Take its structure and its examples, and drop anything the change does not have.
   The one type with a block of its own, because "quote the output" is a claim nobody downstream can check.
   *Applies: when the change adds examples, or reworks existing ones enough that a reader would want to see them run.*
 
+- [design-topic](design-topic.md) — **one decision that will be hard to undo, before the code exists.**
+  One decision per entry, options spelled as the code that would be written, and a sentence on what it costs to get
+  wrong.
+  *Applies: a `design` review, which is every review with no changeset.*
+
 - [verdict](verdict.md) — **the big picture, at the end.**
   Is the shape right, does it fit the repository's philosophy, would we want this in a year.
   The judgement that detail-oriented entries lose.
@@ -59,6 +77,8 @@ Take its structure and its examples, and drop anything the change does not have.
 ## Where they sit
 
 The numbering is the reading order, and the fixed positions anchor it:
+
+A design review numbers the same way, with `010-framing.md` in place of orientation and no generated entries.
 
 ```
 010-orientation.md     the reviewer's own framing        (authored)

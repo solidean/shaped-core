@@ -12,6 +12,7 @@
 #include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/download.hh>
+#include <shaped-graphics/context/gpu_metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/context/transient.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -49,6 +50,29 @@ public:
     /// Which GPU this context is running on, fixed at creation.
     /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
     [[nodiscard]] adapter_info const& adapter() const { return _adapter; }
+
+    // GPU metrics.
+    //
+    // Non-pure with a refusing default, so a backend that cannot answer needs no code at all and a caller gets a clean
+    // error rather than a fabricated zero.
+
+    /// What this process may use of the GPU's memory right now, and what it is using.
+    ///
+    /// Portable in principle and available on both shipping backends: DXGI reports it directly, and Vulkan does where
+    /// VK_EXT_memory_budget is present.
+    /// The card's own size is `adapter().dedicated_video_memory_bytes`, and the two are different scales — see there.
+    [[nodiscard]] virtual cc::result<gpu_memory_usage> query_gpu_memory() const;
+
+    /// Monotone busy time per GPU engine class, for sg::gpu_load_sampler to difference.
+    ///
+    /// **Neither D3D12 nor Vulkan exposes utilization**, so this comes from the OS instead: the GPU Engine performance
+    /// counters on Windows, `raw:/sys/class/drm/*/device/gpu_busy_percent` on Linux where the driver provides one,
+    /// IOKit on macOS.
+    /// Only the Windows path exists today; everywhere else this refuses rather than guessing.
+    ///
+    /// A caller almost always wants sg::gpu_load_sampler rather than this — the counters are published because a rate
+    /// has thrown the seconds away and somebody always wants them back.
+    [[nodiscard]] virtual cc::result<gpu_counters> read_gpu_counters() const;
 
     /// Whether the GPU device has been lost — driver reset, TDR, removed adapter.
     /// Sticky once set: the context is unusable and must be torn down and recreated.
@@ -188,7 +212,11 @@ protected:
 
     /// Records which adapter the backend picked.
     /// Called once during creation, before the context is handed out; the adapter cannot change afterwards.
-    void set_adapter_info(adapter_info info) { _adapter = cc::move(info); }
+    /// Records which GPU this context runs on, and stamps it into recordings.
+    ///
+    /// The stamp registration happens here rather than at backend start-up because this is the one point every backend
+    /// already goes through, and the first adapter to arrive is the one a recording describes.
+    void set_adapter_info(adapter_info info);
 
     /// Drives cooperative work until `future` is ready or nothing anywhere reports more.
     /// Collapses to a single false test where every semantic thread has an OS thread of its own; without them it is what makes a blocking wait terminate.

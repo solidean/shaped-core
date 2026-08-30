@@ -212,3 +212,40 @@ void vulkan_context::shutdown()
     _is_shut_down = true;
 }
 } // namespace sg::backend::vulkan
+
+cc::result<sg::gpu_memory_usage> sg::backend::vulkan::vulkan_context::query_gpu_memory() const
+{
+    if (_physical_device == VK_NULL_HANDLE)
+        return cc::error("no physical device");
+
+    // VK_EXT_memory_budget is what turns the heap sizes into a live budget.
+    // Without it vulkan reports only how big the heaps ARE, which says nothing about what is left.
+    // So this refuses rather than reporting a static number as a reading.
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = {};
+    budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+
+    VkPhysicalDeviceMemoryProperties2 properties = {};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+    properties.pNext = &budget;
+
+    vkGetPhysicalDeviceMemoryProperties2(_physical_device, &properties);
+
+    auto out = sg::gpu_memory_usage();
+    auto any = false;
+    for (u32 i = 0; i < properties.memoryProperties.memoryHeapCount; ++i)
+    {
+        if ((properties.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0)
+            continue;
+
+        // A driver without the extension leaves these zero, which is how the refusal below is detected: a real device
+        // with a real budget never reports zero for every device-local heap.
+        out.budget_bytes += i64(budget.heapBudget[i]);
+        out.current_usage_bytes += i64(budget.heapUsage[i]);
+        any = true;
+    }
+
+    if (!any || out.budget_bytes == 0)
+        return cc::error("VK_EXT_memory_budget is unavailable, so this device reports no memory budget");
+
+    return out;
+}

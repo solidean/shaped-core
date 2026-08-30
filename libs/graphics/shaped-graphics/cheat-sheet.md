@@ -87,6 +87,14 @@ ctx.accepts_shader_format(f)                       // bool — hand this to slib
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
+ctx.adapter().dedicated_video_memory_bytes         // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
+ctx.query_gpu_memory()                             // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
+                                                   //   the budget is what THIS PROCESS may use now and shrinks as others take memory
+                                                   //   NOT the same scale as the board size — dividing one by the other is the classic wrong dashboard
+ctx.read_gpu_counters()                            // result<gpu_counters> — monotone busy_secs per engine class
+sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total is the BUSIEST engine, not the sum
+                                                   //   Windows reads the GPU Engine perf counters; elsewhere it refuses
+                                                   //   see docs/concepts/gpu-metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section

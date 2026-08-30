@@ -27,7 +27,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Append blocks to an entry, stamped with the current round")
     a.review_name(p)
     p.add_argument("entry", help="the entry to append to: its slug, or just its number (`045`)")
-    p.add_argument("--file", default="", metavar="PATH", help="read the blocks from a file (default: stdin)")
+    p.add_argument("--file", default="", metavar="PATH", help="read the blocks from a file, or `-` for stdin (default: stdin)")
     p.add_argument("--dry-run", action="store_true", help="parse and report, write nothing")
     return p
 
@@ -48,11 +48,26 @@ def resolve_entry(ctx: Context, paths: review.ReviewPaths, wanted: str) -> Path:
     raise SystemExit(1)
 
 
+def read_addition(file: str) -> str:
+    """The blocks to append, from a file or from stdin.
+
+    Stdin is decoded as UTF-8 explicitly rather than through the locale.
+    Python decodes stdin with the process's code page, which is cp1252 on a default Windows install, so an em dash
+    arrives as three characters and is then written back out as three real ones — the entry ends up holding `â€”` and
+    nothing reports it.
+
+    `-` means stdin, because every other tool spells it that way and reading it as a path fails with a traceback.
+    """
+    if not file or file == "-":
+        return sys.stdin.buffer.read().decode("utf-8")
+    return Path(file).read_text(encoding="utf-8")
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
     target = resolve_entry(ctx, paths, args.entry)
 
-    addition = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
+    addition = read_addition(args.file)
     if not addition.strip():
         ctx.die("nothing to append (empty input)")
 

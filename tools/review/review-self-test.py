@@ -1492,6 +1492,65 @@ def test_since_reports_only_finalized_answers(root: Path) -> None:
         assert not answers.since(1), "the watermark excludes the round it names"
 
 
+def test_mojibake_is_reported(root: Path) -> None:
+    """A line that lost an em dash to a cp1252 round trip is named rather than left to be noticed by eye."""
+    from tools.review.cmd.validate import mojibake_warnings
+
+    header = "---\nid: 010\ntitle: t\n---\n\n## prose\n\n"
+
+    good = parse_text(header + "A real em dash — like this.\n", Path("entry.md"), slug="010-a")
+    assert mojibake_warnings(good) == [], "a real em dash must not be reported"
+
+    # The three characters an em dash becomes when UTF-8 is decoded as cp1252 and written back out.
+    mangled = "â€”"
+    bad = parse_text(header + f"A mangled em dash {mangled} here.\n", Path("entry.md"), slug="010-a")
+    warnings = mojibake_warnings(bad)
+    assert len(warnings) == 1, f"expected one warning, got {warnings}"
+    assert "cp1252" in warnings[0], warnings[0]
+
+
+def test_append_decodes_stdin_as_utf8(root: Path) -> None:
+    """`append` reads stdin as UTF-8 rather than through the locale, and `-` means stdin.
+
+    The locale is cp1252 on a default Windows install, which is how an em dash written into an entry came back out as
+    three characters.
+    """
+    import io
+    import sys as sys_module
+
+    from tools.review.cmd.append import read_addition
+
+    text = "## prose\n\nAn em dash — survives.\n"
+
+    for spelling in ("", "-"):
+        saved = sys_module.stdin
+        # A stdin whose own encoding is cp1252, which is exactly the case that used to corrupt the text.
+        sys_module.stdin = io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="cp1252")
+        try:
+            assert read_addition(spelling) == text, f"{spelling!r} did not round-trip UTF-8"
+        finally:
+            sys_module.stdin = saved
+
+    path = root / "addition.md"
+    path.write_text(text, encoding="utf-8")
+    assert read_addition(str(path)) == text
+
+
+def test_design_review_refuses_a_range(root: Path) -> None:
+    """A design review has no changeset, so a range would be silently ignored rather than honoured."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": "one\n"})
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "review.py"), "init", "d", "--goal", "design", "--range", "HEAD~1..HEAD"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode != 0, "a design review must refuse --range rather than ignore it"
+    assert "--range" in (result.stderr + result.stdout), result.stderr + result.stdout
+
+
 # ---- harness ----------------------------------------------------------------
 
 

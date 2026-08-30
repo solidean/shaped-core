@@ -64,6 +64,18 @@ struct cc::rec::unit
     /// Whether a rising value is good news, for coloring.
     /// Meaningless when the quantity has no direction.
     bool higher_is_better = false;
+
+    /// Overrides how cc::rec::format_quantity renders a value of this unit.
+    ///
+    /// Null means the generic rule, which covers every unit whose reading is "scale by a prefix and append the symbol".
+    /// Set one for the units that rule gets wrong: a duration a human reads as `1h 23m`, a ratio shown as a percentage,
+    /// a temperature that takes no prefix at all.
+    ///
+    /// **A function pointer does not survive serialization.**
+    /// A unit is round-tripped by value through a `.ccrec`, and there is no field for this in the file, so a loaded
+    /// recording formats generically however the recording process rendered it.
+    /// That is a property to design around rather than discover: a viewer reading a file gets the generic form.
+    void (*format)(cc::string& out, f64 value, rec::unit const& u) = nullptr;
 };
 
 /// What a relation between trace ids MEANS, as a static object the event points at.

@@ -1,4 +1,5 @@
 #include <clean-core/common/profiling.hh>
+#include <clean-core/platform/resource_limits.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 
 #if CC_HAS_THREADS
@@ -60,7 +61,7 @@
 
 int cc::async_thread_pool::default_worker_count()
 {
-    int const n = cc::num_hardware_threads() - 1; // the blocking_get caller runs work too; leave it a core
+    int const n = cc::recommended_worker_count() - 1; // the blocking_get caller runs work too; leave it a core
     return n < 1 ? 1 : n;
 }
 
@@ -588,7 +589,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 
 cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(false)
 {
-    // The count is accepted and ignored rather than asserted on: callers pass hardware_concurrency-shaped numbers unconditionally,
+    // The count is accepted and ignored rather than asserted on: callers pass worker-count-shaped numbers unconditionally,
     // and refusing them here would be exactly the platform branch this fallback exists to remove.
     // There is no `>= 1` assert either — 0 workers is what this build always has.
     (void)worker_count;

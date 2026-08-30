@@ -6,6 +6,7 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
+#include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -165,6 +166,7 @@ cc::rec::console_options cc::rec::console_options::from_environment(rec::console
     apply_flag("CC_LOG_THREAD", options.show_thread);
     apply_flag("CC_LOG_DOMAIN", options.show_domain);
     apply_flag("CC_LOG_SITE", options.show_site);
+    apply_flag("CC_LOG_STATS", options.show_stats);
 
     return options;
 }
@@ -174,7 +176,12 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
     for (auto it = view.begin(); it != view.end(); ++it)
     {
         auto const e = *it;
-        if (e.kind() != rec::event_kind::log || e.level() < _options.min_level)
+
+        auto const is_stat = e.kind() == rec::event_kind::stat_snapshot || e.kind() == rec::event_kind::stat_accumulate;
+        auto const is_log = e.kind() == rec::event_kind::log;
+        if (!is_log && !(is_stat && _options.show_stats))
+            continue;
+        if (e.level() < _options.min_level)
             continue;
 
         auto const wall_secs = view.wall_secs_of(e.cycles);
@@ -196,8 +203,27 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
         if (_options.show_domain)
             line.appendf("{}: ", cc::console::colorize(cc::console::color::dim, e.domain()->name(), _colored));
 
-        // A message with no format arguments lives in the descriptor, so the event carries no payload at all.
-        line += e.payload.empty() ? e.name() : e.payload_as_text();
+        if (is_stat)
+        {
+            // A stat's payload is one f64 and its meaning is in the unit, which is the whole reason a listener can
+            // render a quantity it has never heard of.
+            line += e.name();
+            line += ": ";
+            if (e.payload.size() >= isize(sizeof(f64)))
+            {
+                auto value = f64(0);
+                cc::memcpy(&value, e.payload.data(), sizeof(value));
+                if (e.quantity() != nullptr)
+                    rec::format_quantity_to(line, value, *e.quantity());
+                else
+                    line.appendf("{}", value);
+            }
+        }
+        else
+        {
+            // A message with no format arguments lives in the descriptor, so the event carries no payload at all.
+            line += e.payload.empty() ? e.name() : e.payload_as_text();
+        }
 
         if (e.is_truncated())
             line += cc::console::colorize(cc::console::color::dim, " ...(truncated)", _colored);
