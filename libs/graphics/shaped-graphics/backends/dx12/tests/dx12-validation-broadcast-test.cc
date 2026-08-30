@@ -40,7 +40,7 @@ void provoke_validation_message(dx12::dx12_context& ctx)
         .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
     };
 
-    ComPtr<ID3D12Resource> unused;
+    dx12::ComPtr<ID3D12Resource> unused;
     (void)ctx._device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
                                                D3D12_RESOURCE_STATE_COPY_DEST, // must be GENERIC_READ on UPLOAD
                                                nullptr, IID_PPV_ARGS(&unused));

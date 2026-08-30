@@ -2,6 +2,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::memcpy
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
@@ -193,9 +194,15 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
         .layout = pipeline->layout->_layout,
     };
 
-    if (VkResult const r = ctx._raytracing_functions.create_raytracing_pipelines(
-            ctx._device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline->_pipeline);
-        r != VK_SUCCESS)
+    // Shared, so builds still run in parallel with each other; what it excludes is device creation and teardown.
+    // See vulkan_driver_lock.hh for the driver deadlock this exists for.
+    VkResult r = VK_SUCCESS;
+    {
+        scoped_raytracing_build const driver_guard;
+        r = ctx._raytracing_functions.create_raytracing_pipelines(ctx._device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &info,
+                                                                  nullptr, &pipeline->_pipeline);
+    }
+    if (r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateRayTracingPipelinesKHR failed");
 
     // Read every group's handle once, so building a shader table is a memcpy.

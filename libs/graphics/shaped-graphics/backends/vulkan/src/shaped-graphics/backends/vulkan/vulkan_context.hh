@@ -115,7 +115,11 @@ public:
         vkGetPhysicalDeviceMemoryProperties(_physical_device, &_memory_properties);
     }
 
-    ~vulkan_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
+    // Runs shutdown() before the base dtor asserts it, and swallows what shutdown() throws.
+    // A lost device makes the drain inside shutdown() throw sg::device_lost_exception, and a destructor reached while
+    // that same exception is unwinding would then call std::terminate — turning a recoverable device loss into an
+    // abort with no diagnostic, at the exact moment the caller's handler was about to run.
+    ~vulkan_context() override { shutdown_no_throw(); }
 
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;
@@ -538,6 +542,10 @@ public:
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
 
     void shutdown() override;
+
+    /// shutdown(), with every exception caught and logged.
+    /// The destructor's route in: the teardown still has to run, and nothing above a destructor can act on a failure.
+    void shutdown_no_throw() noexcept;
 
     // Index of a device memory type satisfying `type_bits` (from a requirements mask) and all of `properties`.
     // Returns UINT32_MAX if none matches.

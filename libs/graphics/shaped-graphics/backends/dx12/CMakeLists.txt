@@ -51,6 +51,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/fwd.hh
     src/shaped-graphics/backends/dx12/dx12_common.hh
     src/shaped-graphics/backends/dx12/dx12_context.hh
+    src/shaped-graphics/backends/dx12/dx12_expected_messages.hh
     src/shaped-graphics/backends/dx12/dx12_epoch.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
     src/shaped-graphics/backends/dx12/dx12_barrier.hh

@@ -48,6 +48,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
   - **reflection-driven validation** of a view's `T` and access class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
+- **An optional clear value on `texture_description`.**
+  D3D12 takes a `D3D12_CLEAR_VALUE` at resource creation and uses it to pick a fast-clear path.
+  On most hardware that means clear-colour compression metadata, valid only for the one value the resource was created with.
+  Creating without it is legal and costs a slower clear, which is the `did not pass any clear value to resource creation` advisory both test listeners allowlist (`dx12_expected_messages.hh`).
+  We pass `nullptr` everywhere today, and that is the right default rather than an oversight.
+  sg lets any render pass clear to any colour (`rt.cleared(colour)`), so a stored value that disagrees with the actual clear is a *worse* outcome than none:
+  D3D12 then raises `CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE` and takes the slow path anyway.
+  So the shape is an **optional** field a caller opts into when the clear really is fixed.
+  That is the common case for a depth target cleared to 1.0 every frame, and for a render target with a constant background.
+  Vulkan has no creation-time equivalent, so it would be a hint one backend honours and the other ignores.
+  Acceptable for a pure performance hint, and worth stating in [concepts/views.md](concepts/views.md) if it lands.
+  Worth doing only with a measurement behind it: a fast clear is a bandwidth win on a full-screen target and noise on a small one.
 - **Vertex attributes: go location-based, drop the HLSL semantic from the public API.**
   `vertex_attribute` identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that does not survive a change of shader language.
   Every other target matches vertex inputs by a **numeric location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`.
@@ -95,5 +107,68 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   needs the contention.
   The single-threaded pool had the same shape and was fixed by dropping finished nodes in `participate_until_ready`;
   whether the threaded one retains a finished node anywhere is the thing to establish.
+
+- **A texture readback can come back all zeroes when two lists record concurrently on one context.**
+  Seen only on vulkan, on Windows, while the tier-2 suite briefly shared one context.
+  About one run in eleven, `vulkan-raster-test.cc`'s "a rendering scope clears, draws and stores" read its target back as 4096 zero bytes.
+  Not another test's pixels and not a wrong colour — nothing from either render scope survived, and the clear alone would have left alpha at 255.
+  No validation message accompanied it.
+  Run alone the test passes 30/30, so it needs the concurrency.
+  **The ring-ordering hypothesis is excluded.**
+  `cmd.download`'s staging is reserved while a list records and its jobs are enqueued when a list submits.
+  `vulkan_download_inline.hh` claims those orders are the same, and they are not once two lists are open.
+  But each job carries its own `deferred_cpu_copy` closure over its own reservation, so drain order decides when a copy runs and never which window it reads.
+  [tests/transfer/overlapping-readback-test.cc](../tests/transfer/overlapping-readback-test.cc) reserves in one order and submits in the other deliberately, and passes 20/20 on every backend.
+  It stays as the gate for that.
+  The tier-2 suite is back to a context per test, so nothing we ship reaches this today — which also means it cannot be reproduced on demand any more.
+
+- **vulkan: a texture reverted to its canonical layout is handed back as `undefined`, which is both a discard and a spec violation.**
+  Vulkan only.
+  dx12 has the same *shape* and not the bug — see below.
+  [tests/barrier/concurrent-layout-test.cc](../tests/barrier/concurrent-layout-test.cc) is the gate and **fails on vulkan today**; it passes on both dx12 adapters.
+
+  **The defect.**
+  `vulkan_texture_access` seeds `_canonical` as `texture_layout::undefined`, which is truthful — `vkCreateImage` really does leave the image there.
+  When a list writes a texture and submits while another list is still open over the *same* texture, `revert_to_canonical` transitions it back to that canonical.
+  So `newLayout = VK_IMAGE_LAYOUT_UNDEFINED`, which the validation layer rejects outright — `VUID-VkImageMemoryBarrier2-newLayout-01198` says newLayout must never be UNDEFINED.
+  Semantically it also hands the texture back discardable, losing what the list just wrote.
+
+  **Why dx12 is fine.**
+  `resource_access_state` defaults `curr_layout` / `prev_layout` to `general`, and dx12 takes that default as-is.
+  A D3D12 resource is created in COMMON, which *is* `general`, so its tracker's initial state is true of the resource.
+  dx12 also expresses discard as `D3D12_TEXTURE_BARRIER_FLAG_DISCARD` on the barrier rather than as a layout.
+  The divergence is deliberate and documented in `vulkan_texture_access`'s constructor.
+
+  **The agreed design.**
+  Stop resting textures in `undefined`, and make the `UNDEFINED -> resting` transition belong to no list:
+  - `texture_description` gains `cc::optional<sg::texture_layout> initial_layout` — nullopt derives from `usage`, and `assert_valid()` rejects `undefined` and `present`.
+    `sg::texture_layout` is the right vocabulary, since a second enum would be a parallel spelling of one concept.
+    dx12 ignores the field for now: it is already optimal.
+  - `vulkan_texture_access` seeds canonical to the resolved resting layout and carries a `needs_initial_transition` flag.
+  - Each command list gathers, at record time, the textures it is the first to touch.
+    That set is *tentative*, since a concurrently recording list may claim one first: it is a superset of the real set and never a subset.
+  - At **submit**, that set is filtered against the flag and the survivors' `UNDEFINED -> resting` barriers are recorded into a small second command buffer, prepended to the same `vkQueueSubmit`.
+    Claiming at submit rather than at record is what puts the transition on the list that *runs* first.
+    A list that recorded second can submit first, and its eager barriers would then name an `oldLayout` the image is not in.
+  - The claim is taken inside the submission lock, which is what serializes submission order.
+
+  **What an attempt at it found, and what is still open.**
+  The design works: with it in, the gate test goes green on vulkan and stays green on dx12.
+  Two things bit, and the second is the one to settle first.
+  - `vulkan_command_pool` is `{pool, buffer}` and is handed back by value on both the submit and drop paths, so a recycled pool loses the second command buffer.
+    Carry the third handle through.
+  - **The async transfer path is a second submit route, on a different queue, and it bypasses all of the above.**
+    [vulkan_upload_async.cc](../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_upload_async.cc) and its download twin bypass it.
+    They read `canonical_layout_of(range)` and use it directly as an `oldLayout`.
+    They then write `general` back with `set_canonical_layout`.
+    That is safe *today only because canonical starts `undefined`*, so the first such `oldLayout` is legal whatever the image is really in.
+    Making canonical a real layout turns that read into a specific claim, read on the transfer queue at a moment decoupled from when its barrier executes.
+    Having the async paths take the claim too is necessary and not sufficient.
+    The concurrent `sg stream` and upload/download fuzz tests then fail with `expects VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL -- instead, current layout is VK_IMAGE_LAYOUT_GENERAL`.
+
+  So the question to answer before writing the fix is **what a texture's canonical layout means while the transfer queue owns it**.
+  Today that has the answer "it does not matter, because the first transition always discards".
+
+  **Worth keeping whatever shape the fix takes:** a tier-2 test pinning that the initial transition is claimed exactly once, and the tier-1 gate above.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

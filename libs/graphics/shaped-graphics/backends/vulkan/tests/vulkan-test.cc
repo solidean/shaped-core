@@ -330,9 +330,9 @@ TEST("sg vulkan - a texture round-trips through the staging rings")
 
     // 8x8 rgba8: 256 tightly-packed bytes, and small enough to compare byte for byte.
     auto texture = base.persistent.create_texture_2d({
+        .format = sg::pixel_format::rgba8_unorm,
         .width = 8,
         .height = 8,
-        .format = sg::pixel_format::rgba8_unorm,
         .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
     });
     REQUIRE(texture.raw() != nullptr);
@@ -372,9 +372,9 @@ TEST("sg vulkan - a block-compressed texture stages at its block size")
     auto& base = static_cast<sg::context&>(*handle);
 
     auto texture = base.persistent.create_texture_2d({
+        .format = sg::pixel_format::bc1_rgba_unorm,
         .width = 8,
         .height = 8,
-        .format = sg::pixel_format::bc1_rgba_unorm,
         .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst,
     });
     REQUIRE(texture.raw() != nullptr);

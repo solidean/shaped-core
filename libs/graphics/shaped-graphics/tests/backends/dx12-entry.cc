@@ -2,7 +2,8 @@
 
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#include <shaped-graphics/backends/dx12/dx12_context.hh>           // sg::create_dx12_context
+#include <shaped-graphics/backends/dx12/dx12_expected_messages.hh> // the allowlist both suites share
 
 // dx12 entry-point drivers inside the sg API test binary (shaped-graphics-test).
 // Each creates a dx12 context and invokes every sg::context_handle API test against it.
@@ -16,17 +17,24 @@ namespace
 {
 namespace dx12 = sg::backend::dx12;
 
-// Fails whichever test provoked it on any debug-layer warning or worse.
+// Fails whichever test provoked it on any debug-layer warning or worse, bar the advisories sg provokes on purpose.
 // Without this a validation error is a line on stderr nobody reads, and the run stays green.
 // The check lands on the right test wherever the runtime raised the message, since attribution rides the ambient context.
 // A test that means to provoke one opts out by not installing this.
+//
+// The allowlist is dx12_expected_messages.hh rather than a copy here, because the tier-2 suite installs a listener of
+// its own and the two disagreeing is a test that fails on a message the other binary already understood.
 void fail_on_validation_messages(sg::context_handle const& ctx)
 {
     static_cast<dx12::dx12_context&>(*ctx).set_message_callback(
         [](dx12::dx12_message_severity severity, cc::string_view message)
         {
-            if (severity <= dx12::dx12_message_severity::warning)
-                CHECK(false).context(cc::format("dx12 debug layer: {}", message));
+            if (severity > dx12::dx12_message_severity::warning)
+                return;
+            if (dx12::is_expected_validation_message(message))
+                return;
+
+            CHECK(false).context(cc::format("dx12 debug layer: {}", message));
         });
 }
 } // namespace

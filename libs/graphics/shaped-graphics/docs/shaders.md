@@ -177,7 +177,11 @@ Every path that resolves becomes a reload dependency of the shader that pulled i
 
 One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
 What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
-None of them costs anything on the DXIL side: DXC ignores a `[[vk::…]]` attribute when it is not generating SPIR-V.
+
+**Every one of them goes behind `#ifdef __spirv__`.**
+DXC ignores a `[[vk::…]]` attribute when it is not generating SPIR-V, and it ignores it *with a warning* — `-Wignored-attributes`.
+ssc compiles with `-WX` (`compile_options::warnings_as_errors`, on by default), so on the DXIL target an unguarded attribute is a compile error rather than a no-op.
+Nothing catches it at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
 
 - **`[[vk::binding(N, set)]]` on every resource.**
   There is no `-fvk-*-shift` in our compile line, so an unannotated `b0`/`t0`/`u0` collapse onto the same SPIR-V binding number and collide.
@@ -187,7 +191,22 @@ None of them costs anything on the DXIL side: DXC ignores a `[[vk::…]]` attrib
 - **`[[vk::location(N)]]` on every vertex input**, numbered in the order the sg vertex layout lists its attributes.
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
   A mismatch is silent: the pipeline builds and the geometry is wrong.
-- **`[[vk::push_constant]]` for inline constants**, which is the one that needs a fork.
+  A `#ifdef` per struct member reads badly, so fork the attribute itself once and use the macro on each line:
+
+```hlsl
+#ifdef __spirv__
+#define VK_LOCATION(n) [[vk::location(n)]]
+#else
+#define VK_LOCATION(n)
+#endif
+
+struct vs_input
+{
+    VK_LOCATION(0) float3 position : POSITION;
+    VK_LOCATION(1) float3 normal : NORMAL;
+};
+```
+- **`[[vk::push_constant]]` for inline constants**, which needs a fork with a real DXIL spelling on the other side rather than an empty one.
   A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
   A shader that does not say `push_constant` therefore declares a resource the pipeline layout never binds.
   There is no DXIL spelling of the attribute, and a root constant there is an ordinary `register(b0)`:

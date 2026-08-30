@@ -4,6 +4,8 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
 {
@@ -112,10 +114,42 @@ bool vulkan_context::note_device_lost_if_lost(VkResult r, char const* what)
     return true;
 }
 
+void vulkan_context::shutdown_no_throw() noexcept
+{
+    // The teardown still has to run, and nothing above a destructor can act on a failure, so the only honest outcome
+    // is to finish and say what happened.
+    // A lost device is the case this exists for: the drain below throws sg::device_lost_exception, and a destructor
+    // running inside that same exception's unwind would terminate the process instead of letting the caller's handler see it.
+    try
+    {
+        shutdown();
+    }
+    catch (sg::device_lost_exception const& e)
+    {
+        CC_LOG_ERROR("context shutdown on a lost device: {}", e.reason());
+    }
+    catch (sg::exception const& e)
+    {
+        CC_LOG_ERROR("context shutdown failed: {}", e.message());
+    }
+    catch (...)
+    {
+        CC_LOG_ERROR("context shutdown failed with an unknown exception");
+    }
+
+    // Whatever threw, the context must not look live to the base destructor's assert.
+    _is_shut_down = true;
+}
+
 void vulkan_context::shutdown()
 {
     if (_is_shut_down)
         return;
+
+    // The teardown half of the same exclusion the creation path takes; see vulkan_driver_lock.hh.
+    // Taken for the whole shutdown rather than around vkDestroyDevice alone: the drain above it submits, and a
+    // ray-tracing build starting between the drain and the destroy would reopen the window.
+    scoped_device_lifecycle const driver_guard;
 
     // Release per-context routine instances first: they may cache epoch/allocator-managed resources
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.

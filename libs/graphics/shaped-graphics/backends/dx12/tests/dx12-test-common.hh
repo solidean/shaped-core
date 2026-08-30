@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
 
 // Shared helper for the dx12 backend test binary (shaped-graphics-dx12-test).
 // The tests are split per topic across several .cc files; this is the one piece they all reuse.
@@ -21,17 +22,7 @@ struct scoped_expected_validation_messages;
 
 namespace sg::backend::dx12
 {
-/// Debug-layer advisories sg provokes on purpose, matched as substrings.
-/// Each entry is a decision, not a mute button: the message is understood, and the alternative is worse or does not exist yet.
-/// Anything not listed fails the test, so a NEW warning is still loud.
-inline constexpr cc::string_view k_expected_validation_messages[] = {
-    // A perf advisory: D3D12 wants an optimized clear value at texture creation, matching what the target is later cleared to.
-    // sg::texture_description has no such field, and inventing one that disagrees with the actual clear is worse than none.
-    "did not pass any clear value to resource creation",
-
-    // A command list carrying only barriers is a legitimate sg shape — a list opened purely to transition resources.
-    "recorded only Barrier commands",
-};
+// The allowlist itself is dx12_expected_messages.hh, shared with the tier-1 entry driver.
 
 /// Set while a test is deliberately provoking a validation message; see scoped_expected_validation_messages.
 inline thread_local bool tl_expect_validation_messages = false;
@@ -65,9 +56,8 @@ inline void fail_on_validation_messages(dx12_context_handle const& ctx)
         {
             if (severity > dx12_message_severity::warning || tl_expect_validation_messages)
                 return;
-            for (auto const expected : k_expected_validation_messages)
-                if (message.contains(expected))
-                    return;
+            if (is_expected_validation_message(message))
+                return;
 
             CHECK(false).context(cc::format("dx12 debug layer: {}", message));
         });

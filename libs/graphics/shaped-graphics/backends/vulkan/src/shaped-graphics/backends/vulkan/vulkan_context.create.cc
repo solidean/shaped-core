@@ -10,6 +10,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 
 
 namespace sg::backend::vulkan
@@ -383,6 +384,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 {
     using namespace sg::backend::vulkan;
 
+    // Excludes every ray-tracing pipeline build in the process for the duration; see vulkan_driver_lock.hh.
+    // Held across instance AND device creation, since the deadlock is against either.
+    scoped_device_lifecycle const driver_guard;
+
     // Validation is best-effort: enabled only when both the layer and VK_EXT_debug_utils are present.
     bool const enable_validation
         = config.enable_validation_layers && validation_layer_available() && debug_utils_extension_available();
@@ -576,11 +581,11 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .pNext = &vk13_features,
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
         // How the query system resets a pool: vkCmdResetQueryPool cannot be recorded inside a render-pass instance,
         // and a timestamp legitimately can be.
         // See vulkan_query.hh.
         .hostQueryReset = VK_TRUE,
-        .runtimeDescriptorArray = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
     };

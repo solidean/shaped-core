@@ -10,6 +10,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.cc
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
+    src/shaped-graphics/backends/vulkan/vulkan_driver_lock.cc
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
     src/shaped-graphics/backends/vulkan/vulkan_query.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.queries.cc
@@ -53,6 +54,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
+    src/shaped-graphics/backends/vulkan/vulkan_driver_lock.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
     src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh
@@ -79,8 +81,9 @@ target_include_directories(shaped-graphics-vulkan
 # Vulkan::Vulkan carries the loader link plus the SDK include dir (for <vulkan/vulkan.h>).
 target_link_libraries(shaped-graphics-vulkan PUBLIC shaped-graphics Vulkan::Vulkan)
 
-# SG rather than a vulkan-specific tier: <vulkan/vulkan.h> reaches an UNSANITIZED windows.h under
-# VK_USE_PLATFORM_WIN32_KHR, which is the collision dx12_common.hh's bracket exists to prevent, and 6 TUs do not justify the risk.
+# SG rather than a vulkan-specific tier: a tier over <vulkan/vulkan.h> would bake the surface defines into the PCH,
+# and those differ per translation unit, so the two that create surfaces could not share it anyway.
+# The windows.h vulkan_common.hh reaches under VK_USE_PLATFORM_WIN32_KHR is sanitized there, so the header itself is no longer the reason.
 sc_target_pch(shaped-graphics-vulkan SG)
 
 target_compile_options(shaped-graphics-vulkan
@@ -95,9 +98,9 @@ target_compile_options(shaped-graphics-vulkan
 # Probed rather than assumed: a machine with the Vulkan SDK and no X11 headers is ordinary, and guessing there turns a
 # missing package into a compile error deep in a system header.
 #
-# Scoped to the ONE translation unit that creates surfaces, for the reason the PCH note above gives: on Windows
-# VK_USE_PLATFORM_WIN32_KHR reaches an unsanitized windows.h, and confining that to a single file is what keeps it out
-# of the other thirty.
+# Scoped to the translation units that create surfaces, because a surface define changes what vulkan.h declares and
+# what it includes — on Windows it reaches windows.h, which vulkan_common.hh then has to sanitize.
+# Keeping that off the other thirty TUs is cheaper than paying for it everywhere.
 #
 # With none of them the windowed paths compile to a runtime error naming the platform, which is the honest answer —
 # the backend still builds and still presents headlessly.
@@ -127,12 +130,19 @@ elseif(NOT APPLE)
     endif()
 endif()
 
+# These two also skip the PCH.
+# It is built without the surface defines, and clang-cl warns (-Wclang-cl-pch) on every compile whose macro set
+# differs from the one the PCH was built with.
+# The SG tier holds no vulkan header, so nothing in it actually varies with the define and the warning is noise —
+# but it is noise on every build, and two TUs compiling without a PCH is the cheaper side of that trade.
 if(_sc_vulkan_surface_defines)
     set_source_files_properties(
         src/shaped-graphics/backends/vulkan/vulkan_swapchain.cc
         src/shaped-graphics/backends/vulkan/vulkan_context.create.cc
         TARGET_DIRECTORY shaped-graphics-vulkan
-        PROPERTIES COMPILE_DEFINITIONS "${_sc_vulkan_surface_defines}")
+        PROPERTIES
+        COMPILE_DEFINITIONS "${_sc_vulkan_surface_defines}"
+        SKIP_PRECOMPILE_HEADERS ON)
 endif()
 
 # Backend-specific test binary: device creation, command lists, buffers, epochs.

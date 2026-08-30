@@ -24,6 +24,8 @@ Findings we want to keep, but that are not a guide to anything.
 
 - [notes/build-times.md](notes/build-times.md) — where a `dev.py check` spends its time, and the cold / semi-cold / warm scenarios it splits into.
   Also what was measured before choosing precompiled headers over unity builds, and before deferring a prebuilt extern.
+- [bugs-external/_index.md](bugs-external/_index.md) — compiler and driver bugs we have hit, each with a standalone reproduction that runs without shaped-core.
+  The entry is what says whether the bug is still there, and whether it was ever ours.
 
 ## Guides
 
