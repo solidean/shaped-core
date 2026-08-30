@@ -16,6 +16,11 @@ rules:
     files: src/shaped-shader-compiler-dxc/impl/dxc_common.hh
 
   - kind: allow-include
+    value: <spirv_reflect.h>
+    reason: the vendored SPIRV-Reflect, reached only from the SPIR-V reflection TU — a module carries its bindings in its own instruction stream, so reading them back is a parser rather than a query
+    files: src/shaped-shader-compiler-dxc/impl/spirv_reflection.cc
+
+  - kind: allow-include
     value: [<string>, <vector>]
     reason: "TODO: DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
     files: src/**

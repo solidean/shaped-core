@@ -342,6 +342,30 @@ check_handle make_check_handle_asserts(check_kind kind, char const* expr_text, F
     ::nx::impl::make_check_handle(::nx::impl::check_kind::require, #Expr, ::nx::impl::lhs_grab{} <=> Expr, \
                                   cc::source_location::current())
 
+namespace nx::impl
+{
+// Backs REQUIRED_VALUE: requires that `v` holds a value, then hands the value back.
+// The return type is `auto` rather than `decltype(auto)` on purpose — it decays to a value, so the result never
+// references a temporary that dies at the end of the enclosing full-expression.
+// cc::result / cc::optional forward their value category through deducing this, so an rvalue argument moves out and
+// a move-only payload (a unique_ptr result, say) works.
+template <class T>
+[[nodiscard]] auto required_value(T&& v, char const* expr, cc::source_location loc)
+{
+    ::nx::impl::make_check_handle(::nx::impl::check_kind::require, expr, ::nx::impl::lhs_grab{} <=> v.has_value(), loc);
+    return static_cast<T&&>(v).value();
+}
+} // namespace nx::impl
+
+// REQUIRED_VALUE macro: REQUIRE that a cc::result / cc::optional holds a value, and evaluate to that value.
+// The fallible half of the codebase returns one of those, so the alternative at a call site is a REQUIRE followed by
+// a separate .value() — two statements that name the expression twice and cannot be used in an initializer.
+//
+// Examples:
+//   auto buffer = REQUIRED_VALUE(ctx.try_create_raw_buffer(256, usage));
+//   auto cmd = REQUIRED_VALUE(ctx.try_create_command_list());   // move-only payload
+#define REQUIRED_VALUE(Expr) ::nx::impl::required_value((Expr), #Expr " has a value", cc::source_location::current())
+
 // FAIL macro: unconditional hard failure (like REQUIRE(false))
 // Optionally takes a message argument
 // Returns check_handle that can be chained with other helper functions

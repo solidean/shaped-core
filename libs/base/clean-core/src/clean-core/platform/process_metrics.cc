@@ -93,7 +93,12 @@ cc::result<cc::process_usage, cc::query_error> read_usage()
 
     auto out = cc::process_usage();
     out.resident_bytes = i64(counters.WorkingSetSize);
-    out.peak_resident_bytes = i64(counters.PeakWorkingSetSize);
+
+    // Windows updates PeakWorkingSetSize lazily rather than in lockstep with WorkingSetSize, so a process whose
+    // working set is growing right now reports a peak the current size has already passed — by one page, typically.
+    // Both fields come from this one call, so there is no sampling race here to fix; the counters themselves disagree.
+    // Callers compare the two, and a snapshot that contradicts itself is worse than a peak that is briefly optimistic.
+    out.peak_resident_bytes = cc::max(i64(counters.PeakWorkingSetSize), out.resident_bytes);
     out.private_bytes = i64(counters.PrivateUsage); // "Commit size" in Task Manager
 
     DWORD handles = 0;

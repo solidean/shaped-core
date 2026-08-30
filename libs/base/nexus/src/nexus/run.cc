@@ -1,6 +1,7 @@
 #include "run.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -22,7 +23,7 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <unordered_set> // std::unordered_set: cc has no set type yet
+#include <unordered_set> // std::unordered_set: keyed on declaration addresses, where cc::set's hashing requirements do not apply
 
 namespace
 {
@@ -376,6 +377,11 @@ int nx::run(int argc, char** argv)
 
     // Orphan invocable tests: in a full, unfiltered normal sweep every enabled INVOCABLE_TEST must be
     // invoked by some driver (see nx::invoke_tests). Anything left over is almost always a wiring mistake.
+    //
+    // An invocable an alias can reach is exempt, because the mistake this catches is "nothing can run this" rather than
+    // "nothing ran this". A driver may be deliberately disabled — a backend still being built out registers so its
+    // aliases exist, and disables so a sweep stays out of the parts it has not reached — and its invocables are then
+    // parked rather than unwired, runnable by name whenever someone asks for one.
     int orphan_count = 0;
     bool const full_normal_sweep = config.filters.empty() && config.section_filters.empty()
                                 && config.selected_bucket == nx::config::test_bucket::normal;
@@ -385,8 +391,19 @@ int nx::run(int argc, char** argv)
         for (auto const& exec : execution.executions)
             collect_invoked(exec, invoked);
 
+        // Every invocable name some alias expands onto, which is the set an alias can drive by name.
+        cc::set<cc::string_view> alias_reachable;
+        for (auto const& alias : registry.aliases)
+        {
+            alias_reachable.insert(cc::string_view(alias.name));
+            for (auto const& fragment : alias.fragments)
+                for (auto const& section : fragment.section_path)
+                    alias_reachable.insert(cc::string_view(section));
+        }
+
         for (auto const& decl : registry.declarations)
-            if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl))
+            if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl)
+                && !alias_reachable.contains(cc::string_view(decl.name)))
             {
                 if (orphan_count == 0)
                     cc::eprintln("\nOrphan invocable tests (declared but never invoked):");

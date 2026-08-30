@@ -7,6 +7,7 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/present/native_window.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/input.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -87,7 +88,7 @@ struct sr::window_description
 /// window_system::poll_events refreshes every live window at once, so size, minimized state and the close request all read as of the last poll.
 ///
 ///     auto const win = wsys->create_window({.title = "viewer", .width = 1600, .height = 900});
-///     auto const sc = ctx->create_swapchain({.native_window_handle = win->native_window_handle()});
+///     auto const sc = ctx->create_swapchain({.window = win->native_window()});
 class sr::window
 {
 public:
@@ -98,12 +99,10 @@ public:
     window& operator=(window const&) = delete;
     window& operator=(window&&) = delete;
 
-    /// The OS window object, for sg::swapchain_description::native_window_handle.
-    /// An HWND on Windows.
-    /// Null on every other platform, and under a headless window_system — nothing can present against those.
-    /// X11 and wayland each need a display plus a handle, which does not fit one pointer.
-    /// sg grows a platform-tagged handle when its vulkan swapchain lands and gives that struct a second caller.
-    [[nodiscard]] void* native_window_handle() const;
+    /// The OS window, tagged with the windowing system it belongs to — feeds sg::swapchain_description::window.
+    /// Win32, X11 (xlib and xcb name the same window) or wayland, whichever SDL is driving this session.
+    /// Invalid under a headless window_system, and for a windowing system sr has no mapping for — nothing can present against those.
+    [[nodiscard]] sg::native_window native_window() const;
 
     /// Client-area size in pixels, as of the last poll_events.
     /// Both are 0 while minimized — skip the frame rather than sizing a swapchain against that.

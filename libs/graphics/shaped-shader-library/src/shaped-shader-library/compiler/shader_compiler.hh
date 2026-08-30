@@ -47,6 +47,10 @@ public:
     [[nodiscard]] virtual sg::shader_format target_format() const = 0;
 
     /// Flattens `#include`s through `resolve`. The error carries the compiler's own diagnostics.
+    ///
+    /// Per target, not once for all of them: a compiler targeting SPIR-V flattens with its own macros defined, so a
+    /// source may fork on the target it is being built for.
+    /// That is why `shader_asset` keeps a flattened source and its dependencies per format entry.
     [[nodiscard]] virtual cc::result<cc::string> preprocess(shader_source_description const& desc,
                                                             include_resolver resolve) const = 0;
 

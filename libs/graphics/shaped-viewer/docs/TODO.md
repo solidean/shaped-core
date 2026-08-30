@@ -95,6 +95,12 @@ A `sv::mesh` names a material, `scene_ref::add_mesh` resolves it against the mes
 `pathtrace_routine` then traces a DXR pipeline carrying one hit group per permutation.
 What is left is narrower than it was:
 
+- **The generated HLSL is DXIL-shaped, which is what keeps sv off vulkan.**
+  A SPIR-V target needs `[[vk::binding]]`, `[[vk::location]]` and `[[vk::push_constant]]` annotations — see sg's [shaders](../../shaped-graphics/docs/shaders.md).
+  Neither the generator nor the hand-written `.hlsli` library emits any.
+  So `sv::shader_library` registers both compilers and a vulkan context still resolves nothing it can build a pipeline from.
+  Emitting them from the generator makes the generated half portable; the `.hlsli` library is the larger half, and a genuinely portable shader language is the larger answer still.
+
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.

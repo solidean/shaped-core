@@ -115,7 +115,11 @@ A shader reload is folded into that same hash as a reload generation, since `sg:
 ## Platform / backend status
 
 Ray tracing runs on **dx12 + DXR** (Windows), hardware or WARP.
-Vulkan RT is stubbed upstream in shaped-graphics, so rendering is Windows-only for now.
+Vulkan ray tracing is real in shaped-graphics now, and sv still does not run on it — the blocker moved rather than cleared.
+Both backends take HLSL, and it is not the same HLSL.
+A SPIR-V target needs `[[vk::binding]]`, `[[vk::location]]` and `[[vk::push_constant]]` annotations — see sg's [shaders](../../shaped-graphics/docs/shaders.md).
+sv's generated material shaders carry none.
+Emitting them from the generator would make the generated half portable and leave the hand-written `.hlsli` library to follow; a genuinely portable shader language is the larger follow-up.
 The whole sv API compiles everywhere, though: without a backend a routine simply acquires no shader and draws nothing.
 
 ## First library-extension seams (per the "living libraries" rule)

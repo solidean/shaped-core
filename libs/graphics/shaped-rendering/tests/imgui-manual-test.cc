@@ -107,8 +107,7 @@ TEST("sr - imgui window (manual)", nx::config::manual)
     lib.add_package(sr::shader_package());
 
     // bgra8_unorm, not its _srgb sibling: imgui's colors are already sRGB-encoded and the routine refuses a target that would encode them twice.
-    auto const sc = ctx->create_swapchain(
-        {.native_window_handle = win->native_window_handle(), .format = sg::pixel_format::bgra8_unorm});
+    auto const sc = ctx->create_swapchain({.window = win->native_window(), .format = sg::pixel_format::bgra8_unorm});
 
     auto imgui = sr::imgui_context::create({.enable_viewports = true}); // create() applies the Solidean theme by default
 

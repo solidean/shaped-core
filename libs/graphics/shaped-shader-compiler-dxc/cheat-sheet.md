@@ -2,10 +2,11 @@
 
 DXC wrapper: HLSL -> `sg::compiled_shader`.
 Namespace `ssc::dxc`.
-Windows-only, and depends on shaped-graphics.
+Depends on shaped-graphics.
+Builds wherever DXC does; DXIL *reflection* additionally needs the Windows SDK, so off Windows the usable target is SPIR-V.
 Headers are included by full path from `src/`: `#include <shaped-shader-compiler-dxc/<name>.hh>`.
 
-> **Scope note:** DXIL only, for every `sg::shader_stage` — compute, raster and the six ray-tracing stages — with reflection.
+> **Scope note:** DXIL and SPIR-V, for every `sg::shader_stage` — compute, raster and the six ray-tracing stages — with reflection.
 > Fallible calls return `cc::result`.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
@@ -20,7 +21,8 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 
 ```cpp
 #include <shaped-shader-compiler-dxc/compile_options.hh>
-ssc::dxc::compile_target        // dxil   (spirv/metal_lib slot in later)
+ssc::dxc::compile_target        // dxil (dx12; reflection needs the Windows SDK) | spirv (vulkan)
+                                //   metal_lib slots in later
 ssc::dxc::shader_model          // sm_6_0 .. sm_6_8   -> profile suffix "6_8"
 ssc::dxc::optimization_level    // disabled(-Od) | level_0..level_3(-O0..-O3)
 ssc::dxc::compile_options       // { target; optimization; bool debug_info; bool warnings_as_errors;
@@ -47,7 +49,7 @@ ssc::dxc::compiler               // move-only; owns IDxcUtils + IDxcCompiler3 (p
 ssc::dxc::compiler::create()                     // -> cc::result<compiler>   (fails only on a broken DXC install)
 c.preprocess(desc, resolve_include, opts={})// -> cc::result<preprocessed_source>  (-P; resolves #includes)
 c.compile(desc, opts={})                    // -> cc::result<sg::compiled_shader>  (rejects #includes)
-// compile() output: stage/format=dxil/entry_point set; bytecode = DXIL blob; bindings + (compute)
+// compile() output: stage/format/entry_point set; format and bytecode follow options.target; bindings + (compute)
 // workgroup_size from reflection; compiler = {"dxc", version, joined-args signature}
 ```
 

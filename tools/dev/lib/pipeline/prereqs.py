@@ -5,7 +5,7 @@ That is seconds on a cold install and a cheap pin-file check after, and `SC_SKIP
 A cross-target preset skips all four, since these are host-side dependencies.
 None of them is fatal: a failure leaves the dependent target unbuilt and configure proceeds.
 
-DXC and Zydis are Windows-only, while SDL3 and SQLite run everywhere — which is what makes a cold Linux or macOS configure do real work.
+Zydis is Windows-only; DXC is fetched on Windows and Linux, while SDL3 and SQLite run everywhere — which is what makes a cold Linux or macOS configure do real work.
 Each dep's own docs own its pin, its size and what is missing without it — for Zydis that is tools/instruction-tracer/readme.md, not a libs/ doc.
 """
 
@@ -28,14 +28,22 @@ def _pinned_hash(manifest: Path) -> str | None:
 
     Scanned by line rather than parsed, so this stays stdlib-only — dev.py declares no dependencies, and this runs on the fast path of every configure.
     The first entry is the one whose pin `.install/pin.txt` carries, which is why zydis declares Zydis before the Zycore it vendors.
+
+    An upstream shipping one asset per platform declares `pin_hash_<os>` instead, and the host's key is what counts.
+    Taking the bare key there — or another platform's — would make every configure believe the install is stale and
+    re-fetch it, which is exactly the fast path this function exists to keep fast.
     """
     if not manifest.is_file():
         return None
+    host_key = f"pin_hash_{'windows' if sys.platform == 'win32' else 'macos' if sys.platform == 'darwin' else 'linux'}:"
+    fallback = None
     for line in manifest.read_text(encoding="utf-8").splitlines():
         s = line.strip()
-        if s.startswith("pin_hash:"):
+        if s.startswith(host_key):
             return s.split(":", 1)[1].strip().strip('"').strip("'")
-    return None
+        if fallback is None and s.startswith("pin_hash:"):
+            fallback = s.split(":", 1)[1].strip().strip('"').strip("'")
+    return fallback
 
 
 def _is_current(manifest: Path, pin: Path) -> bool:
@@ -102,7 +110,10 @@ def ensure_dxc(root: Path, preset_name: str = "") -> None:
         directory="dxc",
         script_name="download-dxc.py",
         skip_env="SC_SKIP_DXC",
-        windows_only=True,
+        # Fetched on Windows and Linux both: the same release ships an asset for each, and vulkan needs the SPIR-V
+        # half of the compiler.
+        # macOS has no release asset upstream, which _ensure's own script and manifest checks already cover.
+        windows_only=False,
         doing="downloading the pinned DirectX Shader Compiler release",
         dependent="shaped-shader-compiler-dxc",
     )

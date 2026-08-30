@@ -523,19 +523,25 @@ INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed rows", 
     // The readback below still observes this write — its window waits on the upload completion fence.
     c.upload.bytes_to_texture(tex, cc::make_pinned_data(src));
 
-    // Staged rows are padded to 256 and the sink's contract is tightly-packed bytes, so a row is the largest run
-    // that can be handed over without first assembling one — which is the copy a sink exists to avoid.
+    // The contract is a **run of whole rows** per call, not one row per call.
+    //
+    // How long a run is depends on how the backend stages: dx12 pads staged rows to 256 while the sink's bytes are
+    // tightly packed, so a row is the largest run it can hand over without first assembling one — the copy a sink
+    // exists to avoid.
+    // Vulkan stages tightly packed and hands over as many rows as the window holds.
+    // Both satisfy what a sink can actually rely on, which is what this checks: whole rows, row-aligned offsets, and
+    // every row exactly once.
     cc::vector<byte> got;
     for (isize i = 0; i < src.size(); ++i)
         got.push_back(byte(0));
-    int rows_seen = 0;
+    isize rows_seen = 0;
     bool whole_rows = true;
     auto stream = c.stream.to_sink_from_texture(tex,
                                                 [&](cc::span<byte const> bytes, isize offset)
                                                 {
-                                                    whole_rows = whole_rows && bytes.size() == row_bytes
-                                                              && offset % row_bytes == 0;
-                                                    ++rows_seen;
+                                                    whole_rows = whole_rows && bytes.size() % row_bytes == 0
+                                                              && bytes.size() > 0 && offset % row_bytes == 0;
+                                                    rows_seen += bytes.size() / row_bytes;
                                                     for (isize i = 0; i < bytes.size(); ++i)
                                                         got[offset + i] = bytes[i];
                                                     return true;

@@ -58,7 +58,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         SKIP("no DXC compiler to build the ray-tracing shaders");
 
     auto sc_r = ctx.try_create_swapchain(
-        {.native_window_handle = win->native_window_handle(), .buffer_count = 3, .format = sg::pixel_format::bgra8_unorm});
+        {.window = win->native_window(), .buffer_count = 3, .format = sg::pixel_format::bgra8_unorm});
     if (sc_r.has_error())
         SKIP("could not create a swapchain for the window");
     sg::swapchain_handle const sc = sc_r.value();

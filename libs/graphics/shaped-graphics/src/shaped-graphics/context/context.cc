@@ -83,6 +83,11 @@ bool context::accepts_shader_format(shader_format format) const
     return false;
 }
 
+void context::release_cached_pipelines()
+{
+    _pipeline_cache->release_at_shutdown();
+}
+
 pipeline_cache& context::pipeline_cache_ref()
 {
     return *_pipeline_cache;
@@ -172,6 +177,13 @@ void context::shutdown()
     // Routine instances are released at the top of each backend's shutdown (see routines.clear() there), before its resource systems are torn down.
     // A routine's cached GPU state must not outlive the device it was built on.
     routines.clear();
+
+    // Same rule, one layer down: the transient heap is GPU memory from the device about to be destroyed.
+    transient.release_heap_at_shutdown();
+
+    // And the same again for the pipeline cache, which holds layouts and pipelines built on that device.
+    release_cached_pipelines();
+
     _is_shut_down = true;
 }
 } // namespace sg

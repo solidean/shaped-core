@@ -140,3 +140,19 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 } // namespace sg
+
+namespace sg
+{
+void context_transient_scope::release_heap_at_shutdown()
+{
+    // Nothing is drained here: shutdown has already waited the device idle, and a backend that has not is broken in
+    // ways this cannot fix.
+    _bump.lock(
+        [](bump_state& s)
+        {
+            s.heap = nullptr;
+            s.head = 0;
+            s.last_epoch = 0;
+        });
+}
+} // namespace sg

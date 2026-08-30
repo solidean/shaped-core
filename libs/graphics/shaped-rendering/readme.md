@@ -12,12 +12,12 @@ It is also home to the **window abstraction**, where the graphics family meets t
 ## Windows
 
 `sr::window_system` owns the platform init and the event pump; `sr::window` is one OS window.
-A window's `native_window_handle()` is exactly what `sg::swapchain_description` wants, so a windowed renderer can be written against sr alone:
+A window's `native_window()` is exactly what `sg::swapchain_description` wants, so a windowed renderer can be written against sr alone:
 
 ```cpp
 auto const wsys = sr::window_system::create();
 auto const win = wsys->create_window({.title = "viewer", .width = 1600, .height = 900});
-auto const sc = ctx->create_swapchain({.native_window_handle = win->native_window_handle()});
+auto const sc = ctx->create_swapchain({.window = win->native_window()});
 
 while (!win->is_close_requested())
 {
@@ -39,7 +39,7 @@ Three things worth knowing before you use it:
   On macOS that thread must be the process main thread.
   Violations assert.
 * **Rendering is not.**
-  `native_window_handle()` is fixed for a window's lifetime, so a render thread may drive the swapchain as long as `poll_events` stays on the main thread.
+  `native_window()` is fixed for a window's lifetime, so a render thread may drive the swapchain as long as `poll_events` stays on the main thread.
 
 Multiple windows work today: each has its own size, position, focus, close latch and native handle, and `wsys->windows()` enumerates them.
 That is what imgui's multi-viewport support is built on — see [docs/imgui.md](docs/imgui.md).

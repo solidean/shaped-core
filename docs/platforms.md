@@ -57,8 +57,17 @@ It is worth naming separately anyway, because its immutable base image ships a r
 - **`std::stacktrace` does not link**, so clean-core configures the empty stub and `CC_HAS_STACKTRACE` is 0.
   The image carries `libstdc++.so` but not the `libstdc++exp` that implements `<stacktrace>`, and the LLVM toolchain's libc++ ships no `<stacktrace>` header at all.
   An assert therefore reports "stacktrace unavailable on this platform" instead of frames.
-- **No dx12, and vulkan builds without registering a test driver**, so the cross-backend sg API tests are not compiled here — see shaped-graphics' `_sg_test_drivers`.
-  A Vulkan SDK being present is what makes SteamOS the first platform to separate "a backend builds" from "a backend can be driven".
+- **No dx12, so vulkan is the only backend the cross-backend sg API tests run against here** — see shaped-graphics' `_sg_test_drivers`.
+  It is the first platform where that suite runs against something other than dx12.
+  A Vulkan SDK being present is also what makes it the first to separate "a backend builds" from "a backend can be driven".
+  Both questions now answer yes: the vulkan driver sweeps like dx12's, so a plain `dev.py test` covers the whole tier-1 suite here.
+- **The base image ships the windowing runtime but not its development headers**, so `sr::window` and a windowed Vulkan swapchain both compile themselves out.
+  `libX11.so` and `libwayland-client.so` are there; `X11/Xlib.h` and `wayland-client.h` are not.
+  Both the SDL3 fetch in [extern/sdl3](../extern/sdl3/CMakeLists.txt) and the surface probe in the vulkan backend gate on the headers.
+  What survives is everything headless: the suite passes, and `dev.py example <match> --capture` renders and writes its image.
+  What is lost is a real window, which is why an example run without `--capture` reports no window backend and draws nothing.
+  `uv run dev.py doctor` names it — its `vulkan surface` and `sr::window (SDL3)` lines.
+  The fix is to put those headers where the compiler already looks, which on an immutable image usually means a sysroot rather than `/usr/include`.
 - **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
   `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
 

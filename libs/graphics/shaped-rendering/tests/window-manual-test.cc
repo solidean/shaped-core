@@ -27,7 +27,7 @@ TEST("sr - window native handle (manual)", nx::config::manual)
     CHECK(win->height() == 240);
 
 #ifdef CC_OS_WINDOWS
-    CHECK(win->native_window_handle() != nullptr);
+    CHECK(win->native_window().is_valid());
 #endif
 }
 
@@ -37,7 +37,7 @@ TEST("sr - window (manual)", nx::config::manual)
     auto const win = wsys->create_window({.title = "shaped-rendering — close this window to end the test"});
 
     cc::println("opened a {}x{} window; native handle {}", win->width(), win->height(),
-                win->native_window_handle() != nullptr ? "present" : "null");
+                win->native_window().is_valid() ? "present" : "invalid");
 
     auto last_width = win->width();
     auto last_height = win->height();

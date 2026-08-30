@@ -1,3 +1,4 @@
+#include <shaped-shader-compiler-dxc/impl/com_object.hh>
 #include <shaped-shader-compiler-dxc/impl/include_handler.hh>
 
 namespace ssc::dxc::impl
@@ -7,8 +8,7 @@ namespace
 /// Delegates DXC's include loads to the caller-supplied resolver (a virtual file system: embedded
 /// resources, in-memory sources, etc.). Returns E_FAIL when the resolver can't find the path, which
 /// DXC surfaces as an include error.
-class resolver_include_handler final
-  : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IDxcIncludeHandler>
+class resolver_include_handler final : public com_object<IDxcIncludeHandler>
 {
 public:
     resolver_include_handler(IDxcUtils* utils, include_resolver resolver) : _utils(utils), _resolver(resolver) {}
@@ -40,8 +40,7 @@ private:
 
 /// Fails every include — installed during compile() so a stray `#include` in supposedly-preprocessed
 /// source is a hard error rather than a silent filesystem read.
-class reject_include_handler final
-  : public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IDxcIncludeHandler>
+class reject_include_handler final : public com_object<IDxcIncludeHandler>
 {
 public:
     HRESULT STDMETHODCALLTYPE LoadSource(LPCWSTR, IDxcBlob** include_source) noexcept override
@@ -53,13 +52,25 @@ public:
 };
 } // namespace
 
+namespace
+{
+// A com_object is born with one reference, so the pointer is adopted rather than AddRef'd again.
+template <class T, class... Args>
+[[nodiscard]] ComPtr<IDxcIncludeHandler> make_handler(Args&&... args)
+{
+    ComPtr<IDxcIncludeHandler> handler;
+    *handler.GetAddressOf() = new T(static_cast<Args&&>(args)...);
+    return handler;
+}
+} // namespace
+
 ComPtr<IDxcIncludeHandler> make_include_handler(IDxcUtils* utils, include_resolver resolve_include)
 {
-    return Microsoft::WRL::Make<resolver_include_handler>(utils, resolve_include);
+    return make_handler<resolver_include_handler>(utils, resolve_include);
 }
 
 ComPtr<IDxcIncludeHandler> make_reject_include_handler()
 {
-    return Microsoft::WRL::Make<reject_include_handler>();
+    return make_handler<reject_include_handler>();
 }
 } // namespace ssc::dxc::impl

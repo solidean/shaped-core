@@ -44,6 +44,15 @@ public:
     /// Whether this context can build pipelines from `format`.
     [[nodiscard]] bool accepts_shader_format(shader_format format) const;
 
+    /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
+    ///
+    /// A build-and-device fact rather than a preference, and it differs by backend for a real reason: vulkan needs
+    /// VK_EXT_headless_surface plus VK_KHR_swapchain, while dx12 emulates the whole thing with ordinary render-target
+    /// textures and therefore always can.
+    /// Defaults to false, so a backend that has not implemented headless present reports it rather than failing at
+    /// creation — which is what lets a test skip cleanly instead of asserting.
+    [[nodiscard]] virtual bool supports_headless_present() const { return false; }
+
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
@@ -378,6 +387,16 @@ protected:
     /// A backend calls this from advance_epoch once the new epoch is open.
     /// No-op if no budget change is pending.
     void apply_pending_transient_budget() { transient.apply_pending_budget_at_epoch_boundary(); }
+
+    /// Drops the transient bump heap, which is device memory and must not outlive the device.
+    /// A backend calls this from its shutdown, before it destroys the device.
+    /// The base shutdown also calls it, which covers a backend that forgets — but by then the device may already be
+    /// gone, so calling it at the right point is the backend's job.
+    void release_transient_heap() { transient.release_heap_at_shutdown(); }
+
+    /// Drops every cached binding-group layout, pipeline layout and pipeline.
+    /// Same rule as the two above: they are device objects, and the cache outlives every caller that held one.
+    void release_cached_pipelines();
 
     /// Allocates a GPU-resident buffer; size must be >= 0, and 0 is a valid empty buffer.
     /// `alloc` selects the backing memory (see allocation_info).

@@ -49,7 +49,29 @@ cc::result<dx12_swapchain_handle> dx12_context::create_dx12_swapchain(sg::swapch
     // Validate the contract before any DXGI work, so a bad desc asserts at the entry point.
     desc.assert_valid();
 
-    HWND const hwnd = static_cast<HWND>(desc.native_window_handle);
+    // A headless chain skips DXGI entirely: there is no presentation target to create a swap chain over, so the
+    // back buffers are ordinary textures and present is a fence signal plus a rotate.
+    // Everything below the creation split is shared, which is what keeps the emulation from becoming a second
+    // swapchain implementation.
+    if (!desc.is_windowed())
+    {
+        ComPtr<ID3D12Fence> headless_fence;
+        if (HRESULT hr = _device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&headless_fence)); FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateFence (headless swapchain) failed");
+
+        HANDLE const headless_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (headless_event == nullptr)
+            return cc::error("CreateEvent for the headless swapchain fence failed");
+
+        auto headless = std::make_shared<dx12_swapchain>(*this, desc, /*hwnd =*/nullptr, /*swapchain =*/nullptr,
+                                                         /*allow_tearing =*/false, cc::move(headless_fence),
+                                                         headless_event, desc.headless_extent.value());
+        CC_RETURN_IF_ERROR(headless->build_backbuffers());
+        return dx12_swapchain_handle(cc::move(headless));
+    }
+
+    CC_ASSERT(desc.window.platform == sg::window_platform::win32, "dx12 presents to a win32 window only");
+    HWND const hwnd = static_cast<HWND>(desc.window.handle);
     tg::vec2i const size = client_size_of(hwnd);
 
     // Tearing (uncapped present) needs adapter support AND the immediate present mode; it also requires the
@@ -105,16 +127,27 @@ cc::result<cc::unit> dx12_swapchain::build_backbuffers()
     _backbuffers.reserve(_desc.buffer_count);
     for (int i = 0; i < _desc.buffer_count; ++i)
     {
-        ComPtr<ID3D12Resource> resource;
-        if (HRESULT hr = _swapchain->GetBuffer(UINT(i), IID_PPV_ARGS(&resource)); FAILED(hr))
-            return dx12_error(hr, "IDXGISwapChain::GetBuffer failed");
-
         sg::texture_description td;
         td.format = _desc.format;
         td.dimension = sg::texture_dimension::d2;
         td.width = _size[0];
         td.height = _size[1];
         td.usage = sg::texture_usage::render_target;
+
+        // A headless buffer is an ordinary owned texture, also readable — which is what makes a presented frame
+        // verifiable rather than merely non-crashing.
+        if (!_desc.is_windowed())
+        {
+            td.usage = sg::texture_usage::render_target | sg::texture_usage::copy_src;
+            auto owned = _ctx.create_dx12_texture(td, sg::allocation_info{});
+            CC_RETURN_IF_ERROR(owned);
+            _backbuffers.push_back(backbuffer{.texture = cc::move(owned.value()), .frame_fence_value = 0});
+            continue;
+        }
+
+        ComPtr<ID3D12Resource> resource;
+        if (HRESULT hr = _swapchain->GetBuffer(UINT(i), IID_PPV_ARGS(&resource)); FAILED(hr))
+            return dx12_error(hr, "IDXGISwapChain::GetBuffer failed");
 
         // Wrap the DXGI back buffer as a *borrowed* dx12_texture: DXGI owns the resource, so ~dx12_texture
         // drops our reference synchronously (the swapchain waits for the GPU before releasing). The render
@@ -171,15 +204,19 @@ sg::render_target_view dx12_swapchain::acquire_backbuffer()
 
     // Auto-resize to the window, but only the first acquire of each epoch checks.
     // That bounds resize, which drains the GPU, to once per epoch, so it never advances an epoch under the caller.
-    if (sg::epoch const epoch = _ctx.current_epoch(); epoch != _last_resize_epoch)
-    {
-        _last_resize_epoch = epoch;
-        if (tg::vec2i const client = client_size_of(_hwnd); client != _size)
-            if (auto r = resize(client); r.has_error())
-                fail(DXGI_ERROR_DEVICE_REMOVED, "swapchain resize failed");
-    }
+    // A headless chain has no window to follow, so it never resizes.
+    if (_desc.is_windowed())
+        if (sg::epoch const epoch = _ctx.current_epoch(); epoch != _last_resize_epoch)
+        {
+            _last_resize_epoch = epoch;
+            if (tg::vec2i const client = client_size_of(_hwnd); client != _size)
+                if (auto r = resize(client); r.has_error())
+                    fail(DXGI_ERROR_DEVICE_REMOVED, "swapchain resize failed");
+        }
 
-    _acquired_index = _swapchain->GetCurrentBackBufferIndex();
+    // DXGI decides which buffer is current; a headless chain rotates its own index at present.
+    if (_desc.is_windowed())
+        _acquired_index = _swapchain->GetCurrentBackBufferIndex();
     backbuffer const& bb = _backbuffers[_acquired_index];
 
     // Don't hand back a buffer whose previous frame is still in flight.
@@ -213,16 +250,24 @@ void dx12_swapchain::present()
     CC_ASSERT(_acquired, "present() without a matching acquire_backbuffer()");
     _acquired = false;
 
-    UINT const sync_interval = _desc.present_mode == sg::present_mode::vsync ? 1u : 0u;
-    UINT const flags = _tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u; // valid only with sync interval 0
-    if (HRESULT hr = _swapchain->Present(sync_interval, flags); FAILED(hr))
-        fail(hr, "IDXGISwapChain::Present failed");
+    if (_desc.is_windowed())
+    {
+        UINT const sync_interval = _desc.present_mode == sg::present_mode::vsync ? 1u : 0u;
+        UINT const flags = _tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u; // valid only with sync interval 0
+        if (HRESULT hr = _swapchain->Present(sync_interval, flags); FAILED(hr))
+            fail(hr, "IDXGISwapChain::Present failed");
+    }
 
     // Signal the present fence after the present is queued, so the next acquire of this index waits for it.
     ++_fence_value;
     if (HRESULT hr = _ctx._queue->Signal(_present_fence.Get(), _fence_value); FAILED(hr))
         fail(hr, "ID3D12CommandQueue::Signal (swapchain present fence) failed");
     _backbuffers[_acquired_index].frame_fence_value = _fence_value;
+
+    // With no DXGI chain to advance the index, rotating it here is what makes a headless chain cycle — the property
+    // sg's contract actually promises, and what the next acquire's fence wait is then gating on.
+    if (!_desc.is_windowed())
+        _acquired_index = (_acquired_index + 1u) % UINT(_backbuffers.size());
 }
 
 void dx12_swapchain::fail(HRESULT hr, char const* what)

@@ -51,6 +51,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/fwd.hh
     src/shaped-graphics/backends/dx12/dx12_common.hh
     src/shaped-graphics/backends/dx12/dx12_context.hh
+    src/shaped-graphics/backends/dx12/dx12_expected_messages.hh
     src/shaped-graphics/backends/dx12/dx12_epoch.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
     src/shaped-graphics/backends/dx12/dx12_barrier.hh
@@ -121,6 +122,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
+        tests/dx12-validation-broadcast-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc
         tests/dx12-completion-group-test.cc

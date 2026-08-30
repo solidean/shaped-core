@@ -7,6 +7,13 @@
 #include <shaped-graphics/present/swapchain.hh>
 
 /// DirectX 12 implementation of sg::swapchain over an IDXGISwapChain3, flip-discard model.
+///
+/// **A headless chain has no IDXGISwapChain3 at all.**
+/// DXGI needs a real presentation target, so there is nothing to create one over — the chain becomes `buffer_count`
+/// ordinary render-target textures and a present that signals the fence and rotates the index.
+/// That is an emulation, where the vulkan backend gets a real VkSwapchainKHR over VK_EXT_headless_surface; what both
+/// guarantee is the same, which is what sg's contract asks for: the frame completes, the chain cycles, and the
+/// presented buffer stays readable until its epoch retires.
 /// Each back buffer is wrapped in a dx12_texture with borrowed storage, so it flows through the normal render-pass / barrier path.
 /// The RTV is created on demand by the render pass.
 /// A dedicated present fence gates back-buffer reuse.
@@ -39,9 +46,10 @@ public:
 
     [[nodiscard]] sg::render_target_view acquire_backbuffer() override;
 
-    // Populates _backbuffers, one dx12_texture wrapper per buffer, from the current IDXGISwapChain3 at the current _size.
+    // Populates _backbuffers at the current _size: one wrapper per DXGI buffer, or one owned render-target texture
+    // per buffer on a headless chain.
     // Called at creation and after every ResizeBuffers.
-    // Returns an error when GetBuffer fails.
+    // Returns an error when GetBuffer or the texture allocation fails.
     [[nodiscard]] cc::result<cc::unit> build_backbuffers();
 
 protected:

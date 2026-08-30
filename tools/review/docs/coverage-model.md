@@ -101,6 +101,19 @@ It is reported, never enforced: a review is allowed to be unfinished, and rounds
 A change whose claim no longer meets net space is marked **superseded** and never deleted, so an entry that discussed it stays readable.
 In a `land-changes` review that mark is the evidence: the fix landed, so the hunk it was about is gone.
 
+## Re-pointing
+
+A change that survives the move keeps its id and gets a **new claim**.
+An id is derived from content and a claim from position, so a hunk the author never touched comes back identical at
+different line numbers — and a claim left in the old coordinates covers atoms that no longer exist while the ones
+that do go unaccounted.
+Gate 1 would then read red for a review that is complete, and nothing could clear it: the digest is already known,
+so every later `ingest` reuses the row rather than replacing it.
+
+So reuse re-points, in `ingest` as well as in `sync`, and both report how many claims moved.
+A superseded change is left alone, since it records what *was* claimed and re-pointing it would bring it back to
+life.
+
 ## Discharged is not the same as read
 
 A broad ask legitimately discharges whatever it names.

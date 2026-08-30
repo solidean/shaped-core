@@ -40,25 +40,10 @@ Bigger design intent lives in [structure.md](structure.md).
 
 Windowing:
 
-- `native_window_handle()` is a bare `void*` and null off Windows.
-  sg defers a platform-tagged handle struct until a second *consumer* exists (see its [TODO](../../shaped-graphics/docs/TODO.md)).
-  The vulkan swapchain landing is that moment, and gives the struct two real callers to be designed against.
-
-  What a `void*` can carry decides where presentation is possible at all:
-
-  | Platform | Needs | Fits one pointer |
-  |----------|-------|------------------|
-  | Windows  | `HWND` | yes |
-  | macOS    | `NSWindow*` | yes |
-  | X11      | `Display*` + `Window` | no |
-  | wayland  | `wl_display*` + `wl_surface*` | no |
-
-  So **Linux presentation needs the tagged struct whether or not wayland is in the picture** — X11 already needs two values.
-
-  The part that shapes the design: on Linux, X11-vs-wayland is a **runtime** choice, not a build-time one.
-  A single SDL build can carry both and picks per session (`SDL_GetCurrentVideoDriver`).
-  So the tag has to be a runtime discriminant that sg switches on, not a `#if` the way Windows and macOS could be.
-  SDL already exposes the pieces as window properties (`SDL_PROP_WINDOW_X11_DISPLAY_POINTER` / `..._X11_WINDOW_NUMBER`, `..._WAYLAND_DISPLAY_POINTER` / `..._WAYLAND_SURFACE_POINTER`).
+- **macOS has no `native_window()` mapping.**
+  `sg::window_platform` names win32, xlib, xcb and wayland, and nothing there covers cocoa.
+  A `CAMetalLayer` from `SDL_PROP_WINDOW_COCOA_WINDOW_POINTER` is what a metal backend would want, and there is no metal backend to design it against.
+  Until then a macOS window returns an invalid handle, which is honest — nothing there can present.
 
 - **wayland is currently off in practice.**
   [extern/sdl3](../../../../extern/sdl3/CMakeLists.txt) forces `SDL_WAYLAND ON`, but SDL's wayland backend pkg-checks for `wayland-client`, `wayland-egl`, `wayland-cursor`, `egl` and `xkbcommon` —

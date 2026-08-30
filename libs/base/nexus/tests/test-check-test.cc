@@ -1,4 +1,6 @@
 #include <clean-core/error/exception.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_debug_string.hh>
 #include <nexus/test.hh>
@@ -1345,4 +1347,37 @@ TEST("check - a passing test with many checks is never capped", no_scheduler)
 
     CHECK(exec.count_failed_tests() == 0);
     CHECK(exec.count_total_checks() == 5000);
+}
+
+// REQUIRED_VALUE: REQUIRE the container holds a value, then evaluate to it.
+TEST("nexus - REQUIRED_VALUE yields the held value")
+{
+    auto const opt = cc::optional<int>(42);
+    CHECK(REQUIRED_VALUE(opt) == 42);
+
+    auto const res = cc::result<cc::string>(cc::string("held"));
+    CHECK(REQUIRED_VALUE(res) == "held");
+}
+
+namespace
+{
+// Move-only, so it only compiles through REQUIRED_VALUE if the value is moved out rather than copied.
+struct move_only_payload
+{
+    int value = 0;
+
+    explicit move_only_payload(int v) : value(v) {}
+    move_only_payload(move_only_payload&&) = default;
+    move_only_payload& operator=(move_only_payload&&) = default;
+    move_only_payload(move_only_payload const&) = delete;
+    move_only_payload& operator=(move_only_payload const&) = delete;
+};
+} // namespace
+
+TEST("nexus - REQUIRED_VALUE moves out of a move-only payload")
+{
+    // The reason the helper returns by value rather than decltype(auto): a prvalue argument's value must be moved
+    // out, and the result must not reference a temporary that dies at the end of this full-expression.
+    auto held = REQUIRED_VALUE(cc::result<move_only_payload>(move_only_payload(7)));
+    CHECK(held.value == 7);
 }

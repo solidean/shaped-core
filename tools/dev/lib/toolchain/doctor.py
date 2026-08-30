@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import clangd
+from . import clangd, graphics
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
 from ..core.process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
@@ -168,10 +168,37 @@ def _exe_version(exe: str) -> tuple[bool, str]:
         return False, f"failed to run {exe} ({e})"
 
 
-def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
-    """Report the compiler `preset` (plus any pinned --toolset) actually configures.
+def resolve_cxx(root: Path, preset: Preset) -> tuple[str | None, str | None]:
+    """The C++ compiler `preset` (plus any pinned --toolset) configures, as (path, error).
 
-    Resolves exactly what configure will use — a --toolset-pinned clang/gcc binary, the preset's CMAKE_CXX_COMPILER cache variable, or the MSVC env for cl — and reports its path and --version.
+    Resolves exactly what configure will use, in configure's own order: a --toolset-pinned binary, the preset's
+    CMAKE_CXX_COMPILER cache variable, then a bare PATH probe.
+    Returns (None, reason) when it cannot be resolved, and (None, None) for MSVC, whose compiler is reached through an
+    environment rather than a path — a caller wanting to *run* the compiler has nothing to run there.
+    """
+    from . import toolset as ts
+
+    if preset.family == "msvc":
+        return (None, None)
+
+    cxx: str | None = None
+    if preset.toolset:
+        try:
+            cxx = ts.compiler_defines(preset, root).get("CMAKE_CXX_COMPILER")
+        except ts.ToolsetError as e:
+            return (None, str(e))
+    if cxx is None:
+        cxx = resolve_cache_variable(root, preset.configure_preset, "CMAKE_CXX_COMPILER")
+    if cxx is None:
+        cxx = shutil.which("clang++") or shutil.which("g++")
+    if cxx is None:
+        return (None, "no C++ compiler resolved for this preset")
+    return (cxx, None)
+
+
+def _compiler_check(root: Path, preset: Preset, cxx: str | None, error: str | None) -> tuple[str, bool, str]:
+    """Report the compiler `preset` resolved to, or why it did not resolve.
+
     So a missing or wrong toolchain shows up here rather than as a confusing configure failure.
     The report reflects the build compiler, not whatever bare clang++/g++ happens to sit on PATH.
     """
@@ -189,18 +216,8 @@ def _compiler_check(root: Path, preset: Preset) -> tuple[str, bool, str]:
         ok = env is not None or shutil.which("cl") is not None or shutil.which("clang-cl") is not None
         return ("compiler", ok, "MSVC env reachable" if ok else "no MSVC/clang-cl compiler found")
 
-    cxx: str | None = None
-    if preset.toolset:
-        try:
-            cxx = ts.compiler_defines(preset, root).get("CMAKE_CXX_COMPILER")
-        except ts.ToolsetError as e:
-            return ("compiler", False, str(e))
     if cxx is None:
-        cxx = resolve_cache_variable(root, preset.configure_preset, "CMAKE_CXX_COMPILER")
-    if cxx is None:
-        cxx = shutil.which("clang++") or shutil.which("g++")
-    if cxx is None:
-        return ("compiler", False, "no C++ compiler resolved for this preset")
+        return ("compiler", False, error or "no C++ compiler resolved for this preset")
     ok, detail = _exe_version(cxx)
     return ("compiler", ok, detail)
 
@@ -320,11 +337,15 @@ def doctor(
     ok, detail = _tool_version("ninja")
     checks.append(("ninja", ok, detail))
 
+    # Resolved once: the compiler line reports it, and the graphics header probes run through it, so both describe the
+    # same toolchain configure will use — which is the whole answer on a machine whose headers live in a sysroot.
+    cxx, cxx_error = resolve_cxx(root, preset) if preset is not None else (None, None)
+
     if preset is not None:
         # Emscripten's real compiler is emcc, validated by _emscripten_checks below.
         # Skip the native compiler line for it, so it does not misreport a host clang++/g++.
         if preset.family != "emscripten":
-            checks.append(_compiler_check(root, preset))
+            checks.append(_compiler_check(root, preset, cxx, cxx_error))
     elif platform.system() == "Windows":
         env = msvc_env()
         # None means either cl.exe already on PATH (fine) or not found.
@@ -354,6 +375,9 @@ def doctor(
 
     # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
     checks.extend(_emscripten_checks(emsdk_path))
+
+    # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
+    checks.extend(graphics.checks(root, cxx))
 
     checks.extend(_clangd_checks(root))
 

@@ -290,21 +290,34 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
         state.positionals.push_back(cc::string(token));
 
     // One filter argument may carry several, comma-separated, which is the Catch2 convention.
+    // A `\,` is an escaped comma rather than a separator, also as Catch2 has it.
+    // Without it a test whose name contains a comma cannot be addressed at all, and an exact name is the only way to
+    // select a test the schedule would otherwise skip.
     // Empty pieces are dropped: a filter that matches everything is never what a stray comma meant.
     for (auto const& value : state.positionals)
     {
         auto const arg = cc::string_view(value);
-        auto start = isize(0);
-        for (auto end = arg.find(','); end >= 0; end = arg.find(',', start))
+        cc::string filter;
+        auto const flush = [&]
         {
-            if (auto const filter = arg.subview({.start = start, .end = end}); !filter.empty())
-                config.filters.emplace_back(filter);
+            if (!filter.empty())
+                config.filters.push_back(filter);
+            filter.clear();
+        };
 
-            start = end + 1;
+        for (isize i = 0; i < arg.size(); ++i)
+        {
+            if (arg[i] == '\\' && i + 1 < arg.size() && arg[i + 1] == ',')
+            {
+                filter += ',';
+                ++i; // the comma is data, not a separator
+            }
+            else if (arg[i] == ',')
+                flush();
+            else
+                filter += arg[i];
         }
-
-        if (auto const filter = arg.subview(start); !filter.empty())
-            config.filters.emplace_back(filter);
+        flush();
     }
 
     // Everything after -- arrives already split; --test-args carries one string that still needs tokenizing.

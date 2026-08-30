@@ -11,6 +11,7 @@ add_library(shaped-shader-compiler-dxc
     src/shaped-shader-compiler-dxc/impl/command_line_args.cc
     src/shaped-shader-compiler-dxc/impl/include_handler.cc
     src/shaped-shader-compiler-dxc/impl/reflection.cc
+    src/shaped-shader-compiler-dxc/impl/spirv_reflection.cc
 )
 
 # Public headers (co-located in src/). impl/ headers are internal — reachable via the src/ include
@@ -40,7 +41,7 @@ target_include_directories(shaped-shader-compiler-dxc
 
 # shaped-graphics provides sg::compiled_shader (public API surface). DXC is an implementation detail
 # kept behind the pimpl, so it links PRIVATE.
-target_link_libraries(shaped-shader-compiler-dxc PUBLIC shaped-graphics PRIVATE dxc)
+target_link_libraries(shaped-shader-compiler-dxc PUBLIC shaped-graphics PRIVATE dxc spirv-reflect)
 
 # Names impl/dxc_common.hh, this library's SDK gate, on the same reasoning as the dx12 backend's DX12 tier.
 # Nothing extends this tier, and nothing should: a gate belongs at the end of a header list.
@@ -59,9 +60,18 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/preprocess-test.cc
         tests/compile-test.cc
-        tests/reflect-raytracing-test.cc
-        tests/shader_cache-test.cc
     )
+
+    # Both of these compile to DXIL and assert what comes back from its reflection container, which needs the Windows
+    # SDK's d3d12shader.h — a header the Linux DXC release does not ship.
+    # The SPIR-V counterparts belong beside them once the shared test shaders carry [[vk::binding]] annotations; until
+    # then compile-test.cc's own SPIR-V case is the cross-platform coverage.
+    if(WIN32)
+        target_sources(shaped-shader-compiler-dxc-test PRIVATE
+            tests/reflect-raytracing-test.cc
+            tests/shader_cache-test.cc
+        )
+    endif()
 
     target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-shader-compiler-dxc nexus)
 
@@ -91,9 +101,14 @@ if(SC_BUILD_TESTS)
     # Stage the DXC runtime DLLs (dxcompiler + its dxil.dll signer) next to the test binary so it loads
     # them at run time. DXC_RUNTIME_DLLS is set by extern/dxc; dxil.dll isn't the imported target, so
     # $<TARGET_RUNTIME_DLLS> alone would miss it.
-    add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
-        COMMAND_EXPAND_LISTS
-    )
+    #
+    # The list is empty off Windows — there is no signer, and the loader finds the .so through the imported target —
+    # and copy_if_different with no sources is a usage error rather than a no-op, so the emptiness is the guard.
+    if(DXC_RUNTIME_DLLS)
+        add_custom_command(TARGET shaped-shader-compiler-dxc-test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:shaped-shader-compiler-dxc-test>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()

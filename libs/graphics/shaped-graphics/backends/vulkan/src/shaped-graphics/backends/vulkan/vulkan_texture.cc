@@ -2,184 +2,63 @@
 // The texture type itself is header-only, so the create path, the format/usage maps and the destructor live here.
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_format.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 
 namespace sg::backend::vulkan
 {
-namespace
+
+std::shared_ptr<vulkan_texture> vulkan_context::register_if_transient(std::shared_ptr<vulkan_texture> texture,
+                                                                      sg::lifetime_scope scope)
 {
-VkFormat to_vk_format(sg::pixel_format f)
-{
-    switch (f)
-    {
-    case sg::pixel_format::undefined:
-        return VK_FORMAT_UNDEFINED;
-
-    case sg::pixel_format::r8_unorm:
-        return VK_FORMAT_R8_UNORM;
-    case sg::pixel_format::r8_snorm:
-        return VK_FORMAT_R8_SNORM;
-    case sg::pixel_format::r8_uint:
-        return VK_FORMAT_R8_UINT;
-    case sg::pixel_format::r8_sint:
-        return VK_FORMAT_R8_SINT;
-    case sg::pixel_format::rg8_unorm:
-        return VK_FORMAT_R8G8_UNORM;
-    case sg::pixel_format::rg8_snorm:
-        return VK_FORMAT_R8G8_SNORM;
-    case sg::pixel_format::rg8_uint:
-        return VK_FORMAT_R8G8_UINT;
-    case sg::pixel_format::rg8_sint:
-        return VK_FORMAT_R8G8_SINT;
-    case sg::pixel_format::rgba8_unorm:
-        return VK_FORMAT_R8G8B8A8_UNORM;
-    case sg::pixel_format::rgba8_snorm:
-        return VK_FORMAT_R8G8B8A8_SNORM;
-    case sg::pixel_format::rgba8_uint:
-        return VK_FORMAT_R8G8B8A8_UINT;
-    case sg::pixel_format::rgba8_sint:
-        return VK_FORMAT_R8G8B8A8_SINT;
-    case sg::pixel_format::rgba8_unorm_srgb:
-        return VK_FORMAT_R8G8B8A8_SRGB;
-    case sg::pixel_format::bgra8_unorm:
-        return VK_FORMAT_B8G8R8A8_UNORM;
-    case sg::pixel_format::bgra8_unorm_srgb:
-        return VK_FORMAT_B8G8R8A8_SRGB;
-
-    case sg::pixel_format::r16_float:
-        return VK_FORMAT_R16_SFLOAT;
-    case sg::pixel_format::r16_uint:
-        return VK_FORMAT_R16_UINT;
-    case sg::pixel_format::r16_sint:
-        return VK_FORMAT_R16_SINT;
-    case sg::pixel_format::rg16_float:
-        return VK_FORMAT_R16G16_SFLOAT;
-    case sg::pixel_format::rg16_uint:
-        return VK_FORMAT_R16G16_UINT;
-    case sg::pixel_format::rg16_sint:
-        return VK_FORMAT_R16G16_SINT;
-    case sg::pixel_format::rgba16_float:
-        return VK_FORMAT_R16G16B16A16_SFLOAT;
-    case sg::pixel_format::rgba16_uint:
-        return VK_FORMAT_R16G16B16A16_UINT;
-    case sg::pixel_format::rgba16_sint:
-        return VK_FORMAT_R16G16B16A16_SINT;
-
-    case sg::pixel_format::r32_float:
-        return VK_FORMAT_R32_SFLOAT;
-    case sg::pixel_format::r32_uint:
-        return VK_FORMAT_R32_UINT;
-    case sg::pixel_format::r32_sint:
-        return VK_FORMAT_R32_SINT;
-    case sg::pixel_format::rg32_float:
-        return VK_FORMAT_R32G32_SFLOAT;
-    case sg::pixel_format::rg32_uint:
-        return VK_FORMAT_R32G32_UINT;
-    case sg::pixel_format::rg32_sint:
-        return VK_FORMAT_R32G32_SINT;
-    case sg::pixel_format::rgba32_float:
-        return VK_FORMAT_R32G32B32A32_SFLOAT;
-    case sg::pixel_format::rgba32_uint:
-        return VK_FORMAT_R32G32B32A32_UINT;
-    case sg::pixel_format::rgba32_sint:
-        return VK_FORMAT_R32G32B32A32_SINT;
-
-    case sg::pixel_format::rgb10a2_unorm:
-        return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-    case sg::pixel_format::rg11b10_float:
-        return VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-
-    case sg::pixel_format::depth16_unorm:
-        return VK_FORMAT_D16_UNORM;
-    case sg::pixel_format::depth32_float:
-        return VK_FORMAT_D32_SFLOAT;
-    case sg::pixel_format::depth32_float_stencil8:
-        return VK_FORMAT_D32_SFLOAT_S8_UINT;
-
-    case sg::pixel_format::bc1_rgba_unorm:
-        return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-    case sg::pixel_format::bc1_rgba_unorm_srgb:
-        return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
-    case sg::pixel_format::bc2_unorm:
-        return VK_FORMAT_BC2_UNORM_BLOCK;
-    case sg::pixel_format::bc2_unorm_srgb:
-        return VK_FORMAT_BC2_SRGB_BLOCK;
-    case sg::pixel_format::bc3_unorm:
-        return VK_FORMAT_BC3_UNORM_BLOCK;
-    case sg::pixel_format::bc3_unorm_srgb:
-        return VK_FORMAT_BC3_SRGB_BLOCK;
-    case sg::pixel_format::bc4_r_unorm:
-        return VK_FORMAT_BC4_UNORM_BLOCK;
-    case sg::pixel_format::bc4_r_snorm:
-        return VK_FORMAT_BC4_SNORM_BLOCK;
-    case sg::pixel_format::bc5_rg_unorm:
-        return VK_FORMAT_BC5_UNORM_BLOCK;
-    case sg::pixel_format::bc5_rg_snorm:
-        return VK_FORMAT_BC5_SNORM_BLOCK;
-    case sg::pixel_format::bc6h_rgb_ufloat:
-        return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-    case sg::pixel_format::bc6h_rgb_sfloat:
-        return VK_FORMAT_BC6H_SFLOAT_BLOCK;
-    case sg::pixel_format::bc7_rgba_unorm:
-        return VK_FORMAT_BC7_UNORM_BLOCK;
-    case sg::pixel_format::bc7_rgba_unorm_srgb:
-        return VK_FORMAT_BC7_SRGB_BLOCK;
-    }
-
-    CC_ASSERT(false, "unhandled pixel_format in to_vk_format");
-    return VK_FORMAT_UNDEFINED;
+    if (scope == sg::lifetime_scope::transient)
+        _transient_expiring_textures.lock([&](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+                                          { v.push_back(texture); });
+    return texture;
 }
 
-VkImageType to_vk_image_type(sg::texture_dimension d)
+void vulkan_texture::release_storage() const
 {
-    switch (d)
-    {
-    case sg::texture_dimension::d1:
-        return VK_IMAGE_TYPE_1D;
-    case sg::texture_dimension::d2:
-        return VK_IMAGE_TYPE_2D;
-    case sg::texture_dimension::d3:
-        return VK_IMAGE_TYPE_3D;
-    }
-    return VK_IMAGE_TYPE_2D;
+    // Stage the GPU handles and finalizers for deletion once the current epoch retires.
+    // Idempotent: the handles are cleared here, so expiry and destruction cannot stage the same ones twice.
+    if (_image == VK_NULL_HANDLE && _memory == VK_NULL_HANDLE && _finalizers.empty())
+        return;
+
+    vulkan_expiring_resource expiring;
+    // A borrowed image is not ours to destroy — its owner outlives this wrapper by contract — so only the finalizers
+    // are staged for it.
+    if (_owns_image)
+        expiring.image = _image;
+    expiring.memory = _memory;
+    expiring.finalizers = cc::move(_finalizers);
+
+    // The transfer queue may still be copying into or out of this image, which the epoch says nothing about.
+    // The same gate vulkan_buffer takes, and for the same reason — see its release_storage.
+    auto const upload_pending = _pending_async_upload_value.load(cc::memory_order_acquire);
+    auto const stream_pending = _pending_stream_copy_value.load(cc::memory_order_acquire);
+    auto const download_pending = _pending_async_download_value.load(cc::memory_order_acquire);
+    auto const stream_download_pending = _pending_stream_download_value.load(cc::memory_order_acquire);
+    auto const highest_upload = upload_pending > stream_pending ? upload_pending : stream_pending;
+    auto const highest_download = download_pending > stream_download_pending ? download_pending : stream_download_pending;
+    if (highest_upload != 0 && _upload_group != nullptr)
+        expiring.copy_wait = {.group = _upload_group, .value = highest_upload};
+    else if (highest_download != 0 && _download_group != nullptr)
+        expiring.copy_wait = {.group = _download_group, .value = highest_download};
+
+    _image = VK_NULL_HANDLE;
+    _memory = VK_NULL_HANDLE;
+    _ctx.schedule_deferred_deletion(cc::move(expiring));
 }
 
-VkImageUsageFlags to_vk_image_usage(sg::texture_usages u)
+void vulkan_texture::on_expired() const
 {
-    VkImageUsageFlags flags = 0;
-    if (u.has(sg::texture_usage::copy_src))
-        flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    if (u.has(sg::texture_usage::copy_dst))
-        flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (u.has(sg::texture_usage::readonly_texture))
-        flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-    if (u.has(sg::texture_usage::readwrite_texture))
-        flags |= VK_IMAGE_USAGE_STORAGE_BIT;
-    if (u.has(sg::texture_usage::render_target))
-        flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (u.has(sg::texture_usage::depth_stencil))
-        flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-    // Vulkan rejects a zero-usage image, so a usage-less texture keeps a benign SAMPLED bit and stays valid.
-    // Same shape as the buffer path's transfer-dst fallback.
-    if (flags == 0)
-        flags = VK_IMAGE_USAGE_SAMPLED_BIT;
-    return flags;
+    release_storage();
 }
-} // namespace
 
 vulkan_texture::~vulkan_texture()
 {
-    // Stage the GPU handles and finalizers for deletion once the current epoch retires.
-    if (_image != VK_NULL_HANDLE || _memory != VK_NULL_HANDLE || !_finalizers.empty())
-    {
-        vulkan_expiring_resource expiring;
-        expiring.image = _image;
-        expiring.memory = _memory;
-        expiring.finalizers = cc::move(_finalizers);
-        _ctx.schedule_deferred_deletion(cc::move(expiring));
-    }
-}
+    release_storage();
+} // no-op if expire() already released the storage
 
 cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
                                                                         sg::allocation_info const& alloc)
@@ -198,6 +77,16 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     if (desc.is_cube)
         layers *= 6;
 
+    // A texture any async transfer can touch is shared CONCURRENTLY between the graphics and transfer families, for
+    // the same reason a buffer is: an ownership transfer would serialize the concurrency async transfer provides.
+    //
+    // It is not free the way a buffer's is — some hardware disables lossless compression for a concurrently-shared
+    // image — which is why it is scoped to textures whose usage says a transfer is possible at all, rather than
+    // applied to every image.
+    u32 const families[2] = {_queue_family_index, _transfer_queue_family};
+    bool const shared = has_dedicated_transfer_queue()
+                     && desc.usage.has_any(sg::texture_usage::copy_src | sg::texture_usage::copy_dst);
+
     auto const image_info = VkImageCreateInfo{
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .flags = VkImageCreateFlags(desc.is_cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0),
@@ -209,11 +98,9 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         .samples = VkSampleCountFlagBits(desc.sample_count), // enum values equal the sample counts
         .tiling = VK_IMAGE_TILING_OPTIMAL,
         .usage = to_vk_image_usage(desc.usage),
-        // TODO: the streaming usages need VK_SHARING_MODE_CONCURRENT over the graphics + transfer
-        // families — EXCLUSIVE cannot express two families holding a resource at once, and ownership
-        // transfer serializes the very concurrency streaming exists to allow.
-        // Vulkan is the strict backend here: dx12 needs a flag only for a region inside a subresource.
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .sharingMode = shared ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = shared ? 2u : 0u,
+        .pQueueFamilyIndices = shared ? families : nullptr,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
@@ -250,6 +137,7 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
         return vulkan_error(r, "vkBindImageMemory failed");
     }
 
-    return std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, memory);
+    return vulkan_texture_handle(register_if_transient(
+        std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, memory), alloc.scope));
 }
 } // namespace sg::backend::vulkan

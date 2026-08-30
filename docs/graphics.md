@@ -40,7 +40,7 @@ See [imgui.md](../libs/graphics/shaped-rendering/docs/imgui.md).
 
 And sr is where the family meets the OS.
 `sr::window_system` / `sr::window` are the **window abstraction**, backed by SDL3 and exposing none of it.
-A window's `native_window_handle()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
+A window's `native_window()` is what `sg::swapchain_description` consumes, so a windowed renderer can be written against sr alone.
 Multiple windows are supported today, which is the groundwork for imgui docking and multiple viewports.
 
 - **SDL3 is downloaded on demand**, not vendored.
@@ -98,5 +98,8 @@ All three build and test through the repo driver like every other library:
 uv run dev.py test "sg "     # just the shaped-graphics tests (also "sr ", "sv ")
 uv run dev.py build          # the whole repo, incl. platform-enabled backends
 ```
+
+Which backend, window and shader compiler a build ends up with is decided by what the machine has, and all of it is optional.
+[requirements.md](requirements.md#graphics--windowing) is the table of what each piece needs and what its absence costs; `uv run dev.py doctor` reports the machine's own answer.
 
 [guides/building-and-testing.md](guides/building-and-testing.md) has the full workflow, and [libraries.md](libraries.md) the full library catalog.

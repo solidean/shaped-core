@@ -110,14 +110,20 @@ u32 impl::backend_window_id(window const& w)
     if (windows == nullptr)
         return 0;
 
+    // SDL_GetWindows hands back an array the caller owns, not a view into SDL's own storage.
+    auto id = u32(0);
     for (int i = 0; i < count; ++i)
     {
         auto* const back_pointer
             = SDL_GetPointerProperty(SDL_GetWindowProperties(windows[i]), back_pointer_property, nullptr);
         if (back_pointer == &w)
-            return u32(SDL_GetWindowID(windows[i]));
+        {
+            id = u32(SDL_GetWindowID(windows[i]));
+            break;
+        }
     }
-    return 0;
+    SDL_free(windows);
+    return id;
 }
 
 window::~window()
@@ -129,15 +135,37 @@ window::~window()
     SDL_DestroyWindow(as_sdl(_native_window));
 }
 
-void* window::native_window_handle() const
+sg::native_window window::native_window() const
 {
-#if defined(SDL_PLATFORM_WIN32)
-    return SDL_GetPointerProperty(SDL_GetWindowProperties(as_sdl(_native_window)), SDL_PROP_WINDOW_WIN32_HWND_POINTER,
-                                  nullptr);
-#else
-    // X11 wants a display plus an XID and wayland a display plus a surface — neither fits a single pointer.
-    return nullptr;
-#endif
+    auto const props = SDL_GetWindowProperties(as_sdl(_native_window)); // an SDL_PropertiesID, not a pointer
+
+    // Which set of properties carries the window is a runtime fact rather than a compile-time one: one SDL3 build
+    // drives X11 and wayland both, and picks per session.
+    // So the driver name decides, and an unrecognized one leaves the result invalid rather than guessing.
+    auto const driver = cc::string_view(SDL_GetCurrentVideoDriver());
+
+    sg::native_window win;
+    win.client_size = tg::vec2i(_width, _height); // wayland has no other source for it
+    if (driver == "windows")
+    {
+        win.platform = sg::window_platform::win32;
+        win.handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+    }
+    else if (driver == "x11")
+    {
+        // xlib rather than xcb: SDL hands out the Display*, and an xcb connection derived from it would outlive
+        // nothing we control.
+        win.platform = sg::window_platform::xlib;
+        win.display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+        win.window_id = u64(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    }
+    else if (driver == "wayland")
+    {
+        win.platform = sg::window_platform::wayland;
+        win.display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+        win.handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    }
+    return win;
 }
 
 // The setters below return void, so a platform refusal cannot be reported — it is a bug or a broken driver, not something a caller can act on.
@@ -491,7 +519,7 @@ void window::send_to_back()
     // Win32 directly: SDL has SDL_RaiseWindow and no counterpart to lower a window.
     // Unchecked because a window manager declining is an ordinary outcome, not an error worth propagating.
 #if defined(CC_OS_WINDOWS)
-    auto* const hwnd = static_cast<HWND>(this->native_window_handle());
+    auto* const hwnd = static_cast<HWND>(this->native_window().handle);
     if (hwnd != nullptr)
         (void)SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 #endif

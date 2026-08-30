@@ -163,9 +163,13 @@ target_compile_options(shaped-graphics
 # Vulkan SDK on a non-web target. Enabled backends are collected so the test binary link-checks them.
 #
 # _sg_test_drivers is the narrower list: the backends that also register an entry-point driver in the API test
-# binary. It is not the same question as "does this backend build" — vulkan builds wherever the SDK is, and its
-# driver stays unregistered while its transfer ops abort (see tests/backends/vulkan-entry.cc). A backend that
-# builds without registering can invoke nothing, so it must not switch the cross-backend API tests on.
+# binary. It is not the same question as "does this backend build" — a backend that builds without registering can
+# invoke nothing, so it must not switch the cross-backend API tests on.
+#
+# A backend still being built out registers but disables its driver, which is what makes its two test flags do
+# different jobs: registering builds the per-invocable aliases, so one API test runs against it by being named
+# exactly, while nx::config::disabled keeps a full sweep out of the seams that still abort.
+# Both backends are past that now and both sweep. See tests/backends/vulkan-entry.cc.
 set(_sg_backends "")
 set(_sg_test_drivers "")
 
@@ -181,6 +185,7 @@ if(NOT EMSCRIPTEN)
     if(Vulkan_FOUND)
         add_subdirectory(backends/vulkan)
         list(APPEND _sg_backends shaped-graphics-vulkan)
+        list(APPEND _sg_test_drivers vulkan)
     else()
         message(STATUS "shaped-graphics: Vulkan SDK not found, skipping the vulkan backend")
     endif()
@@ -215,7 +220,7 @@ if(SC_BUILD_TESTS)
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
     # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
-    # a compiled-but-unregistered backend leaves all 133 invocables orphaned, which fails the binary.
+    # a compiled-but-unregistered backend leaves every invocable orphaned (100+ of them), which fails the binary.
     #
     # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
     # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
@@ -233,6 +238,9 @@ if(SC_BUILD_TESTS)
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
             tests/transfer/download-async-test.cc
+            tests/transfer/texture-async-test.cc
+            tests/transfer/overlapping-readback-test.cc
+            tests/barrier/concurrent-layout-test.cc
             tests/transfer/stream-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc
@@ -243,6 +251,7 @@ if(SC_BUILD_TESTS)
             tests/error-handling/error-handling-test.cc
             tests/raytracing/raytracing-test.cc
             tests/query/query-test.cc
+            tests/present/present-test.cc
         )
         if(WIN32)
             target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)

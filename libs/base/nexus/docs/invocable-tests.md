@@ -136,6 +136,16 @@ Orphan invocable tests (declared but never invoked):
 So you cannot declare an invocable test and forget to wire it into a driver.
 The check is silent under any filter — `dev.py test "<pattern>"`, `-c`, `--manual`, and so on.
 
+**An invocable an alias can reach is exempt**, because the mistake being caught is *nothing can run this* rather than *nothing ran this*.
+A driver may be deliberately `nx::config::disabled` while it is still being built out.
+Registering it is what defines the aliases, so every one of its invocables stays runnable by name.
+Disabling it keeps a sweep out of the parts it has not reached yet.
+Those invocables are parked rather than unwired.
+An invocable with no alias and no invocation is still an orphan, which is the wiring mistake this exists for.
+
+shaped-graphics' vulkan backend was the worked case, through the whole of its build-out.
+[`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc) records what the toggle bought and when it came off.
+
 ## Patterns
 
 - **Backend matrix** — one driver per backend, each invoking on the backend handle, as above.

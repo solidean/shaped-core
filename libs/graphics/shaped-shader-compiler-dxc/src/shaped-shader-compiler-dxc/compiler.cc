@@ -141,12 +141,24 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
         FAILED(hr) || !object || object->GetBufferSize() == 0)
         return cc::error("shaped-shader-compiler-dxc: DXC produced no object bytecode");
 
-    auto reflected = impl::reflect(_state->utils.Get(), result, desc.stage, desc.entry_point);
+    // Reflection comes from wherever the target puts it: DXIL carries it in a container beside the bytecode, SPIR-V
+    // carries it in the module itself.
+    auto const object_bytes
+        = cc::span<byte const>(static_cast<byte const*>(object->GetBufferPointer()), isize(object->GetBufferSize()));
+    auto reflected = options.target == compile_target::spirv
+                       ? impl::reflect_spirv(object_bytes, desc.stage, desc.entry_point)
+#ifdef CC_OS_WINDOWS
+                       : impl::reflect(_state->utils.Get(), result, desc.stage, desc.entry_point);
+#else
+                       : cc::result<impl::reflected_shader>(
+                             cc::error("DXIL reflection needs the Windows SDK's d3d12shader.h, which the Linux DXC "
+                                       "release does not ship — compile to SPIR-V instead"));
+#endif
     CC_RETURN_IF_ERROR(reflected);
 
     sg::compiled_shader shader;
     shader.stage = desc.stage;
-    shader.format = sg::shader_format::dxil;
+    shader.format = options.target == compile_target::spirv ? sg::shader_format::spirv : sg::shader_format::dxil;
     shader.entry_point = desc.entry_point;
     auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(object->GetBufferPointer()),
                                             isize(object->GetBufferSize()));

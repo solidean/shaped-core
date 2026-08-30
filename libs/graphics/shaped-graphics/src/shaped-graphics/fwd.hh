@@ -176,6 +176,8 @@ class buffer; // a typed buffer facade (see resource/buffer.hh)
 
 // Render-target / depth-stencil views (see resource/views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
+enum class window_platform : u8;
+struct native_window;
 class render_target_view;
 class depth_stencil_view;
 

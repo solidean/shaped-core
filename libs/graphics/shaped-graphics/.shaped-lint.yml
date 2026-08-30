@@ -47,5 +47,10 @@ rules:
   # =========================================================================================================
 
   - kind: allow-include
+    value: <shared_mutex>
+    reason: no cc:: shared/exclusive lock yet — docs/TODO.md records the same gap for render routines, which want cc::shared_mutex<T> next to cc::mutex<T>. Move this there when it lands
+    files: backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_driver_lock.hh
+
+  - kind: allow-include
     value: <atomic>
     reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"
