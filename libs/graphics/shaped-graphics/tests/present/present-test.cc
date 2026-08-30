@@ -28,9 +28,10 @@ INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_han
     if (!ctx->supports_headless_present())
         SKIP("this backend cannot present headlessly");
 
-    auto swapchain = ctx->create_swapchain({.buffer_count = k_buffers,
-                                            .format = sg::pixel_format::bgra8_unorm,
-                                            .headless_extent = tg::vec2i(k_extent, k_extent)});
+    // Designators must follow declaration order: headless_extent is declared before buffer_count.
+    auto swapchain = ctx->create_swapchain({.headless_extent = tg::vec2i(k_extent, k_extent),
+                                            .buffer_count = k_buffers,
+                                            .format = sg::pixel_format::bgra8_unorm});
     REQUIRE(swapchain != nullptr);
     CHECK(!swapchain->is_windowed());
 
