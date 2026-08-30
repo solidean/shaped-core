@@ -203,7 +203,6 @@ if(SC_BUILD_TESTS)
         tests/texture/texture-test.cc
         tests/texture/texture-view-test.cc
         tests/transfer/bytes_future-test.cc
-        tests/transfer/overlapping-readback-test.cc
         tests/transfer/stream_handle-test.cc
         tests/transfer/transfer_scheduler-test.cc
         tests/binding/binding-test.cc
@@ -213,7 +212,6 @@ if(SC_BUILD_TESTS)
         tests/pipeline/raster_pipeline-test.cc
         tests/sampler/sampler-test.cc
         tests/barrier/access_state-test.cc
-        tests/barrier/concurrent-layout-test.cc
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
@@ -241,6 +239,8 @@ if(SC_BUILD_TESTS)
             tests/transfer/upload-async-test.cc
             tests/transfer/download-async-test.cc
             tests/transfer/texture-async-test.cc
+            tests/transfer/overlapping-readback-test.cc
+            tests/barrier/concurrent-layout-test.cc
             tests/transfer/stream-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc

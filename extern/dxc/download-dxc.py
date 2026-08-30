@@ -129,6 +129,12 @@ def main() -> int:
 
     # The Windows release lays its members out per architecture; the Linux one is flat and ships x86_64 only.
     is_windows = sys.platform == "win32"
+    if not is_windows and host_arch() != "x64":
+        # Upstream publishes no arm64 Linux binary, so there is nothing to install rather than something to fail on.
+        # Installing the x86_64 one anyway is worse than skipping: CMake takes the presence of .install as "DXC is
+        # available" and every dependent target then fails to link against a foreign-architecture .so.
+        print(f"dxc: no {platform.machine()} linux binary published upstream — skipping (DXC stays unavailable)")
+        return 0
     arch = host_arch() if is_windows else "x86_64"
     print(f"downloading {up.name} {up.tag} ({up.asset}, {arch}) ...", flush=True)
     request = urllib.request.Request(up.url, headers={"User-Agent": "shaped-core-dxc-fetch"})
