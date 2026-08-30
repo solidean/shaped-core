@@ -41,6 +41,27 @@ struct sg::texture_description
 
     texture_usages usage = {};
 
+    /// The layout the texture rests in before anything has used it; nullopt derives one from `usage`.
+    ///
+    /// A texture has to start somewhere, and "nowhere" is not available: Vulkan creates an image in
+    /// VK_IMAGE_LAYOUT_UNDEFINED, which cannot be the *destination* of a barrier, so a tracker that rests textures
+    /// there has no layout to hand one list back to while another is still recording.
+    /// The backend therefore transitions the texture into this layout once, before the first list to touch it runs.
+    ///
+    /// Set it where the resting layout is known and the derivation would guess worse — a texture that is sampled far
+    /// more often than it is written, say.
+    /// `undefined` and `present` are rejected: the first is the state this exists to leave, and the second belongs to
+    /// a swapchain image rather than to anything create_texture makes.
+    ///
+    /// dx12 ignores it today.
+    /// A D3D12 resource is created in COMMON, which is `general`, so it already has a real resting layout and needs no
+    /// initial transition — see libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+    cc::optional<texture_layout> initial_layout = {};
+
+    /// `initial_layout`, or the layout derived from `usage` when it is unset.
+    /// Always a real resting layout — never `undefined`, and never `present`.
+    [[nodiscard]] texture_layout resolved_initial_layout() const;
+
     /// Whether the shape contract holds: a concrete format, extents >= 1, mip and sample counts >= 1, and a valid dimension / array / cube / MSAA combination.
     /// The non-asserting counterpart of assert_valid().
     [[nodiscard]] bool is_valid() const;

@@ -152,6 +152,7 @@ Not invariants — v1 shortcuts:
 - **Async texture copies assume the texture is already in the COMMON layout** — the copy queue can't run layout barriers.
   A freshly-created texture qualifies.
   One left in a shader/attachment layout by a direct-queue list must be transitioned back first, or uploaded inline (`cmd.upload.bytes_to_texture` drives the barrier).
+  There is no way to ask for that transition today, which is what the prepare-for-async command in the [TODO](../TODO.md) adds.
 - **Resource lifetime spans the copy queue.**
   The copy queue is decoupled from epochs, so a buffer whose last reference is dropped while an async upload to it is still in flight must not be freed when its epoch retires.
   Deferred deletion carries a second gate: each expiring resource is tagged with the buffer's `_pending_async_upload_value`.
@@ -171,6 +172,24 @@ Not invariants — v1 shortcuts:
   The per-slot allocators and the reused command list survive; only staging memory changes.
   Applied before the next upload is staged, so in-flight uploads are unaffected.
 - The public facade is [`upload.hh`](../../src/shaped-graphics/context/upload.hh), reached as `ctx.upload` — see [context](context.md).
+
+## vulkan implementation
+
+The shape is dx12's; two things differ and both concern textures.
+
+- **The transfer queue borrows a texture's layout rather than changing it.**
+  Vulkan's transfer queue *can* run layout barriers, so a texture copy brackets `resting -> TRANSFER_DST -> resting`, reading
+  that layout when the transfer is enqueued — beside the reverse token, so the token really does cover every list that could
+  have set it.
+  It never writes the layout back, which is what keeps a single writer on the canonical state.
+  See [barriers](barriers.md).
+- **A texture takes the same per-resource stamps a buffer does**, in both directions, so an async texture transfer is ordered
+  against command lists exactly as an async buffer transfer is.
+
+Interleaving a command list with an async transfer of one texture still is not supported, even though vulkan's GPU ordering
+for it is correct: the validation layer tracks image layouts in `vkQueueSubmit` **call** order and does not model semaphores,
+so it reports a mismatch a correct program cannot avoid.
+The [TODO](../TODO.md)'s prepare-for-async entry is the fix, and it is the same one dx12 needs.
 
 ## See also
 

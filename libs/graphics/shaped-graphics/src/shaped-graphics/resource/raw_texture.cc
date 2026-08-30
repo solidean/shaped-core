@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg
@@ -38,7 +39,36 @@ bool texture_description::is_valid() const
     if (usage.has(texture_usage::allow_region_stream) && (usage.has(texture_usage::depth_stencil) || sample_count > 1))
         return false;
 
+    if (initial_layout.has_value()
+        && (initial_layout.value() == texture_layout::undefined || initial_layout.value() == texture_layout::present))
+        return false;
+
     return true;
+}
+
+texture_layout texture_description::resolved_initial_layout() const
+{
+    if (initial_layout.has_value())
+        return initial_layout.value();
+
+    // Most-specific usage first: the resting layout should be the one the texture spends its life in, and a texture
+    // that is both a render target and sampled is a render target that happens to be read.
+    // `general` is deliberately last rather than the default — it is the one layout drivers cannot compress, and a
+    // resting layout is permanent in the sense that nothing ever transitions back to it on its own.
+    if (usage.has(texture_usage::depth_stencil))
+        return texture_layout::depth_readwrite;
+    if (usage.has(texture_usage::render_target))
+        return texture_layout::render_target;
+    if (usage.has(texture_usage::readwrite_texture))
+        return texture_layout::shader_readwrite;
+    if (usage.has(texture_usage::readonly_texture))
+        return texture_layout::shader_readonly;
+    if (usage.has(texture_usage::copy_dst))
+        return texture_layout::copy_dst;
+    if (usage.has(texture_usage::copy_src))
+        return texture_layout::copy_src;
+
+    return texture_layout::general;
 }
 
 void texture_description::assert_valid() const
@@ -48,6 +78,10 @@ void texture_description::assert_valid() const
     CC_ASSERT(mip_levels >= 1, "texture needs at least one mip level");
     CC_ASSERT(sample_count >= 1, "sample_count must be >= 1 (1 = not multisampled)");
     CC_ASSERT(!array_layers.has_value() || array_layers.value() >= 1, "array_layers, if set, must be >= 1");
+    CC_ASSERT(!initial_layout.has_value() || initial_layout.value() != texture_layout::undefined,
+              "texture_layout::undefined is not a resting layout — leave initial_layout unset to derive one");
+    CC_ASSERT(!initial_layout.has_value() || initial_layout.value() != texture_layout::present,
+              "texture_layout::present belongs to a swapchain image, not to a created texture");
 
     // Shape invariants: array-ness / cube-ness / multisampling only combine with the dimensions that support them across every backend.
     if (dimension == texture_dimension::d1)

@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
@@ -44,6 +45,14 @@ struct sg::backend::vulkan::vulkan_async_download_job
 
     /// Defer the read until this graphics-queue token completes, so it reads what the last writer left.
     sg::submission_token wait_token = sg::submission_token::not_submitted;
+
+    /// Texture reads: the layout this transfer must hand the texture back in.
+    ///
+    /// The transfer queue *borrows* a texture's layout — it transitions from this and restores it — which matters
+    /// more here than on the upload side, since a readback changes nothing about the texture and has no business
+    /// changing its layout either.
+    /// Captured at enqueue beside `wait_token`, and for the same reason.
+    sg::texture_layout restore_layout = sg::texture_layout::general;
 
     /// Set only for a STREAMING readback; null marks the async tier.
     std::shared_ptr<sg::impl::stream_control> stream;

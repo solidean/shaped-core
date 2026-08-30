@@ -89,31 +89,53 @@ namespace sg::backend::vulkan
 class sg::backend::vulkan::vulkan_texture_access
 {
 public:
-    explicit vulkan_texture_access(sg::subresource_extent extent) : _canonical(extent)
+    vulkan_texture_access(sg::subresource_extent extent, sg::texture_layout resting)
+      : _canonical(extent), _resting_layout(resting)
     {
-        // Seed canonical as `undefined`, which is where vkCreateImage actually leaves an image — initialLayout may
-        // only be UNDEFINED or PREINITIALIZED, and vulkan_texture uses the former.
+        // Canonical is the texture's resting layout from the start, and never `undefined`.
         //
-        // **This differs from dx12 and the difference is load-bearing.**
-        // A D3D12 resource is created in COMMON, which is sg's `general`, so dx12 can take the default state as-is.
-        // Doing the same here would have the first barrier declare oldLayout = GENERAL for an image that is really
-        // UNDEFINED, which Vulkan rejects: an old layout must either match the current one or be UNDEFINED.
+        // vkCreateImage really does leave the image in VK_IMAGE_LAYOUT_UNDEFINED — initialLayout may only be that or
+        // PREINITIALIZED — so the image and this tracker disagree until the initial transition runs.
+        // `_needs_initial_transition` is that gap, and claim_initial_transition closes it: whichever submit path gets
+        // there first carries an UNDEFINED -> resting barrier ahead of its own work.
         //
-        // Starting undefined is also what makes the first transition a discard rather than a preserve, which is
-        // correct — there are no contents to keep.
+        // Resting somewhere real is what makes revert_to_canonical safe.
+        // A texture handed back to `undefined` is handed back discardable, losing whatever the list just wrote, and
+        // Vulkan rejects the barrier outright: newLayout must never be UNDEFINED.
+        //
+        // **dx12 needs none of this.**
+        // A D3D12 resource is created in COMMON, which is sg's `general`, so its tracker's default state is already
+        // true of the resource and there is no gap to close.
         _canonical.for_each_in(sg::subresource_range::whole(extent),
-                               [](sg::resource_access_state& state)
+                               [resting](sg::resource_access_state& state)
                                {
-                                   state.curr_layout = sg::texture_layout::undefined;
-                                   state.prev_layout = sg::texture_layout::undefined;
+                                   state.curr_layout = resting;
+                                   state.prev_layout = resting;
                                });
     }
+
+    /// Claims the one-time UNDEFINED -> resting transition, or reports that someone else already has.
+    /// Exactly one caller ever wins, however many command lists and transfer jobs race for it.
+    [[nodiscard]] bool claim_initial_transition()
+    {
+        if (!_needs_initial_transition)
+            return false;
+        _needs_initial_transition = false;
+        return true;
+    }
+
+    /// Whether the image is still in the layout vkCreateImage left it in.
+    [[nodiscard]] bool needs_initial_transition() const { return _needs_initial_transition; }
+
+    /// The layout this texture rests in between lists.
+    [[nodiscard]] sg::texture_layout resting_layout() const { return _resting_layout; }
 
     /// The canonical layout of `range`'s first subresource.
     ///
     /// For the async transfer path, which records on the *transfer* queue and so cannot go through the per-list
-    /// declare/flush rhythm: it transitions from whatever the graphics side left, and hands the texture back in a
-    /// layout it then records here.
+    /// declare/flush rhythm.
+    /// That path **borrows** the layout: it transitions from what it reads here and hands the texture back in exactly
+    /// that layout, so canonical keeps a single writer — a graphics list's finalize.
     /// Whole-subresource transfers are the only ones that reach it, so one layout describes the range.
     [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range)
     {
@@ -129,18 +151,6 @@ public:
                                    }
                                });
         return layout;
-    }
-
-    /// Records the layout the transfer queue left `range` in, so a later graphics list transitions from the truth.
-    /// The counterpart of canonical_layout_of, and the only writer of canonical outside a finalize.
-    void set_canonical_layout(sg::subresource_range range, sg::texture_layout layout)
-    {
-        _canonical.for_each_in(range,
-                               [&](sg::resource_access_state& state)
-                               {
-                                   state.curr_layout = layout;
-                                   state.prev_layout = layout;
-                               });
     }
 
     /// Accumulate one declared access over `range` for `slot`, seeding from canonical on first touch.
@@ -331,5 +341,7 @@ private:
 
     cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
     sg::subresource_partition _canonical;   // the between-lists state
+    sg::texture_layout _resting_layout;     // what _canonical was seeded to, and what the initial transition targets
+    bool _needs_initial_transition = true;  // the image is still UNDEFINED; whoever claims it fixes that
     int _active_slot_count = 0;             // how many open lists are using this texture
 };

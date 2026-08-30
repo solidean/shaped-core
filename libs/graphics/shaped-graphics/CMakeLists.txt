@@ -240,6 +240,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
             tests/transfer/download-async-test.cc
+            tests/transfer/texture-async-test.cc
             tests/transfer/stream-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc

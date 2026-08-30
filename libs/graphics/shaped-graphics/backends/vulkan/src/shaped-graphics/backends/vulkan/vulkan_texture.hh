@@ -28,7 +28,7 @@ public:
         _image(image),
         _memory(memory),
         _owns_image(owns_image),
-        _access(vulkan_texture_access(subresource_extent_of(desc)))
+        _access(vulkan_texture_access(subresource_extent_of(desc), desc.resolved_initial_layout()))
     {
         // A timeline only where a transfer is even possible — see the same rule on vulkan_buffer.
         if (desc.usage.has(sg::texture_usage::copy_dst))
@@ -62,15 +62,33 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
     }
 
-    /// The canonical layout of `range`, and the hand-back the async transfer path uses.
+    /// The canonical layout of `range`.
     /// Thread-safe.
     [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range) const
     {
         return _access.lock([&](vulkan_texture_access& a) { return a.canonical_layout_of(range); });
     }
-    void set_canonical_layout(sg::subresource_range range, sg::texture_layout layout) const
+
+    /// Claims the one-time UNDEFINED -> resting transition for the caller, or false if someone already has.
+    /// Thread-safe.
+    /// Called from a submit path, so the claimer is the first to actually run.
+    [[nodiscard]] bool claim_initial_transition() const
     {
-        _access.lock([&](vulkan_texture_access& a) { a.set_canonical_layout(range, layout); });
+        return _access.lock([&](vulkan_texture_access& a) { return a.claim_initial_transition(); });
+    }
+
+    /// Whether the image is still in the layout vkCreateImage left it in.
+    /// A hint at record time: another list may claim the transition before this one submits, which is why the set it
+    /// feeds is tentative and claim_initial_transition is what decides.
+    [[nodiscard]] bool needs_initial_transition() const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.needs_initial_transition(); });
+    }
+
+    /// The layout this texture rests in between lists — what an initial transition targets.
+    [[nodiscard]] sg::texture_layout resting_layout() const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.resting_layout(); });
     }
 
     /// Test-and-set the per-op pending flag; true only the first time since the last flush.

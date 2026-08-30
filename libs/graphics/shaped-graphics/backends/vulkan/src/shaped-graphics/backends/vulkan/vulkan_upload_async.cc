@@ -482,12 +482,18 @@ bool vulkan_upload_async_system::run_one_window()
 
     if (job.is_texture)
     {
-        // The transfer queue owns the layout here, which the per-list declare/flush rhythm cannot reach: it records
+        // The transfer queue borrows the layout, which the per-list declare/flush rhythm cannot reach: that records
         // on the graphics queue.
-        // So the image is transitioned from whatever the graphics side left it in, and handed back in `general` —
-        // recorded on the tracker, so a later list transitions from the truth rather than from a stale canonical.
+        // So the image is transitioned from the layout captured at enqueue and handed straight back to it, leaving
+        // canonical with a single writer — a graphics list's finalize.
+        //
+        // A transfer that wins the initial claim owes the discard instead, and only on its first window.
+        // Claimed here rather than at enqueue, because this is where the barrier realizing it is recorded: a claim
+        // taken at enqueue is lost outright when the job is later skipped — a dead target, a cancelled shutdown, a
+        // source that yields nothing — and then nothing transitions the image while every list assumes it is resting.
         auto const range = sg::subresource_range(job.subresource);
-        auto const current = texture->canonical_layout_of(range);
+        bool const discards = job.staged == 0 && texture->claim_initial_transition();
+        auto const current = discards ? sg::texture_layout::undefined : job.restore_layout;
 
         auto const to_copy = VkImageMemoryBarrier2{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -533,7 +539,7 @@ bool vulkan_upload_async_system::run_one_window()
             .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .newLayout = vk_layout_from(job.restore_layout),
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = texture->_image,
@@ -543,7 +549,6 @@ bool vulkan_upload_async_system::run_one_window()
                                                .imageMemoryBarrierCount = 1,
                                                .pImageMemoryBarriers = &to_general};
         vkCmdPipelineBarrier2(_window_buffers[slot], &dep_back);
-        texture->set_canonical_layout(range, sg::texture_layout::general);
     }
     else
     {
@@ -782,6 +787,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
 
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
+    job.restore_layout = dst->canonical_layout_of(sg::subresource_range(subresource));
 
     _actor->enqueue_message(cc::move(job));
 }
@@ -823,6 +829,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
 
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
+    job.restore_layout = dst->canonical_layout_of(sg::subresource_range(subresource));
 
     control->on_promote = [dst, value = job.completion.value]
     {

@@ -210,10 +210,19 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
 
         if (job.is_texture)
         {
-            // The transfer queue owns the layout here, as on the upload side — transition from whatever the graphics
-            // side left, and hand the texture back in `general`, recorded on the tracker.
+            // The transfer queue borrows the layout here, as on the upload side — transition from the layout
+            // captured at enqueue and hand the texture straight back to it.
+            //
+            // A readback never *claims* the one-time transition, and that asymmetry with the upload side is the
+            // point: two transfer queues bidding for one claim can settle it in the order opposite to the one their
+            // cross-wait imposes, leaving the loser naming a layout the image is not in yet.
+            // A readback has nothing to lose by declining — it writes nothing, so a later discard costs it nothing,
+            // and reading a texture no one has written yet is meaningless whatever layout it is in.
+            // So it discards from UNDEFINED while the transition is still owed, and leaves the claim for whoever
+            // writes first.
             auto const range = sg::subresource_range(job.subresource);
-            auto const current = texture->canonical_layout_of(range);
+            bool const owed = texture->needs_initial_transition();
+            auto const current = owed ? sg::texture_layout::undefined : job.restore_layout;
             auto const sub_range = VkImageSubresourceRange{.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                                            .baseMipLevel = u32(job.subresource.mip_level),
                                                            .levelCount = 1,
@@ -259,7 +268,8 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                 .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
                 .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                // Back to UNDEFINED-equivalent resting: the claim is still owed, so whoever takes it discards anyway.
+                .newLayout = vk_layout_from(job.restore_layout),
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = texture->_image,
@@ -269,7 +279,6 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                                                    .imageMemoryBarrierCount = 1,
                                                    .pImageMemoryBarriers = &to_general};
             vkCmdPipelineBarrier2(_window_buffers[slot], &dep_back);
-            texture->set_canonical_layout(range, sg::texture_layout::general);
         }
         else
         {
@@ -629,6 +638,7 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
 
     src->_pending_async_download_value.store(job.completion_value.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
+    job.restore_layout = src->canonical_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
@@ -691,6 +701,7 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
 
     src->_pending_stream_download_value.store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
+    job.restore_layout = src->canonical_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 

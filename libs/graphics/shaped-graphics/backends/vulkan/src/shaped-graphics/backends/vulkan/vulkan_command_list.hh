@@ -42,7 +42,8 @@ public:
                         sg::epoch created_in,
                         sg::command_list_slot slot,
                         VkCommandPool pool,
-                        VkCommandBuffer buffer);
+                        VkCommandBuffer buffer,
+                        VkCommandBuffer pre_buffer);
 
     // Auto-drops, with a warning, a list left neither submitted nor dropped.
     // A no-op once either has run, since both mark the list consumed.
@@ -72,6 +73,18 @@ public:
     bool _consumed = false;      // set by submit/drop; gates the destructor's auto-drop
     VkCommandPool _pool = VK_NULL_HANDLE;
     VkCommandBuffer _buffer = VK_NULL_HANDLE; // owned by _pool, freed with it
+
+    // Recorded at submit and submitted ahead of _buffer; see vulkan_command_pool::pre_buffer.
+    VkCommandBuffer _pre_buffer = VK_NULL_HANDLE;
+
+    /// Textures this list is the first to touch, gathered while recording.
+    ///
+    /// Tentative on purpose: a concurrently recording list may have touched the same texture first, so this is a
+    /// superset of what actually needs an initial transition and never a subset.
+    /// Submit claims each one against the texture and drops those another list already took, which is what puts the
+    /// transition on the list that runs first rather than the one that recorded first.
+    /// Shared rather than raw: `_touched_textures` is cleared before the submit lock, and the claim happens inside it.
+    cc::vector<vulkan_texture_handle> _tentative_initial_transitions;
 
     // Declared for the current op and awaiting the pre-op flush; empty between ops.
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;

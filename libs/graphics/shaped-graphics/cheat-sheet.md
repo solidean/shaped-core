@@ -372,7 +372,10 @@ sg::format_aspect_at(f, i)      // texture_aspect — the plane at POSITIONAL in
 #include <shaped-graphics/resource/texture.hh>       // the typed texture<Traits> wrapper + shape typedefs
 sg::texture_description      // { format, dimension(d1/d2/d3), width/height/depth, mip_levels,
                              //   array_layers (cc::optional<int>; nullopt = not an array),
-                             //   sample_count (>1 = MSAA), is_cube, usage }
+                             //   sample_count (>1 = MSAA), is_cube, usage, initial_layout }
+  .initial_layout            // cc::optional<texture_layout>; the layout it RESTS in before first use.
+                             //   nullopt derives from usage; `undefined` / `present` are rejected. dx12 ignores it.
+  .resolved_initial_layout() // -> texture_layout; the field, or the derivation. Never undefined/present.
 sg::raw_texture_handle       // std::shared_ptr<sg::raw_texture const> — the general/raw resource
 t->width()/height()/depth()  // int — extents (height/depth per dimension)
 t->mip_levels()/sample_count()/array_layers()  // int

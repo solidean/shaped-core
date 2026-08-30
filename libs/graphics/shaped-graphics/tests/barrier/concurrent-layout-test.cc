@@ -16,10 +16,10 @@ using namespace cc::primitive_defines;
 // A list that submits while another is still open instead hands the texture back in the canonical layout, so the
 // still-open list finds it as it left it.
 //
-// A fresh texture's canonical layout is `undefined`, which is where creation leaves it and is what makes the first
-// transition a discard rather than a preserve.
-// That is correct until a list has written something.
-// After that, handing the texture back "in the canonical layout" must not mean handing it back as `undefined`.
+// A texture therefore rests in a real layout from the start, never in `undefined`.
+// Creation does leave it there, and the one-time transition out of it belongs to no list — see libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+// Handing a texture back "in the canonical layout" must never mean handing it back as `undefined`, which is both a
+// discard of what the list just wrote and, on Vulkan, a barrier the spec forbids outright.
 
 namespace
 {

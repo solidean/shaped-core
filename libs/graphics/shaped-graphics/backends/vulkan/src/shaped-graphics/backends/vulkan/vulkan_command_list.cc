@@ -14,8 +14,9 @@ vulkan_command_list::vulkan_command_list(vulkan_context& ctx,
                                          sg::epoch created_in,
                                          sg::command_list_slot slot,
                                          VkCommandPool pool,
-                                         VkCommandBuffer buffer)
-  : sg::command_list(ctx, created_in), _ctx(ctx), _slot(slot), _pool(pool), _buffer(buffer)
+                                         VkCommandBuffer buffer,
+                                         VkCommandBuffer pre_buffer)
+  : sg::command_list(ctx, created_in), _ctx(ctx), _slot(slot), _pool(pool), _buffer(buffer), _pre_buffer(pre_buffer)
 {
 }
 
@@ -34,7 +35,7 @@ vulkan_command_list::~vulkan_command_list()
 cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_command_list()
 {
     // Reuse a pooled command pool if one is free — a pool re-enters the free set only once idle.
-    // The pool and its single buffer are recycled as a unit.
+    // The pool and both its buffers are recycled as a unit.
     vulkan_command_pool const reused = _command_pools.lock(
         [](vulkan_command_pool_set& p) -> vulkan_command_pool
         {
@@ -45,9 +46,10 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 
     VkCommandPool pool = reused.pool;
     VkCommandBuffer buffer = reused.buffer;
+    VkCommandBuffer pre_buffer = reused.pre_buffer;
     if (pool != VK_NULL_HANDLE)
     {
-        // Recycle: reset returns the pool's buffer to the initial state, ready to record into again.
+        // Recycle: reset returns the pool's buffers to the initial state, ready to record into again.
         if (VkResult r = vkResetCommandPool(_device, pool, 0); r != VK_SUCCESS)
             return vulkan_error(r, "vkResetCommandPool failed");
     }
@@ -62,17 +64,21 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
         if (VkResult r = vkCreateCommandPool(_device, &pool_info, nullptr, &pool); r != VK_SUCCESS)
             return vulkan_error(r, "vkCreateCommandPool failed");
 
+        // Two: the list's own, plus the pre-list that carries initial layout transitions ahead of it.
         auto const alloc_info = VkCommandBufferAllocateInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = pool,
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
+            .commandBufferCount = 2,
         };
-        if (VkResult r = vkAllocateCommandBuffers(_device, &alloc_info, &buffer); r != VK_SUCCESS)
+        VkCommandBuffer allocated[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        if (VkResult r = vkAllocateCommandBuffers(_device, &alloc_info, allocated); r != VK_SUCCESS)
         {
             vkDestroyCommandPool(_device, pool, nullptr);
             return vulkan_error(r, "vkAllocateCommandBuffers failed");
         }
+        buffer = allocated[0];
+        pre_buffer = allocated[1];
     }
 
     // Handed out already recording; submit ends it.
@@ -88,7 +94,8 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
     // Stamped with the epoch it must be submitted/dropped in, plus an access-tracking slot freed on submit/drop.
-    return std::make_unique<vulkan_command_list>(*this, current_epoch(), _command_list_slots.acquire(), pool, buffer);
+    return std::make_unique<vulkan_command_list>(*this, current_epoch(), _command_list_slots.acquire(), pool, buffer,
+                                                 pre_buffer);
 }
 
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
@@ -134,6 +141,14 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
     }
 
+    // Textures take the same pair, and must: the async transfer path reads a texture's canonical layout and restores
+    // it, so without these edges that read names a layout the image is only in by luck.
+    for (auto const& texture : cmd->_touched_textures)
+    {
+        add_async_wait(texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire));
+        add_async_wait(texture->_download_group, texture->_pending_async_download_value.load(cc::memory_order_acquire));
+    }
+
     for (auto const& buffer : cmd->_touched_buffers)
         buffer->finalize_slot(cmd->slot());
 
@@ -143,7 +158,6 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         for (auto const& sub : texture->finalize_slot(cmd->slot()))
             cmd->_pending_image_barriers.push_back(
                 make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
-    cmd->_touched_textures.clear();
     submit_barriers(cmd->_buffer, {}, cmd->_pending_image_barriers);
     cmd->_pending_image_barriers.clear();
 
@@ -157,6 +171,59 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         {
             sg::submission_token const t = next;
             next = sg::submission_token(u64(next) + 1);
+
+            // Bring every texture this list is the first to *run* into its resting layout, ahead of this list's own
+            // work.
+            //
+            // Claimed here rather than while recording, and inside this lock rather than outside it: submission order
+            // is what this lock serializes, so the list that claims is the list that runs first.
+            // Claiming at record time would let a list that recorded second submit first, and its barriers would name
+            // an oldLayout the image is not in yet.
+            cc::vector<VkImageMemoryBarrier2> initial_barriers;
+            for (auto const& texture : cmd->_tentative_initial_transitions)
+            {
+                if (!texture->claim_initial_transition())
+                    continue; // someone got there first, and their transition carries it
+
+                // UNDEFINED as the source is the discard: there are no contents to keep, which is what makes this
+                // cheap.
+                auto const barrier = sg::access_barrier{
+                    .needed = true,
+                    .src_layout = sg::texture_layout::undefined,
+                    .dst_layout = texture->resting_layout(),
+                };
+                auto vk_barrier = make_image_barrier(
+                    texture->_image, sg::subresource_range::whole(subresource_extent_of(texture->description())),
+                    texture->description().format, barrier);
+
+                // The destination scope is widened past anything sg::pipeline_stage_flag can spell, on purpose.
+                // A barrier's second synchronization scope covers everything later in *submission order*, which
+                // includes the whole of cmd->_buffer since the pre-list is submitted ahead of it in the same submit.
+                // That is what makes the transition complete before the list's own first use of the texture, without
+                // knowing here what that use is.
+                // Set directly rather than through the flag set: naming every stage would include the ray-tracing
+                // ones, which are invalid on a device without the extension.
+                vk_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                vk_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+                initial_barriers.push_back(vk_barrier);
+            }
+
+            VkCommandBuffer submitted_buffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            u32 submitted_count = 0;
+            if (!initial_barriers.empty())
+            {
+                auto const pre_begin = VkCommandBufferBeginInfo{
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+                };
+                VkResult const pre = vkBeginCommandBuffer(cmd->_pre_buffer, &pre_begin);
+                CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (initial transitions) failed");
+                submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                VkResult const pre_end = vkEndCommandBuffer(cmd->_pre_buffer);
+                CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (initial transitions) failed");
+                submitted_buffers[submitted_count++] = cmd->_pre_buffer;
+            }
+            submitted_buffers[submitted_count++] = cmd->_buffer;
 
             // The submission timeline always signals; a presenting list also signals its render-finished semaphore.
             // The value array needs one entry per signal semaphore even though a binary one ignores its value.
@@ -192,8 +259,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .waitSemaphoreCount = wait_count,
                 .pWaitSemaphores = wait_count != 0 ? waits.data() : nullptr,
                 .pWaitDstStageMask = wait_count != 0 ? wait_stages.data() : nullptr,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &cmd->_buffer,
+                .commandBufferCount = submitted_count,
+                .pCommandBuffers = submitted_buffers,
                 .signalSemaphoreCount = signal_count,
                 .pSignalSemaphores = signal_semaphores,
             };
@@ -203,19 +270,23 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             if (sr != VK_SUCCESS && !note_device_lost_if_lost(sr, "vkQueueSubmit"))
                 CC_ASSERT(false, "vkQueueSubmit failed");
 
-            // The reverse half of async sync: a later async transfer on any of these buffers defers behind this
-            // token, so it never overwrites bytes this list still reads.
+            // The reverse half of async sync: a later async transfer on any of these resources defers behind this
+            // token, so it never overwrites bytes this list still reads — nor, for a texture, transitions away from
+            // the layout this list's barriers name.
             // Stamped inside the lock, so the token a transfer captures is never one from a list submitted after it.
-            for (auto const& buffer : cmd->_touched_buffers)
+            auto const stamp_reverse = [t](cc::atomic<u64>& slot)
             {
                 u64 const stamp = u64(t);
-                u64 previous = buffer->_last_used_submission_token.load(cc::memory_order_relaxed);
+                u64 previous = slot.load(cc::memory_order_relaxed);
                 while (previous < stamp
-                       && !buffer->_last_used_submission_token.compare_exchange_weak(
-                           previous, stamp, cc::memory_order_acq_rel, cc::memory_order_relaxed))
+                       && !slot.compare_exchange_weak(previous, stamp, cc::memory_order_acq_rel, cc::memory_order_relaxed))
                 {
                 }
-            }
+            };
+            for (auto const& buffer : cmd->_touched_buffers)
+                stamp_reverse(buffer->_last_used_submission_token);
+            for (auto const& texture : cmd->_touched_textures)
+                stamp_reverse(texture->_last_used_submission_token);
 
             // Inside the lock, so the actor's queue order matches submission order — which is also the order the
             // readback ring handed out its space.
@@ -228,14 +299,18 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     if (is_device_lost())
         throw sg::device_lost_exception(device_loss_reason());
 
-    // Cleared only now: the reverse stamp inside the lock above reads this list, so it cannot be emptied earlier.
+    // Cleared only now: the reverse stamp inside the lock above reads these, so they cannot be emptied earlier.
     cmd->_touched_buffers.clear();
+    cmd->_touched_textures.clear();
+    cmd->_tentative_initial_transitions.clear();
 
     // The pool is in flight until this epoch retires, so hand it to the current epoch.
     // Null the list's handles so its destructor cannot destroy the pool just handed off.
-    _command_pools.lock([&](vulkan_command_pool_set& p) { p.in_epoch.push_back({cmd->_pool, cmd->_buffer}); });
+    _command_pools.lock([&](vulkan_command_pool_set& p)
+                        { p.in_epoch.push_back({cmd->_pool, cmd->_buffer, cmd->_pre_buffer}); });
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
+    cmd->_pre_buffer = VK_NULL_HANDLE;
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
@@ -265,6 +340,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     for (auto const& texture : cmd._touched_textures)
         texture->discard_slot(cmd.slot());
     cmd._touched_textures.clear();
+    cmd._tentative_initial_transitions.clear();
 
     // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
     // A future nobody ever settles parks its dependents for the life of the process.
@@ -272,9 +348,10 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
 
     // Never submitted, so the GPU never touched this pool — return it straight to the free set, where reset happens at reuse.
     // Null the handles so nothing double-frees them.
-    _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd._pool, cmd._buffer}); });
+    _command_pools.lock([&](vulkan_command_pool_set& p) { p.free.push_back({cmd._pool, cmd._buffer, cmd._pre_buffer}); });
     cmd._pool = VK_NULL_HANDLE;
     cmd._buffer = VK_NULL_HANDLE;
+    cmd._pre_buffer = VK_NULL_HANDLE;
     (void)_command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
@@ -313,7 +390,14 @@ void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
         _pending_barrier_textures.push_back(&texture);
 
     if (texture.mark_recorded(_slot))
+    {
         _touched_textures.push_back(std::static_pointer_cast<vulkan_texture const>(texture.shared_from_this()));
+
+        // Tentative: another list recording right now may reach submit first and claim it.
+        // Filtered there.
+        if (texture.needs_initial_transition())
+            _tentative_initial_transitions.push_back(_touched_textures.back());
+    }
 }
 
 void vulkan_command_list::flush_barriers()
