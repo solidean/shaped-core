@@ -58,7 +58,10 @@ private:
     vulkan_context& _ctx; // creating context — must outlive this swapchain (sg lifetime contract)
     VkSurfaceKHR _surface = VK_NULL_HANDLE;
     VkSwapchainKHR _swapchain = VK_NULL_HANDLE;
-    VkFormat _vk_format = VK_FORMAT_UNDEFINED;
+    /// The (format, colorSpace) pair the surface advertised, kept whole.
+    /// Vulkan advertises pairs rather than two independent lists, so building with a colorspace the surface never
+    /// offered alongside this format is rejected — which is what keeping only the format would risk.
+    VkSurfaceFormatKHR _vk_surface_format = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
 
     cc::vector<vulkan_texture_handle> _backbuffers;
 

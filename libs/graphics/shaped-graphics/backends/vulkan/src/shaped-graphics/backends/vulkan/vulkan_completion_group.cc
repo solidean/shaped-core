@@ -30,18 +30,21 @@ vulkan_completion_group_handle vulkan_completion_group_pool::acquire()
     {
         if (g == nullptr)
             return;
-        if (free->alive.load(cc::memory_order_acquire))
-        {
-            bool returned = false;
-            free->groups.lock(
-                [&](cc::vector<vulkan_completion_group*>& groups)
-                {
-                    groups.push_back(g);
-                    returned = true;
-                });
-            if (returned)
-                return;
-        }
+        // The liveness check belongs INSIDE the lock, since shutdown drains the list under it: read outside, a
+        // shutdown landing between the read and the push adds `g` to a vector nothing will drain again, and its
+        // semaphore is then alive at vkDestroyDevice.
+        bool returned = false;
+        free->groups.lock(
+            [&](cc::vector<vulkan_completion_group*>& groups)
+            {
+                if (!free->alive.load(cc::memory_order_acquire))
+                    return;
+                groups.push_back(g);
+                returned = true;
+            });
+        if (returned)
+            return;
+
         // The pool is gone, so this is teardown: destroy the semaphore rather than leaking it.
         if (g->timeline != VK_NULL_HANDLE && g->ctx != nullptr)
             vkDestroySemaphore(g->ctx->_device, g->timeline, nullptr);

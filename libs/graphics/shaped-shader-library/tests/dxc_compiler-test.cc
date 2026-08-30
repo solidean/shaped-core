@@ -40,7 +40,7 @@ sg::compiled_shader const& await(sg::async_compiled_shader const& shader)
 constexpr auto k_target_format = sg::shader_format::dxil;
 [[nodiscard]] auto make_dxc_compiler()
 {
-    return make_dxc_compiler();
+    return slib::create_dxc_compiler();
 }
 #else
 constexpr auto k_target_format = sg::shader_format::spirv;

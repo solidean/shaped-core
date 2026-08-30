@@ -166,7 +166,7 @@ cc::result<vulkan_swapchain_handle> vulkan_swapchain::create(vulkan_context& ctx
 
     auto format_result = pick_surface_format(ctx, chain->_surface, desc.format, desc.enable_hdr);
     CC_RETURN_IF_ERROR(format_result);
-    chain->_vk_format = format_result.value().format;
+    chain->_vk_surface_format = format_result.value();
 
     if (auto r = chain->build(chain->current_extent()); r.has_error())
         return cc::error(cc::move(r).error());
@@ -231,8 +231,10 @@ cc::result<cc::unit> vulkan_swapchain::build(tg::vec2i size)
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = _surface,
         .minImageCount = image_count,
-        .imageFormat = _vk_format,
-        .imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+        .imageFormat = _vk_surface_format.format,
+        // The colorspace the surface advertised this format in, never a fixed one: a pair the surface did not offer
+        // is rejected, and it is also what carries an honoured `enable_hdr` request.
+        .imageColorSpace = _vk_surface_format.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
         // TRANSFER_SRC is what makes a presented image readable, which is the whole point of a headless chain being
