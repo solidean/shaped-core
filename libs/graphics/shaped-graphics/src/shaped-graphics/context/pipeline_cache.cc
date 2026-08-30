@@ -7,7 +7,8 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh> // including it is what makes build_compute_pipeline a coroutine
 #include <shaped-graphics/binding/binding.hh>
-#include <shaped-graphics/binding/binding_group.hh> // named_sampler
+#include <shaped-graphics/binding/binding_group.hh>        // named_sampler
+#include <shaped-graphics/binding/binding_group_layout.hh> // release_backend_objects at shutdown
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh> // pipeline_layout_description::groups
@@ -137,6 +138,28 @@ void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shade
     if (s.has_value())
         add_shader(b, s.value());
 }
+
+/// Destroys `handle`'s backend objects, if it names one.
+///
+/// A handle is `shared_ptr<T const>` because a caller sharing a pipeline may not mutate it.
+/// Shutdown is not that caller: the cache owns these entries, and this is the one point allowed to destroy them, so
+/// the cast states that rather than putting a destructive method on the public const surface.
+template <class T>
+void release_handle(std::shared_ptr<T const> const& handle)
+{
+    if (handle != nullptr)
+        const_cast<T*>(handle.get())->release_backend_objects();
+}
+
+/// The same for a cached build, once it has finished; see release_at_shutdown on why an unfinished one is left alone.
+template <class Node>
+void release_ready_node(Node const& node)
+{
+    if (node == nullptr)
+        return;
+    if (auto const* const handle = node->try_value(); handle != nullptr)
+        release_handle(*handle);
+}
 } // namespace
 
 void pipeline_cache::set_blob_cache(bcache::blob_cache* cache)
@@ -215,6 +238,24 @@ void pipeline_cache::add_default_in_memory_providers(isize max_entries)
 
 void pipeline_cache::release_at_shutdown()
 {
+    // Destroying the backend objects comes FIRST, and dropping the tiers is not what would have done it.
+    //
+    // A built pipeline lives in a scheduled async node, and the cache's tier is not that node's only owner: the pool
+    // holds it too, for as long as its own bookkeeping takes to reclaim it.
+    // So a release that only dropped tiers would leave the device objects alive past vkDestroyDevice, and the node's
+    // later drop would run a destructor against a context that no longer exists.
+    // Under -j1 the pool reclaims promptly and this never showed; under load it is a use-after-free.
+    //
+    // Only ready entries, deliberately.
+    // A build still in flight at shutdown is already outside the contract — shutdown is externally synchronized
+    // against creates, and that build is one — and it holds a raw context pointer it would dereference either way.
+    // Pipelines before the layouts they were built against, so a layout never outlives its last user here.
+    _compute_cache.for_each_value([](async_compute_pipeline const& n) { release_ready_node(n); });
+    _raster_cache.for_each_value([](async_raster_pipeline const& n) { release_ready_node(n); });
+    _raytracing_cache.for_each_value([](async_raytracing_pipeline const& n) { release_ready_node(n); });
+    _pipeline_layout_cache.for_each_value([](pipeline_layout_handle const& h) { release_handle(h); });
+    _binding_group_layout_cache.for_each_value([](binding_group_layout_handle const& h) { release_handle(h); });
+
     _binding_group_layout_cache.release_providers();
     _pipeline_layout_cache.release_providers();
     _compute_cache.release_providers();

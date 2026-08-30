@@ -147,13 +147,20 @@ isize vulkan_binding_group_layout::descriptor_offset_of(isize slot, int element)
     return _binding_offsets[slot] + isize(element) * descriptor_size_of(_ctx, b.type);
 }
 
-vulkan_binding_group_layout::~vulkan_binding_group_layout()
+void vulkan_binding_group_layout::release_backend_objects()
 {
     if (_layout != VK_NULL_HANDLE)
         vkDestroyDescriptorSetLayout(_ctx._device, _layout, nullptr);
     for (auto sampler : _slot_samplers)
         if (sampler != VK_NULL_HANDLE)
             vkDestroySampler(_ctx._device, sampler, nullptr);
+    _layout = VK_NULL_HANDLE;
+    _slot_samplers.clear();
+}
+
+vulkan_binding_group_layout::~vulkan_binding_group_layout()
+{
+    this->release_backend_objects();
 }
 } // namespace sg::backend::vulkan
 

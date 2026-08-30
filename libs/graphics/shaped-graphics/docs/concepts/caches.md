@@ -136,6 +136,22 @@ bindings + static samplers ─▶ ctx.cached.acquire_binding_group_layout ─▶
 Every arrow that names a cache is a get-or-create: identical inputs reuse the stored entry.
 An in-flight async is shared too, so a second `acquire` for a still-compiling pipeline hands back the same node rather than starting a duplicate build.
 
+## Shutdown releases the objects, not just the entries
+
+`release_at_shutdown` destroys every cached pipeline's and layout's **backend objects** before it drops the tiers.
+Dropping the tiers is deliberately not what frees them, because the tier is not the only owner.
+
+A built pipeline lives in a scheduled `cc::async` node, and the pool holds that node for as long as its own bookkeeping takes to reclaim it — past the cache's release, and past the context.
+So a release that only dropped entries left the device objects alive at `vkDestroyDevice`, and the node's later drop ran a destructor against a context that no longer existed.
+Under `-j1` the pool reclaims promptly and nothing shows; under load it is a use-after-free that surfaced as a rare failure in whichever test was running.
+
+Only **ready** entries are released.
+A build still in flight at shutdown is already outside the contract: shutdown is externally synchronized against creates, and a build is one.
+That node also holds a raw context pointer it would dereference either way.
+
+This covers what the cache owns, which is every pipeline reached through `ctx.cached`.
+A pipeline created through `ctx.uncached` and held past its context is still the caller's to get right: no cache knows about it.
+
 ## Deferred
 
 **A content hash on `compiled_shader`**, so a pipeline key need not re-hash the bytecode.

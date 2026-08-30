@@ -80,12 +80,21 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         ctx, hash, layout, cc::move(groups), cc::move(static_samplers), inline_bytes));
 }
 
-vulkan_pipeline_layout::~vulkan_pipeline_layout()
+// Immediate rather than epoch-deferred, unchanged from what the destructor always did: a layout is consumed at
+// pipeline-creation and descriptor-allocation time, so no in-flight work names it.
+void vulkan_pipeline_layout::release_backend_objects()
 {
     if (_layout != VK_NULL_HANDLE)
         vkDestroyPipelineLayout(_ctx._device, _layout, nullptr);
     for (auto sampler : _static_samplers)
         vkDestroySampler(_ctx._device, sampler, nullptr);
+    _layout = VK_NULL_HANDLE;
+    _static_samplers.clear();
+}
+
+vulkan_pipeline_layout::~vulkan_pipeline_layout()
+{
+    this->release_backend_objects();
 }
 } // namespace sg::backend::vulkan
 

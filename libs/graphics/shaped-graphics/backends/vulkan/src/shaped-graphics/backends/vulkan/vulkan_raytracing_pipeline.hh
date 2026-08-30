@@ -30,6 +30,9 @@ public:
 
     ~vulkan_raytracing_pipeline() override;
 
+    /// Destroys the backend objects now; see sg::raytracing_pipeline::release_backend_objects.
+    void release_backend_objects() override;
+
     /// Ray-tracing pipelines carry no serialized blob here: VkPipelineCache covers the ordinary tiers, and a
     /// state-object blob has no Vulkan counterpart.
     /// dx12 answers the same way, and the answer a caller needs is the same — nothing here is worth persisting.

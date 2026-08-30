@@ -36,6 +36,9 @@ public:
 
     ~vulkan_pipeline_layout() override;
 
+    /// Destroys the backend objects now; see sg::pipeline_layout::release_backend_objects.
+    void release_backend_objects() override;
+
     vulkan_context& _ctx;
     VkPipelineLayout _layout = VK_NULL_HANDLE;
 

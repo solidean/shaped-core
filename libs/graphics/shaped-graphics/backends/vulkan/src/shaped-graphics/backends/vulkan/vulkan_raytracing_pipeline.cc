@@ -237,7 +237,7 @@ cc::span<byte const> vulkan_raytracing_pipeline::callable_handle(sg::callable_sh
     return handle_at(_group_handles, _handle_size, _callable_base, int(h), _group_count - _callable_base);
 }
 
-vulkan_raytracing_pipeline::~vulkan_raytracing_pipeline()
+void vulkan_raytracing_pipeline::release_backend_objects()
 {
     if (_pipeline == VK_NULL_HANDLE)
         return;
@@ -245,7 +245,13 @@ vulkan_raytracing_pipeline::~vulkan_raytracing_pipeline()
     vulkan_expiring_resource expiring;
     auto* const device = &_ctx._device;
     expiring.finalizers.push_back([device, pipeline = _pipeline] { vkDestroyPipeline(*device, pipeline, nullptr); });
+    _pipeline = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));
+}
+
+vulkan_raytracing_pipeline::~vulkan_raytracing_pipeline()
+{
+    this->release_backend_objects();
 }
 } // namespace sg::backend::vulkan
 

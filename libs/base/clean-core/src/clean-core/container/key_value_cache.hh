@@ -33,6 +33,14 @@ struct cc::key_value_provider
     /// Periodic maintenance (e.g. eviction), driven by the owning cache.
     virtual void apply_bookkeeping() = 0;
 
+    /// Visits every value this tier currently holds.
+    ///
+    /// For teardown, where a value owns something that must be released before the subsystem that made it, and the
+    /// caller no longer knows the keys to ask for.
+    /// Visiting nothing is the default because it is the right answer for a tier that stores bytes rather than live
+    /// values: a persistent one has nothing to release.
+    virtual void for_each_value(cc::function_ref<void(V const&)>) {}
+
     virtual ~key_value_provider() = default;
 };
 
@@ -57,6 +65,15 @@ struct cc::in_memory_key_value_provider final : key_value_provider<K, V>
     {
         if (_map.size() > _max_entries)
             _map.clear();
+    }
+
+    void for_each_value(cc::function_ref<void(V const&)> f) override
+    {
+        for (auto const [key, value] : _map)
+        {
+            (void)key;
+            f(value);
+        }
     }
 
 private:
@@ -116,6 +133,20 @@ struct cc::key_value_cache
     void release_providers()
     {
         _state.lock([](state& s) { s.providers.clear(); });
+    }
+
+    /// Visits every value every tier holds, fastest tier first, under the cache's lock.
+    ///
+    /// For teardown — see key_value_provider::for_each_value, and release_providers, which this usually precedes.
+    /// A value held by several tiers is visited once per tier, so a visitor must be idempotent.
+    void for_each_value(cc::function_ref<void(V const&)> f)
+    {
+        _state.lock(
+            [&](state& s)
+            {
+                for (auto const& provider : s.providers)
+                    provider->for_each_value(f);
+            });
     }
 
     /// Runs apply_bookkeeping on all providers (e.g. to trigger in-memory eviction).

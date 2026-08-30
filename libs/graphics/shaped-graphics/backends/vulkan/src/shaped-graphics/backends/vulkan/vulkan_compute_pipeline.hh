@@ -33,6 +33,9 @@ public:
 
     ~vulkan_compute_pipeline() override;
 
+    /// Destroys the backend objects now; see sg::compute_pipeline::release_backend_objects.
+    void release_backend_objects() override;
+
     /// The pipeline cache's serialized form; empty when it holds nothing or serialization fails.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
 

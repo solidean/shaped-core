@@ -30,6 +30,9 @@ public:
 
     ~vulkan_raster_pipeline() override;
 
+    /// Destroys the backend objects now; see sg::raster_pipeline::release_backend_objects.
+    void release_backend_objects() override;
+
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;
 
     vulkan_context& _ctx;

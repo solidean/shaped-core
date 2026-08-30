@@ -271,3 +271,40 @@ TEST("sg vulkan - a draw depending on a dispatch in the same list")
     }
     CHECK(all_six);
 }
+
+// The context, not the last handle, is what destroys a cached pipeline's device objects.
+//
+// A handle outliving its context used to destroy them against a device that was already gone: a leak at
+// vkDestroyDevice, then vkDestroyPipelineLayout on VK_NULL_HANDLE and an abort.
+// It reached the suite as a rare failure in whichever test happened to be running, because sg produced this state on
+// its own — a pool worker holding the build node past release_cached_pipelines — rather than because anyone wrote
+// the code below.
+// Declaring the handle before the context is the deterministic form of the same thing.
+TEST("sg vulkan - a pipeline handle may outlive its context")
+{
+    sg::raster_pipeline_handle pipeline; // declared first, so it is destroyed LAST — after the context
+    {
+        auto handle = vulkan::test::make_context();
+        if (handle == nullptr)
+            SKIP("no vulkan device");
+        auto& ctx = *handle;
+
+        auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
+        REQUIRE(pipeline_layout != nullptr);
+
+        pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+            .layout = pipeline_layout,
+            .vertex_shader = make_shader(
+                sg::shader_stage::vertex,
+                cc::span<byte const>(reinterpret_cast<byte const*>(triangle_vs_spirv), isize(sizeof(triangle_vs_spirv))),
+                "vs_main"),
+            .fragment_shader = make_shader(
+                sg::shader_stage::fragment,
+                cc::span<byte const>(reinterpret_cast<byte const*>(triangle_ps_spirv), isize(sizeof(triangle_ps_spirv))),
+                "ps_main"),
+            .vertex_input = make_vertex_layout(),
+            .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
+        }));
+        REQUIRE(pipeline != nullptr);
+    } // the context releases the pipeline's device objects here, and validation must stay quiet
+}

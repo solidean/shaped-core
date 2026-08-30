@@ -80,6 +80,17 @@ class sg::raster_pipeline
 public:
     virtual ~raster_pipeline();
 
+    /// Destroys the backend objects now, leaving this an inert husk.
+    ///
+    /// The context calls this at shutdown for everything its pipeline cache still holds, because the cache dropping
+    /// its own reference is NOT what frees them: a scheduled build node keeps the handle alive on a pool worker, and
+    /// that node's later drop would run this destructor against a context that no longer exists.
+    /// See libs/graphics/shaped-graphics/docs/concepts/caches.md, "Shutdown releases the objects, not just the entries".
+    ///
+    /// Idempotent, and the destructor afterwards does nothing.
+    /// The default is empty, for a backend whose objects are reference-counted and safe to drop late.
+    virtual void release_backend_objects() {}
+
     /// The backend's serialized PSO blob, for persisting and feeding back via raster_pipeline_description::cached_pipeline.
     /// Empty if the backend does not support it.
     [[nodiscard]] virtual cc::pinned_data<byte const> cached_pipeline_data() const = 0;

@@ -338,7 +338,10 @@ cc::pinned_data<byte const> vulkan_raster_pipeline::cached_pipeline_data() const
     return data;
 }
 
-vulkan_raster_pipeline::~vulkan_raster_pipeline()
+// Still through the epoch, not immediately: at context shutdown this runs BEFORE the final drain, and the pipeline
+// may back work that is still in flight.
+// What the context buys by calling it there is only that it runs while the context is still alive.
+void vulkan_raster_pipeline::release_backend_objects()
 {
     if (_pipeline == VK_NULL_HANDLE && _cache == VK_NULL_HANDLE)
         return;
@@ -353,7 +356,14 @@ vulkan_raster_pipeline::~vulkan_raster_pipeline()
             if (cache != VK_NULL_HANDLE)
                 vkDestroyPipelineCache(*device, cache, nullptr);
         });
+    _pipeline = VK_NULL_HANDLE;
+    _cache = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));
+}
+
+vulkan_raster_pipeline::~vulkan_raster_pipeline()
+{
+    this->release_backend_objects();
 }
 } // namespace sg::backend::vulkan
 

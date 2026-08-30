@@ -45,6 +45,9 @@ public:
 
     ~vulkan_binding_group_layout() override;
 
+    /// Destroys the backend objects now; see sg::binding_group_layout::release_backend_objects.
+    void release_backend_objects() override;
+
     /// Byte offset of element `element` of binding slot `slot` within one group's range.
     /// `slot` indexes `bindings()`, and `element` must be inside that binding's count.
     [[nodiscard]] isize descriptor_offset_of(isize slot, int element) const;

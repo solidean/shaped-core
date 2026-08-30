@@ -106,7 +106,7 @@ cc::pinned_data<byte const> vulkan_compute_pipeline::cached_pipeline_data() cons
     return data;
 }
 
-vulkan_compute_pipeline::~vulkan_compute_pipeline()
+void vulkan_compute_pipeline::release_backend_objects()
 {
     // The pipeline may still back in-flight work, so it goes through the epoch; the cache backs none and could go
     // now, but it rides along so that both releases are one staged entry.
@@ -123,7 +123,14 @@ vulkan_compute_pipeline::~vulkan_compute_pipeline()
             if (cache != VK_NULL_HANDLE)
                 vkDestroyPipelineCache(*device, cache, nullptr);
         });
+    _pipeline = VK_NULL_HANDLE;
+    _cache = VK_NULL_HANDLE;
     _ctx.schedule_deferred_deletion(cc::move(expiring));
+}
+
+vulkan_compute_pipeline::~vulkan_compute_pipeline()
+{
+    this->release_backend_objects();
 }
 } // namespace sg::backend::vulkan
 
