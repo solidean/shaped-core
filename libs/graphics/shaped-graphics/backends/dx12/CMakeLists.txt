@@ -121,6 +121,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
+        tests/dx12-validation-broadcast-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc
         tests/dx12-completion-group-test.cc
