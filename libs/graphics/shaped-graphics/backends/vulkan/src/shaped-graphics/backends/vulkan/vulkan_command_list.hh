@@ -15,10 +15,6 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
-/// Vulkan implementation of sg::command_list.
-/// Owns its command pool and the single command buffer allocated from it, handed out already recording.
-/// Recording is not implemented: every recording call below aborts.
-/// The exceptions are the raytracing / query support queries, which honestly answer false, and record_gpu_timestamp, which returns an invalid query.
 /// One declare_array_buffer_access call, held until the next dispatch resolves it against the bound groups.
 struct sg::backend::vulkan::vulkan_array_buffer_declare
 {
@@ -33,6 +29,11 @@ struct sg::backend::vulkan::vulkan_array_texture_declare
     cc::vector<sg::array_texture_access> elements;
 };
 
+/// Vulkan implementation of sg::command_list.
+/// Owns its command pool and the single command buffer allocated from it, handed out already recording.
+/// Every scope records for real — transfer, copy, compute, raster, ray tracing and queries — and the capability
+/// queries report the device rather than a fixed answer: cmd.raytracing.is_supported() asks the context's extension
+/// set, and cmd.query.is_supported() the queue family's timestamp bits.
 class sg::backend::vulkan::vulkan_command_list final : public sg::command_list
 {
 public:

@@ -81,7 +81,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Both backends are real, windowed and headless.
   Still open:
   - a **cocoa arm on `sg::window_platform`**, for the metal backend that would consume it — see shaped-rendering's [TODO](../../shaped-rendering/docs/TODO.md);
-  - **deeper HDR** — metadata and tone-mapping beyond the colorspace set;
+  - **deeper HDR** — metadata and tone-mapping beyond the colorspace set.
+    Including whether the request was *granted*: `enable_hdr` is best-effort on both backends and `is_hdr_enabled()`
+    reports what was asked for, so nothing tells a caller which colorspace it actually got;
   - **exclusive fullscreen** and **multi-window**;
   - letting a windowed renderer thread the swapchain's back-buffer count into `advance_epoch`;
 - **A shared async pool can outlive the device a node's value belongs to.**

@@ -70,11 +70,11 @@ Complex and edge-case coverage belongs here too.
 Drop to tier 2 only when you genuinely need backend internals or a backend-specific resource, such as an embedded shader blob.
 
 Tests are split **per topic**, one `.cc` per area (`buffer/`, `transfer/`, `binding/`, `transient/`, …),
-and each topic file is added to the `if(_sg_backends)` block in the library
+and each topic file is added to the `if(_sg_test_drivers)` block in the library
 [`CMakeLists.txt`](../CMakeLists.txt) (agnostic tests need at least one backend to run against).
 
 > A backend-agnostic test still needs *some* backend to execute.
-> Until an always-available CPU/validation backend exists (a TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds — today, dx12 on Windows.
+> Until an always-available CPU/validation backend exists (a TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds — dx12 on Windows, vulkan wherever the SDK is.
 
 ---
 

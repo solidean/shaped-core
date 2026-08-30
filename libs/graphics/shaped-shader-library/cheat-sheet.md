@@ -113,6 +113,9 @@ slib::shader_compiler              // ONE edge: source_language() -> target_form
 
 #include <shaped-shader-library/compiler/dxc_compiler.hh>   // only when SLIB_HAS_DXC
 slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compiler>>; hlsl -> dxil
+                                   //   Windows in practice: DXIL reflection needs the Windows SDK
+slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere DXC does
+                                   //   register BOTH: a shader_asset picks by what the context accepts
                                    //   content-keyed cache inside: an identical recompile is free
 ```
 

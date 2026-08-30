@@ -58,9 +58,9 @@ It is worth naming separately anyway, because its immutable base image ships a r
   The image carries `libstdc++.so` but not the `libstdc++exp` that implements `<stacktrace>`, and the LLVM toolchain's libc++ ships no `<stacktrace>` header at all.
   An assert therefore reports "stacktrace unavailable on this platform" instead of frames.
 - **No dx12, so vulkan is the only backend the cross-backend sg API tests run against here** — see shaped-graphics' `_sg_test_drivers`.
-  Its driver is registered but disabled while the backend is built out, so a test runs against vulkan by being named exactly rather than by a sweep.
-  A Vulkan SDK being present is what makes SteamOS the first platform to separate "a backend builds" from "a backend can be driven".
-  It is also the first platform where the API suite runs against something other than dx12.
+  It is the first platform where that suite runs against something other than dx12.
+  A Vulkan SDK being present is also what makes it the first to separate "a backend builds" from "a backend can be driven".
+  Both questions now answer yes: the vulkan driver sweeps like dx12's, so a plain `dev.py test` covers the whole tier-1 suite here.
 - **The base image ships the windowing runtime but not its development headers**, so `sr::window` and a windowed Vulkan swapchain both compile themselves out.
   `libX11.so` and `libwayland-client.so` are there; `X11/Xlib.h` and `wayland-client.h` are not.
   Both the SDL3 fetch in [extern/sdl3](../extern/sdl3/CMakeLists.txt) and the surface probe in the vulkan backend gate on the headers.

@@ -89,7 +89,7 @@ src/shaped-graphics/
     memory_heap.hh/.cc            [in progress] abstract heap + memory_requirements; both backends place buffers, textures still dedicated-only
 
   present/
-    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire / present / resize / HDR / headless); both backends real, vulkan windowed off Windows pending a platform-tagged handle
+    swapchain.hh/.cc              [in progress] swapchain_description + swapchain (acquire / present / resize / HDR / headless); both backends real, windowed and headless; which window systems vulkan can present to is a build-time answer
 
   query/
     gpu_timestamp.hh/.cc          [done]        pollable tick result of cmd.query.record_gpu_timestamp
@@ -105,7 +105,7 @@ src/shaped-graphics/
   raytracing/
     acceleration_structure.hh/.cc [done]        blas / tlas + their build inputs; dx12 = a storage buffer, vulkan = a VkAccelerationStructureKHR over one
     raytracing_pipeline.hh/.cc    [done]        DXR state object + the shader-handle registration phase; vulkan = ray-tracing shader groups
-    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table; dx12 real (vulkan stub)
+    raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table; both backends real; its records still sit in a plain buffer
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)

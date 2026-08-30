@@ -128,8 +128,11 @@ VkBufferMemoryBarrier2 make_buffer_barrier(VkBuffer buffer, sg::access_barrier c
         .srcAccessMask = vk_access2_from(barrier.src_access),
         .dstStageMask = vk_stage2_from(barrier.dst_stages),
         .dstAccessMask = vk_access2_from(barrier.dst_access),
-        // sg submits on one queue family today, so every barrier stays within it.
-        // The transfer queue the streaming milestone adds is what makes these two diverge.
+        // Always IGNORED, even with a dedicated transfer queue in the picture.
+        // Anything an async transfer can touch is created VK_SHARING_MODE_CONCURRENT over both families, so no
+        // ownership transfer is ever needed — and an ownership transfer is precisely what would serialize the
+        // concurrency async transfer exists to provide.
+        // See vulkan_buffer.cc, which argues the trade.
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .buffer = buffer,

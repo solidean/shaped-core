@@ -143,7 +143,8 @@ Disabling it keeps a sweep out of the parts it has not reached yet.
 Those invocables are parked rather than unwired.
 An invocable with no alias and no invocation is still an orphan, which is the wiring mistake this exists for.
 
-shaped-graphics' vulkan backend is the worked case — see its [`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc).
+shaped-graphics' vulkan backend was the worked case, through the whole of its build-out.
+[`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc) records what the toggle bought and when it came off.
 
 ## Patterns
 

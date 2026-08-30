@@ -207,7 +207,10 @@ ConstantBuffer<cube_constants> gConstants : register(b0);
 
 `__spirv__` is DXC's own macro, and it works here because **slib flattens a shader's includes once per target rather than once per shader**.
 The preprocess pass is given the same target the compile is, so the fork is resolved against the format actually being built.
-[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example of all three.
+[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example of the last two.
+It declares no descriptor bindings at all, so it demonstrates nothing about the first.
+The worked examples for `[[vk::binding]]` are the vulkan backend's own tier-2 shaders:
+[`triangle.hlsl`](../backends/vulkan/tests/triangle.hlsl) and [`double_compute.hlsl`](../backends/vulkan/tests/double_compute.hlsl).
 
 ## Adding a shader
 

@@ -11,7 +11,10 @@ Compute and the raster stages each target their own DXC profile — `cs_6_8`, `v
 The six ray-tracing stages target a single-entry DXIL library (`lib_6_x`), which needs shader model 6.3 or higher.
 Only compute carries a reflected workgroup size.
 
-**Windows-only** for now: it links DXC and uses the Windows SDK's `d3d12shader.h` reflection.
+Two bytecode targets, and which of them a build can produce is a property of the platform rather than a choice.
+**SPIR-V works everywhere DXC does**: reflection is read out of the emitted module through the vendored SPIRV-Reflect.
+**DXIL is Windows-only**, because its reflection reads a container beside the bytecode through the Windows SDK's `d3d12shader.h`, which the Linux DXC release does not ship.
+A caller does not usually pick: `slib` registers both compilers and a `shader_asset` resolves whichever format the context accepts.
 
 ## Two-step compilation
 
