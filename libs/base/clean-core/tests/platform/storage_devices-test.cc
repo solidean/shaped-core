@@ -17,27 +17,44 @@ TEST("cc storage_devices - a mount describes one coherent filesystem")
         return;
     }
 
+    // Counted rather than checked per mount, so the test asserts the property itself and still says something on a
+    // platform that reports no mount at all.
+    auto unnamed = 0;
+    auto unsized = 0;
+    auto free_out_of_range = 0;
+    auto available_over_free = 0;
+
     for (auto const& m : mounts.value())
     {
-        CHECK(!m.path.empty());
+        if (m.path.empty())
+            ++unnamed;
 
         // Zero-sized mounts are filtered out, because a pseudo filesystem is nothing a dashboard can draw.
-        CHECK(m.total_bytes > 0);
+        if (m.total_bytes <= 0)
+            ++unsized;
 
-        CHECK(m.free_bytes >= 0);
-        CHECK(m.free_bytes <= m.total_bytes);
+        if (m.free_bytes < 0 || m.free_bytes > m.total_bytes)
+            ++free_out_of_range;
 
         // available is what THIS user may take, so it never exceeds what is actually free.
-        CHECK(m.available_bytes >= 0);
-        CHECK(m.available_bytes <= m.free_bytes);
+        if (m.available_bytes < 0 || m.available_bytes > m.free_bytes)
+            ++available_over_free;
     }
+
+    CHECK(unnamed == 0);
+    CHECK(unsized == 0);
+    CHECK(free_out_of_range == 0);
+    CHECK(available_over_free == 0);
 }
 
 TEST("cc storage_devices - one entry per device, never one per mount")
 {
     auto mounts = cc::query_mounts();
     if (mounts.has_error())
+    {
+        CHECK(!mounts.error().detail.empty());
         return;
+    }
 
     // One filesystem is reachable at many paths, and each answers identically.
     // Without this the same disk arrives thirteen times on an ordinary Linux box, and anything summing the list is off
@@ -48,10 +65,17 @@ TEST("cc storage_devices - one entry per device, never one per mount")
     // every other filter because both spell the same path and answer identically.
     // Two paths on one device are caught by the implementation rather than here, and deliberately: a test cannot tell
     // them from two devices that happen to be the same size, which a machine with two 1 MiB tmpfs mounts really has.
+    //
+    // Counted rather than checked per pair, so a machine reporting a single mount still asserts the property.
     auto const& all = mounts.value();
+
+    auto repeats = 0;
     for (isize i = 0; i < all.size(); ++i)
         for (isize j = i + 1; j < all.size(); ++j)
-            CHECK(all[i].path != all[j].path);
+            if (all[i].path == all[j].path)
+                ++repeats;
+
+    CHECK(repeats == 0);
 }
 
 TEST("cc storage_devices - every enumerated disk has an id to key a sampler on")
