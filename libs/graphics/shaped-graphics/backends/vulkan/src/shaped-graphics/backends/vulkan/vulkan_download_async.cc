@@ -208,6 +208,24 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
         };
         vkBeginCommandBuffer(_window_buffers[slot], &begin);
 
+        // One memory dependency per window, ahead of the copy.
+        //
+        // The layout is settled by the direct queue, so this queue emits no *image* barrier — but two copies
+        // submitted to it in succession still need a dependency between them: submission order is execution order,
+        // not a memory dependency, and two writes to one resource are a hazard synchronization validation reports.
+        // A plain memory barrier is enough and costs one per window: this queue only ever copies.
+        auto const transfer_dep_barrier = VkMemoryBarrier2{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+        };
+        auto const transfer_dep = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                                   .memoryBarrierCount = 1,
+                                                   .pMemoryBarriers = &transfer_dep_barrier};
+        vkCmdPipelineBarrier2(_window_buffers[slot], &transfer_dep);
+
         if (job.is_texture)
         {
             // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
