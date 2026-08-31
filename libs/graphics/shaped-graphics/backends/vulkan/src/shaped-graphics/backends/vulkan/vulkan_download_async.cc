@@ -459,8 +459,14 @@ namespace
     control->total_hint.store(-1, std::memory_order_relaxed);
 
     // promote_to_async's backend half: a list recorded after the call waits on this readback like any async one.
+    //
+    // Since a streaming transfer is waited on either way now, what promotion adds is the *statement of intent*: it
+    // moves the value onto the async stamp, where the wait carries no warning, because a caller who asked for the
+    // wait does not need telling that it stalls.
     control->on_promote = [src, value]
     {
+        src->suppress_stream_wait_warning(value);
+
         u64 previous = src->_pending_async_download_value.load(cc::memory_order_relaxed);
         while (previous < value
                && !src->_pending_async_download_value.compare_exchange_weak(previous, value, cc::memory_order_acq_rel,

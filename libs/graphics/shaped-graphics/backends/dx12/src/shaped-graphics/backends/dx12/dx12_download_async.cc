@@ -605,6 +605,21 @@ cc::result<cc::unit> dx12_download_async_system::initialize(isize window_bytes)
     return cc::unit{};
 }
 
+namespace
+{
+// Raise `slot` to `value`, never lower it.
+// Every cross-queue stamp is monotonic and never reset, so a racing higher value simply wins and a stale one yields a
+// cheap already-satisfied wait.
+void stamp_stream_max(std::atomic<u64>& slot, u64 value)
+{
+    u64 prev = slot.load(std::memory_order_relaxed);
+    while (prev < value && !slot.compare_exchange_weak(prev, value, std::memory_order_release, std::memory_order_relaxed))
+    {
+        // CAS retries; `prev` is refreshed with the current value each time.
+    }
+}
+} // namespace
+
 sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_handle buffer, isize offset, isize size)
 {
     CC_ASSERT(buffer != nullptr, "async download source buffer is null");
@@ -738,6 +753,10 @@ template <class ResourceT>
     {
         if (auto const strong = weak.lock())
         {
+            // What promotion adds now that every stream is waited on: the wait off the async stamp carries no
+            // warning, because a caller who asked for it does not need telling that it stalls.
+            strong->suppress_stream_wait_warning(value);
+
             u64 prev = strong->_pending_async_download_value.load(std::memory_order_relaxed);
             while (prev < value
                    && !strong->_pending_async_download_value.compare_exchange_weak(
@@ -762,11 +781,12 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    // A value is RESERVED but not stamped: nothing waits on a streamed read until promote_to_async says so.
-    // It is still folded into the window when the read finishes, so the fence reaches it — otherwise a promotion
-    // would hand a later writer a value the fence never gets to, and hang it.
+    // Stamped on the STREAM value rather than the async one: a later list that writes this resource waits for the
+    // read either way, and warns that it did, while promote_to_async moves the value onto the async stamp where the
+    // same wait is silent because the caller asked for it.
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_stream_max(src->_pending_stream_download_value, value);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
@@ -815,6 +835,7 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_stream_max(src->_pending_stream_download_value, value);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
     cc::span<byte> const dst_span = dst.span();
@@ -854,6 +875,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
 
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_stream_max(src->_pending_stream_download_value, value);
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     auto control = make_stream_control(typed, value, size);
@@ -901,6 +923,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
 
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_stream_max(src->_pending_stream_download_value, value);
 
     auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
     auto control = make_stream_control(typed, value, fp.tight_size());

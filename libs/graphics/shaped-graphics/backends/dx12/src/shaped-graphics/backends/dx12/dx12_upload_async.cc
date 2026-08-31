@@ -902,7 +902,12 @@ template <class ResourceT>
     control->on_promote = [weak = std::weak_ptr<ResourceT const>(cc::move(target)), value]
     {
         if (auto const strong = weak.lock())
+        {
+            // What promotion adds now that every stream is waited on: the wait off the async stamp carries no
+            // warning, because a caller who asked for it does not need telling that it stalls.
+            strong->suppress_stream_wait_warning(value);
             stamp_max(strong->_pending_async_upload_value, value);
+        }
     };
     return control;
 }

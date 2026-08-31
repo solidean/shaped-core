@@ -685,8 +685,12 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
 
     // promote_to_async's backend half: move this transfer's value onto the async stamp too, so a list recorded after
     // the call waits on it like any async upload.
+    // Since a streaming transfer is waited on either way now, what promotion adds is the *statement of intent*: the
+    // wait off the async stamp carries no warning, because a caller who asked for it does not need telling it stalls.
     control->on_promote = [dst, value = job.completion.value]
     {
+        dst->suppress_stream_wait_warning(value);
+
         u64 previous = dst->_pending_async_upload_value.load(cc::memory_order_relaxed);
         while (previous < value
                && !dst->_pending_async_upload_value.compare_exchange_weak(previous, value, cc::memory_order_acq_rel,
@@ -807,8 +811,12 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
 
+    // Since a streaming transfer is waited on either way now, what promotion adds is the *statement of intent*: the
+    // wait off the async stamp carries no warning, because a caller who asked for it does not need telling it stalls.
     control->on_promote = [dst, value = job.completion.value]
     {
+        dst->suppress_stream_wait_warning(value);
+
         u64 previous = dst->_pending_async_upload_value.load(cc::memory_order_relaxed);
         while (previous < value
                && !dst->_pending_async_upload_value.compare_exchange_weak(previous, value, cc::memory_order_acq_rel,

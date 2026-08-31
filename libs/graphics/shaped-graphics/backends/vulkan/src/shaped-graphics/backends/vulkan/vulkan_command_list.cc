@@ -133,10 +133,28 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         async_wait_values.push_back(value);
     };
 
+    // A STREAMING transfer's values join the async ones here.
+    // A list that touches a resource a stream is still filling waits for it, which is what makes a stream as safe as
+    // an async transfer rather than a documented data race — and the wait is the caller's cue, so it warns once per
+    // stream unless promote_to_async has already said the wait is intended.
+    auto const add_stream_wait = [&](vulkan_completion_group_handle const& group, u64 value, auto const& resource)
+    {
+        if (group == nullptr || value == 0 || group->has_reached(value))
+            return; // already settled, so nothing waits and nothing is worth saying
+        if (resource->claim_stream_wait_warning(value))
+            CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the "
+                           "whole transfer lands. Wait on the stream handle yourself before using the resource, or "
+                           "call promote_to_async on it if the wait is what you want");
+        add_async_wait(group, value);
+    };
+
     for (auto const& buffer : cmd->_touched_buffers)
     {
         add_async_wait(buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
+        add_stream_wait(buffer->_upload_group, buffer->_pending_stream_copy_value.load(cc::memory_order_acquire), buffer);
+        add_stream_wait(buffer->_download_group, buffer->_pending_stream_download_value.load(cc::memory_order_acquire),
+                        buffer);
     }
 
     // Textures take the same pair, and must: the async transfer path reads a texture's canonical layout and restores
@@ -145,6 +163,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     {
         add_async_wait(texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(texture->_download_group, texture->_pending_async_download_value.load(cc::memory_order_acquire));
+        add_stream_wait(texture->_upload_group, texture->_pending_stream_copy_value.load(cc::memory_order_acquire),
+                        texture);
+        add_stream_wait(texture->_download_group,
+                        texture->_pending_stream_download_value.load(cc::memory_order_acquire), texture);
     }
 
     CC_ASSERT(cmd->_pending_image_barriers.empty(), "a declared access was never flushed by a GPU op");

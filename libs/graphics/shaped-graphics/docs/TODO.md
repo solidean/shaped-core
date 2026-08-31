@@ -8,6 +8,19 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
+  - a **direction-specific async-ready layout**, which the transfer path cannot hold today.
+    `async_ready_layout` returns `general` on both backends, so `sg::async_direction` is accepted and ignored — a caller's statement of intent rather than an answer.
+    Vulkan could copy from `TRANSFER_SRC_OPTIMAL` and into `TRANSFER_DST_OPTIMAL` and keep whatever compression that buys, and dx12 could not: its copy queue needs COMMON either way.
+    **What rules it out is submit-call order.**
+    The fixup that settles a texture's layout runs at *enqueue*, on the calling thread, while a transfer already enqueued has not necessarily been submitted by its actor yet.
+    An upload followed by a download of one texture therefore puts the download's fixup ahead of the upload's copy in call order.
+    The validation layer tracks image layouts in `vkQueueSubmit` call order and models no semaphore, so it reads the upload's copy as naming a layout the image has left.
+    The GPU ordering is correct throughout; only the layer disagrees, and a layer message fails a test.
+    One layout for both directions removes the second fixup, and with it the interleave.
+    The reproduction is [tests/transfer/stream-test.cc](../tests/transfer/stream-test.cc)'s `a texture sink receives whole tightly-packed rows`.
+    It failed about one run in ten with direction-specific layouts, and passes 40/40 with one.
+    **What would earn it back** is submitting the fixup from the transfer actor, immediately before the job it belongs to, so call order matches queue order.
+    That needs a direct-queue submit from the actor thread and a job whose wait token is settled after the fact, which is why it is a follow-up rather than part of the change that found it.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
   - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;

@@ -84,15 +84,21 @@ That is where nearly all of the system's risk lives.
 
 Preserve these; the rest is tuning:
 
-1. **A streaming transfer never stamps the value a later command list waits on.**
-   That stamp is what makes a later list wait, and not paying it is the entire point of the tier.
-   For an upload the storage still has to outlive the copy, so the lifetime gate reads a *separate* per-resource stamp, and deferred deletion waits on the max of the two.
+1. **A streaming transfer stamps a value of its own, which a later command list waits on and warns about.**
+   A list that touches a resource a stream is still filling waits for it, exactly as it would for an async transfer.
+   That is what makes streaming as safe as the async tier rather than a documented data race.
+   It is a change from the tier's original shape, where a stream was invisible to a later list until it was promoted.
 
-   A completion value is still **reserved** and still folded into its window, in both directions.
-   That is what `promote_to_async` has to hand out: promotion stamps the resource with that already-reserved value, and a value the fence never reaches would hang the very list it was given to.
+   What the stall costs is real, so the wait says so, **once per stream**.
+   The message names the two ways out: wait on the handle yourself before touching the resource, or call `promote_to_async` if the wait is what you want.
+   Once per stream rather than once per resource, since a resource streamed every frame would otherwise report the first one and stay silent about the hundred after it.
+
+   The stamp stays *separate* from the async one, because the two carry different meanings: the async stamp's wait is silent, and promotion is what moves a value onto it.
+   Deferred deletion reads the max of both, as it always did.
 
    The value is reserved on the **resource's own completion timeline**, never a shared counter — see [async upload](upload.async.md).
    Streaming is what makes that unavoidable: a stream picked ahead of an older async transfer finishes first, and on one shared timeline its completion would report that older transfer done.
+
 2. **Every teardown path settles the completion node.**
    Cancellation, a dropped handle, a dropped destination, context shutdown — all of them push `cc::async_error::make_cancelled()`.
    A manual async node nobody pushes parks its dependents for the process's lifetime, so silence is the one unacceptable outcome.
@@ -105,7 +111,9 @@ Preserve these; the rest is tuning:
 
 `set_priority` and `cancel` are relaxed atomic stores from any thread — no message, no lock — read by the actor when it next picks, which is once per window.
 
-`promote_to_async()` is **additive**: the transfer keeps its handle, its progress and its completion, and *additionally* gains the automatic synchronization.
+`promote_to_async()` is **additive**: the transfer keeps its handle, its progress and its completion.
+What it adds is a *statement of intent* rather than the wait itself, which every stream now gets.
+It moves the value onto the async stamp, where the same wait carries no warning — a caller who asked for the stall does not need telling about it.
 It is what makes a low-priority stream a safe prewarm — guessing wrong about what will be needed is recoverable rather than fatal.
 Lists recorded before the call are unaffected, which is the same rule the contract already states.
 

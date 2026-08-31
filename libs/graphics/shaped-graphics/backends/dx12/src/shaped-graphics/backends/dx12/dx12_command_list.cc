@@ -57,6 +57,29 @@ void fold_group_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 }
 } // namespace
 
+namespace
+{
+/// Fold a STREAMING transfer's value into a list's wait set, warning the first time it makes a list wait.
+///
+/// A list that touches a resource a stream is still filling waits for it, which is what makes a stream as safe as an
+/// async transfer rather than a documented data race.
+/// The wait is the caller's cue: it stalls the list until the whole transfer lands, so it says so once per stream —
+/// unless promote_to_async has already declared the wait intended.
+template <class Resource>
+void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
+                      sg::backend::dx12::dx12_group_value const& wait,
+                      Resource const& resource)
+{
+    if (wait.group == nullptr || wait.value == 0)
+        return;
+    if (resource->claim_stream_wait_warning(wait.value))
+        CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the whole "
+                       "transfer lands. Wait on the stream handle yourself before using the resource, or call "
+                       "promote_to_async on it if the wait is what you want");
+    fold_group_wait(waits, wait);
+}
+} // namespace
+
 void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                             sg::pipeline_stage_flags stages,
                                             sg::access_flags access)
@@ -76,6 +99,14 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
         fold_group_wait(_required_download_waits,
                         {buffer->_download_group, buffer->_pending_async_download_value.load(std::memory_order_acquire)});
     }
+
+    // A streaming transfer's values join the async ones, warning where they make this list wait.
+    fold_stream_wait(_required_copy_waits,
+                     {buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)}, buffer);
+    if (sg::is_unordered_write(access))
+        fold_stream_wait(
+            _required_download_waits,
+            {buffer->_download_group, buffer->_pending_stream_download_value.load(std::memory_order_acquire)}, buffer);
 
     // Accumulate the access; no barrier yet.
     // Declaring rather than flushing here is what lets a buffer bound several times to one op merge into a single barrier with the union of its stages/access.
@@ -109,6 +140,15 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
         fold_group_wait(
             _required_download_waits,
             {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
+
+    // A streaming transfer's values join the async ones, warning where they make this list wait.
+    fold_stream_wait(_required_copy_waits,
+                     {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
+                     texture);
+    if (sg::is_unordered_write(access))
+        fold_stream_wait(
+            _required_download_waits,
+            {texture->_download_group, texture->_pending_stream_download_value.load(std::memory_order_acquire)}, texture);
 
     // Accumulate the access over the range; no barrier yet.
     // Declaring rather than flushing here is what lets a texture bound several times to one op merge its declares into one barrier per subresource box.

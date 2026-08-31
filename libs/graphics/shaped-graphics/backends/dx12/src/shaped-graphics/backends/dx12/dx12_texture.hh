@@ -80,6 +80,11 @@ public:
     // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
     mutable std::atomic<u64> _pending_stream_copy_value = 0;
 
+    // The same, on the download timeline, for a STREAMING readback.
+    // Command-list access tracking reads it so a list touching a texture a stream is still reading waits for it,
+    // and warns once per stream that it did.
+    mutable std::atomic<u64> _pending_stream_download_value = 0;
+
     // Per-command-list subresource access tracking.
     // Mutable: a texture's shape is fixed, but its tracked GPU state changes as lists record against it.
     // Guarded because concurrent lists may record the same texture.
