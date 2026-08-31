@@ -153,7 +153,7 @@ h.is_settled() / h.is_complete()  // bool — settled (delivered OR cancelled) /
 h.progress()            // -> sg::stream_progress {i64 bytes_done; cc::optional<i64> total_hint}  (hint, never a test)
 h.set_priority(i32) / h.priority()  // reordered against other streams; takes effect within ~one window; any thread
 h.cancel()              // stops it being served; recorded chunks still run. DROPPING THE HANDLE CANCELS TOO
-h.promote_to_async()    // ADDITIVE: keeps the handle, and gains the automatic waits — the clean prewarm upgrade
+h.promote_to_async()    // ADDITIVE: keeps the handle. every stream is waited on anyway; this says the wait is INTENDED, so it stops warning
 dl.future()             // stream_download_handle only -> sg::bytes_future, independent of the handle's lifetime
 ctx.submit_command_list(std::move(cmd))            // -> submission_token — consumes cmd (submit once; same epoch it opened in); throws sg::device_lost_exception on device loss
 ctx.submit_command_list_and_present(sc, std::move(cmd)) // -> submission_token — THE present path: folds the swapchain back-buffer's present-layout transition into cmd, submits, then presents (see swapchain)
@@ -230,6 +230,9 @@ cmd.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_fu
 cmd.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T
 cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 cmd.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — inline read one texture (sub)region back (needs copy_src), tightly packed; ready once the submitted list runs
+cmd.ensure_layout(tex, layout, range={})                      // void — leave `tex` in `layout` when this list submits; saves the NEXT consumer a transition. no buffer overload (no layout)
+cmd.prepare_for_async(tex, direction, range={})               // void — ensure_layout with the layout the BACKEND picks for ctx.upload/download/stream. sg::async_direction::{upload,download,both}
+                                                              //   skip it and the transfer submits a one-transition list itself and WARNS once per texture. general on both backends today (see docs/TODO.md)
 sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op

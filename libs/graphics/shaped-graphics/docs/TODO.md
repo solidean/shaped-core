@@ -134,71 +134,10 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   [tests/transfer/overlapping-readback-test.cc](../tests/transfer/overlapping-readback-test.cc) reserves in one order and submits in the other deliberately, and passes 20/20 on every backend.
   It stays as the gate for that.
   The tier-2 suite is back to a context per test, so nothing we ship reaches this today — which also means it cannot be reproduced on demand any more.
-
-- **`prepare_for_async` — an async transfer of a texture cannot be interleaved with command lists that use it.**
-  Both backends, for different reasons, and the fix is one design rather than two.
-
-  **The defect.**
-  An async transfer runs on a queue that cannot settle the resource's layout for itself.
-  A D3D12 copy queue **cannot run layout barriers at all**, so a copy there requires the resource in `COMMON`; an inline list
-  that left it in `COPY_DEST` makes the copy illegal, and the debug layer says so.
-  Vulkan's transfer queue *can* barrier, and sg's borrow-and-restore makes the GPU ordering correct — but the validation layer
-  tracks image layouts in `vkQueueSubmit` **call** order and does not model semaphores, so a transfer submit landing after a
-  direct submit reads as a layout mismatch.
-  Correct and unverifiable is still unshippable, since the test listener fails on any layer message.
-  So today the supported pattern is a texture touched by *either* command lists *or* async transfers, never both around one
-  transfer.
-
-  **The agreed design — a prepare command, and a lock that makes it hold.**
-  A resource is moved into its async-ready layout by the **direct** queue, at a point the caller picks, and then held there:
-  - a command list records `prepare_for_async(resource, range)`, which declares an access like any other, so the transition
-    rides the existing declare/flush path and needs no new barrier machinery;
-  - the **backend** picks the target layout — `general` on dx12, which is what its copy queue requires, and `copy_src` /
-    `copy_dst` on vulkan.
-    The command says "prepare for an async transfer", never "transition to layout X";
-  - once submitted, the range is **locked**: sg refuses the uses that would move the layout, so nothing can change it between
-    that submit and the transfer's.
-    A second command releases it.
-
-  The lock is what does the work, and it is why an explicit prepare *without* it would not be enough: a prepare that only
-  settles the layout at one instant leaves the same race, just moved.
-  With the lock, the transfer needs no layout transition at all — `oldLayout == newLayout`, or no image barrier whatsoever —
-  so there is no layout claim left to get wrong, and the layer's map agrees by construction.
-
-  **What the lock must *not* forbid.**
-  Writes and layout-changing uses, not all uses.
-  A buffer has no layout, so a shader read on the direct queue concurrent with an async download is legal Vulkan today and
-  needs nothing — the resources are already `VK_SHARING_MODE_CONCURRENT`, and the only precondition is no unsynchronized
-  writer.
-  Forbidding that would outlaw exactly the overlap the transfer queue exists to provide.
-  A texture is different only because one image cannot be in two layouts at once: a prepared texture asserts on a concurrent
-  shader read by default, and preparing to `general` instead keeps such reads legal at a compression cost.
-  That is the same trade `combine_layouts` already makes when an SRV and a UAV collide on one op, warning included.
-
-  **Other things it settles.**
-  Buffers gain no correctness from it, but a mandatory direct-queue hop means async uploads and downloads can no longer chain
-  transfer-to-transfer — which is what the cross-linked `upload_wait` / `download_wait` completion-group pairs exist to handle,
-  and they can go.
-  The state is per subresource, which is nearly free: the canonical state is already a covering partition over
-  mip × array × aspect, so the lock is a flag beside `curr_layout` / `prev_layout`.
-  Set and cleared at **submit**, under the texture's mutex in submission order, exactly as the canonical promote already is —
-  so it composes with concurrent recording for the same reason that does.
-
-  **The gate.**
-  Three tier-1 tests, written and then held back because neither backend passes them:
-  - `sg - async upload composes after a list that wrote the texture` — an inline list writes the texture and submits, then an
-    async upload of a different pattern must compose *after* it (the reverse edge);
-  - `sg - a list reading a texture waits on an in-flight async upload` — a seeded texture, an async upload, then an inline
-    readback recorded straight afterwards must see the streamed bytes (the forward edge);
-  - `sg - an async texture transfer hands the texture back in the layout it found` — an inline write, a `ctx.download`, then a
-    second inline write and readback.
-    This one **passes on vulkan today** and is kept as
-    [backends/vulkan/tests/vulkan-texture-transfer-test.cc](../backends/vulkan/tests/vulkan-texture-transfer-test.cc);
-    it moves up to tier 1 once dx12 can hold it too.
-
-  The ergonomic cost is real and worth taking: a one-shot `ctx.download.bytes_from_texture` needs no command list today and
-  would need a prepare recorded on one.
-  An unprepared resource should be **refused** rather than silently fixed by a just-in-time transition, since a silent fix
-  reintroduces the race the lock exists to remove.
+  **The likely cause has since been found and fixed**, though not by chasing this.
+  Two lists recorded concurrently against one resource each computed their barriers against the state it was in *while they recorded*.
+  So neither saw the other's declares, and both took the no-barrier freebie.
+  That is exactly this shape — a readback that needs the concurrency and sees nothing.
+  Re-test it against the entry-barrier model before treating it as open.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

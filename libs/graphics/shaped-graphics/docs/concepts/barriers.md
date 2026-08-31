@@ -54,45 +54,62 @@ Only a same-resource copy does that today (`cmd.copy` with `src == dst`); skippi
 The machine is **opt-in**: a backend that emits explicit barriers uses it, and a driver-barrier backend (opengl/webgl) ignores it.
 Emission is entirely the backend's own; there is no core "emit this barrier" seam.
 
-## A texture rests in a real layout, and gets there once
+## A texture starts in a real layout, and gets there once
 
-A texture is created in a layout no barrier may target — `VK_IMAGE_LAYOUT_UNDEFINED` on Vulkan — so a tracker that *rested*
-textures there had no layout to hand one list back to while another was still recording, and reverting emitted
-`newLayout = UNDEFINED`: a discard, and a spec violation.
+A texture is created in a layout no barrier may target — `VK_IMAGE_LAYOUT_UNDEFINED` on Vulkan — so a tracker that
+started textures there would have nothing for a barrier to name as its source.
 
-So a texture rests somewhere real from the start.
-`texture_description::initial_layout` names it, and `nullopt` derives one from `usage` — most-specific first, with `general`
-last rather than default, since it is the one layout drivers cannot compress.
-`undefined` and `present` are rejected: the first is the state this exists to leave, the second belongs to a swapchain image.
+So a texture starts somewhere real.
+`texture_description::initial_layout` names it, and `nullopt` derives one from `usage` — most-specific first, with
+`general` last rather than default, since it is the one layout drivers cannot compress.
+`undefined` and `present` are rejected: the first is the state this exists to leave, the second belongs to a swapchain
+image.
 
 The **one-time** transition out of `UNDEFINED` belongs to no list.
-A list gathers, while recording, the textures it is the first to touch — a *tentative* set, since a concurrently recording
-list may claim one first, so it is a superset and never a subset.
+A list gathers, while recording, the textures it is the first to touch — a *tentative* set, since a concurrently
+recording list may claim one first, so it is a superset and never a subset.
 At **submit**, inside the submission lock, each is claimed against the texture and the survivors' `UNDEFINED -> resting`
-barriers go into a small second command buffer prepended to the same `vkQueueSubmit`.
-Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first, and its
-eager barriers would name an `oldLayout` the image is not in.
+barriers go into the small command buffer prepended to the same `vkQueueSubmit`, ahead of that list's entry barriers.
+Whole-image rather than per-subresource, because a list that uses one mip leaves the others where `vkCreateImage` left
+them while the tracker would say otherwise.
 
-dx12 needs none of this and ignores the field.
-A D3D12 resource is created in `COMMON`, which *is* `general`, so its tracker's default is already true of the resource; dx12
-also expresses discard as `D3D12_TEXTURE_BARRIER_FLAG_DISCARD` on the barrier rather than as a layout.
+Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first.
 
-## The transfer queue borrows a layout, and never changes it
+**While the claim is owed, the tracked layout reads as `undefined`**, whatever the texture was seeded to start in.
+What reads it is the async fixup below, and telling it the truth is what makes it submit the list that claims the
+transition instead of copying from an image nothing has transitioned yet.
 
-The async transfer paths record on a queue the per-list declare/flush rhythm cannot reach.
-They **borrow**: each reads the layout the texture rests in when the transfer is enqueued, transitions from it, and hands the
-texture back in exactly that layout.
-So canonical keeps a single writer — a list's finalize — and the transfer path is a pure reader.
+dx12 needs none of this and ignores the field for the transition's purposes.
+A D3D12 resource is created in `COMMON`, which *is* `general`, so its tracker's default is already true of the resource;
+dx12 also expresses discard as `D3D12_TEXTURE_BARRIER_FLAG_DISCARD` on the barrier rather than as a layout.
 
-That read is only meaningful because the transfer is ordered against the direct queue in both directions, by the same
-per-resource stamps buffers use: a list submitted before the enqueue is covered by the reverse token, and one submitted after
-waits on the transfer's completion value.
-It is also what makes the streaming tier safe, which deliberately does not stamp its forward value until promoted: a list
-running concurrently with a streaming transfer still finds the texture in the layout its barriers name, and only the *data*
-races.
+## The transfer queue never changes a layout — the direct queue settles it first
 
-Interleaving a command list with an async transfer of the same texture is nevertheless **not supported yet** — see
-[TODO](../TODO.md)'s prepare-for-async entry for why, and for the design that fixes it.
+An async or streaming transfer runs on a queue that cannot settle a texture's layout for itself.
+A D3D12 copy queue **cannot run layout barriers at all**, so a copy there requires the resource in `COMMON`.
+Vulkan's transfer queue can run them, and doing so is still wrong for a different reason: the validation layer tracks
+image layouts in `vkQueueSubmit` **call** order and models no semaphore, so a transfer submit landing after a direct
+submit reads as a mismatch even when the GPU ordering is right.
+Correct and unverifiable is still unshippable, since a layer message fails a test.
+
+So the **direct queue** settles it, before the transfer is enqueued.
+`ctx.prepare_texture_for_async` compares the texture's current layout against what the transfer needs, and on a
+mismatch submits a throwaway command list holding one transition.
+The transfer then emits **no image barrier at all**, and has no layout claim for the layer to disagree with.
+
+**It warns, once per texture.**
+The caller could have avoided the submit by recording `cmd.prepare_for_async` on a list they were already building, or
+by creating the texture with `initial_layout` set, and the message names both.
+There is no opt-out on purpose: doing either is both the fix and the thing the warning asks for.
+
+The fixup runs **before** a transfer job's stamps rather than after.
+It is an ordinary command list, so its submit waits on the texture's pending-transfer values — and a value stamped for
+a job still being enqueued is one nothing will ever signal.
+
+**The async-ready layout is `general` on both backends**, and `sg::async_direction` is accepted and ignored.
+A direction-specific layout on vulkan would keep more compression and cannot be held: see [TODO](../TODO.md) for the
+submit-call-order reason and what would earn it back.
+
 
 ## Subresources: a covering partition (designed-in for textures)
 
@@ -111,35 +128,43 @@ A backend keeps one partition per open command-list slot, plus a canonical one.
 Every command list is "concurrent": on creation it takes a **slot** from the context's [command_list_slot_allocator](../../src/shaped-graphics/barrier/command_list_slot.hh).
 The allocator is a mutex-guarded 64-bit free bitmask — lowest clear bit — with a heap free-list past 64 that warns, since that many concurrent recorders usually means a leaked list.
 The slot keys the list's **private** access-state entry inside each resource it touches: a `cc::small_vector` of per-slot states, so a few parallel lists do not allocate.
-Several lists can therefore record against the same resource at once without sharing state.
 
-Each resource also has a **canonical** state — the state shared between command lists.
-A list starts a resource's slot from canonical on first touch and tracks intra-list hazards privately, while the resource separately counts how many open lists are using it.
-On **submit**, per touched resource:
+**A slot starts empty.**
+A resource enters at whatever the list's own first op asks for — its layout, its stages, its access — recorded as that
+list's **entry requirement** and nothing else.
+Nothing the list records is trusted about where the resource starts, which is the property the whole model is after.
 
-- if this list's finalize drops that resource's live-user count to **0** (it was the last list using it),
-  the list **promotes** its final state to canonical;
-- otherwise it **reverts** the resource to the canonical layout it seeded from — stable while other lists
-  use it, since a user count ≥ 1 blocks any promote (for a texture this emits the transitions back to that
-  layout and warns, because the revert is a hidden cost of concurrent recording).
+Each resource also carries a **current** state: what it is in as of the last *submitted* list.
+At **submit**, inside the submission lock, per touched resource:
 
-The decision is **per resource, not global**: one list can be the last user of texture A and promote it, while still sharing texture B with another open list and reverting B.
-Each resource makes the call under its own mutex.
-So **only the last-user submit may leave a resource in a new canonical layout** — every other submit hands it back exactly as it found it.
-With one list open at a time every finalize is a last user, so there are no reverts and no overhead.
-On **drop** the recorded work never runs, so the list only drops each resource's user count and clears its slots, leaving canonical unchanged.
+- the entry requirement is resolved against the current state, and the barrier that satisfies it goes into a small
+  command buffer **prepended** to the same submit — `_pre_buffer` on vulkan, a second command list on dx12;
+- the list's final state then becomes the current one, unconditionally, in submission order.
 
-**Buffers skip all of this.**
-A buffer has no layout, and D3D12 decays it to `COMMON` at `ExecuteCommandLists`, so cross-list ordering is free and only *intra-list* hazards ever need a barrier.
-A buffer therefore keeps **no** canonical state and **no** user count — each list seeds a fresh state and clears its slot at submit or drop.
-The canonical / promote / revert machinery above is a texture concern.
+Only the boxes a list actually used are committed: a slot's partition starts empty, so its untouched boxes say nothing
+about the subresources the list never named.
 
-The one *global* requirement is ordering: a submit's finalize writes the canonical layout and its `ExecuteCommandLists` realizes it, so finalize order must equal execute order.
-dx12 gets that for free by running finalize and execute under the one lock (`_next_submission`) that already serializes queue submission and fence signal.
-No extra submit-wide lock is needed.
+Under the lock, because submission order is what that lock serializes — it is what makes "the state so far" mean
+anything at all.
 
-Fine-grained data hazards *between* concurrently-recorded lists on the same resource remain the caller's responsibility, as in Vulkan.
-The model orders gross execution by submit order plus the epoch fence and keeps each list's layout bookkeeping consistent, but it cannot see across two lists recording at once.
+**What this replaced, and why.**
+The model before it seeded a slot from the shared state at its first touch, and had every non-last finalize *revert*
+the resource to it.
+Two things were wrong with that.
+A list computed its barriers against whatever the resource was in *while it recorded*, so two lists recording
+concurrently never saw each other's declares: A's write and B's read both took the no-barrier freebie, and submitting
+A then B left them unsynchronized.
+Vulkan gives no implicit ordering between two `vkQueueSubmit` batches, so that was a real hazard, and synchronization
+validation reports it as a `READ_AFTER_WRITE`.
+(dx12 was safe there by construction: `ExecuteCommandLists` orders the batches, and a buffer decays to `COMMON`.)
+And revert held only as long as command lists were the only things moving a layout — an async transfer's fixup moving
+one between a list's submit and another's left the second list's barriers naming a layout the texture had left.
+
+**Buffers keep their between-lists state on vulkan and none on dx12.**
+D3D12 decays a buffer to `COMMON` at `ExecuteCommandLists`, so cross-list ordering is free there and only *intra-list*
+hazards ever need a barrier.
+Vulkan has no such decay, so a vulkan buffer carries the same current state and entry requirement a texture does, minus
+the subresource partition.
 
 ## dx12: buffer barriers + texture layout transitions
 
@@ -160,20 +185,21 @@ No specialized D3D12 layout serves both an SRV and a UAV, so it falls back to `g
 A genuinely incompatible pair, such as copy-dest plus sampled in one op, asserts.
 
 For **buffers specifically the concurrency machinery is teeth-free**: a dx12 buffer's layout is always `general`, because D3D12 decays buffers to `COMMON` at `ExecuteCommandLists`.
-So revert emits nothing and cross-list ordering rides on that decay, with no trailing barriers.
+So a buffer keeps no between-lists state at all, and cross-list ordering rides on that decay.
 
 **Textures give the machinery teeth.**
 Each `dx12_texture` owns a per-command-list covering partition, [dx12_texture_access](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_texture_access.hh).
 `declare` accumulates the covered subresource boxes' access.
 `flush` rolls them through the state machine and returns the per-box `D3D12_TEXTURE_BARRIER`s the command list batches and emits before the op.
 Each is scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, carrying `LayoutBefore→LayoutAfter`.
-A non-last-user submit returns the reverse transitions back to the canonical layout, flushed before `Close`, and warns.
+A submit returns the box's **entry** transitions, which go into the second command list executed ahead of this one in the same `ExecuteCommandLists` call.
+Never into the list's own body, since a list that recorded second may submit first.
 This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine and partition.
 Barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each owns its tracking and emission.
 The drivers today are the inline texture copy, the compute, ray-tracing and raster bound groups, the raster rendering scope's target transitions, and the swapchain's present transition.
 The inline copy is the clearest: `cmd.upload.bytes_to_texture` / `cmd.download.bytes_from_texture` record a `copy_dst` / `copy_src` access against the region before staging.
 The layout transition is therefore emitted ahead of the `CopyTextureRegion`.
-The **vulkan** backend reuses the shared vocabulary and state machine with its own emission when its compute/copy milestone lands.
+The **vulkan** backend reuses the shared vocabulary and state machine with its own emission, and its own prepended command buffer.
 
 ## See also
 
@@ -181,4 +207,5 @@ The **vulkan** backend reuses the shared vocabulary and state machine with its o
 - [resource_access_state.hh](../../src/shaped-graphics/barrier/resource_access_state.hh) — the three-timeline machine.
 - [subresource_state.hh](../../src/shaped-graphics/barrier/subresource_state.hh) — the covering partition.
 - [command_list_slot.hh](../../src/shaped-graphics/barrier/command_list_slot.hh) — the concurrency substrate.
+- [tests/vulkan-concurrent-lists-test.cc](../../backends/vulkan/tests/vulkan-concurrent-lists-test.cc) — two lists recorded against one resource, run under synchronization validation.
 - [threading](threading.md) — the thread model concurrent recording builds on.
