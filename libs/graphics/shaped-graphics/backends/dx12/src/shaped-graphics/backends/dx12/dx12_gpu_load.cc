@@ -1,4 +1,5 @@
 #include <clean-core/platform/win32_sanitized.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/mutex.hh>
 #include <pdh.h>
@@ -113,6 +114,12 @@ cc::result<sg::gpu_counters> sg::backend::dx12::dx12_context::read_gpu_counters(
                 auto const engine = engine_type_of(narrow);
                 if (engine.empty())
                     continue;
+
+                // A cumulative counter has no negative value to report, so one is PDH answering with something
+                // this cannot use — summing it would hand back a total a caller would draw as a negative bar.
+                // Erroring is the whole response: the counter is re-read from scratch, so the next call is fine again.
+                if (items[i].RawValue.FirstValue < 0)
+                    return cc::error(cc::format("the GPU Engine counter for {} reported a negative running time", narrow));
 
                 // 100 ns units, like every other Windows tick.
                 auto const busy = f64(items[i].RawValue.FirstValue) * 1e-7;

@@ -14,6 +14,27 @@ using namespace cc::primitive_defines;
 
 namespace dx12 = sg::backend::dx12;
 
+namespace
+{
+/// Retries a GPU counter reading, because one fails for a reason that is gone by the next call: a counter is the sum
+/// over the processes currently using the engine, so one exiting lowers it and the reading spanning that carries no
+/// load to report.
+/// Bounded, so a machine whose counters are simply unavailable still falls through to its SKIP rather than spinning.
+template <class F>
+auto retried(F&& read) -> decltype(read())
+{
+    constexpr auto k_attempts = 8;
+
+    auto result = read();
+    for (auto attempt = 1; attempt < k_attempts && result.has_error(); ++attempt)
+    {
+        cc::this_thread_sleep_secs(0.01);
+        result = read();
+    }
+    return result;
+}
+} // namespace
+
 // Which GPU is in the machine is not something a test can know, so nothing here asserts a size.
 // What it pins is that the two memory figures are different scales and both coherent, and that an unimplemented query
 // refuses rather than reporting an idle GPU.
@@ -54,12 +75,12 @@ TEST("sg dx12 - the memory budget is what this process may use, not what the boa
         CHECK(memory.value().budget_bytes <= board.value());
 }
 
-TEST("sg dx12 - GPU busy counters are monotone and named per engine")
+TEST("sg dx12 - GPU busy counters are non-negative and named per engine")
 {
     auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
 
-    auto first = handle->read_gpu_counters();
+    auto first = retried([&] { return handle->read_gpu_counters(); });
     if (first.has_error())
         SKIP("the GPU Engine performance counters are unavailable here");
 
@@ -70,15 +91,15 @@ TEST("sg dx12 - GPU busy counters are monotone and named per engine")
         CHECK(e.busy_secs >= 0);
     }
 
-    auto second = handle->read_gpu_counters();
+    // NOT asserted: that a second reading is greater than the first.
+    // A counter is the sum over the processes currently using the engine, so one exiting between the two readings
+    // lowers it — which is a fact about the counter rather than a failure, and it is the sampler that reports it.
+    // The first reading answered, so the counters exist here and a retried second one must answer too.
+    auto second = retried([&] { return handle->read_gpu_counters(); });
     REQUIRE(second.has_value());
 
-    // Matched by name, because the engine set can differ between two readings and pairing by index would difference
-    // two unrelated counters.
-    for (auto const& before : first.value().engines)
-        for (auto const& after : second.value().engines)
-            if (cc::string_view(before.engine) == cc::string_view(after.engine))
-                CHECK(after.busy_secs >= before.busy_secs);
+    for (auto const& e : second.value().engines)
+        CHECK(e.busy_secs >= 0);
 }
 
 TEST("sg dx12 - a sampled GPU load is the busiest engine, in range")
@@ -92,7 +113,14 @@ TEST("sg dx12 - a sampled GPU load is the busiest engine, in range")
     auto sampler = sg::gpu_load_sampler(*handle);
     cc::this_thread_sleep_secs(0.05);
 
-    auto const load = sampler.sample();
+    // A counter that fell because a GPU process exited is an error rather than a load, and each sample re-baselines
+    // against the reading that failed — so retrying is what turns that into the load this means to check.
+    auto const load = retried(
+        [&]
+        {
+            cc::this_thread_sleep_secs(0.01);
+            return sampler.sample();
+        });
     REQUIRE(load.has_value());
 
     CHECK(load.value().interval_secs > 0);
