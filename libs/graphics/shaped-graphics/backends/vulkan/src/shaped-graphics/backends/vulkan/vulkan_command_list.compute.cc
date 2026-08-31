@@ -151,7 +151,7 @@ void vulkan_command_list::declare_array_accesses()
             CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
             auto const& element = ab->elements[e.index];
             CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            track_texture_access(*element.texture, element.range, e.stages, e.access, e.layout);
+            (void)track_texture_access(*element.texture, element.range, e.stages, e.access, e.layout);
         }
     }
 
@@ -205,8 +205,8 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
         // Bound textures also transition to the layout their access class needs (a sampled texture to
         // shader_readonly, a storage texture to shader_readwrite) — the inferred layout is shader_layout_of.
         for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::compute,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+            (void)track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::compute,
+                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.

@@ -407,14 +407,21 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
         _touched_buffers.push_back(std::static_pointer_cast<vulkan_buffer const>(buffer.shared_from_this()));
 }
 
-void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
-                                               sg::subresource_range range,
-                                               sg::pipeline_stage_flags stages,
-                                               sg::access_flags access,
-                                               sg::texture_layout layout)
+sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture const& texture,
+                                                             sg::subresource_range range,
+                                                             sg::pipeline_stage_flags stages,
+                                                             sg::access_flags access,
+                                                             sg::texture_layout layout)
 {
     if (texture._image == VK_NULL_HANDLE)
-        return;
+        return layout;
+
+    // A texture with a transfer in flight stays in the layout that transfer needs.
+    // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
+    // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
+    // `general` serves this list's access too, at the compression cost combine_layouts already trades away elsewhere.
+    if (texture.has_pending_transfer())
+        layout = sg::texture_layout::general;
 
     texture.declare_access(_slot, range, stages, access, layout);
 
@@ -430,6 +437,8 @@ void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
         if (texture.needs_initial_transition())
             _tentative_initial_transitions.push_back(_touched_textures.back());
     }
+
+    return layout;
 }
 
 void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle texture,
@@ -443,7 +452,7 @@ void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle textu
     // No stages and no access: this asks for a layout and nothing else, so the state machine sees a pure layout
     // change and the barrier it produces carries the transition alone.
     auto const whole = sg::subresource_range::whole(subresource_extent_of(t->description()));
-    track_texture_access(*t, range.has_value() ? range.value() : whole, {}, {}, layout);
+    (void)track_texture_access(*t, range.has_value() ? range.value() : whole, {}, {}, layout);
     flush_barriers();
 }
 
@@ -535,8 +544,8 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
     auto const staging = _ctx._upload_inline.reserve(layout.size_in_bytes, layout.alignment);
     cc::memcpy(staging.mapped, pixels.data(), size_t(layout.size_in_bytes));
 
-    track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
-                         sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    auto const dst_layout = track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_write, sg::texture_layout::copy_dst);
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -548,7 +557,7 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };
-    vkCmdCopyBufferToImage(_buffer, staging.buffer, dst->_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    vkCmdCopyBufferToImage(_buffer, staging.buffer, dst->_image, vk_layout_from(dst_layout), 1, &copy);
 }
 
 sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_texture_handle texture,
@@ -570,8 +579,8 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
 
     auto const staging = _ctx._download_inline.reserve(layout.size_in_bytes, layout.alignment);
 
-    track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
-                         sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    auto const src_layout = track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_read, sg::texture_layout::copy_src);
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -582,7 +591,7 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };
-    vkCmdCopyImageToBuffer(_buffer, src->_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.buffer, 1, &copy);
+    vkCmdCopyImageToBuffer(_buffer, src->_image, vk_layout_from(src_layout), staging.buffer, 1, &copy);
 
     _ctx._download_inline.account_pending_copy(staging.epoch_copies);
 

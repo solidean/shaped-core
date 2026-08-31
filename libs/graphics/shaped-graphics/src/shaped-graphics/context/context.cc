@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/stamp.hh>
 #include <clean-core/string/format.hh>

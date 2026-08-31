@@ -4,6 +4,7 @@
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh> // has_pending_transfer reads the fences
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
@@ -117,6 +118,23 @@ public:
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> flush_texture_access(sg::command_list_slot slot) const
     {
         return _access.lock([&](dx12_texture_access& t) { return t.flush(slot); });
+    }
+
+    /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.
+    ///
+    /// A command list that touches such a texture must not move its layout, even though it waits for the transfer and
+    /// therefore runs after it: the debug layer reads submit-call order, and a list's entry barrier is submitted
+    /// before the copy of a transfer whose actor has not got to it yet.
+    /// Moving the layout there would make that copy name a layout the resource has left.
+    [[nodiscard]] bool has_pending_transfer() const
+    {
+        auto const pending = [](dx12_completion_group_handle const& group, u64 value)
+        { return group != nullptr && value != 0 && !group->has_reached(value); };
+
+        return pending(_upload_group, _pending_async_upload_value.load(std::memory_order_acquire))
+            || pending(_upload_group, _pending_stream_copy_value.load(std::memory_order_acquire))
+            || pending(_download_group, _pending_async_download_value.load(std::memory_order_acquire))
+            || pending(_download_group, _pending_stream_download_value.load(std::memory_order_acquire));
     }
 
     /// The layout `range` is in as of the last submitted command list.

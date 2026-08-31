@@ -461,8 +461,8 @@ void vulkan_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table c
             if (view.buffer != nullptr)
                 track_buffer_access(*view.buffer, sg::pipeline_stage_flag::raytracing, sg::shader_access_of(view.access));
         for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+            (void)track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
+                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
     declare_array_accesses();

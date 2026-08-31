@@ -68,6 +68,23 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
     }
 
+    /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.
+    ///
+    /// A command list that touches such a texture must not move its layout, even though it waits for the transfer and
+    /// therefore runs after it: the validation layer reads submit-call order, and a list's entry barrier is submitted
+    /// before the copy of a transfer whose actor has not got to it yet.
+    /// Moving the layout there would make that copy name a layout the image has left.
+    [[nodiscard]] bool has_pending_transfer() const
+    {
+        auto const pending = [](vulkan_completion_group_handle const& group, u64 value)
+        { return group != nullptr && value != 0 && !group->has_reached(value); };
+
+        return pending(_upload_group, _pending_async_upload_value.load(cc::memory_order_acquire))
+            || pending(_upload_group, _pending_stream_copy_value.load(cc::memory_order_acquire))
+            || pending(_download_group, _pending_async_download_value.load(cc::memory_order_acquire))
+            || pending(_download_group, _pending_stream_download_value.load(cc::memory_order_acquire));
+    }
+
     /// The layout `range` is in as of the last submitted command list.
     /// Thread-safe.
     [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range) const

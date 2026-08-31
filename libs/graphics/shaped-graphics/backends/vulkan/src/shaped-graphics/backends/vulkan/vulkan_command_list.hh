@@ -58,11 +58,14 @@ public:
     void track_buffer_access(vulkan_buffer const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 
     /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
-    void track_texture_access(vulkan_texture const& texture,
-                              sg::subresource_range range,
-                              sg::pipeline_stage_flags stages,
-                              sg::access_flags access,
-                              sg::texture_layout layout);
+    /// Declare one access, returning the layout actually settled on — which is not always the one asked for, since a
+    /// texture with a transfer in flight stays where that transfer needs it.
+    /// A recorded copy command names a layout literally, so it has to use what comes back rather than what it wanted.
+    [[nodiscard]] sg::texture_layout track_texture_access(vulkan_texture const& texture,
+                                                          sg::subresource_range range,
+                                                          sg::pipeline_stage_flags stages,
+                                                          sg::access_flags access,
+                                                          sg::texture_layout layout);
 
     /// Record one vkCmdPipelineBarrier2 for everything declared since the last flush, then clear the staging.
     /// Called once per op, immediately before recording it.
