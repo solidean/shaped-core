@@ -58,6 +58,7 @@ add_library(babel-serializer
     src/babel-serializer/image/jpg.cc
     src/babel-serializer/image/pfm.cc
     src/babel-serializer/image/png.cc
+    src/babel-serializer/image/impl/spng_backend.cc
     src/babel-serializer/image/impl/stb_backend.cc
 
     src/babel-serializer/trace/chrome_trace.cc
@@ -78,7 +79,7 @@ target_sources(babel-serializer
     src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
 
-    # image/impl/*.hh is internal (the stb backend seam) — deliberately NOT in the public FILE_SET.
+    # image/impl/*.hh is internal (the libspng and stb backend seams) — deliberately NOT in the public FILE_SET.
     src/babel-serializer/image/hdr.hh
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
@@ -116,10 +117,11 @@ else()
     target_compile_definitions(babel-serializer PRIVATE BABEL_HAS_SQLITE=0)
 endif()
 
-# The stb image backend is committed in-source (extern/stb), so the target always exists and the link is unconditional.
-# No if(TARGET stb) and no availability gate, unlike sqlite above.
-# stb is linked PRIVATE: the stb headers live only inside image/impl/stb_backend.cc.
-target_link_libraries(babel-serializer PRIVATE stb)
+# Both image backends are committed in-source (extern/libspng, extern/stb), so the targets always exist and the links are unconditional.
+# No if(TARGET ...) and no availability gate, unlike sqlite above.
+# Both are PRIVATE, and each third-party header lives in exactly one TU: spng.h in image/impl/spng_backend.cc, stb's in image/impl/stb_backend.cc.
+# libspng is the PNG codec; stb is what JPEG still decodes and encodes through.
+target_link_libraries(babel-serializer PRIVATE spng stb)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-serializer

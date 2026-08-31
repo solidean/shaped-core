@@ -63,9 +63,10 @@ Its engine backend is fetched on demand and may be absent, so probe `is_availabl
 
 `image` is babel's first **writer** and first **committed** third-party backend.
 The per-format codecs read *and* write, exposing each format's own metadata; `image` sits on top for the plain-pixels case.
-`png` / `jpg` decode through the vendored **stb** single-file libraries, always in-tree and always linked — so no availability probe, unlike sqlite — and much of their metadata is still `[todo]`.
+`png` runs on the vendored **libspng** and reads and writes its ancillary chunks; `jpg` runs on the vendored **stb** and much of its metadata is still `[todo]`.
+Both are always in-tree and always linked — so no availability probe, unlike sqlite.
 `hdr` / `pfm` reach no backend at all: both formats are small enough to own outright, so they are fully native and complete.
-The sample type follows the format — `u8` for PNG / JPEG, `f32` for Radiance HDR and PFM — and the aggregator's `encode` rejects a mismatch rather than reinterpreting bytes.
+The sample type follows the format — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for Radiance HDR and PFM — and the aggregator's `encode` rejects a mismatch rather than reinterpreting bytes.
 
 `gltf` deviates on its **input**, for zero copy: every embedded buffer comes back as a subview sharing the input's owner instead of a copy.
 Its stream and span overloads exist for convenience and own a copy, which their `///` docs say outright.

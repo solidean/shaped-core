@@ -89,8 +89,9 @@ Two layers, kept distinct: each format parses into an **unopinionated native str
 Reading is optimized for the read-once case and takes a `cc::read_stream`, with one deviation for a format that must hand back zero-copy views of its input.
 [coding-guidelines.md](../libs/data/babel-serializer/docs/coding-guidelines.md) owns all of that.
 Today: a base64 codec, JSON reading and writing, a markdown reader plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
-Plus PNG/JPEG read+write over the vendored stb, and fully native Radiance HDR and PFM codecs, with the `babel::image` aggregator on top (`image/`).
-The sample type follows the format — `u8` for PNG/JPEG, `f32` for HDR/PFM — and the aggregator refuses to encode a mismatch.
+Plus PNG read+write over the vendored libspng, ancillary chunks included, and JPEG over the vendored stb.
+Fully native Radiance HDR and PFM codecs too, with the `babel::image` aggregator on top (`image/`).
+The sample type follows the format — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for HDR/PFM — and the aggregator refuses to encode a mismatch.
 
 **One namespace, several link targets.**
 `babel-data` is the externals-free base — base64, JSON and markdown over clean-core alone — and `babel-serializer` is everything else on top of it, the target to link when in doubt.

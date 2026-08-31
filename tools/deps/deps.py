@@ -647,8 +647,10 @@ def split_expression(expression: str) -> list[str]:
     """The identifiers in an SPDX expression.
 
     `A OR B` is allowed only when every branch is, since we may end up relying on any of them.
+    `A AND B` for the same reason from the other direction: both bind at once, so both must be acceptable.
+    An operand may still carry a `WITH` exception, which stays attached — `Apache-2.0 WITH LLVM-exception` is one identifier.
     """
-    return [part.strip() for part in re.split(r"\bOR\b", expression) if part.strip()]
+    return [part.strip() for part in re.split(r"\bOR\b|\bAND\b", expression) if part.strip()]
 
 
 def check_policy(upstreams: list, allowed: set[str], denied: dict[str, str]) -> list[str]:

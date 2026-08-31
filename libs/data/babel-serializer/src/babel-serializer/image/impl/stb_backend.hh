@@ -5,11 +5,14 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 
-// Backend seam for the image codecs — the ONLY place stb is reached.
+// Backend seam for the JPEG codec — the ONLY place stb is reached.
 //
-// These declarations are backend-neutral: no stb type appears here, so png / jpg / image never see stb_image.h.
+// These declarations are backend-neutral: no stb type appears here, so jpg / image never see stb_image.h.
 // stb_backend.cc is the single TU that includes the stb headers and links the vendored `stb` target (PRIVATE).
-// A future hand-rolled per-format decoder replaces the body of one of these — the signatures stay put.
+// A future hand-rolled decoder replaces the body of one of these — the signatures stay put.
+//
+// PNG went that way already and now runs on libspng, through the spng_backend.hh seam next door.
+// stb_decode still decodes any stb-supported format, which is what the planned bmp / tga / gif containers will reach for.
 //
 // Internal to babel — this header is NOT part of the public FILE_SET.
 
@@ -31,7 +34,6 @@ struct stb_image
 
 /// Encode tightly-packed 8-bit pixels to the format's file bytes.
 /// width / height / channels describe `pixels`.
-[[nodiscard]] cc::result<cc::vector<byte>> stb_encode_png(cc::span<byte const> pixels, int width, int height, int channels);
 [[nodiscard]] cc::result<cc::vector<byte>> stb_encode_jpg(cc::span<byte const> pixels,
                                                           int width,
                                                           int height,

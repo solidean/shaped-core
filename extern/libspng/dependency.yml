@@ -1,0 +1,22 @@
+# Pin and license for the upstream vendored here.
+# vendor-libspng.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: libspng
+    homepage: https://libspng.org
+    source: git
+    repo: https://github.com/randy408/libspng
+    track: tags
+    tag: v0.7.4
+    digest_algo: git-commit
+    pin_hash: fb768002d4288590083a476af628e51c3f1d47cd
+    license: BSD-2-Clause AND libpng-2.0
+    license_files: [LICENSE, LICENSE-libpng]
+    used_by: babel-serializer — the PNG codec behind babel::png
+    notes: |
+      Two licenses, jointly rather than at our choice, which is why the expression is `AND` and not `OR`.
+      Upstream's own code is BSD-2-Clause and ships as `LICENSE`.
+      The SSE2 and NEON defilters at the end of spng.c are derived from libpng and carry the PNG Reference Library License version 2 inline —
+      upstream ships no file for it, so vendor-libspng.py extracts that notice into `LICENSE-libpng` on every re-vendor.
+      libspng needs an inflate/deflate implementation and has none of its own; it builds against the vendored zlib rather than the bundled miniz option.
