@@ -39,7 +39,7 @@ TEST("sv - flat-PBR raytraced view (headless)")
 
     // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop to drain
     // that queue, so it drains it itself.
-    resources.flush_pending_uploads();
+    resources.wait_for_pending_uploads();
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
     REQUIRE(resources.meshes.contains(mesh));
     REQUIRE(resources.materials.contains(materials));

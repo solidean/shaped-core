@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
@@ -23,6 +24,18 @@ constexpr auto geometry_usage
     = sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 
+namespace impl
+{
+// What the streaming actor orders our transfers by; higher runs first.
+//
+// Attributes outrank the geometry that indexes them, and that ordering is a correctness argument rather than a
+// preference: a mesh becomes drawable the moment its BLAS is built, and if its uv set were still in flight then it
+// would draw its real triangles against zeroed attribute bytes for a frame or two.
+// Geometry outranks textures for the reason the design gives: a grey model beats a floating albedo map.
+constexpr i32 attribute_stream_priority = 20;
+constexpr i32 geometry_stream_priority = 10;
+} // namespace impl
+
 mesh_id mesh_manager::acquire(triangle_data const& mesh)
 {
     if (auto const id = find_by_hash(mesh.hash); id.has_value())
@@ -32,16 +45,21 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     CC_ASSERT(!positions.empty() && positions.size() % 3 == 0, "mesh_manager::acquire expects a triangle list (vertex "
                                                                "count a non-zero multiple of 3)");
 
-    // The BUFFER is created here and the bytes are not: an acquire mints an id and queues the work, and
-    // `record_uploads` is what spends the bandwidth — at whatever rate the epoch's budget allows.
+    // The BUFFER is created here and the bytes are not: the payload goes to `ctx.stream`, which carries it on the
+    // copy queue rather than making the next command list that touches this buffer wait on it.
+    // That is the whole difference from `ctx.upload`, and the reason a big asset does not stall the frame that asked
+    // for it — see shaped-graphics/transfer/stream.hh.
     auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage);
 
     auto up = _ctx.create_command_list();
     auto stand_in = _acquire_index_stand_in(*up);
     _ctx.submit_command_list(cc::move(up));
 
-    // The BLAS is not charged yet, since it is not built: `record_uploads` adds its size once it is.
+    // The BLAS is not charged yet, since it is not built: `record_settled` adds its size once it is.
     auto const size_in_bytes = vertices.size_in_bytes();
+    auto transfer = _ctx.stream.data_to_buffer(vertices, mesh.positions);
+    transfer.set_priority(impl::geometry_stream_priority);
+
     auto const id = insert(mesh.hash,
                            {.state = residency::pending,
                             .vertices = cc::move(vertices),
@@ -51,7 +69,7 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
                             .bounds = mesh.bounds},
                            size_in_bytes);
 
-    _pending.push_back({.id = id, .positions = mesh.positions, .bytes = size_in_bytes});
+    _settling[id] = {.vertices = cc::move(transfer), .bytes = size_in_bytes};
     return id;
 }
 
@@ -115,6 +133,12 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
     auto index_buffer = _ctx.persistent.create_buffer<u32>(indices.size(), geometry_usage);
 
     auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes();
+
+    auto vertex_transfer = _ctx.stream.data_to_buffer(vertices, mesh.positions);
+    auto index_transfer = _ctx.stream.data_to_buffer(index_buffer, mesh.indices);
+    vertex_transfer.set_priority(impl::geometry_stream_priority);
+    index_transfer.set_priority(impl::geometry_stream_priority);
+
     auto const id = insert(mesh.hash,
                            {.state = residency::pending,
                             .vertices = cc::move(vertices),
@@ -124,59 +148,83 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
                             .bounds = mesh.bounds},
                            size_in_bytes);
 
-    _pending.push_back({.id = id, .positions = mesh.positions, .indices = mesh.indices, .bytes = size_in_bytes});
+    _settling[id] = {.vertices = cc::move(vertex_transfer), .indices = cc::move(index_transfer), .bytes = size_in_bytes};
     return id;
 }
 
-isize mesh_manager::record_uploads(isize max_bytes)
+bool mesh_manager::_try_settle(sg::command_list& cmd, mesh_id id, pending_mesh& p)
 {
-    if (_pending.empty())
-        return 0;
+    auto const vertices_done = p.vertices.is_settled();
+    auto const indices_done = !p.indices.is_valid() || p.indices.is_settled();
+    if (!vertices_done || !indices_done)
+        return false;
 
-    auto spent = isize(0);
-    auto keep = cc::vector<pending_mesh>();
+    auto* const record = mutable_record(id);
+    if (record == nullptr)
+        return true; // evicted while streaming; dropping the entry cancels whatever is left
 
-    for (auto& w : _pending)
+    // Settled without delivering — cancelled, or the transfer failed.
+    // `failed` rather than leaving it pending, so nothing waits on it forever and the placeholder is known to be final.
+    if (!p.vertices.is_complete() || (p.indices.is_valid() && !p.indices.is_complete()))
     {
-        auto* const record = mutable_record(w.id);
-        if (record == nullptr)
-            continue; // evicted since it was queued, so nobody is waiting on it any more
-
-        // The first request always runs whatever its size: half a vertex buffer would build a BLAS over a hole, so a
-        // request is never split, and a budget smaller than one mesh still drains one mesh per epoch.
-        if (max_bytes > 0 && spent > 0 && spent + w.bytes > max_bytes)
-        {
-            keep.push_back(cc::move(w));
-            continue;
-        }
-
-        // Two lists so the build sees the upload finished; both submit in order on the direct queue, so a later trace
-        // that references this BLAS is correctly ordered after.
-        auto up = _ctx.create_command_list();
-        up->upload.data_to_buffer(record->vertices, w.positions.span());
-        if (record->is_indexed)
-            up->upload.data_to_buffer(record->indices, w.indices.span());
-        _ctx.submit_command_list(cc::move(up));
-
-        auto build = _ctx.create_command_list();
-        record->blas = record->is_indexed
-                         ? build->raytracing.build_blas({{.vertices = record->vertices.raw(),
-                                                          .vertex_count = record->vertices.element_count(),
-                                                          .indices = record->indices.raw(),
-                                                          .index_count = record->indices.element_count()}})
-                         : build->raytracing.build_blas(
-                               {{.vertices = record->vertices.raw(), .vertex_count = record->vertices.element_count()}});
-        _ctx.submit_command_list(cc::move(build));
-
-        record->state = residency::complete;
-        spent += w.bytes;
-
-        // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
-        add_bytes(w.id, record->blas->size_in_bytes());
+        record->state = residency::failed;
+        return true;
     }
 
-    _pending = cc::move(keep);
-    return spent;
+    // Recorded only now that completion has been observed, which is what the streaming contract asks: a list touching
+    // a streamed extent must be SUBMITTED after that observation, and `cmd` is the caller's to submit after this.
+    record->blas = record->is_indexed ? cmd.raytracing.build_blas({{.vertices = record->vertices.raw(),
+                                                                    .vertex_count = record->vertices.element_count(),
+                                                                    .indices = record->indices.raw(),
+                                                                    .index_count = record->indices.element_count()}})
+                                      : cmd.raytracing.build_blas({{.vertices = record->vertices.raw(),
+                                                                    .vertex_count = record->vertices.element_count()}});
+    record->state = residency::complete;
+
+    // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
+    add_bytes(id, record->blas->size_in_bytes());
+    return true;
+}
+
+isize mesh_manager::record_settled(sg::command_list& cmd)
+{
+    if (_settling.empty())
+        return 0;
+
+    auto finished = isize(0);
+    auto keep = cc::map<mesh_id, pending_mesh>();
+    for (auto&& [id, p] : _settling)
+    {
+        if (_try_settle(cmd, id, p))
+            ++finished;
+        else
+            keep[id] = cc::move(p);
+    }
+
+    _settling = cc::move(keep);
+    return finished;
+}
+
+void mesh_manager::wait_for_settled()
+{
+    if (_settling.empty())
+        return;
+
+    // Promoted first: with the automatic waits back on, a list recorded after this needs no ordering of its own.
+    for (auto&& [id, p] : _settling)
+    {
+        (void)id;
+        p.vertices.promote_to_async();
+        if (p.indices.is_valid())
+            p.indices.promote_to_async();
+        (void)cc::try_async_blocking_get(p.vertices.completion());
+        if (p.indices.is_valid())
+            (void)cc::try_async_blocking_get(p.indices.completion());
+    }
+
+    auto cmd = _ctx.create_command_list();
+    (void)record_settled(*cmd);
+    _ctx.submit_command_list(cc::move(cmd));
 }
 
 sg::buffer<u32> mesh_manager::_acquire_index_stand_in(sg::command_list& cmd)
@@ -315,6 +363,9 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     // The buffer exists from here on, so a descriptor naming it is valid immediately; only its contents wait.
     auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
 
+    auto transfer = _ctx.stream.bytes_to_buffer(data.raw(), attribute.data);
+    transfer.set_priority(impl::attribute_stream_priority);
+
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
                             .data = cc::move(data),
@@ -323,41 +374,43 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
                             .element_count = attribute.element_count()},
                            bytes.size());
 
-    _pending.push_back({.id = id, .data = attribute.data});
+    _settling[id] = cc::move(transfer);
     return id;
 }
 
-isize attribute_manager::record_uploads(isize max_bytes)
+isize attribute_manager::collect_settled()
 {
-    if (_pending.empty())
+    if (_settling.empty())
         return 0;
 
-    auto spent = isize(0);
-    auto keep = cc::vector<pending_attribute>();
-
-    for (auto& w : _pending)
+    auto finished = isize(0);
+    auto keep = cc::map<attribute_id, sg::stream_upload_handle>();
+    for (auto&& [id, transfer] : _settling)
     {
-        auto* const record = mutable_record(w.id);
-        if (record == nullptr)
-            continue;
-
-        auto const bytes = w.data.span();
-        if (max_bytes > 0 && spent > 0 && spent + bytes.size() > max_bytes)
+        if (!transfer.is_settled())
         {
-            keep.push_back(cc::move(w));
+            keep[id] = cc::move(transfer);
             continue;
         }
 
-        auto up = _ctx.create_command_list();
-        up->upload.data_to_buffer(record->data, bytes);
-        _ctx.submit_command_list(cc::move(up));
-
-        record->state = residency::complete;
-        spent += bytes.size();
+        if (auto* const record = mutable_record(id); record != nullptr)
+            record->state = transfer.is_complete() ? residency::complete : residency::failed;
+        ++finished;
     }
 
-    _pending = cc::move(keep);
-    return spent;
+    _settling = cc::move(keep);
+    return finished;
+}
+
+void attribute_manager::wait_for_settled()
+{
+    for (auto&& [id, transfer] : _settling)
+    {
+        (void)id;
+        transfer.promote_to_async();
+        (void)cc::try_async_blocking_get(transfer.completion());
+    }
+    (void)collect_settled();
 }
 
 } // namespace sv

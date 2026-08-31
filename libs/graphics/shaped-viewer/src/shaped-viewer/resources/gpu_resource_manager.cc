@@ -534,26 +534,20 @@ texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
     return id;
 }
 
-void gpu_resource_manager::flush_pending_uploads()
+void gpu_resource_manager::wait_for_pending_uploads()
 {
-    // Attributes first for the same reason the budgeted drain does it: see `record_pending_work`.
-    (void)attributes.record_uploads(0);
-    (void)meshes.record_uploads(0);
+    attributes.wait_for_settled();
+    meshes.wait_for_settled();
 }
 
 i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
 {
-    // Queued payloads before queued follow-up work, and attributes before geometry.
-    //
-    // The order IS the correctness argument for drawing a mesh the moment its geometry lands: an attribute is up
-    // before the geometry that indexes it, so a mesh never draws its real triangles against attribute bytes that have
-    // not arrived — which would read as zeroed uvs for a frame rather than as something still loading.
-    // Textures come last by not being here at all: they upload at acquire, and a pending one has no placeholder yet.
-    auto upload_budget = _work_budget.max_upload_bytes_per_epoch;
-    auto const spent_on_attributes = attributes.record_uploads(upload_budget);
-    if (upload_budget > 0)
-        upload_budget = upload_budget > spent_on_attributes ? upload_budget - spent_on_attributes : 1;
-    (void)meshes.record_uploads(upload_budget);
+    // Whatever landed since the last epoch is finished first, so a mesh whose geometry arrived draws its real
+    // triangles this frame rather than next.
+    // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
+    // acquire set — this only collects the results.
+    (void)attributes.collect_settled();
+    (void)meshes.record_settled(cmd);
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
         return 0;

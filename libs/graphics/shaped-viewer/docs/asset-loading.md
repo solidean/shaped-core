@@ -192,7 +192,7 @@ The state machine is not monotonic, and the substitution paths below have to han
 | fetch | uri | the resolver's business (VFS, OS page cache) | re-fetch |
 | structure parse | file content hash + importer version | `bcache` | re-parse, which is cheap |
 | payload decode and processing | source key + operation + params + importer version | `bcache` — where block compression and tangent generation pay off | re-run, usually a cache hit |
-| upload | — | not cacheable | re-upload from the step above |
+| upload | — | not cacheable | re-upload from the step above, through `ctx.stream` |
 
 ### Nothing is ever a hole in the frame
 
@@ -247,7 +247,9 @@ The stages of a load know different things, and glTF splits exactly where progre
    Cheap, and it yields the whole shape: mesh count, names, materials with all their factors, and bounds from accessor `min` / `max`.
 3. **Payload decode** — vertex and index buffers, image decode, tangent-frame generation.
    On a worker, and the expensive part.
-4. **Upload** — on the main thread, drained at a bounded rate by `record_pending_work`. *Landed*, along with the record states it drains into.
+4. **Upload** — on sg's copy queue through `ctx.stream`, with `record_pending_work` collecting what landed.
+   *Landed*, along with the record states it collects into.
+   Not the main thread and not a rate we bound: `ctx.stream` exists for exactly this traffic, and its actor paces the transfers while their priorities order them.
 
 So an asynchronous load is *structurally* complete after stage 2 — the full mesh list, correctly placed, correctly colored from the
 material factors, drawn as placeholder boxes — and sharpens per resource as stages 3 and 4 land.
@@ -420,9 +422,9 @@ not yet need would be the wrong order.
    The **shared cube BLAS** is in, and live: an acquire now queues its upload, so a mesh really is pending until the drain reaches it.
    The **factor-seeded 1x1 texture** is not — texture acquires still upload inline, which is the one resource kind with no pending state yet.
 5. **Asynchronous loading.** *The resource half landed; the loading half is next.*
-   Every record carries a `residency`, an acquire queues its payload rather than uploading it, and `record_pending_work` drains at a per-epoch byte budget.
-   Priority so far is the drain order — attributes before geometry, which is what lets a mesh draw its real triangles the moment they land.
-   Still to come: the four-stage load pipeline itself, an `sv::asset` handle that fills in, structure-first glTF parsing, and per-texture priority.
+   Every record carries a `residency`, an acquire hands its payload to `sg::context_stream_scope` (`ctx.stream`), and `record_pending_work` collects what landed.
+   Priority is the transfer's own rather than a drain order, so attributes outrank the geometry that indexes them and a mesh never draws real triangles against attribute bytes still in flight.
+   Still to come: the four-stage load pipeline itself, an `sv::asset` handle that fills in, structure-first glTF parsing, streamed textures and their placeholder.
 6. **Recipes and caching.** `from_uri` and `derived`, `bcache` on the parse and processing steps, re-materialization after eviction, importer versioning in the keys.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
 
