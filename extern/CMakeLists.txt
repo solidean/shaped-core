@@ -33,6 +33,11 @@ option(SC_USE_VENDORED_ZLIB "Build the in-tree vendored zlib (OFF expects an ext
 # Back babel-serializer's image codecs; linked PRIVATE there, so no stb header ever reaches a babel public header.
 option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an external `stb` target)" ON)
 
+# libspng, committed in-source: two files, and the PNG half of babel-serializer's image codecs.
+# Two files with no build machinery worth keeping puts it in the xxhash tier, which is why it is in-source rather than fetched.
+# Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
+option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
+
 # SPIRV-Reflect, committed in-source (three files).
 # Backs shaped-shader-compiler-dxc's SPIR-V reflection: a module carries its bindings in its own instruction stream, so
 # reading them back is a parser rather than a query, and DXC emits no reflection container for a -spirv compile.
@@ -95,6 +100,10 @@ endif()
 
 if(SC_USE_VENDORED_STB)
     add_subdirectory(stb)
+endif()
+
+if(SC_USE_VENDORED_SPNG)
+    add_subdirectory(libspng)
 endif()
 
 if(SC_USE_VENDORED_SPIRV_REFLECT)

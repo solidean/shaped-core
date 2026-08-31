@@ -343,7 +343,7 @@ h.reopen(other_rowid);                     // same handle, next row — cheaper 
 ## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
-`png` / `jpg` decode through the vendored, always-linked **stb** — never visible from a babel header, and never reached by the aggregator.
+`png` decodes through the vendored **libspng** and `jpg` through the vendored **stb** — always linked, never visible from a babel header, and never reached by the aggregator.
 `hdr` / `pfm` are fully native and reach no backend at all.
 
 ```cpp
@@ -355,7 +355,7 @@ cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); 
 
 struct image {                        // row-major, top-left origin, tightly packed
     int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
-    babel::image::component comp;             // u8 (png/jpg) | f32 (hdr/pfm) | u16 (API-ready)
+    babel::image::component comp;             // u8 (png/jpg) | u16 (16-bit png, host-endian) | f32 (hdr/pfm)
     cc::vector<cc::byte> pixels;
     bool is_empty(); int bytes_per_component(); isize row_stride();
     cc::span<float const> samples_f32();      // the pixels as floats; empty unless comp == f32
@@ -371,15 +371,17 @@ cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::fo
 #include <babel-serializer/image/jpg.hh>   // low-level JPG: pixels + native metadata
 
 babel::png::data p = babel::png::read(bytes).value();
-p.width; p.height; p.channels; p.pixels;       // populated from the decoder
-p.bit_depth; p.color; p.interlace;             // native IHDR fields (parsed natively)
-p.gamma; p.icc_profile; p.texts; p.physical;   // [todo] designed, not yet populated (stb exposes no metadata)
+p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 grey / 2 GA / 3 rgb / 4 rgba, +1 for a tRNS chunk
+p.decoded;                                     // u8, or u16 for a 16-bit PNG — HOST-endian, unlike the file
+p.bit_depth; p.color; p.interlace;             // native IHDR fields; 1/2/4-bit unpacks to u8, so bit_depth is where it survives
+p.gamma; p.srgb_intent; p.icc_profile; p.texts; p.physical;  // gAMA / sRGB / iCCP / tEXt+zTXt+iTXt / pHYs, read AND written
 
 babel::jpg::data j = babel::jpg::read(bytes).value();
 j.bit_depth; j.progressive; j.chroma; j.jfif_density; // native SOF/JFIF fields
 j.icc_profile; j.exif; j.comments;                    // [todo] designed, not yet populated
 
-babel::png::encode(p);  babel::jpg::encode(j, {.quality = 90});  // + write(stream, ...)
+babel::png::encode(p, {.compression_level = 9});  // -1 (zlib default) .. 9; depth from `decoded`, always non-interlaced
+babel::jpg::encode(j, {.quality = 90});           // + write(stream, ...) for both
 ```
 
 ```cpp
@@ -479,11 +481,14 @@ Only what the signatures above cannot tell you.
 - **JPG is lossy, PNG lossless.** Round-trip PNG for exact pixels, and expect small per-channel deltas through JPG.
 - **`channels` is the *decoded* count**, since palette PNGs are de-palettized and Adam7 is de-interlaced.
   The native `color` / `interlace` fields still report the original encoding.
-- **The sample type follows the format.** PNG / JPEG decode to `u8` whatever the file's native `bit_depth` says (`u16` is API-ready but not decoded); HDR / PFM decode to `f32`.
+- **The sample type follows the format.** JPEG decodes to `u8` and HDR / PFM to `f32`; PNG is the one that spans two, `u16` for a 16-bit file and `u8` for every other depth.
   `encode` errors on a mismatch rather than reinterpreting the buffer, so check `comp` after a `read` that picked its own format.
 - **HDR is lossy and PFM is not.** RGBE quantizes a pixel's three mantissas against one shared exponent (~0.2% of the pixel's largest channel); PFM stores the bits, so its round-trip is exact.
 - **HDR and PFM both store rows the other way up**, and both are flipped to a top-left origin on read — `stored_bottom_up` reports what the HDR file did.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
+- **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.
+- **A PNG decode caps dimensions and ancillary-chunk memory**, because the input is untrusted and libspng's own defaults are effectively unbounded.
+  A file past either ceiling is an error, not a truncated decode.
 
 ## Umbrellas
 

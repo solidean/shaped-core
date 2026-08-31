@@ -26,8 +26,8 @@ src/babel-serializer/
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
-  image/       [in progress]   image formats (read + write; committed stb backend, plus two native codecs)
-    png        [done]          low-level reader + writer (native IHDR fields; rich metadata [todo])
+  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus two native codecs)
+    png        [done]          low-level reader + writer (native IHDR fields; ancillary chunks read and written)
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
     hdr        [done]          low-level reader + writer, fully native — Radiance RGBE, f32 out
     pfm        [done]          low-level reader + writer, fully native — Portable FloatMap, f32 out
@@ -121,8 +121,22 @@ Both are rules now, in [coding-guidelines.md](coding-guidelines.md).
 
 Low-level PNG reader + writer; see [png.hh](../src/babel-serializer/image/png.hh).
 
-- `[planned]` **native metadata** — gamma, ICC, text chunks and physical dimensions are designed and `[todo]`.
-  The fields exist now so a native chunk walker lands without an API change; stb exposes none of it.
+Runs on the vendored libspng, which is also what reads and writes the ancillary chunks: gAMA, sRGB, iCCP, tEXt / zTXt / iTXt and pHYs.
+`channels` follows the file rather than a fixed output shape, and a tRNS chunk becomes an alpha channel.
+
+16-bit files decode to `u16` samples and re-encode at that width, host-endian in memory and big-endian on disk.
+Sub-byte depths (1/2/4) unpack to `u8`, so `bit_depth` is the only place they survive.
+
+A PNG is untrusted input, so the decode caps image dimensions, the decoded pixel buffer and ancillary-chunk memory rather than believing a header.
+All three ceilings are `spng_backend.cc` constants, and all three are errors rather than a truncated decode.
+libspng ships no default worth having, and the chunks are deflate-compressed, so a few crafted kilobytes would otherwise inflate to gigabytes.
+The pixel-buffer ceiling is the one a per-axis cap cannot stand in for: the axes bound neither their product nor the sample width, and the decoded size is answered from the IHDR alone.
+
+Four decode behaviours babel's own encoder cannot produce are pinned by hand-built PNGs under `tests/image/fixtures/`, embedded as bytes by the script that generates them.
+Palette, tRNS-becomes-alpha, sub-byte grey and Adam7 — every one of them decode-only, and so unreachable through a round-trip.
+A fifth fixture is a hostile IHDR rather than a behaviour, and the ceilings it and the oversized-chunk test pin are what the decode's untrusted-input claim rests on.
+
+- `[planned]` **the remaining chunks** — cHRM, bKGD, sBIT and tIME, each an added field rather than an API change.
 
 ### jpg [done]
 
@@ -152,11 +166,11 @@ The aggregator: a plain pixel buffer, `detect_format` from the magic bytes, and 
 See [image.hh](../src/babel-serializer/image/image.hh).
 
 - `[done]` **the f32 sample path** — HDR and PFM decode to `component::f32`, and `encode` rejects an image whose `comp` the target format cannot store.
-- `[planned]` **16-bit samples** — `component::u16` is still reserved and unproduced, waiting on a 16-bit PNG decode path.
+- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width; PNG is the one format spanning two sample types.
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / tga / gif), `.exr`, and the 16-bit decode path behind PNG.
+`[planned]` further stb-supported containers (bmp / tga / gif), and `.exr`.
 
 ## Aggregators
 

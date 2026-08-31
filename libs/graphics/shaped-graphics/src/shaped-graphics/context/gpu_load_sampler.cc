@@ -1,5 +1,6 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
 
@@ -7,13 +8,15 @@ namespace sg
 {
 namespace
 {
-/// A busy fraction from two readings of one engine's counter, clamped into [0, 1].
+/// A busy fraction from two readings of one engine's counter, capped at 1.
 ///
-/// The clamp is not cosmetic: the counters are sampled per engine at slightly different instants, and a driver may
-/// reset one, either of which produces a ratio outside the range that a caller would draw as a bar running off the end.
+/// The cap is not cosmetic: the engines are sampled at slightly different instants, so a ratio can land just over the
+/// range a caller would draw as a bar.
+/// A counter that went BACKWARDS is not capped here — `sample` reports that as an error, since it is a reading this
+/// cannot difference rather than one at the edge of its range.
 f32 engine_busy(f64 before, f64 after, f64 interval)
 {
-    if (interval <= 0 || after < before)
+    if (interval <= 0)
         return 0;
 
     auto const busy = f32((after - before) / interval);
@@ -75,6 +78,23 @@ cc::result<sg::gpu_load> sg::gpu_load_sampler::sample()
 
         if (!found)
             continue; // an engine that appeared since the baseline has nothing to difference against yet
+
+        // The counter is a sum over the processes currently using the engine, so one exiting takes its share of the
+        // total with it and the sum falls.
+        // That is a reading with no utilization in it rather than an idle GPU, so it is an error instead of a zero —
+        // and since the next sample re-baselines against this one, it is a single lost interval.
+        if (engine.busy_secs < before)
+        {
+            // Built before the move, which is what `engine` points into.
+            auto message = cc::format("the {} GPU engine counter went backwards, from {} s to {} s", engine.engine,
+                                      before, engine.busy_secs);
+
+            // The baseline still advances: leaving the old one in place would fail every later sample against it too.
+            _per_engine.clear();
+            _previous = cc::move(next);
+            _previous_time_secs = now;
+            return cc::error(cc::move(message));
+        }
 
         auto const busy = sg::engine_busy(before, engine.busy_secs, interval);
         _per_engine.push_back({.engine = engine.engine, .busy = busy});

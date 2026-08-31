@@ -43,8 +43,8 @@ One-liner per library:
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
   So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
   Plus Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
-  Also PNG/JPEG codecs in `babel::png` / `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
-  with the `babel::image` aggregator on top (`image/`) — `u8` samples for the first two, `f32` for the last two.
+  Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
+  with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
   Namespace `babel`. Depends on clean-core + typed-geometry.
   **One namespace, several link targets**: `babel-data` is the externals-free base — base64, JSON and markdown over clean-core and nothing more.

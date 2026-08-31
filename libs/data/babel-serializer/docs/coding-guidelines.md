@@ -77,14 +77,15 @@ See `tests/data/sqlite-test.cc`.
 ## Committed-in-source backend: always linked, so absence is not a runtime state
 
 Some backends are **committed in-source** rather than fetched.
-The stb image libraries (`extern/stb`, two small public-domain headers) are the first, following the xxhash / imgui model.
-Because the source is always on disk, the `stb` target always exists and babel **always** links it.
+The stb image libraries (`extern/stb`, two small public-domain headers) were the first, and libspng (`extern/libspng`, one `.c` and one `.h`) followed, both on the xxhash / imgui model.
+Because the source is always on disk, the `stb` and `spng` targets always exist and babel **always** links them.
 
 That drops the entire availability machinery the sqlite rule above carries.
 **No `is_available()`, no `BABEL_HAS_*` compile switch, no stub path, no runtime "backend missing" error, no `if(TARGET stb)`.**
-The link in `CMakeLists.txt` is unconditional (`target_link_libraries(babel-serializer PRIVATE stb)`).
+The link in `CMakeLists.txt` is unconditional (`target_link_libraries(babel-serializer PRIVATE spng stb)`).
 
-**The header non-leak still binds**, with no availability gate carrying it: the stb headers appear in exactly one TU, `image/impl/stb_backend.cc`, and the link is `PRIVATE`.
+**The header non-leak still binds**, with no availability gate carrying it.
+Each third-party header appears in exactly one TU — `spng.h` in `image/impl/spng_backend.cc`, stb's in `image/impl/stb_backend.cc` — and both links are `PRIVATE`.
 Here the reason is layering hygiene and a swappable backend rather than a conditionally-present engine.
 
 Pick the fetched-and-gated shape (the section above) only when the backend is genuinely heavy enough to keep out of the tree.
@@ -95,16 +96,20 @@ Default to committed-and-always-linked for a small self-contained dependency.
 ## The backend is a swappable seam; per-format codecs sit under an aggregator
 
 stb is a **prototyping backend** — eventually most formats want a non-stb path.
-So it is kept behind a backend-neutral seam (`babel::impl::stb_decode` / `stb_encode_*` in `image/impl/stb_backend.hh`, which names no stb type).
-A future hand-rolled decoder replaces the body of one `impl::` function inside one `.cc` — no public signature moves.
-The low-level codecs already parse each format's structural header natively (PNG IHDR, JPEG SOF/JFIF), so that native path has somewhere to grow.
+So it is kept behind a backend-neutral seam (`babel::impl::stb_decode` / `stb_encode_jpg` in `image/impl/stb_backend.hh`, which names no stb type).
+A replacement decoder swaps the body of one `impl::` function inside one `.cc` — no public signature moves.
+
+**PNG has already gone that way**, and is what the seam was for: it runs on libspng behind `image/impl/spng_backend.hh`, and `babel::png`'s own signatures did not move.
+That seam differs from stb's in one respect worth knowing before adding a third.
+It speaks `babel::png::data` rather than a neutral pixel struct, because mapping a PNG's chunks onto those fields *is* the decode.
+A per-format backend that reads a format's metadata will look like the libspng one; a generic pixel backend will look like stb's.
 
 Images also invert the usual "one native structure per format, aggregators later" order, deliberately.
 Every image format decodes to the *same* packed pixel buffer, so:
 
-- the **low-level** `babel::png` / `babel::jpg` are the format layer — pixels **plus** the format's own metadata (color type, gamma, ICC, EXIF, ...), much of it `[todo]` until the native walker lands;
+- the **low-level** `babel::png` / `babel::jpg` are the format layer — pixels **plus** the format's own metadata (color type, gamma, ICC, EXIF, ...), complete for PNG and still `[todo]` for JPEG;
 - the **aggregator** `babel::image` is the opinionated "just give me pixels" layer, dispatching by format.
-  It **delegates to the low-level codecs and never touches stb** — only the codecs reach the seam.
+  It **delegates to the low-level codecs and never touches a backend** — only the codecs reach a seam.
 
 Reach for a low-level codec when you need a format's metadata; reach for the aggregator when you do not.
 

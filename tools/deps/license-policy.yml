@@ -20,6 +20,11 @@ allowed:
     why: Permissive, attribution plus a no-endorsement clause we can satisfy.
   - identifier: Zlib
     why: Permissive, attribution only, with no requirement to ship the notice for binary distribution.
+  - identifier: libpng-2.0
+    why: >-
+      The PNG Reference Library License version 2. Permissive, attribution only.
+      Its three conditions are the zlib license's — do not misrepresent the origin, mark altered sources, keep the notice —
+      and shipping the notice in docs/licenses/ satisfies all of them.
   - identifier: Apache-2.0
     why: Permissive with an explicit patent grant.
   - identifier: Apache-2.0 WITH LLVM-exception

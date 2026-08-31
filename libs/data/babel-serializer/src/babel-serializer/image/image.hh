@@ -20,7 +20,7 @@ struct write_options;
 // Reach for a low-level codec instead when you need a format's metadata (color profile, gamma, EXIF, the PFM scale, ...).
 //
 // THE SAMPLE TYPE FOLLOWS THE FORMAT, and a caller that mixes the two gets an error rather than reinterpreted bytes.
-// PNG and JPEG are `u8`; HDR and PFM are `f32`.
+// JPEG is `u8` and HDR and PFM are `f32`; PNG is the one that spans two, `u16` for a 16-bit file and `u8` otherwise.
 // So `comp` is worth reading after any `read` that did not pick the format itself, and `encode` rejects an image
 // whose `comp` the target format cannot store.
 //
@@ -37,7 +37,8 @@ enum class babel::image::format : babel::u8
 };
 
 /// Decoded sample type.
-/// `u8` for PNG / JPEG, `f32` for HDR / PFM; `u16` is API-ready (16-bit PNG) and not produced yet.
+/// `u8` for PNG / JPEG, `u16` for a 16-bit PNG (host-endian), `f32` for HDR / PFM.
+/// PNG is the one format that spans two: which one a decode produced is what `comp` says.
 enum class babel::image::component : babel::u8
 {
     u8,
@@ -99,8 +100,9 @@ namespace babel::image
 {
 
 /// Encode `img` to `fmt`'s file bytes, delegating to the matching low-level codec.
-/// `img.comp` must be what the format stores — `u8` for PNG / JPEG, `f32` for HDR / PFM — and the channel count
-/// must be one the format has (3 for HDR; 1 or 3 for PFM).
+/// `img.comp` must be what the format stores — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for HDR / PFM — and the
+/// channel count must be one the format has (3 for HDR; 1 or 3 for PFM).
+/// A `u16` PNG encode writes 16-bit samples, so `comp` is what picks the written depth.
 [[nodiscard]] cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options opts = {});
 
 /// Encode and write to a stream.

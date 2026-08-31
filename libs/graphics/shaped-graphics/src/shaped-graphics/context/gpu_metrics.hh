@@ -14,7 +14,7 @@
 ///
 /// The same three shapes as cc's platform metrics, and for the same reasons.
 /// Memory is a **level**, so a plain query answers it.
-/// Busy time is a monotone **counter**, so a rate needs `sg::gpu_load_sampler` to hold the previous reading — a bare
+/// Busy time is a **counter**, so a rate needs `sg::gpu_load_sampler` to hold the previous reading — a bare
 /// `query_gpu_load()` returning a percentage could only work by keeping a hidden baseline somewhere, which is what a
 /// sampler exists to avoid.
 ///
@@ -44,11 +44,16 @@ struct sg::gpu_engine_counter
     cc::string engine;
 
     /// Seconds this engine class has been busy, since the OS started counting.
-    /// Monotone, so two readings difference into a utilization.
+    /// Two readings difference into a utilization, which is what `gpu_load_sampler` does with them.
+    ///
+    /// **Summed over the processes currently using the engine, so it is not monotone.**
+    /// One of them exiting takes its share of the total with it, and the next reading is lower than the last.
+    /// A sampler that sees that reports an error rather than a zero, because the interval carries no utilization it
+    /// could name; the reading after it differences normally again.
     f64 busy_secs = 0;
 };
 
-/// Monotone GPU busy counters, per engine class.
+/// One reading of the GPU busy counters, per engine class.
 struct sg::gpu_counters
 {
     cc::vector<sg::gpu_engine_counter> engines;
@@ -91,6 +96,8 @@ public:
     explicit gpu_load_sampler(sg::context const& ctx);
 
     /// The load since the previous `sample()`, or since construction for the first one.
+    /// Errors when the interval carries no load to report — no baseline yet, or a counter that fell because a process
+    /// using the GPU exited — and takes a fresh baseline either way, so the next call answers normally.
     [[nodiscard]] cc::result<sg::gpu_load> sample();
 
     /// Whether this context can answer at all, so a caller decides once instead of probing every frame.
