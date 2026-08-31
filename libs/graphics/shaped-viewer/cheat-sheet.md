@@ -241,6 +241,13 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **An acquire mints an id and queues the work; it does not upload.**
+  The buffer exists immediately (so a descriptor naming it is always valid) and its contents land when `record_pending_work` drains.
+  A viewer drains once per frame; anyone else calls `flush_pending_uploads`, and a test that traces what it just built must.
+- **A pending mesh is traced as the shared placeholder cube**, sized by the `bounds` its payload declared, shaded through the fallback hit group.
+  Its instance record names the CUBE's vertices, since a hit recomputes the geometric normal from what the record points at.
+  A pending mesh that declared no bounds is skipped instead — there is no honest extent to draw it at.
+- **Attributes drain before geometry**, and that ordering is the correctness argument: an attribute is up before the mesh indexing it draws its real triangles.
 - **A permutation that did not compile is substituted, not fatal.**
   `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
   `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
@@ -530,9 +537,15 @@ sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; t
 m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
 m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; }
 sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
-m.record_pending_work(cmd) -> i32   // records what THIS epoch's budget allows, oldest first; returns dispatches spent
+m.record_pending_work(cmd) -> i32   // drains queued UPLOADS then follow-up work, at this epoch's budgets; returns dispatches spent
+m.flush_pending_uploads()          // uploads everything queued, now and unbounded — for a caller with no frame loop to wait for
+m.pending_upload_count()           // -> isize, payloads still queued across the managers
+sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
+m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as
+m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
-// config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// config: { texture_policy textures_policy = {.generate_mips = true};
+//           work_budget work = {.max_dispatches_per_epoch = 16, .max_upload_bytes_per_epoch = 0} }  // 0 = unbounded
 ```
 
 **The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).

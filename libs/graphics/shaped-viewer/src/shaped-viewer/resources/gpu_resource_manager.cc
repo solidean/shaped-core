@@ -281,23 +281,43 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
         r.uploaded = cc::move(bytes);
     }
 
+    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
+    // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
+    auto const pending = m.state != residency::complete;
+    auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
+    auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+
     // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
     // declaration `freeze()` hands the trace.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
-            .vertices = u32(acquire_buffer(m.vertices.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(m.indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u};
+            .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
+            .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
 }
 
 sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
 {
     CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
 
+    // The box travels with the payload rather than being recomputed from it: the manager keeps it after the bytes are
+    // gone, and a placeholder drawn while the geometry is still arriving has nothing else to be sized by.
+    auto const box = data.bounds.has_value() ? data.bounds : bounds_of(data.geometry);
+
     // Both bridges keep the geometry's own content key, so this resolves to a resident id rather than an upload
     // whenever the mesh has not changed.
-    auto const geometry = data.geometry.is_indexed() ? meshes.acquire(indexed_triangle_data::from(data.geometry))
-                                                     : meshes.acquire(triangle_data::from(data.geometry));
+    auto const geometry = [&]
+    {
+        if (data.geometry.is_indexed())
+        {
+            auto payload = indexed_triangle_data::from(data.geometry);
+            payload.bounds = box;
+            return meshes.acquire(payload);
+        }
+        auto payload = triangle_data::from(data.geometry);
+        payload.bounds = box;
+        return meshes.acquire(payload);
+    }();
 
     auto bindings = cc::vector<mesh_attribute_binding>();
     bindings.reserve(data.attributes.size());
@@ -326,7 +346,7 @@ sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
             .material = data.material,
             .flags = data.flags,
             .textures = cc::move(bound_textures),
-            .bounds = data.bounds.has_value() ? data.bounds : bounds_of(data.geometry),
+            .bounds = box,
             .triangle_count = data.geometry.triangle_count(),
             .vertex_count = data.geometry.vertex_count()};
 }
@@ -514,8 +534,27 @@ texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
     return id;
 }
 
+void gpu_resource_manager::flush_pending_uploads()
+{
+    // Attributes first for the same reason the budgeted drain does it: see `record_pending_work`.
+    (void)attributes.record_uploads(0);
+    (void)meshes.record_uploads(0);
+}
+
 i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
 {
+    // Queued payloads before queued follow-up work, and attributes before geometry.
+    //
+    // The order IS the correctness argument for drawing a mesh the moment its geometry lands: an attribute is up
+    // before the geometry that indexes it, so a mesh never draws its real triangles against attribute bytes that have
+    // not arrived — which would read as zeroed uvs for a frame rather than as something still loading.
+    // Textures come last by not being here at all: they upload at acquire, and a pending one has no placeholder yet.
+    auto upload_budget = _work_budget.max_upload_bytes_per_epoch;
+    auto const spent_on_attributes = attributes.record_uploads(upload_budget);
+    if (upload_budget > 0)
+        upload_budget = upload_budget > spent_on_attributes ? upload_budget - spent_on_attributes : 1;
+    (void)meshes.record_uploads(upload_budget);
+
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
         return 0;
 

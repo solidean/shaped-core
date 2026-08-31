@@ -88,6 +88,10 @@ mesh_data / mesh type split              [done]         a mesh exists in two for
                                                         gpu_resource_manager::create_mesh is the one-way bridge, scene_ref::add_mesh takes either, and resolution runs against the GPU form — which is what admits geometry that was never on the CPU.
                                                         Textures are symmetric with geometry now: a mesh_data carries pixels, an sv::mesh a texture_id.
                                                         The GPU form also keeps the CPU-side summary (bounds, triangle and vertex counts) that nothing else could answer a framing question with
+deferred uploads + placeholders          [done]         every record carries an sv::residency, and an acquire mints an id and QUEUES the payload rather than uploading it.
+                                                        record_pending_work drains at the epoch's byte budget (unbounded by default), attributes before geometry so an attribute is up before the mesh indexing it draws.
+                                                        A pending mesh is traced as one shared unit-cube BLAS scaled onto its declared bounds and shaded through the fallback hit group; one with no bounds is skipped.
+                                                        The viewer drains once per frame — which nothing did before, so a viewer's textures never grew their mip chains either
 fallback hit group                       [done]         a permutation that has not compiled — still in flight, or a material that does not build — is replaced for that trace by a neutral hit group over an empty signature, which reads no per-instance block and so stands in for any material.
                                                         The pipeline is keyed on the substituted set, so the frame the real one lands a new variant is built with it.
                                                         Before this, one bad material made the whole view a no-op

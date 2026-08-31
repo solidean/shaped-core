@@ -44,6 +44,10 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     REQUIRE(resources.meshes.contains(item.mesh));
     REQUIRE(resources.contains_instance(item.instance));
 
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop to drain
+    // that queue, so it drains it itself.
+    resources.flush_pending_uploads();
+
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
 
@@ -174,6 +178,8 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
     mesh.material = lib.acquire(sv::material::create("sv_test_broken", type, {}));
 
     auto const item = resources.acquire_scene_item(mesh);
+    resources.flush_pending_uploads();
+
     auto const* const permutation = resources.shaders.find(item.shader_key);
     REQUIRE(permutation != nullptr);
 

@@ -631,6 +631,8 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
 
+    m.flush_pending_uploads(); // the record has to be resident before anything reads its buffers back
+
     auto const mesh_id = mesh.geometry;
     auto const instance = m.acquire_instance(resolved, generated.layout);
 
@@ -663,6 +665,7 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const indexed_geometry
         = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
     auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
+    m.flush_pending_uploads();
     CHECK(m.describe_instance(*cmd, indexed, instance).is_indexed == 1u);
 
     // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
@@ -729,6 +732,7 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
 
     // And the imported material resolves against it, which is what places it in a scene.
     auto const item = m.acquire_scene_item(mesh);
+    m.flush_pending_uploads();
     CHECK(item.mesh == mesh.geometry);
     CHECK(item.instance != sv::instance_id::invalid);
 
@@ -738,6 +742,87 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
         for (auto const* const node : {&permutation->shader, &permutation->any_hit, &permutation->shadow_any_hit})
             if (*node != nullptr)
                 (void)cc::try_async_blocking_get(*node);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a mesh that has not uploaded yet is traced as a placeholder box")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    // A budget of one byte: the first queued payload always runs whatever its size, and nothing after it does.
+    auto m = sv::gpu_resource_manager::create(
+        ctx, {.bindless = material_tables(), .work = {.max_upload_bytes_per_epoch = 1}});
+    m.advance_to(ctx.current_epoch());
+
+    auto const first = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto const second = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 1), tg::pos3f(1, 0, 1), tg::pos3f(0, 1, 1)};
+
+    auto const box = tg::aabb3f(tg::pos3f(0, 0, 1), tg::pos3f(1, 1, 1));
+    auto const a = m.create_mesh({.name = "a", .geometry = sv::triangle_geometry::create_from_positions(first)});
+    auto const b
+        = m.create_mesh({.name = "b", .geometry = sv::triangle_geometry::create_from_positions(second), .bounds = box});
+
+    // An acquire mints the id and queues the work, so nothing is resident yet.
+    CHECK(m.meshes.get(a.geometry).state == sv::residency::pending);
+    CHECK(m.meshes.get(b.geometry).state == sv::residency::pending);
+    CHECK(m.pending_upload_count() == 2);
+
+    // The summary crosses at acquire, not at upload — which is what lets a placeholder be sized before the geometry
+    // it stands in for exists.
+    CHECK(m.meshes.get(b.geometry).bounds.value().max == tg::pos3f(1, 1, 1));
+
+    {
+        auto cmd = ctx.create_command_list();
+        (void)m.record_pending_work(*cmd);
+        ctx.submit_command_list(cc::move(cmd));
+    }
+
+    // One landed, one did not: the budget is spent by the first and the rest of the queue waits for a later epoch.
+    CHECK(m.meshes.get(a.geometry).state == sv::residency::complete);
+    CHECK(m.meshes.get(b.geometry).state == sv::residency::pending);
+    CHECK(m.pending_upload_count() == 1);
+
+    // A resident mesh has an acceleration structure to trace; a pending one has none, which is why it cannot be the
+    // TLAS instance's own BLAS and the shared placeholder stands in.
+    CHECK(m.meshes.get(a.geometry).blas != nullptr);
+    CHECK(m.meshes.get(b.geometry).blas == nullptr);
+    CHECK(m.meshes.placeholder_blas() != nullptr);
+
+    // And its instance record names the PLACEHOLDER's geometry, not its own: a hit recomputes the geometric normal
+    // from the positions the record points at, and the cube's triangles are the ones actually intersected.
+    {
+        auto const lib = sv::acquire_material_library();
+        REQUIRE(lib.has_value());
+        auto const material = sv::default_material(*lib.value());
+
+        auto cmd = ctx.create_command_list();
+        auto const pending_item = m.acquire_scene_item(sv::mesh{.geometry = b.geometry, .material = material});
+        auto const resident_item = m.acquire_scene_item(sv::mesh{.geometry = a.geometry, .material = material});
+
+        auto const pending_record = m.describe_instance(*cmd, pending_item.mesh, pending_item.instance);
+        auto const resident_record = m.describe_instance(*cmd, resident_item.mesh, resident_item.instance);
+        CHECK(pending_record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
+        CHECK(resident_record.vertices
+              == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
+        CHECK(pending_record.vertices != resident_record.vertices);
+
+        // Resolving started permutation compiles; one left undriven is async work still holding this test's context.
+        for (auto const key : {pending_item.shader_key, resident_item.shader_key})
+            if (auto const* const p = m.shaders.find(key); p != nullptr)
+                (void)cc::try_async_blocking_get(p->shader);
+
+        ctx.submit_command_list(cc::move(cmd));
+    }
+
+    // The rest drains on a later epoch, and everything is resident once it has.
+    m.flush_pending_uploads();
+    CHECK(m.meshes.get(b.geometry).state == sv::residency::complete);
+    CHECK(m.pending_upload_count() == 0);
 
     ctx.advance_epoch_and_wait_for_idle();
 }

@@ -29,6 +29,13 @@ struct sv::work_budget
 {
     /// Dispatches per epoch; <= 0 disables follow-up work entirely, leaving every texture at its base level.
     i32 max_dispatches_per_epoch = 16;
+
+    /// How many BYTES of queued payload one epoch may upload; <= 0 is unbounded, which is the default.
+    ///
+    /// Unbounded is the right default and not a cop-out: a caller who has not thought about streaming wants their
+    /// meshes on the GPU by the time they draw, and bounding this is what someone loading a large asset opts into
+    /// once they would rather see placeholders than a stalled frame.
+    isize max_upload_bytes_per_epoch = 0;
 };
 
 /// What the manager does with a resource once it has landed.
@@ -204,6 +211,20 @@ public:
 
     /// How many resources are still waiting for their follow-up work.
     [[nodiscard]] isize pending_work_count() const { return _pending.size(); }
+
+    /// Uploads everything queued, right now and unbounded, ignoring the epoch budget.
+    ///
+    /// For a caller that needs residency before it can proceed and has no frame loop to wait for — a test tracing a
+    /// scene it just built, or a tool doing one pass over an asset.
+    /// A viewer never calls this: draining at a bounded rate is the whole point of the queue, and a placeholder is
+    /// what covers the gap.
+    void flush_pending_uploads();
+
+    /// How many payloads are still queued for upload, across every manager.
+    [[nodiscard]] isize pending_upload_count() const
+    {
+        return meshes.pending_upload_count() + attributes.pending_upload_count();
+    }
 
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
     ///

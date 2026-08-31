@@ -104,6 +104,7 @@ image_stats trace_furnace(sg::context& ctx,
     auto const size = tg::vec2i(32, 32);
 
     auto const item = resources.acquire_scene_item(mesh);
+    resources.flush_pending_uploads();
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
 

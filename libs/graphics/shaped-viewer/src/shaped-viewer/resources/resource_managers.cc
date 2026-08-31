@@ -32,27 +32,72 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     CC_ASSERT(!positions.empty() && positions.size() % 3 == 0, "mesh_manager::acquire expects a triangle list (vertex "
                                                                "count a non-zero multiple of 3)");
 
+    // The BUFFER is created here and the bytes are not: an acquire mints an id and queues the work, and
+    // `record_uploads` is what spends the bandwidth — at whatever rate the epoch's budget allows.
     auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage);
 
-    // Upload the geometry, then build its BLAS.
-    // Two lists so the build sees the upload finished; both submit in order on the direct queue, so a later trace that references this BLAS is correctly ordered after.
     auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(vertices, positions);
     auto stand_in = _acquire_index_stand_in(*up);
     _ctx.submit_command_list(cc::move(up));
 
+    // The BLAS is not charged yet, since it is not built: `record_uploads` adds its size once it is.
+    auto const size_in_bytes = vertices.size_in_bytes();
+    auto const id = insert(mesh.hash,
+                           {.state = residency::pending,
+                            .vertices = cc::move(vertices),
+                            .indices = cc::move(stand_in),
+                            .is_indexed = false,
+                            .triangle_count = positions.size() / 3,
+                            .bounds = mesh.bounds},
+                           size_in_bytes);
+
+    _pending.push_back({.id = id, .positions = mesh.positions, .bytes = size_in_bytes});
+    return id;
+}
+
+sg::blas_handle const& mesh_manager::placeholder_blas()
+{
+    if (_placeholder_blas != nullptr)
+        return _placeholder_blas;
+
+    // The unit cube as a raw triangle list: 12 triangles over the corners of [0,1]^3, wound outward.
+    // Spelled out rather than generated, because it is read once and a loop over face tables would be longer.
+    constexpr tg::pos3f c[8] = {tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(1, 1, 0), tg::pos3f(0, 1, 0),
+                                tg::pos3f(0, 0, 1), tg::pos3f(1, 0, 1), tg::pos3f(1, 1, 1), tg::pos3f(0, 1, 1)};
+    constexpr int quads[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {2, 3, 7, 6}, {1, 2, 6, 5}, {0, 4, 7, 3}};
+
+    auto positions = cc::vector<tg::pos3f>();
+    positions.reserve(36);
+    for (auto const& q : quads)
+        for (auto const i : {0, 1, 2, 0, 2, 3})
+            positions.push_back(c[q[i]]);
+
+    _placeholder_vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage);
+
+    // Two lists so the build sees the upload finished, for the same reason an acquire uses two.
+    auto up = _ctx.create_command_list();
+    up->upload.data_to_buffer(_placeholder_vertices, positions);
+    (void)_acquire_index_stand_in(*up); // the placeholder is non-indexed, and still has to bind something
+    _ctx.submit_command_list(cc::move(up));
+
     auto build = _ctx.create_command_list();
-    auto blas = build->raytracing.build_blas({{.vertices = vertices.raw(), .vertex_count = positions.size()}});
+    _placeholder_blas
+        = build->raytracing.build_blas({{.vertices = _placeholder_vertices.raw(), .vertex_count = positions.size()}});
     _ctx.submit_command_list(cc::move(build));
 
-    auto const size_in_bytes = vertices.size_in_bytes() + blas->size_in_bytes();
-    return insert(mesh.hash,
-                  {.vertices = cc::move(vertices),
-                   .indices = cc::move(stand_in),
-                   .is_indexed = false,
-                   .triangle_count = positions.size() / 3,
-                   .blas = cc::move(blas)},
-                  size_in_bytes);
+    return _placeholder_blas;
+}
+
+sg::buffer<tg::pos3f> const& mesh_manager::placeholder_vertices()
+{
+    (void)placeholder_blas();
+    return _placeholder_vertices;
+}
+
+sg::buffer<u32> const& mesh_manager::index_stand_in()
+{
+    (void)placeholder_blas();
+    return _index_stand_in;
 }
 
 mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
@@ -69,26 +114,69 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
     auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage);
     auto index_buffer = _ctx.persistent.create_buffer<u32>(indices.size(), geometry_usage);
 
-    auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(vertices, positions);
-    up->upload.data_to_buffer(index_buffer, indices);
-    _ctx.submit_command_list(cc::move(up));
+    auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes();
+    auto const id = insert(mesh.hash,
+                           {.state = residency::pending,
+                            .vertices = cc::move(vertices),
+                            .indices = cc::move(index_buffer),
+                            .is_indexed = true,
+                            .triangle_count = indices.size() / 3,
+                            .bounds = mesh.bounds},
+                           size_in_bytes);
 
-    auto build = _ctx.create_command_list();
-    auto blas = build->raytracing.build_blas({{.vertices = vertices.raw(),
-                                               .vertex_count = positions.size(),
-                                               .indices = index_buffer.raw(),
-                                               .index_count = indices.size()}});
-    _ctx.submit_command_list(cc::move(build));
+    _pending.push_back({.id = id, .positions = mesh.positions, .indices = mesh.indices, .bytes = size_in_bytes});
+    return id;
+}
 
-    auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes() + blas->size_in_bytes();
-    return insert(mesh.hash,
-                  {.vertices = cc::move(vertices),
-                   .indices = cc::move(index_buffer),
-                   .is_indexed = true,
-                   .triangle_count = indices.size() / 3,
-                   .blas = cc::move(blas)},
-                  size_in_bytes);
+isize mesh_manager::record_uploads(isize max_bytes)
+{
+    if (_pending.empty())
+        return 0;
+
+    auto spent = isize(0);
+    auto keep = cc::vector<pending_mesh>();
+
+    for (auto& w : _pending)
+    {
+        auto* const record = mutable_record(w.id);
+        if (record == nullptr)
+            continue; // evicted since it was queued, so nobody is waiting on it any more
+
+        // The first request always runs whatever its size: half a vertex buffer would build a BLAS over a hole, so a
+        // request is never split, and a budget smaller than one mesh still drains one mesh per epoch.
+        if (max_bytes > 0 && spent > 0 && spent + w.bytes > max_bytes)
+        {
+            keep.push_back(cc::move(w));
+            continue;
+        }
+
+        // Two lists so the build sees the upload finished; both submit in order on the direct queue, so a later trace
+        // that references this BLAS is correctly ordered after.
+        auto up = _ctx.create_command_list();
+        up->upload.data_to_buffer(record->vertices, w.positions.span());
+        if (record->is_indexed)
+            up->upload.data_to_buffer(record->indices, w.indices.span());
+        _ctx.submit_command_list(cc::move(up));
+
+        auto build = _ctx.create_command_list();
+        record->blas = record->is_indexed
+                         ? build->raytracing.build_blas({{.vertices = record->vertices.raw(),
+                                                          .vertex_count = record->vertices.element_count(),
+                                                          .indices = record->indices.raw(),
+                                                          .index_count = record->indices.element_count()}})
+                         : build->raytracing.build_blas(
+                               {{.vertices = record->vertices.raw(), .vertex_count = record->vertices.element_count()}});
+        _ctx.submit_command_list(cc::move(build));
+
+        record->state = residency::complete;
+        spent += w.bytes;
+
+        // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
+        add_bytes(w.id, record->blas->size_in_bytes());
+    }
+
+    _pending = cc::move(keep);
+    return spent;
 }
 
 sg::buffer<u32> mesh_manager::_acquire_index_stand_in(sg::command_list& cmd)
@@ -132,7 +220,8 @@ material_set_id material_manager::acquire(material_data const& materials)
     _ctx.submit_command_list(cc::move(up));
 
     auto const size_in_bytes = buffer.size_in_bytes();
-    return insert(materials.hash, {.materials = cc::move(buffer), .count = mats.size()}, size_in_bytes);
+    return insert(materials.hash, {.state = residency::complete, .materials = cc::move(buffer), .count = mats.size()},
+                  size_in_bytes);
 }
 
 texture_manager texture_manager::create(sg::context& ctx, manager_config const& cfg)
@@ -223,18 +312,52 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     auto const bytes = attribute.data.span();
     CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
+    // The buffer exists from here on, so a descriptor naming it is valid immediately; only its contents wait.
     auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
 
-    auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(data, bytes);
-    _ctx.submit_command_list(cc::move(up));
+    auto const id = insert(attribute.hash,
+                           {.state = residency::pending,
+                            .data = cc::move(data),
+                            .format = attribute.format,
+                            .frequency = attribute.frequency,
+                            .element_count = attribute.element_count()},
+                           bytes.size());
 
-    return insert(attribute.hash,
-                  {.data = cc::move(data),
-                   .format = attribute.format,
-                   .frequency = attribute.frequency,
-                   .element_count = attribute.element_count()},
-                  bytes.size());
+    _pending.push_back({.id = id, .data = attribute.data});
+    return id;
+}
+
+isize attribute_manager::record_uploads(isize max_bytes)
+{
+    if (_pending.empty())
+        return 0;
+
+    auto spent = isize(0);
+    auto keep = cc::vector<pending_attribute>();
+
+    for (auto& w : _pending)
+    {
+        auto* const record = mutable_record(w.id);
+        if (record == nullptr)
+            continue;
+
+        auto const bytes = w.data.span();
+        if (max_bytes > 0 && spent > 0 && spent + bytes.size() > max_bytes)
+        {
+            keep.push_back(cc::move(w));
+            continue;
+        }
+
+        auto up = _ctx.create_command_list();
+        up->upload.data_to_buffer(record->data, bytes);
+        _ctx.submit_command_list(cc::move(up));
+
+        record->state = residency::complete;
+        spent += bytes.size();
+    }
+
+    _pending = cc::move(keep);
+    return spent;
 }
 
 } // namespace sv
