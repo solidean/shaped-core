@@ -275,6 +275,7 @@ struct sv::texture_record
 {
     sg::texture_2d texture;
 
+    /// `pending` until the supplied levels land; then `base_resident` or `complete`, per `uploaded_mips`.
     residency state = residency::pending;
 
     /// How many mip levels the pixels carried, and how many the texture has room for.
@@ -293,13 +294,26 @@ public:
     /// A manager that uploads into `ctx` (which must outlive it), budgeted by `cfg`.
     [[nodiscard]] static texture_manager create(sg::context& ctx, manager_config const& cfg = {});
 
-    /// The texture_id for `texture.hash`, resident from a prior acquire (O(1)), or a freshly uploaded one.
+    /// The texture_id for `texture.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
     ///
-    /// On a miss the texture is created and every mip the data carries is uploaded on one command list submitted
-    /// before returning, so the id resolves immediately.
-    /// A texture whose data carried fewer mips than the shape allows comes back `base_resident`, and the
-    /// follow-up that fills the rest is the gpu_resource_manager's to schedule.
+    /// On a miss the texture is created and every mip the data carries is handed to `ctx.stream`, so the id resolves
+    /// immediately while the pixels are still in flight.
+    /// It is `pending` until `collect_settled` sees the transfers land, and a slot sampling it meanwhile reads a 1x1
+    /// placeholder seeded from the material's own factor rather than an empty texture.
     [[nodiscard]] texture_id acquire(texture_data const& texture);
+
+    /// Advances every texture whose pixels have landed, and reports the ids that just became sampleable.
+    ///
+    /// `newly_resident` is appended to rather than cleared, and is what the owning manager turns into queued mip
+    /// generation — which cannot be decided at acquire, since nothing has arrived then.
+    /// Returns how many textures it advanced.
+    isize collect_settled(cc::vector<texture_id>& newly_resident);
+
+    /// Blocks until every queued transfer has landed, then collects them.
+    void wait_for_settled(cc::vector<texture_id>& newly_resident);
+
+    /// How many textures are still streaming.
+    [[nodiscard]] isize settling_count() const { return _settling.size(); }
 
     /// Marks `id`'s chain filled — what the manager calls once it has recorded the mip generation.
     /// A no-op for an id that has been evicted since.
@@ -309,4 +323,7 @@ private:
     explicit texture_manager(sg::context& ctx) : _ctx(ctx) {}
 
     sg::context& _ctx;
+
+    /// The in-flight transfers per queued texture, one per supplied mip; dropping them cancels the upload.
+    cc::map<texture_id, cc::vector<sg::stream_upload_handle>> _settling;
 };

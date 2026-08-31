@@ -1,6 +1,6 @@
 # Asset loading (plan)
 
-**Status: phases 1 to 4 landed bar one placeholder, phase 5 part-way.**
+**Status: phases 1 to 4 landed, phase 5 part-way.**
 The CPU / GPU type split is in — `sv::mesh_data`, `sv::mesh`, symmetric textures, `add_mesh` taking either.
 So is the material mapping — `alpha_cutoff`, `occlusion` and the channel swizzle, through resolve, generation and the permutation key.
 And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ and STL, with the resolver hook.
@@ -202,7 +202,7 @@ Every resource kind has a substitution for "not there yet", so a pending or fail
 |---|---|---|
 | geometry | the shared unit-cube BLAS, instanced with `summary.bounds` folded into the TLAS transform — one BLAS for every placeholder in the scene — *landed* | skipped, with an issue |
 | geometry with no bounds | skipped, which is the honest answer for an adopted mesh that declared none — *landed* | skipped |
-| texture | a 1x1 placeholder seeded from the material's own factor, reached through the bindless slot | magenta, plus an issue |
+| texture | a 1x1 placeholder seeded from the material's own factor, reached through the bindless slot — *landed* | magenta, plus an issue |
 | material parameter block | rebuilt on demand; it is already rebuilt every epoch, so this is a non-event | — |
 | compiled permutation | a neutral fallback hit group, compiled once per cache, reading no per-material block — *landed* | the same fallback |
 
@@ -416,15 +416,16 @@ not yet need would be the wrong order.
    `texture_sample_source` grew a `sample_transform` alongside the swizzle, which is what makes normal maps and occlusion strength import at all.
    One gap stays: the `KHR_materials_*` extensions are not interpreted by babel, so transmission, ior, clearcoat and sheen do not cross yet.
    `.mtl` stays deferred, as planned.
-4. **Placeholders.** *Landed, except the texture.*
+4. **Placeholders.** *Landed.*
    The **fallback hit group** substitutes for a permutation that has not compiled, rather than making the view a no-op.
    **Bounds from glTF accessors** cross on `mesh_data` and reach the record, so a placeholder is sized without touching a payload byte.
    The **shared cube BLAS** is in, and live: an acquire now queues its upload, so a mesh really is pending until the drain reaches it.
-   The **factor-seeded 1x1 texture** is not — texture acquires still upload inline, which is the one resource kind with no pending state yet.
+   The **factor-seeded 1x1 texture** is in as well: `resolved_attribute` keeps the constant a sample beat, and the slot names a 1x1 filled with it while the real pixels stream.
 5. **Asynchronous loading.** *The resource half landed; the loading half is next.*
    Every record carries a `residency`, an acquire hands its payload to `sg::context_stream_scope` (`ctx.stream`), and `record_pending_work` collects what landed.
    Priority is the transfer's own rather than a drain order, so attributes outrank the geometry that indexes them and a mesh never draws real triangles against attribute bytes still in flight.
-   Still to come: the four-stage load pipeline itself, an `sv::asset` handle that fills in, structure-first glTF parsing, streamed textures and their placeholder.
+   Textures stream too, and a slot sampling one that has not arrived reads its placeholder rather than an empty texture.
+   Still to come: the four-stage load pipeline itself, an `sv::asset` handle that fills in, and structure-first glTF parsing.
 6. **Recipes and caching.** `from_uri` and `derived`, `bcache` on the parse and processing steps, re-materialization after eviction, importer versioning in the keys.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
 

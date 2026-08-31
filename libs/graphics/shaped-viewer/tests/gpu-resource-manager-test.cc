@@ -244,6 +244,7 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
 
     auto const base_only = sv::texture_data::create(make_pixels(16, 16, 1, false), sg::pixel_format::rgba8_unorm, 16, 16);
     auto const id = m.acquire_texture(base_only);
+    m.wait_for_pending_uploads(); // the pixels stream in, so residency is what the settle pass reports
     REQUIRE(m.textures.contains(id));
 
     auto const* const record = m.textures.get_ptr(id);
@@ -314,6 +315,7 @@ TEST("sv - a texture given every mip is complete")
     auto const full = sv::texture_data::create(make_pixels(8, 8, 4, true), sg::pixel_format::rgba8_unorm, 8, 8,
                                                sv::impl::mip_count_of(8, 8));
     auto const id = m.acquire_texture(full);
+    m.wait_for_pending_uploads();
     auto const* const record = m.textures.get_ptr(id);
     REQUIRE(record != nullptr);
 
@@ -337,6 +339,7 @@ TEST("sv - a texture's element is declared for the epoch that acquired it, and o
 
     auto const id
         = m.acquire_texture(sv::texture_data::create(make_pixels(8, 8, 5, false), sg::pixel_format::rgba8_unorm, 8, 8));
+    m.wait_for_pending_uploads();
     auto const index = element_of(m, id);
 
     {
@@ -375,15 +378,18 @@ TEST("sv - mip generation is queued, not done inline")
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
-    // An acquire is on the caller's critical path, so the follow-up is queued rather than recorded there.
+    // An acquire is on the caller's critical path, so the pixels stream and the follow-up is queued once they land.
     auto const id = m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 6, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    CHECK(m.pending_work_count() == 0); // nothing to generate from a texture that has not arrived
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
     CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
 
     // Re-acquiring the same content does not queue it a second time.
     (void)m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 6, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
 
     auto cmd = ctx.create_command_list();
@@ -419,6 +425,7 @@ TEST("sv - the work budget spreads mip generation across epochs")
     for (auto seed = u8(0); seed < 3; ++seed)
         (void)m.acquire_texture(
             sv::texture_data::create(make_pixels(16, 16, u8(20 + seed), false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 3);
 
     auto const drain = [&]
@@ -455,6 +462,7 @@ TEST("sv - a texture policy that wants no mips queues nothing")
 
     auto const id = m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 7, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 0);
 
     // It stays at its base level, which is a resolvable state rather than a failure.
@@ -551,6 +559,7 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
     auto const pixel_data = sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4);
     auto const texture = m.acquire_texture(pixel_data);
+    m.wait_for_pending_uploads(); // a pending texture's slot would name the placeholder, not this one
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
     auto data = sv::mesh_data{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
@@ -823,6 +832,99 @@ TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
 
         ctx.submit_command_list(cc::move(cmd));
     }
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+
+    // A material whose base color is dark red, and whose base color MAP has not arrived.
+    auto overrides = cc::vector<sv::material_attribute_binding>();
+    overrides.push_back(sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.0f, 0.0f)));
+    auto const id = lib.acquire(sv::material::create("dark-red", type, overrides));
+
+    auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
+    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto data = sv::mesh_data{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    data.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+    auto const mesh_gpu = m.create_mesh(data);
+
+    auto textured = mesh_gpu;
+    textured.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+    textured.material = id;
+
+    auto const resolved = sv::resolve_material(lib, id, textured);
+
+    // The sample won, and what it beat is kept — which is the whole reason a placeholder can be the right colour.
+    REQUIRE(resolved.attributes.size() > 0);
+    auto const* const base_color = [&]() -> sv::resolved_attribute const*
+    {
+        for (auto const& a : resolved.attributes)
+            if (a.name == "base_color")
+                return &a;
+        return nullptr;
+    }();
+    REQUIRE(base_color != nullptr);
+    CHECK(base_color->frequency == sv::material_frequency::mesh_texture);
+    REQUIRE(!base_color->fallback_constant.empty());
+
+    auto const generated = sv::generate_material_shader(resolved);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+
+    // The slot carries the seed the placeholder is filled with, already inverted through the sample's transform.
+    // Identity transform and identity swizzle here, so it is the factor itself.
+    auto const& record = m.get_instance(instance);
+    auto const* const slot = [&]() -> sv::instance_slot const*
+    {
+        for (auto const& s : record.slots)
+            if (s.kind == sv::material_slot_kind::texture_index)
+                return &s;
+        return nullptr;
+    }();
+    REQUIRE(slot != nullptr);
+    CHECK(slot->placeholder_texel[0] == 0.5f);
+    CHECK(slot->placeholder_texel[1] == 0.0f);
+    CHECK(slot->placeholder_texel[2] == 0.0f);
+
+    auto const slot_offset = [&]
+    {
+        for (auto const& sl : generated.layout.slots)
+            if (sl.name == "base_color" && sl.kind == sv::material_slot_kind::texture_index)
+                return sl.offset;
+        FAIL("no such texture slot");
+        return 0;
+    }();
+
+    // While the texture is pending the block names the PLACEHOLDER, not it.
+    CHECK(m.textures.get(texture).state == sv::residency::pending);
+    auto const while_pending
+        = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
+    CHECK(while_pending != element_of(m, texture));
+
+    // Once it lands the same block names the real thing, with no permutation change in between — which is the point
+    // of substituting at the slot rather than letting the sample lose to a coarser rank.
+    m.wait_for_pending_uploads();
+    CHECK(m.textures.get(texture).state != sv::residency::pending);
+    auto const once_resident
+        = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
+    CHECK(once_resident == element_of(m, texture));
 
     ctx.advance_epoch_and_wait_for_idle();
 }

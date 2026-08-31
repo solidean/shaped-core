@@ -217,7 +217,10 @@ public:
     void wait_for_pending_uploads();
 
     /// How many payloads are still in flight, across every manager.
-    [[nodiscard]] isize settling_count() const { return meshes.settling_count() + attributes.settling_count(); }
+    [[nodiscard]] isize settling_count() const
+    {
+        return meshes.settling_count() + attributes.settling_count() + textures.settling_count();
+    }
 
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
     ///
@@ -318,6 +321,18 @@ public:
 private:
     friend class bound_resources;
 
+    /// Advances every texture whose pixels landed, and queues the mip work each newly-sampleable one asks for.
+    void _collect_textures();
+
+    /// Queues mip generation for whichever of `landed` supplied fewer levels than its shape allows.
+    void _queue_mip_work(cc::span<texture_id const> landed);
+
+    /// The 1x1 texture a slot samples while its own is still arriving, created on first use per (texel, format).
+    ///
+    /// Per format as well as per color because an sRGB view decodes what it reads: the same factor has to be STORED
+    /// differently to come back the same, and a placeholder that ignored that would be visibly off.
+    [[nodiscard]] sg::texture_2d const& _placeholder_texture(tg::vec4f texel, sg::pixel_format format);
+
     /// One entry per declared table, in table order; a table budgeted at 0 has none.
     /// `_slot_of` maps a table onto its entry, so a caller never indexes this by table.
     struct table_entry
@@ -332,7 +347,8 @@ private:
         cc::vector<u64> recorded_in;
     };
 
-    gpu_resource_manager(mesh_manager meshes,
+    gpu_resource_manager(sg::context& ctx,
+                         mesh_manager meshes,
                          material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
@@ -385,6 +401,14 @@ private:
 
     texture_policy _texture_policy;
     work_budget _work_budget;
+
+    /// The context every manager here was built over — needed for the placeholders, which are created on demand from
+    /// a path that has no command list of its own to reach one through.
+    /// A pointer rather than a reference so the type stays movable, which `create` returns by value.
+    sg::context* _ctx = nullptr;
+
+    /// keyed on the packed texel and the format it is stored in; never evicted, since one 1x1 costs nothing to keep
+    cc::map<u64, sg::texture_2d> _placeholder_textures;
 
     sg::epoch _epoch = sg::epoch(0);
 

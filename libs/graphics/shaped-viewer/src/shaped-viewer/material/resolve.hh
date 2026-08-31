@@ -39,6 +39,14 @@ struct sv::resolved_attribute
     /// live when `frequency` is `material_texture` or `mesh_texture`
     texture_sample_source const* sample = nullptr;
 
+    /// The best CONSTANT the walk had before a sample won — live alongside `sample`, and never empty beside one.
+    ///
+    /// It is what a placeholder is seeded from while the texture is still arriving: a material whose base color map
+    /// has not landed shows its own base color factor rather than black, which is the difference between an asset
+    /// appearing dark and an asset appearing unlit.
+    /// The declaration's default at worst, since every declaration has one.
+    cc::span<byte const> fallback_constant;
+
     /// the mesh attribute `sample->uv_attribute` resolved to, live alongside `sample`
     ///
     /// A sample is only a candidate at all when the mesh carries this, so it is never null when `sample` is not.

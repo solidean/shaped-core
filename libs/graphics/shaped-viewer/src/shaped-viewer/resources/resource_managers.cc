@@ -34,6 +34,7 @@ namespace impl
 // Geometry outranks textures for the reason the design gives: a grey model beats a floating albedo map.
 constexpr i32 attribute_stream_priority = 20;
 constexpr i32 geometry_stream_priority = 10;
+constexpr i32 texture_stream_priority = 0;
 } // namespace impl
 
 mesh_id mesh_manager::acquire(triangle_data const& mesh)
@@ -309,18 +310,20 @@ texture_id texture_manager::acquire(texture_data const& texture)
                                                          | sg::texture_usage::readwrite_texture
                                                          | sg::texture_usage::copy_dst});
 
-    // Every supplied level in one list, submitted before returning, so the id is usable the moment it is minted.
-    auto cmd = _ctx.create_command_list();
+    // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
+    // this call without the manager holding a copy of it.
+    // Below the geometry priority: a grey model beats a floating albedo map.
+    auto transfers = cc::vector<sg::stream_upload_handle>();
     auto offset = isize(0);
     for (auto mip = i32(0); mip < texture.mip_count; ++mip)
     {
         auto const size = impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
         CC_ASSERT(offset + size <= texture.pixels.span().size(), "texture pixels are shorter than the mips they claim");
-        cmd->upload.bytes_to_texture(gpu.raw(), texture.pixels.span().subspan({.offset = offset, .size = size}),
-                                     {.mip_level = mip});
+        transfers.push_back(_ctx.stream.bytes_to_texture(
+            gpu.raw(), texture.pixels.subdata({.offset = offset, .size = size}), {.mip_level = mip}));
+        transfers.back().set_priority(impl::texture_stream_priority);
         offset += size;
     }
-    _ctx.submit_command_list(cc::move(cmd));
 
     // The budget is charged for the whole allocated chain rather than the levels supplied so far.
     // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
@@ -333,10 +336,74 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // needs no follow-up, one given fewer is waiting on mip generation.
     auto const state = texture.mip_count == total_mips ? residency::complete : residency::base_resident;
 
-    return insert(
-        texture.hash,
-        {.texture = cc::move(gpu), .state = state, .uploaded_mips = texture.mip_count, .total_mips = total_mips},
-        chain_bytes);
+    auto const id = insert(texture.hash,
+                           {.texture = cc::move(gpu),
+                            .state = residency::pending,
+                            .uploaded_mips = texture.mip_count,
+                            .total_mips = total_mips},
+                           chain_bytes);
+
+    _settling[id] = cc::move(transfers);
+    return id;
+}
+
+isize texture_manager::collect_settled(cc::vector<texture_id>& newly_resident)
+{
+    if (_settling.empty())
+        return 0;
+
+    auto finished = isize(0);
+    auto keep = cc::map<texture_id, cc::vector<sg::stream_upload_handle>>();
+
+    for (auto&& [id, transfers] : _settling)
+    {
+        auto settled = true;
+        auto delivered = true;
+        for (auto const& t : transfers)
+        {
+            settled = settled && t.is_settled();
+            delivered = delivered && t.is_complete();
+        }
+
+        if (!settled)
+        {
+            keep[id] = cc::move(transfers);
+            continue;
+        }
+
+        ++finished;
+        auto* const record = mutable_record(id);
+        if (record == nullptr)
+            continue; // evicted while streaming
+
+        if (!delivered)
+        {
+            record->state = residency::failed;
+            continue;
+        }
+
+        // A texture whose data carried fewer mips than its shape allows is sampleable but not finished; filling the
+        // rest is the owning manager's to schedule, which is why the id is reported rather than just recorded.
+        record->state = record->uploaded_mips >= record->total_mips ? residency::complete : residency::base_resident;
+        newly_resident.push_back(id);
+    }
+
+    _settling = cc::move(keep);
+    return finished;
+}
+
+void texture_manager::wait_for_settled(cc::vector<texture_id>& newly_resident)
+{
+    for (auto&& [id, transfers] : _settling)
+    {
+        (void)id;
+        for (auto& t : transfers)
+        {
+            t.promote_to_async();
+            (void)cc::try_async_blocking_get(t.completion());
+        }
+    }
+    (void)collect_settled(newly_resident);
 }
 
 namespace

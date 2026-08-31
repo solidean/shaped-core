@@ -60,6 +60,10 @@ namespace
     if (d.is_final)
         return winner;
 
+    // The best constant seen so far, carried alongside the walk rather than recovered from it.
+    // A sample overwrites the winner, and this is what survives to seed the placeholder it is drawn as until it lands.
+    cc::span<byte const> best_constant = d.default_value;
+
     auto const* const binding = m.find(d.name);
     auto const binds_constant = binding != nullptr && binding->kind == material_source_kind::constant;
     auto const binds_texture = binding != nullptr && binding->kind == material_source_kind::texture_sample;
@@ -70,15 +74,19 @@ namespace
                   .format = d.format,
                   .frequency = material_frequency::material,
                   .constant = binding->constant};
+        best_constant = binding->constant;
         if (binding->is_final)
             return winner;
     }
 
     if (auto const* const a = find_attribute(mesh, d.name, d.format, true); a != nullptr)
+    {
         winner = {.name = d.name,
                   .format = d.format,
                   .frequency = material_frequency::mesh_instance,
                   .constant = a->value.span()};
+        best_constant = a->value.span();
+    }
 
     if (auto const* const a = find_attribute(mesh, d.name, d.format, false); a != nullptr)
         winner = {.name = d.name, .format = d.format, .frequency = material_frequency::mesh_attribute, .attribute = a};
@@ -89,6 +97,7 @@ namespace
             winner = {.name = d.name,
                       .format = d.format,
                       .frequency = material_frequency::material_texture,
+                      .fallback_constant = best_constant,
                       .sample = &binding->sample,
                       .uv = uv};
 
@@ -101,8 +110,12 @@ namespace
 
     if (auto const* const t = find_mesh_texture(mesh, d.name); t != nullptr)
         if (auto const* const uv = find_uv_attribute(mesh, t->uv_attribute); uv != nullptr)
-            winner
-                = {.name = d.name, .format = d.format, .frequency = material_frequency::mesh_texture, .sample = t, .uv = uv};
+            winner = {.name = d.name,
+                      .format = d.format,
+                      .frequency = material_frequency::mesh_texture,
+                      .fallback_constant = best_constant,
+                      .sample = t,
+                      .uv = uv};
 
     return winner;
 }
@@ -173,6 +186,9 @@ resolved_material resolve_material(material_type const& type, material const& ma
             values.add_pod(a.sample->transform.bias);
             values.add_pod(a.sample->texture);
             values.add_pod(a.uv->hash);
+            // The seed is a value like any other: two materials whose maps have not landed show different placeholders
+            // and therefore fill their blocks differently, so they cannot share one.
+            values.add_pod_span_sized(a.fallback_constant);
             break;
         }
     }

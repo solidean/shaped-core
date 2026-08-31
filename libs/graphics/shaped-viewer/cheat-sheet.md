@@ -214,8 +214,9 @@ sv::resolve_material(type, material, mesh)           // -> resolved_material; th
 sv::resolve_material(lib, material_id, mesh)         // -> the same, resolving the id through the library
 sv::resolved_material            // { material_type const*; material const*; vector<resolved_attribute>; hash128 permutation_key, parameter_key; }
 sv::resolved_attribute           // { string_view name; attribute_format format; material_frequency frequency;
-                                 //   span<byte const> constant; mesh_attribute const* attribute;
-                                 //   texture_sample_source const* sample; mesh_attribute const* uv; }
+                                 //   span<byte const> constant; mesh_attribute_binding const* attribute;
+                                 //   span<byte const> fallback_constant;  // what a sample beat — seeds its placeholder
+                                 //   texture_sample_source const* sample; mesh_attribute_binding const* uv; }
                                  //   exactly one payload is live, `frequency` says which; `uv` rides along with `sample` and is never null when it isn't
 sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
 ```
@@ -249,6 +250,10 @@ Gotchas:
   A viewer calls it once per frame; anyone else calls `wait_for_pending_uploads`, and a test that traces what it just built must.
 - **Priority is the transfer's, not a drain order**: `set_priority` at acquire — attributes (20) over geometry (10), so an attribute is up before the mesh indexing it draws.
   Dropping a transfer cancels it, which is what makes evicting a still-streaming mesh free.
+- **A pending TEXTURE is substituted at the slot**, by a 1x1 seeded from `fallback_constant` — the factor the sample beat.
+  The seed is pushed back through the sample's transform and swizzle, so a normal map's placeholder comes out (0.5, 0.5, 1) and decodes to the default normal.
+  At the slot rather than by letting the sample lose to a coarser rank.
+  Losing would flip the PERMUTATION when the texture lands, recompiling every affected mesh and restarting its accumulation mid-load.
 - **A pending mesh is traced as the shared placeholder cube**, sized by the `bounds` its payload declared, shaded through the fallback hit group.
   Its instance record names the CUBE's vertices, since a hit recomputes the geometric normal from what the record points at.
   A pending mesh that declared no bounds is skipped instead — there is no honest extent to draw it at.
