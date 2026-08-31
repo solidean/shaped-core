@@ -235,10 +235,12 @@ public:
         s.partition.for_each_box_in(sg::subresource_range::whole(s.partition.extent()),
                                     [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
                                     {
-                                        if (!state.has_pending_declares() && !state.has_pending_layout_change())
-                                            return;
+                                        if (!state.entry_begun)
+                                            return; // this list never named the box
                                         if (!state.has_entry_requirement)
                                             state.capture_entry_requirement(); // the submit prepends this one
+                                        else if (!state.has_pending_declares() && !state.has_pending_layout_change())
+                                            return;
                                         auto const b = state.flush();
                                         if (b.needed)
                                             out.push_back({box_range, b});

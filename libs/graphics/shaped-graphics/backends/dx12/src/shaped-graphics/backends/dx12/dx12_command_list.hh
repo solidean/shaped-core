@@ -40,7 +40,9 @@ public:
                       sg::command_list_slot slot,
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
-                      ComPtr<ID3D12GraphicsCommandList> list);
+                      ComPtr<ID3D12GraphicsCommandList> list,
+                      ComPtr<ID3D12CommandAllocator> pre_allocator,
+                      ComPtr<ID3D12GraphicsCommandList> pre_list);
 
     // Auto-drops, with a warning, a list left neither submitted nor dropped.
     // The explicit path is submit_dx12_command_list / drop_dx12_command_list, and this is a no-op once either has run.
@@ -71,6 +73,12 @@ public:
     D3D12_COMMAND_LIST_TYPE _queue; // queue the allocator/list belong to — routes them back to the pool
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
+
+    // The list executed AHEAD of _list in the same ExecuteCommandLists call, carrying the entry barriers that take
+    // each touched resource from what it is really in to what this list's first use of it needs.
+    // Acquired with the list rather than at submit, so the submission lock never has to run a fallible acquire.
+    ComPtr<ID3D12CommandAllocator> _pre_allocator;
+    ComPtr<ID3D12GraphicsCommandList> _pre_list;
 
     // Deferred readback copies recorded into this list, stamped with the submission token and handed to the download system at submit.
     cc::vector<dx12_download_copy_job> _pending_downloads;

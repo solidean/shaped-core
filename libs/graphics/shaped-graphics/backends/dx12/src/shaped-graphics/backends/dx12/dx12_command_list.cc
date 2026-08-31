@@ -26,13 +26,17 @@ dx12_command_list::dx12_command_list(dx12_context& ctx,
                                      sg::command_list_slot slot,
                                      D3D12_COMMAND_LIST_TYPE queue,
                                      ComPtr<ID3D12CommandAllocator> allocator,
-                                     ComPtr<ID3D12GraphicsCommandList> list)
+                                     ComPtr<ID3D12GraphicsCommandList> list,
+                                     ComPtr<ID3D12CommandAllocator> pre_allocator,
+                                     ComPtr<ID3D12GraphicsCommandList> pre_list)
   : sg::command_list(ctx, created_in),
     _ctx(ctx),
     _slot(slot),
     _queue(queue),
     _allocator(cc::move(allocator)),
-    _list(cc::move(list))
+    _list(cc::move(list)),
+    _pre_allocator(cc::move(pre_allocator)),
+    _pre_list(cc::move(pre_list))
 {
 }
 
@@ -581,13 +585,19 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
     auto acquired = _cmd_pool.acquire_command_list(queue);
     CC_RETURN_IF_ERROR(acquired);
 
+    // A second, tiny list for the entry barriers, executed ahead of the first in the same submit.
+    // Acquired here rather than at submit, so the submission lock never has to run something that can fail.
+    auto pre_acquired = _cmd_pool.acquire_command_list(queue);
+    CC_RETURN_IF_ERROR(pre_acquired);
+
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
     // Left open (recording); submit closes it.
     // Stamped with the epoch it must be submitted/dropped in, plus an access-tracking slot that keys its private per-resource state, released on submit/drop.
     // The slot allocator is internally synchronized, and creation touches no resource layout, so it needs no extra sync.
-    return std::make_unique<dx12_command_list>(*this, current_epoch(), _command_list_slots.acquire(), queue,
-                                               cc::move(acquired.value().allocator.allocator),
-                                               cc::move(acquired.value().list));
+    return std::make_unique<dx12_command_list>(
+        *this, current_epoch(), _command_list_slots.acquire(), queue, cc::move(acquired.value().allocator.allocator),
+        cc::move(acquired.value().list), cc::move(pre_acquired.value().allocator.allocator),
+        cc::move(pre_acquired.value().list));
 }
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
@@ -601,9 +611,8 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                                                           "in (it cannot span epochs)");
 
     // Finalize + Close + Execute + Signal all run under _next_submission, so for each list they are one atomic step in a single global order.
-    // finalize writes each touched resource's canonical layout and the ExecuteCommandLists below realizes it, so finalize order must equal execute order.
-    // Running both under this one lock is what guarantees that, since submit is thread-safe / multi_threaded.
-    // The revert-vs-promote decision itself is per-resource — the last list to finalize a resource commits its layout — and is made under each resource's own mutex.
+    // finalize writes each touched resource's current layout and the ExecuteCommandLists below realizes it, so finalize order must equal execute order.
+    // Running both under this one lock is what guarantees that, since submit is thread-safe / multi_threaded, and it is what lets a resource's current state mean "after everything submitted so far".
     // Work that neither changes a layout nor needs the ordering (the reverse upload/download stamp, pool returns, slot release) runs after the lock.
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
@@ -613,20 +622,26 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // Its readbacks ride _pending_downloads and are stamped by enqueue_submitted at the end of this lambda.
             cmd->finalize_queries_before_close();
 
-            // Finalize access tracking before closing.
-            // Each resource decides per-itself: the last command list using it commits its final state as the new canonical, the one case that may leave a texture in a new layout.
-            // Every earlier list rolls back to canonical.
-            // For buffers this is a no-op, since the layout is always general.
-            // For textures the rollback returns transitions back to the canonical layout, recorded here before Close, plus a hidden-cost warning.
+            // Finalize access tracking: each touched resource's layouts become the current ones, and what it returns
+            // is what this list needs on ENTRY, resolved against the state the resource is really in by now.
+            // Those go into the pre-list, executed ahead of this one, rather than into the list's own body — a list
+            // that recorded second may submit first, so a barrier it recorded against a guess would name the wrong
+            // LayoutBefore.
+            // For buffers this is a no-op: a D3D12 buffer has no layout and decays to COMMON at ExecuteCommandLists.
             for (auto const& b : cmd->_touched_buffers)
                 b->finalize_slot(cmd->slot());
             // Both sets stay populated for the reverse async-copy stamp below, which needs the submission token; cleared there.
+            cc::vector<D3D12_TEXTURE_BARRIER> entry_barriers;
             for (auto const& t : cmd->_touched_textures)
                 for (auto const& sb : t->finalize_slot(cmd->slot()))
-                    cmd->_pending_texture_barriers.push_back(
-                        make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
-            // Record the finalize reverts (the only barriers left pending — every op flushed its own) before Close.
-            cmd->flush_barriers();
+                    entry_barriers.push_back(make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
+
+            CC_ASSERT(cmd->_pending_texture_barriers.empty() && cmd->_pending_buffer_barriers.empty(),
+                      "a declared access was never flushed by a GPU op");
+
+            submit_barriers(cmd->_pre_list.Get(), {}, entry_barriers);
+            HRESULT const pre_closed = cmd->_pre_list->Close();
+            CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
 
             HRESULT const hr = cmd->_list->Close();
             if (FAILED(hr))
@@ -651,8 +666,9 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             for (auto const& w : cmd->_required_download_waits)
                 _queue->Wait(w.group->fence.Get(), w.value);
 
-            ID3D12CommandList* lists[] = {cmd->_list.Get()};
-            _queue->ExecuteCommandLists(1, lists);
+            // The pre-list first, so its entry transitions have run before anything the list itself recorded.
+            ID3D12CommandList* lists[] = {cmd->_pre_list.Get(), cmd->_list.Get()};
+            _queue->ExecuteCommandLists(2, lists);
 
             // Take a monotonic completion token and signal it under this same lock, so token order equals queue submission and signal order.
             // The queue is free-threaded, but out-of-order signals would move the fence's completed value backwards and break is_submission_complete.
@@ -696,6 +712,8 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // The list is already closed and can be reused now — resetting an in-flight list onto a fresh, GPU-safe allocator is legal — so return it to the pool for the next acquire.
     _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
+    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_pre_list));
+    _cmd_pool.return_submitted_allocator({cc::move(cmd->_pre_allocator), cmd->_queue});
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
@@ -725,8 +743,8 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     cmd._leased_query_heaps.clear();
     cmd._active_timestamp_lease = -1;
 
-    // The recorded work never runs, so its declared accesses leave no canonical state.
-    // Clear each touched resource's slot, which only decrements that resource's active-slot count: the canonical layout is unchanged and no barriers are emitted.
+    // The recorded work never runs, so its declared accesses leave nothing behind.
+    // Clear each touched resource's slot, which only decrements that resource's active-slot count: the current layout is unchanged and no barriers are emitted.
     // Then release the access-tracking slot.
     // No submit lock: drop changes no layout, and each resource's active-slot count and the slot allocator are already independently synced.
     for (auto const& b : cmd._touched_buffers)
@@ -742,8 +760,12 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     // It was never executed, so no epoch gates it; reset happens at reuse.
     HRESULT const closed = cmd._list->Close();
     CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
+    HRESULT const pre_closed = cmd._pre_list->Close();
+    CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
     _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
     _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
+    _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
+    _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 

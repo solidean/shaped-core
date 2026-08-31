@@ -108,7 +108,7 @@ struct sg::backend::vulkan::vulkan_buffer_access
     {
         auto& s = slot_for(slot);
         s.pending_barrier = false;
-        if (!s.state.has_entry_requirement)
+        if (s.state.entry_begun && !s.state.has_entry_requirement)
             s.state.capture_entry_requirement(); // this list's first op: its barrier is the submit's to prepend
         return s.state.flush();
     }

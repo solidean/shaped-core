@@ -114,9 +114,9 @@ public:
         return _access.lock([&](dx12_texture_access& t) { return t.flush(slot); });
     }
 
-    /// Finalize `slot` at submit: promote its final layout to the canonical state if this was the last list touching the texture, else revert it to the canonical layout.
-    /// Returns the transitions to emit.
-    /// Thread-safe.
+    /// Finalize `slot` at submit: its layouts become the current ones, and the transitions returned are the entry
+    /// barriers the caller executes from a command list prepended to that same submit.
+    /// Thread-safe, and called in submission order.
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot) const
     {
         return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot); });
