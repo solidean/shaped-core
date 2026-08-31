@@ -340,11 +340,12 @@ constexpr size_t max_png_chunk_cache_bytes = size_t(64) * 1024 * 1024;
 constexpr u32 max_png_dimension = 65535;
 
 /// Largest decoded pixel buffer babel will allocate for one image.
-/// The per-axis cap bounds neither the product nor the sample width, and spng_decoded_image_size answers from the
-/// IHDR alone — so this is the ceiling that stands between 13 header bytes and an allocation.
+/// The per-axis cap bounds neither the product nor the sample width, and the decoded size follows from the IHDR
+/// alone — so this is the ceiling that stands between 13 header bytes and an allocation.
 /// It bites on sample width rather than pixel count: 65535 x 65535 grey-8 is 4,294,836,225 bytes and still passes,
 /// 131,071 bytes under this ceiling.
-constexpr size_t max_png_decoded_bytes = size_t(4) * 1024 * 1024 * 1024;
+/// u64 rather than size_t: the product it weighs overflows a 32-bit size_t, which is the case it exists for.
+constexpr u64 max_png_decoded_bytes = u64(4) * 1024 * 1024 * 1024;
 } // namespace
 
 cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
@@ -377,13 +378,19 @@ cc::result<babel::png::data> spng_decode_png(cc::span<byte const> bytes)
     CC_RETURN_IF_ERROR(has_trns);
     auto const plan = plan_decode(ihdr, has_trns.value());
 
+    // Weighed here rather than against spng_decoded_image_size's answer, and in u64 rather than size_t: an
+    // spng format is tightly packed, so this IS that size, and on a 32-bit target the product it reports would
+    // overflow into an EOVERFLOW naming neither the header nor the ceiling.
+    auto const decoded_bytes
+        = u64(ihdr.width) * u64(ihdr.height) * u64(plan.channels) * (plan.decoded == babel::png::component::u16 ? 2 : 1);
+    if (decoded_bytes > max_png_decoded_bytes)
+        return cc::error(
+            cc::format("png decode: {}x{} at {} channels and {}-bit samples needs {} bytes, over the {} byte ceiling",
+                       ihdr.width, ihdr.height, plan.channels, ihdr.bit_depth, decoded_bytes, max_png_decoded_bytes));
+
     auto size = size_t(0);
     if (auto const err = spng_decoded_image_size(guard.ctx, plan.fmt, &size); err != 0)
         return cc::error(spng_message("decoded_image_size", err));
-    if (size > max_png_decoded_bytes)
-        return cc::error(
-            cc::format("png decode: {}x{} at {} channels and {}-bit samples needs {} bytes, over the {} byte ceiling",
-                       ihdr.width, ihdr.height, plan.channels, ihdr.bit_depth, size, max_png_decoded_bytes));
 
     auto result = babel::png::data{
         .width = int(ihdr.width),
