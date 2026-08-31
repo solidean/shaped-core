@@ -294,11 +294,6 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             return t;
         });
 
-    // The submit above may have observed device loss, marked rather than thrown inside the lock.
-    // Surface it now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
-    if (is_device_lost())
-        throw sg::device_lost_exception(device_loss_reason());
-
     // Cleared only now: the reverse stamp inside the lock above reads these, so they cannot be emptied earlier.
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
@@ -314,6 +309,14 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     (void)_command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
+
+    // The submit above may have observed device loss, marked rather than thrown inside the lock.
+    // Surfaced only here, after the bookkeeping above: this list is consumed either way, and throwing over it would
+    // leave its slot claimed and its accesses unfinalized, so the unwind would auto-drop a list whose slot was
+    // already finalized — an assert inside a destructor, which is a terminate rather than a device-lost report.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
+
     return token;
 }
 

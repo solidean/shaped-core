@@ -158,6 +158,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-raytracing-test.cc
         tests/vulkan-texture-access-test.cc
         tests/vulkan-texture-transfer-test.cc
+        tests/vulkan-transient-attachment-test.cc
         tests/vulkan-test.cc
     )
 

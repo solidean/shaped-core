@@ -24,11 +24,13 @@
 /// forgotten by key when its texture dies, cannot let one texture's finalizer destroy another's live entry.
 /// `hash` and `operator==` fold exactly the same fields, which is the invariant a hash map keyed on this needs.
 ///
-/// The texture is a raw pointer on purpose: a handle here would keep every viewed texture alive for the context's
-/// life, which is what the finalizer-driven eviction below exists to avoid.
+/// **The texture is named by `vulkan_texture::_identity`, never by its address.**
+/// A handle would keep every viewed texture alive for the context's life, which is what the eviction below exists to
+/// avoid — but an address is not an identity either, since it is reusable the moment the texture object dies and the
+/// entry naming it outlives that by up to the in-flight epoch depth.
 struct sg::backend::vulkan::vulkan_image_view_key
 {
-    sg::raw_texture const* texture = nullptr;
+    u64 texture_identity = 0;
     sg::view_class access = sg::view_class::readonly;
     sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d;
     sg::pixel_format format = sg::pixel_format::undefined;
@@ -41,7 +43,7 @@ struct sg::backend::vulkan::vulkan_image_view_key
     /// are added.
     [[nodiscard]] friend u64 hash(vulkan_image_view_key const& k)
     {
-        return cc::make_hash(k.texture, k.access, k.dimension, k.format, k.range, k.depth_slice_range.start,
+        return cc::make_hash(k.texture_identity, k.access, k.dimension, k.format, k.range, k.depth_slice_range.start,
                              k.depth_slice_range.end);
     }
 };
@@ -50,11 +52,13 @@ struct sg::backend::vulkan::vulkan_image_view_key
 /// One per context; a view is created on first use and lives until its texture is released.
 ///
 /// **A cached view is dropped with its texture, and that is load-bearing rather than tidy.**
-/// Both keys name the texture by address, and a transient texture is destroyed and recreated every frame — so a new
-/// one landing on a freed one's address would otherwise inherit its entry and hand back a view of an image that no
-/// longer exists.
 /// The drop rides the texture's own finalizer, so it happens exactly when the VkImage does: at epoch retire, once
 /// the GPU is done with both.
+///
+/// That deferral is why both keys name the texture by `vulkan_texture::_identity` and not by address.
+/// A transient texture is destroyed and recreated every frame, and the allocator hands the new one the dead one's
+/// address long before the entry naming it is evicted — so an address key lets the new texture inherit the old
+/// entry and render through a view of an image that is about to be freed under the GPU.
 class sg::backend::vulkan::vulkan_image_view_cache
 {
 public:

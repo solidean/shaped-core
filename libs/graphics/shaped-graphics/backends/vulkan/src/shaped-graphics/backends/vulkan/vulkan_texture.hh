@@ -10,6 +10,12 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
+namespace sg::backend::vulkan
+{
+/// Mints the process-unique stamp behind vulkan_texture::_identity.
+[[nodiscard]] u64 next_texture_identity();
+} // namespace sg::backend::vulkan
+
 /// Vulkan implementation of sg::raw_texture.
 /// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
 /// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
@@ -123,6 +129,11 @@ public:
 
     vulkan_context& _ctx;      // creating context — outlives this texture
     sg::epoch _creation_epoch; // epoch this texture was created in (immutable identity / diagnostics)
+
+    /// Process-unique for the life of the context, and the key the image view cache is built on.
+    /// The address is NOT a usable identity there: it is reusable the moment this object dies, while the cache
+    /// entries naming it survive until the owning epoch retires — see vulkan_view_desc.hh.
+    u64 _identity = next_texture_identity();
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;

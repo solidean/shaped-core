@@ -8,6 +8,13 @@
 namespace sg::backend::vulkan
 {
 
+u64 next_texture_identity()
+{
+    // Relaxed: uniqueness is all that is asked of it, never an ordering against anything else.
+    static cc::atomic<u64> counter = {0};
+    return counter.fetch_add(1, cc::memory_order_relaxed) + 1;
+}
+
 std::shared_ptr<vulkan_texture> vulkan_context::register_if_transient(std::shared_ptr<vulkan_texture> texture,
                                                                       sg::lifetime_scope scope)
 {
