@@ -3,7 +3,7 @@
 
 namespace sg
 {
-swapchain::swapchain(swapchain_description const& desc) : _desc(desc)
+swapchain::swapchain(swapchain_description const& desc) : _desc(desc), _requested_size(desc.window.client_size)
 {
     _desc.assert_valid();
 }
@@ -12,7 +12,12 @@ swapchain::~swapchain() = default;
 
 bool swapchain_description::is_valid() const
 {
-    if (native_window_handle == nullptr)
+    if (is_windowed() && !window.is_valid())
+        return false;
+    if (is_windowed() && window.platform == window_platform::wayland
+        && (window.client_size[0] <= 0 || window.client_size[1] <= 0))
+        return false;
+    if (!is_windowed() && (headless_extent.value()[0] <= 0 || headless_extent.value()[1] <= 0))
         return false;
     if (buffer_count < 2)
         return false;
@@ -24,7 +29,17 @@ bool swapchain_description::is_valid() const
 
 void swapchain_description::assert_valid() const
 {
-    CC_ASSERT(native_window_handle != nullptr, "swapchain requires a native window handle");
+    // A handle is required exactly when the chain is windowed, which is what headless_extent decides.
+    CC_ASSERT(!is_windowed() || window.is_valid(), "a windowed swapchain requires a window (set headless_extent to "
+                                                   "present without one)");
+    // Only wayland: a wl_surface has no size of its own, so a chain built without one comes up at the 1x1
+    // minImageExtent rather than at the window's size, and nothing downstream can tell.
+    CC_ASSERT(!is_windowed() || window.platform != window_platform::wayland
+                  || (window.client_size[0] > 0 && window.client_size[1] > 0),
+              "a wayland swapchain requires native_window::client_size — its surface has no size of its own");
+    if (!is_windowed())
+        CC_ASSERT(headless_extent.value()[0] > 0 && headless_extent.value()[1] > 0, "headless_extent must be positive "
+                                                                                    "in both dimensions");
     CC_ASSERT(buffer_count >= 2, "swapchain buffer_count must be >= 2");
     CC_ASSERT(is_render_target_format(format), "swapchain format must be a color (renderable) format");
 }

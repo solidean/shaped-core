@@ -154,7 +154,7 @@ void install_viewport_callbacks()
 
         viewport->PlatformUserData = owned;
         viewport->PlatformHandle = owned->win.get();
-        viewport->PlatformHandleRaw = owned->win->native_window_handle();
+        viewport->PlatformHandleRaw = owned->win->native_window().handle;
     };
 
     platform_io.Platform_DestroyWindow = [](ImGuiViewport* viewport)
@@ -362,7 +362,7 @@ void imgui_context::install_viewports(window_system& wsys, window& main_window)
     // The main viewport is the caller's window, which sr does not own — so PlatformUserData stays null and Platform_DestroyWindow has nothing to free for it.
     auto* const main_viewport = ImGui::GetMainViewport();
     main_viewport->PlatformHandle = &main_window;
-    main_viewport->PlatformHandleRaw = main_window.native_window_handle();
+    main_viewport->PlatformHandleRaw = main_window.native_window().handle;
 }
 
 void imgui_context::update_viewports()

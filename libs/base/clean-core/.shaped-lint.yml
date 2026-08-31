@@ -180,6 +180,7 @@ rules:
     files:
       - src/clean-core/streams/impl/native_file.cc
       - src/clean-core/platform/file_path.cc
+      - src/clean-core/platform/system_info.cc
 
   - kind: allow-include
     value: [<cstdio>, <cstdlib>]
@@ -233,11 +234,117 @@ rules:
       - src/clean-core/platform/console.cc
       - src/clean-core/streams/impl/native_file.cc
       - src/clean-core/platform/file_path.cc
+      - src/clean-core/platform/system_info.cc
 
   - kind: allow-include
     value: <fcntl.h>
     reason: open() and its flags, the POSIX half of the native file stream
     files: src/clean-core/streams/impl/native_file.cc
+
+  - kind: allow-include
+    value: <intrin.h>
+    reason: __cpuid — the CPU brand and vendor strings, which no Win32 call reports
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: <cpuid.h>
+    reason: __get_cpuid — the same two strings on the GCC and Clang side
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: [<sys/sysctl.h>, <sys/time.h>]
+    reason: sysctlbyname is the whole of Darwin's machine description, including the hw.perflevel* core-class split
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>, <iphlpapi.h>, <netioapi.h>]
+    reason: GetIfTable2 is the per-interface counter table, and it is declared in terms of winsock2's structs
+    files: src/clean-core/platform/network_devices.cc
+
+  - kind: allow-include
+    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>, <sys/socket.h>]
+    reason: getifaddrs carries Darwin's per-interface counters in its if_data
+    files: src/clean-core/platform/network_devices.cc
+
+  - kind: allow-include
+    value: <winioctl.h>
+    reason: IOCTL_DISK_PERFORMANCE and the storage descriptor, the only per-device counters Windows exposes
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
+    value: [<sys/mount.h>, <sys/param.h>]
+    reason: getmntinfo is Darwin's mount table
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
+    value: <sys/statvfs.h>
+    reason: statvfs is the POSIX free-space call, and its f_bavail is what a user may actually take
+    files: src/clean-core/platform/storage_devices.cc
+
+  - kind: allow-include
+    value: [<psapi.h>, <tlhelp32.h>]
+    reason: the working set and its peak, and the thread snapshot that is the only unprivileged thread count
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: [<mach/mach.h>, <mach/task.h>]
+    reason: task_info is Darwin's only per-process accounting
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf(_SC_CLK_TCK), the unit /proc/self/stat counts in
+    files: src/clean-core/platform/process_metrics.cc
+
+  - kind: allow-include
+    value: [<mach/mach.h>, <mach/mach_host.h>, <mach/processor_info.h>, <sys/sysctl.h>, <unistd.h>]
+    reason: host_statistics and host_processor_info are Darwin's only CPU and memory counters
+    files: src/clean-core/platform/system_metrics.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf(_SC_CLK_TCK), the unit /proc/stat counts in
+    files: src/clean-core/platform/system_metrics.cc
+
+  - kind: allow-include
+    value: [<sched.h>, <unistd.h>]
+    reason: sched_getaffinity is the mask a container narrows, and sysconf is the fallback count
+    files: src/clean-core/platform/resource_limits.cc
+
+  - kind: allow-include
+    value: [<intrin.h>, <cpuid.h>]
+    reason: the CPUID hypervisor bit, which is the only in-process hint that this is a VM
+    files: src/clean-core/platform/resource_limits.cc
+
+  - kind: allow-include
+    value: <sys/utsname.h>
+    reason: uname, the kernel version Linux reports nowhere else
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: <cstdlib>
+    reason: std::getenv is the only route to the startup timezone and locale
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: <unistd.h>
+    reason: sysconf for the page size, and the logical core count on the targets that report nothing else
+    files: src/clean-core/platform/system_info.cc
+
+  - kind: allow-include
+    value: [<iphlpapi.h>, <lmcons.h>, <winioctl.h>, <winsock2.h>, <ws2tcpip.h>]
+    reason: GetAdaptersAddresses reports the hardware addresses and needs winsock2's structs, UNLEN bounds a Windows user name, and the storage descriptor carries the disk serial
+    files: src/clean-core/platform/system_identifier.cc
+
+  - kind: allow-include
+    value: [<ifaddrs.h>, <net/if.h>, <net/if_dl.h>, <netpacket/packet.h>, <sys/socket.h>]
+    reason: getifaddrs is the only portable route to an interface's hardware address, and the two link-layer headers are its per-OS address structs
+    files: src/clean-core/platform/system_identifier.cc
+
+  - kind: allow-include
+    value: [<unistd.h>, <cstdlib>]
+    reason: gethostname, and std::getenv for the account name
+    files: src/clean-core/platform/system_identifier.cc
 
   - kind: allow-include
     value: <pthread.h>

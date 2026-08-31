@@ -119,6 +119,16 @@ cc::result<arg_storage> build_compile_args(shader_description const& desc, compi
     a.emplace_back(L"-T");
     a.emplace_back(to_wide(profile.value()));
     a.emplace_back(optimization_flag(opts.optimization));
+
+    // SPIR-V is one flag plus a target environment.
+    // Deliberately no -fvk-*-shift: HLSL's four register classes are mapped by [[vk::binding(N, set)]] annotations in
+    // the shader source instead, so the set and binding a module declares are the ones its author wrote.
+    // See libs/graphics/shaped-graphics/docs/shaders.md for the authoring rule that implies.
+    if (opts.target == compile_target::spirv)
+    {
+        a.emplace_back(L"-spirv");
+        a.emplace_back(L"-fspv-target-env=vulkan1.3");
+    }
     if (opts.debug_info)
     {
         a.emplace_back(L"-Zi");
@@ -139,6 +149,15 @@ cc::result<arg_storage> build_preprocess_args(shader_description const& desc, co
     a.emplace_back(L"-P"); // preprocess only; DXC emits the flattened source to DXC_OUT_HLSL
     a.emplace_back(L"-T");
     a.emplace_back(to_wide(profile.value()));
+
+    // The target reaches preprocessing because DXC defines `__spirv__` under -spirv, and a shader written for both
+    // backends forks on it — a `[[vk::push_constant]]` block has no DXIL spelling, and a `register(b0)` one is not
+    // sg's inline constants under Vulkan.
+    // slib flattens the source once per target and compiles that, so a preprocess run that did not know the target
+    // would resolve the fork the wrong way and the compile would never see the branch it needed.
+    if (opts.target == compile_target::spirv)
+        a.emplace_back(L"-spirv");
+
     // Defines steer #if branches during preprocessing, so they belong here; opt/-WX/debug do not.
     append_defines_and_extra(a, opts);
     return a;

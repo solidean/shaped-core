@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -23,6 +24,17 @@ struct sg::adapter_info
     /// and a vendor is free to change its own encoding.
     /// Empty where the backend cannot report one, which must read as "unknown" rather than as a version.
     cc::string driver_version;
+
+    /// Memory physically on the card, as the adapter reports it.
+    ///
+    /// A property of the hardware, so it belongs here rather than with the live readings.
+    /// **Never compare it against sg::gpu_memory_usage::budget_bytes as if they were the same scale.**
+    /// The budget is what this process may use right now and shrinks as other processes take memory; this is what the
+    /// board has.
+    /// Reporting one as a fraction of the other is how a dashboard says a card is 20% full while the driver is paging.
+    /// Absent where the backend cannot report it, and 0 is a real answer for an integrated GPU with no dedicated
+    /// memory at all.
+    cc::optional<i64> dedicated_video_memory_bytes;
 
     /// A software rasterizer rather than real hardware — WARP, lavapipe.
     /// Its "driver" is the runtime, so a blob it produced is worth even less across machines than a real driver's.

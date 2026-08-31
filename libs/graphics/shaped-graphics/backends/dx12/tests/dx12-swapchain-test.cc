@@ -84,7 +84,7 @@ INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden wi
         SKIP("no interactive window station (headless host) — cannot create a window");
 
     auto sc_result = ctx->try_create_swapchain({
-        .native_window_handle = win.hwnd,
+        .window = sg::native_window::from_win32(win.hwnd),
         .buffer_count = 2,
         .format = sg::pixel_format::bgra8_unorm,
         .present_mode = sg::present_mode::vsync,
@@ -100,7 +100,7 @@ INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden wi
     CHECK(sc->format() == sg::pixel_format::bgra8_unorm);
     CHECK(sc->present_mode() == sg::present_mode::vsync);
     CHECK(!sc->is_hdr_enabled());
-    CHECK(sc->native_window_handle() == win.hwnd);
+    CHECK(sc->window().handle == win.hwnd);
 
     // A few frames: acquire -> clear the back buffer -> present.
     // The acquired view carries this frame's size, since the swapchain has no size getter.
@@ -132,7 +132,7 @@ INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_con
     if (win.hwnd == nullptr)
         SKIP("no interactive window station (headless host) — cannot create a window");
 
-    auto sc_result = ctx->try_create_swapchain({.native_window_handle = win.hwnd});
+    auto sc_result = ctx->try_create_swapchain({.window = sg::native_window::from_win32(win.hwnd)});
     if (sc_result.has_error())
         SKIP("WARP could not create a swapchain for the window (likely a headless / session-0 host)");
     sg::swapchain_handle const sc = sc_result.value();

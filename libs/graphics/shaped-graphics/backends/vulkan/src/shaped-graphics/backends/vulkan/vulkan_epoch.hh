@@ -6,6 +6,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/fwd.hh>
 
 namespace sg::backend::vulkan
@@ -21,13 +22,21 @@ struct vulkan_expiring_resource;
 // The epoch *concept* lives in sg:: — fwd.hh plus the sg::context contract — and this is vulkan's concrete realization on a pair of timeline semaphores.
 // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 
-/// A command pool and the single command buffer allocated from it.
-/// Recycled as a unit: resetting the pool recycles its buffer.
+/// A command pool and the two command buffers allocated from it.
+/// Recycled as a unit: resetting the pool recycles both.
 /// Idle pools live in the pool set; in-flight ones ride along in the owning epoch until it retires.
 struct sg::backend::vulkan::vulkan_command_pool
 {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer buffer = VK_NULL_HANDLE; // owned by the pool; reset with it, not freed separately
+
+    /// Recorded at submit and submitted *before* `buffer`, carrying the initial UNDEFINED -> resting transition for
+    /// every texture this list is the first to bring into use.
+    /// Usually unused, and never recorded into twice.
+    ///
+    /// Allocated up front rather than on demand: a recycled pool has forgotten any buffer it is not carrying, so
+    /// allocating one lazily would allocate a fresh buffer from that pool on every reuse.
+    VkCommandBuffer pre_buffer = VK_NULL_HANDLE;
 };
 
 /// A GPU resource captured for deferred deletion.
@@ -38,6 +47,14 @@ struct sg::backend::vulkan::vulkan_expiring_resource
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     cc::vector<cc::unique_function<void()>> finalizers;
+
+    /// A transfer-queue copy that must finish before this may be released.
+    ///
+    /// The epoch alone is not enough: async transfer runs on its own queue and is deliberately decoupled from the
+    /// epoch cycle, so a buffer released in epoch N may still be the source or destination of a copy the transfer
+    /// queue has not reached.
+    /// An entry whose value has not been reached is put back and retried on a later cycle.
+    vulkan_group_value copy_wait;
 };
 
 /// Everything one epoch owns and must reclaim once its GPU work finishes.

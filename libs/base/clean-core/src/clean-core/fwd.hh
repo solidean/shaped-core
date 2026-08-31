@@ -68,6 +68,43 @@ template <class T, class NodeTraits>
 struct poly_node_allocation;
 struct scoped_default_node_allocator; // scoped override of the default node allocator (memory/node_allocation.hh)
 struct scoped_environment_variable; // one environment variable, set for a scope and put back (platform/environment.hh)
+enum class cache_kind : u8;         // what a cache level holds: data, instructions or both (platform/system_info.hh)
+struct cpu_cache_level;             // one level of one core class's cache hierarchy (platform/system_info.hh)
+struct cpu_core_class;              // one group of alike cores, of which a modern CPU has several
+struct numa_node;
+struct system_info;        // what machine this is, gathered once (platform/system_info.hh)
+enum class identity_field; // one identifying fact about the machine, requested by name (platform/system_identifier.hh)
+struct system_identifier;  // the identifying facts that were asked for, and only those
+struct resource_limits; // what THIS process may use, as opposed to what the machine has (platform/resource_limits.hh)
+
+enum class query_status : u8; // why a live system query could not answer (platform/system_metrics.hh)
+enum class metric : u8;       // one live quantity a dashboard can ask about
+struct query_error;
+struct cpu_counters;    // monotone CPU time as the OS accumulated it
+struct cpu_counter_set; // those counters, per machine and per core
+struct cpu_load;        // how busy the CPU was over one sampling interval
+struct memory_usage;    // physical memory as it stands right now
+class cpu_load_sampler; // CPU load, differenced against this sampler's previous reading
+
+enum class process_id : u64; // a process, for the per-process queries (platform/process_metrics.hh)
+struct process_usage;        // memory and handles this process holds right now
+struct process_cpu_counters; // monotone per-process CPU time and I/O
+struct process_cpu_load;     // how many cores' worth this process used over an interval
+class process_cpu_sampler;
+
+struct mount_point;      // one mounted filesystem and how full it is (platform/storage_devices.hh)
+struct disk_device;      // one physical storage device
+struct disk_io_counters; // monotone per-device I/O since boot
+struct disk_io_rate;     // what one device moved over a sampling interval
+class disk_io_sampler;
+
+struct network_interface; // one network interface (platform/network_devices.hh)
+struct net_counters;      // monotone per-interface traffic
+struct net_traffic_rate;  // what one interface carried over a sampling interval
+class net_traffic_sampler;
+
+struct resource_snapshot; // every level-valued reading at one instant (platform/resource_snapshot.hh)
+
 struct leak_scope; // suppresses LeakSanitizer reports for the calling thread, for a deliberate leak (platform/leak_annotations.hh)
 template <class T>
 struct unique_ptr;

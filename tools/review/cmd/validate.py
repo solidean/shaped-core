@@ -16,6 +16,27 @@ from .context import Context
 
 NAME = "validate"
 
+# UTF-8 bytes that were decoded as cp1252 and written back out.
+#
+# An em dash becomes `â€”`, a right quote `â€™`, a non-breaking space `Â `.
+# None of these is text anyone types on purpose, and the tool itself produced them until `append` stopped decoding
+# stdin through the locale — an entry file is hand-editable, so the check stays whatever the writers do.
+MOJIBAKE_MARKERS = ("â€", "Ã¢", "Ãƒ", "Â ")
+
+
+def mojibake_warnings(entry) -> list[str]:
+    """One warning per line that looks like UTF-8 read as cp1252."""
+    out: list[str] = []
+    for number, line in enumerate(entry.text.splitlines(), start=1):
+        for marker in MOJIBAKE_MARKERS:
+            if marker in line:
+                out.append(
+                    f"{entry.slug}:{number}: {marker!r} looks like UTF-8 decoded as cp1252 — "
+                    f"the line probably lost an em dash or a quote"
+                )
+                break
+    return out
+
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
@@ -45,6 +66,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry in entries:
         warnings.extend(review.word_warnings(entry))
+        warnings.extend(mojibake_warnings(entry))
         answers = ctx.answers(paths, entry)
         # The tiers exist so an entry can be answered on its own, so they are owed while it is still waiting for an answer.
         # An entry whose asks are all finalized will not be answered again, and adding tiers to it would edit a question
@@ -60,7 +82,19 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         # which splits one thread across two files and makes the second restate the first's context.
         for block in entry.asks:
             target = block.attrs.get("follows", "")
-            if target and entry.ask(target) is None:
+            if not target or entry.ask(target) is not None:
+                continue
+
+            # A superseded ask IS in this entry; it has just been retired, so `entry.ask` no longer finds it.
+            # Saying it is "not an ask in this entry" sends the reader looking for a missing entry, when what they have
+            # is a redundant attribute: `supersedes:` already retires the question, so `follows:` adds nothing.
+            retired = any(b.is_ask and b.name == target for b in entry.blocks)
+            if retired:
+                warnings.append(
+                    f"{entry.slug}: ask {block.name!r} follows {target!r}, which this entry has superseded — "
+                    f"`supersedes:` already retires it, so `follows:` is redundant here"
+                )
+            else:
                 warnings.append(
                     f"{entry.slug}: ask {block.name!r} follows {target!r}, which is not an ask in this entry — "
                     f"a follow-up usually belongs appended to the entry it follows"

@@ -8,6 +8,9 @@ A change whose claim no longer meets net space is **superseded**, never deleted.
 An entry that discussed it stays readable, and in a `land-changes` review the fact that its change is superseded
 is the evidence the fix actually landed.
 
+A change that survives keeps its id and gets a new claim, since the id is content-derived and the claim is
+positional — see `register` in lib/changeset/ingest.py.
+
 The base is only re-pinned when asked for.
 Silently following a moving integration branch would change the review's obligation underneath ids already handed out.
 """
@@ -96,10 +99,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     cfg.base, cfg.head = new_base, new_head
     review.save(paths.config, cfg)
     review.record(paths.log, "sync", head=new_head, base=new_base,
-                  superseded=len(gone), created=len(result.created))
+                  superseded=len(gone), created=len(result.created), repointed=len(result.repointed))
 
     uncovered = net.subtract(ledger.covered())
     print(f"{len(result.created)} changes created")
+    if result.repointed:
+        # The common case on a head move: a hunk the author never touched, at different line numbers.
+        # Its id is content-derived and therefore unchanged, so only the claim had to follow.
+        print(f"{len(result.repointed)} claim(s) re-pointed at their new line numbers")
     if uncovered.is_empty:
         print(review.console.green(f"all {len(net)} atoms accounted for"))
     else:

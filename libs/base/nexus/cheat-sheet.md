@@ -182,6 +182,8 @@ SUCCEED();  SUCCEED("msg");              // unconditional soft pass
 // hard — failure aborts the current test:
 REQUIRE(expr);
 REQUIRE_THROWS(expr);  REQUIRE_THROWS_AS(expr, ExceptionType);  REQUIRE_ASSERTS(expr);
+auto v = REQUIRED_VALUE(expr);           // REQUIRE a cc::result/cc::optional holds a value, then evaluate to it
+                                         // returns BY VALUE (moves out of an rvalue), so move-only payloads work
 FAIL();  FAIL("msg");                    // unconditional hard fail
 SKIP();  SKIP("not implemented yet");    // skip the test (not counted as a failure)
 ```
@@ -265,6 +267,7 @@ TEST("sg backend - vulkan")
   `s.invocables_with<Args...>()` / `find_test(name)` help build them.
   Aliases never double-run: a full sweep ignores them, and a fragment whose driver is already name-selected is dropped.
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
+  One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 
@@ -272,7 +275,7 @@ TEST("sg backend - vulkan")
 
 ```bash
 # NEVER run the *-test binary directly — always go through the repo driver:
-uv run dev.py test "group - what"        # auto-build + run matching test(s); substring match, comma-OR
+uv run dev.py test "group - what"        # auto-build + run matching test(s); substring match, comma-OR (`\,` is a literal comma)
 uv run dev.py test vector-test.cc        # matching no name, the filter is retried as a glob over the tests' source files
 uv run dev.py test "libs/base/**/tests/memory/*"   # …so a path or a directory selects everything declared under it
 uv run dev.py test                       # build + run the whole suite

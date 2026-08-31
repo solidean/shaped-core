@@ -10,8 +10,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 
 > **Scope note:** this sheet covers the surface that exists today.
 > The sg core API and the **dx12** backend are real.
-> The **vulkan** backend brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
-> Every other `try_create_*`, both async transfer scopes, and all recording are stubs.
+> The **vulkan** backend is real across the whole surface too, and runs the same tier-1 API suite dx12 does.
+> A windowed swapchain needs the platform's development headers at build time, and reports the platform by name where they were missing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
@@ -87,6 +87,14 @@ ctx.accepts_shader_format(f)                       // bool — hand this to slib
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
+ctx.adapter().dedicated_video_memory_bytes         // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
+ctx.query_gpu_memory()                             // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
+                                                   //   the budget is what THIS PROCESS may use now and shrinks as others take memory
+                                                   //   NOT the same scale as the board size — dividing one by the other is the classic wrong dashboard
+ctx.read_gpu_counters()                            // result<gpu_counters> — monotone busy_secs per engine class
+sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total is the BUSIEST engine, not the sum
+                                                   //   Windows reads the GPU Engine perf counters; elsewhere it refuses
+                                                   //   see docs/concepts/gpu-metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
@@ -233,15 +241,15 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 //   ctx.wait_for(future) is the only completion guarantee. See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
-// vulkan transfer is a TODO stub.
+// both backends real.
 
 // GPU queries (cmd.query scope). See docs/concepts/queries.md.
-cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (dx12 direct queue: yes; vulkan stub: no)
+cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (both, where the queue family times)
 cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a point-in-time GPU tick here; invalid if unsupported
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
 
 // raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops,
-// then bind a raster_pipeline and draw. vulkan is a stub. dx12 real on WARP.
+// then bind a raster_pipeline and draw. Both backends real (dx12 on WARP).
 auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
                                   .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
@@ -353,6 +361,8 @@ sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)
+sg::format_aspect_at(f, i)      // texture_aspect — the plane at POSITIONAL index i: 0 is color on a color format,
+                                //   depth on a depth one. Never cast an aspect index to texture_aspect directly.
 ```
 
 ## texture — GPU-resident texture  (raw resource + typed wrapper)
@@ -362,7 +372,10 @@ sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for dep
 #include <shaped-graphics/resource/texture.hh>       // the typed texture<Traits> wrapper + shape typedefs
 sg::texture_description      // { format, dimension(d1/d2/d3), width/height/depth, mip_levels,
                              //   array_layers (cc::optional<int>; nullopt = not an array),
-                             //   sample_count (>1 = MSAA), is_cube, usage }
+                             //   sample_count (>1 = MSAA), is_cube, usage, initial_layout }
+  .initial_layout            // cc::optional<texture_layout>; the layout it RESTS in before first use.
+                             //   nullopt derives from usage; `undefined` / `present` are rejected. dx12 ignores it.
+  .resolved_initial_layout() // -> texture_layout; the field, or the derivation. Never undefined/present.
 sg::raw_texture_handle       // std::shared_ptr<sg::raw_texture const> — the general/raw resource
 t->width()/height()/depth()  // int — extents (height/depth per dimension)
 t->mip_levels()/sample_count()/array_layers()  // int
@@ -455,22 +468,30 @@ v.aspect_ratio()             // -> float  width/height; both clamped >= 1, so ne
 sg::is_render_target_format(f) // bool — a renderable color format (not depth, not compressed, not undefined)
 ```
 
-## swapchain — window presentation  (see docs/concepts/presentation.md; dx12 real, via ctx.create_swapchain)
+## swapchain — window presentation  (see docs/concepts/presentation.md; dx12 + vulkan, via ctx.create_swapchain)
 
 ```cpp
 #include <shaped-graphics/present/swapchain.hh>
-sg::swapchain_description       // { void* native_window_handle=nullptr (HWND on Windows); int buffer_count=2 (>=2);
-                                //   pixel_format format=bgra8_unorm; present_mode present_mode=vsync; bool enable_hdr=false }
+sg::swapchain_description       // { native_window window; int buffer_count=2 (>=2); pixel_format format=bgra8_unorm;
+                                //   present_mode present_mode=vsync; bool enable_hdr=false;
+                                //   cc::optional<tg::vec2i> headless_extent (set => no window, fixed size) }
+sg::native_window               // { window_platform platform; void* display; void* handle; u64 window_id; tg::vec2i client_size }
+                                //   win32: handle=HWND | xlib/xcb: display + window_id | wayland: display + handle
+                                //   .is_valid() states which slots that platform needs; ::from_win32(hwnd) is the shorthand
+                                //   client_size is REQUIRED on wayland (its surface has no size of its own), ignored elsewhere
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
-auto sc = ctx.create_swapchain({.native_window_handle = hwnd});   // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
+ctx.supports_headless_present()   // bool — may a swapchain_description carry a headless_extent here?
+                                  //   vulkan: VK_EXT_headless_surface + VK_KHR_swapchain. dx12: always (it emulates)
+auto sc = ctx.create_swapchain({.window = win->native_window()});  // -> swapchain_handle (fallible twin: ctx.try_create_swapchain)
 // per frame:
+sc->set_window_size({w, h});          // wayland only reads it (no size on the surface); harmless elsewhere — call it unconditionally
 auto rt = sc->acquire_backbuffer();   // -> render_target_view for the current back buffer (auto-resizes to the window, once/epoch)
 auto size = rt.size();                   // -> tg::vec2i, THIS frame's size — the swapchain has no size getter (a later acquire may resize)
 float aspect = rt.aspect_ratio();        // -> float, for the projection; rt.width() / rt.height() are still there as ints
 //   ... render into rt this frame (rt.cleared(color) / cmd.raster.render_to({.color_targets = {...}})) ...
 ctx.submit_command_list_and_present(*sc, std::move(cmd));  // the present path: folds the present-layout transition into cmd,
                                                            //   submits, then presents — exactly one per successful acquire
-sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->native_window_handle() sc->description()
+sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->window() sc->description()
 // acquire / submit_command_list_and_present throw sg::device_lost_exception on device loss. Bad handle / count / format asserts.
 ```
 
@@ -487,7 +508,8 @@ sg::sampler_border_color    // transparent_black | opaque_black | opaque_white  
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
 // two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
-// dx12 only; a cube UAV analogue — samplers live in their own descriptor heap + root table.
+// both backends: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
+//   layout's immutable samplers. A pipeline-level static sampler (one on no group) is dx12 only so far.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -523,7 +545,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
 
-## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (dx12 real; vulkan stubs)
+## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (both backends real)
 
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
@@ -647,11 +669,11 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> b
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
 // blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
-//   dx12 real (WARP); vulkan is_supported()==false + stubs.
+//   both backends real (dx12 on WARP).
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```
 
-## raytracing pipeline + shader table + dispatch_rays  (dx12 real on WARP; see docs/concepts/raytracing-pipeline.md)
+## raytracing pipeline + shader table + dispatch_rays  (both backends real; see docs/concepts/raytracing-pipeline.md)
 
 ```cpp
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
@@ -773,7 +795,7 @@ h.acquire_allocation_for_buffer(size, usage, offset)  // -> allocation_info, con
 // protected pure-virtual query_buffer_requirements(size, usage) is the backend hook both public methods build on
 // flow: query reqs -> your allocator picks offset -> h.acquire_allocation_for_*(...) -> pass allocation_info to create_*
 // create_raw_buffer takes the allocation_info; dedicated and placed both work on dx12 (CreatePlacedResource).
-// Textures are not placeable — memory_heap only sizes buffers. vulkan stubs heaps and placement entirely.
+// Textures are not placeable — memory_heap only sizes buffers.
 ```
 
 ## backends — subclass the abstract sg types

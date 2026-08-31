@@ -129,7 +129,7 @@ TEST("sr - a headless window has no native handle", main_thread)
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "handleless"});
 
-    CHECK(win->native_window_handle() == nullptr);
+    CHECK(!win->native_window().is_valid());
 }
 
 TEST("sr - a second window system asserts", main_thread)

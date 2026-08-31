@@ -329,6 +329,64 @@ def test_rest_only_claims_what_is_left(root: Path) -> None:
         assert len(again.reused) == 1 and again.skipped_covered == 1, (again.reused, again.skipped_covered)
 
 
+def test_a_reused_claim_follows_its_hunk_after_a_head_move(root: Path) -> None:
+    """A change id is content-derived and a claim is positional, so a shift moves one and not the other.
+
+    Left alone, the claim keeps the old line numbers: it covers atoms that no longer exist while the ones that do go
+    unaccounted, so coverage reads red for a review that is complete.
+    No later ingest can clear that, since the digest is already known and reuse is the branch it lands in.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(120)})
+    body = numbered(120).replace("line 100\n", "line 100 CHANGED\n")
+    head_one = commit(root, "edit", {"a.txt": body})
+
+    net_one = build_net(git, base, head_one)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        first = candidates_for(git, base, head_one, context=8, gap=20, net=net_one)
+        register(ledger, first, round_number=1, write_body=lambda *_: None)
+        assert net_one.subtract(ledger.covered()).is_empty
+
+        # Two lines inserted above the edit: every following line number moves, no hunk content does.
+        head_two = commit(root, "prelude", {"a.txt": "prelude a\nprelude b\n" + body})
+        net_two = build_net(git, base, head_two)
+        second = candidates_for(git, base, head_two, context=8, gap=20, net=net_two)
+
+        result = register(ledger, second, round_number=2, write_body=lambda *_: None)
+        assert result.repointed, "the shifted hunk's claim must follow it"
+
+        left = net_two.subtract(ledger.covered())
+        assert left.is_empty, f"a moved head left {len(left)} atoms unaccounted: {left.runs()}"
+
+        # Idempotent: a second pass over the same head re-points nothing.
+        again = register(ledger, second, round_number=2, write_body=lambda *_: None)
+        assert not again.repointed, [c.summary for c in again.repointed]
+
+
+def test_a_superseded_claim_is_not_re_pointed(root: Path) -> None:
+    """A superseded change records what WAS claimed, and re-pointing it would quietly bring it back to life."""
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(20)})
+    head = commit(root, "edit", {"a.txt": numbered(20).replace("line 5\n", "line 5 edited\n")})
+
+    net = build_net(git, base, head)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        candidates = candidates_for(git, base, head, context=8, gap=20, net=net)
+        created = register(ledger, candidates, round_number=1, write_body=lambda *_: None).created
+        assert len(created) == 1
+
+        change = created[0]
+        change.superseded = True
+        change.claim = net.__class__.empty()
+        ledger.append(change)
+
+        result = register(ledger, candidates, round_number=2, write_body=lambda *_: None)
+        assert not result.repointed, [c.summary for c in result.repointed]
+        assert ledger.get(change.id).claim.is_empty
+
+
 # ---- commit-local mapping ---------------------------------------------------
 
 
@@ -1490,6 +1548,65 @@ def test_since_reports_only_finalized_answers(root: Path) -> None:
         answers.finalize(1)
         assert [a.name for a in answers.since(0)] == ["pick-one"]
         assert not answers.since(1), "the watermark excludes the round it names"
+
+
+def test_mojibake_is_reported(root: Path) -> None:
+    """A line that lost an em dash to a cp1252 round trip is named rather than left to be noticed by eye."""
+    from tools.review.cmd.validate import mojibake_warnings
+
+    header = "---\nid: 010\ntitle: t\n---\n\n## prose\n\n"
+
+    good = parse_text(header + "A real em dash — like this.\n", Path("entry.md"), slug="010-a")
+    assert mojibake_warnings(good) == [], "a real em dash must not be reported"
+
+    # The three characters an em dash becomes when UTF-8 is decoded as cp1252 and written back out.
+    mangled = "â€”"
+    bad = parse_text(header + f"A mangled em dash {mangled} here.\n", Path("entry.md"), slug="010-a")
+    warnings = mojibake_warnings(bad)
+    assert len(warnings) == 1, f"expected one warning, got {warnings}"
+    assert "cp1252" in warnings[0], warnings[0]
+
+
+def test_append_decodes_stdin_as_utf8(root: Path) -> None:
+    """`append` reads stdin as UTF-8 rather than through the locale, and `-` means stdin.
+
+    The locale is cp1252 on a default Windows install, which is how an em dash written into an entry came back out as
+    three characters.
+    """
+    import io
+    import sys as sys_module
+
+    from tools.review.cmd.append import read_addition
+
+    text = "## prose\n\nAn em dash — survives.\n"
+
+    for spelling in ("", "-"):
+        saved = sys_module.stdin
+        # A stdin whose own encoding is cp1252, which is exactly the case that used to corrupt the text.
+        sys_module.stdin = io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="cp1252")
+        try:
+            assert read_addition(spelling) == text, f"{spelling!r} did not round-trip UTF-8"
+        finally:
+            sys_module.stdin = saved
+
+    path = root / "addition.md"
+    path.write_text(text, encoding="utf-8")
+    assert read_addition(str(path)) == text
+
+
+def test_design_review_refuses_a_range(root: Path) -> None:
+    """A design review has no changeset, so a range would be silently ignored rather than honoured."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": "one\n"})
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "review.py"), "init", "d", "--goal", "design", "--range", "HEAD~1..HEAD"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode != 0, "a design review must refuse --range rather than ignore it"
+    assert "--range" in (result.stderr + result.stdout), result.stderr + result.stdout
 
 
 # ---- harness ----------------------------------------------------------------

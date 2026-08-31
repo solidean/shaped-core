@@ -17,6 +17,17 @@ class sg::binding_group_layout
 public:
     virtual ~binding_group_layout();
 
+    /// Destroys the backend objects now, leaving this an inert husk.
+    ///
+    /// The context calls this at shutdown for everything its pipeline cache still holds, because the cache dropping
+    /// its own reference is NOT what frees them: a scheduled build node keeps the handle alive on a pool worker, and
+    /// that node's later drop would run this destructor against a context that no longer exists.
+    /// See libs/graphics/shaped-graphics/docs/concepts/caches.md, "Shutdown releases the objects, not just the entries".
+    ///
+    /// Idempotent, and the destructor afterwards does nothing.
+    /// The default is empty, for a backend whose objects are reference-counted and safe to drop late.
+    virtual void release_backend_objects() {}
+
     /// Content identity: a hash over the bindings and static samplers this was created from, never over its own address.
     /// Stable across processes, which is what lets it key a cache that outlives one.
     ///

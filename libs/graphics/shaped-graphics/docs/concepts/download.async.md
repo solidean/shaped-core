@@ -179,6 +179,14 @@ Failing that, route one stream onto another queue, or fall back to a single shar
 That fallback must therefore serialize upload against download — one actor for both, say — rather than run two independent actors on it.
 The vulkan backend is still a stub, but the constraint is load-bearing for its design.
 
+## vulkan implementation
+
+As on the [upload](upload.async.md#vulkan-implementation) side: the transfer queue **borrows** a texture's layout, bracketing
+`resting -> TRANSFER_SRC -> resting` from the layout read at enqueue, and writes nothing back.
+That matters more here than on the upload side, since a readback changes nothing about the texture and has no business
+changing its layout either.
+Textures carry the same per-resource stamps buffers do, in both directions.
+
 ## See also
 
 - [context](context.md) — the scope this hangs off, and how it relates to the other five.

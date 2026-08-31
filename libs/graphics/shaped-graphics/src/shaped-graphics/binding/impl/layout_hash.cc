@@ -55,6 +55,13 @@ cc::hash128 binding_group_layout_hash(cc::span<binding const> bindings, cc::span
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
+cc::hash128 sampler_hash(sampler const& s)
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    add_sampler(b, s);
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
 cc::hash128 pipeline_layout_hash(cc::span<binding_group_layout_handle const> groups,
                                  cc::span<bound_sampler const> static_samplers,
                                  cc::optional<binding> const& inline_constants)

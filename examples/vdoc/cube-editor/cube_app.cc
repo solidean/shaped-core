@@ -91,7 +91,7 @@ cc::unique_ptr<app> app::create(cc::string_view title)
     else
     {
         out->_swapchain = out->_ctx->create_swapchain(
-            {.native_window_handle = out->_win->native_window_handle(), .format = sg::pixel_format::bgra8_unorm});
+            {.window = out->_win->native_window(), .format = sg::pixel_format::bgra8_unorm});
     }
 
     out->_imgui = sr::imgui_context::create();

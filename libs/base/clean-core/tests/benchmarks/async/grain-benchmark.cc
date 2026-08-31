@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/platform/resource_limits.hh>
 
 // The concurrent scheduler needs OS threads; this file compiles to nothing where they are unavailable (wasm).
 #if CC_HAS_THREADS
@@ -272,7 +273,7 @@ void run_sweep()
 // The figure wanted is the cost of the whole pass rather than a per-element one, and the median IS that.
 void run_fork_floor()
 {
-    int const p = cc::num_hardware_threads();
+    int const p = cc::recommended_worker_count();
     int const w_max = p < floor_max_workers ? p : floor_max_workers;
 
     auto data = make_random(floor_max_n);
@@ -302,7 +303,7 @@ void run_fork_floor()
 // Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.
 void run_latency()
 {
-    int const p = cc::num_hardware_threads();
+    int const p = cc::recommended_worker_count();
     for (int w : {1, 2, 4, 8, 16, 32, 64})
     {
         if (w > p)

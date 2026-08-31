@@ -240,7 +240,7 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     }
     else
     {
-        auto sc_r = ctx.try_create_swapchain({.native_window_handle = win->native_window_handle(),
+        auto sc_r = ctx.try_create_swapchain({.window = win->native_window(),
                                               .buffer_count = config.buffer_count,
                                               .format = sg::pixel_format::bgra8_unorm});
         if (sc_r.has_error())

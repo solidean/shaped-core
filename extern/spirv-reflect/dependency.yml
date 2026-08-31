@@ -1,0 +1,21 @@
+# Pin and license for the upstream vendored here.
+# vendor-spirv-reflect.py reads its pin from this file; the copy map and wipe list stay in the script.
+
+upstreams:
+  - name: SPIRV-Reflect
+    homepage: https://github.com/KhronosGroup/SPIRV-Reflect
+    source: git
+    repo: https://github.com/KhronosGroup/SPIRV-Reflect
+    track: tags
+    tag: vulkan-sdk-1.4.321.0
+    version: 1.4.321.0
+    digest_algo: git-commit
+    pin_hash: e55086b044225f9b511ae44dbf9b079d3625943f
+    license: Apache-2.0
+    license_files: [LICENSE]
+    used_by: shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module
+    notes: |
+      A SPIR-V module carries its bindings in its own instruction stream rather than in a container beside it, so reading them back is a parser rather than a query.
+      DXC emits no DXC_OUT_REFLECTION for a `-spirv` compile, and its Linux release ships neither d3d12shader.h nor an implementation of the interfaces it declares — so the DXIL reflection path is not merely unavailable there, the container it reads does not exist.
+      Vendored rather than fetched: it is three files, being committed *is* the pin, and it stays out of the prereq chain so an offline or cold checkout needs no network for it.
+      Tags track Vulkan SDK releases, so the pin moves with the SDK rather than on its own schedule.

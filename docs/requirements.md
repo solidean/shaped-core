@@ -100,6 +100,24 @@ On non-MSVC compilers the fastest available linker is auto-selected by [DetectLi
 None are required, and absence just falls back.
 MSVC uses its own linker.
 
+## Graphics & windowing
+
+Everything in this section is **optional**, and every piece degrades rather than breaking the build.
+That is what makes it worth writing down: a checkout missing all of it configures, builds and passes the whole suite, and the gap only shows up as an example that draws nothing.
+`uv run dev.py doctor` reports each line below.
+
+| Need | For | Absent |
+|------|-----|--------|
+| **Vulkan headers** (`vulkan/vulkan.h`, via `$VULKAN_SDK` or a distro package) | building the vulkan backend at all — `find_package(Vulkan)` gates it | the backend is skipped at configure, and on non-Windows that leaves sg with no backend |
+| **Vulkan loader + an ICD** | creating a device at run time | `create_vulkan_context` fails with no graphics device |
+| **X11 / XCB / wayland development headers** (Linux) | a *windowed* swapchain, and SDL3 configuring at all | `sr::window_system::try_create` fails and a swapchain reports the platform unsupported; headless present and `--capture` are unaffected |
+| **DXC** (`uv run extern/dxc/download-dxc.py`, run by dev.py) | `ssc::dxc`, so a shader package's HLSL becomes DXIL or SPIR-V | every `slib` `acquire` fails, and the examples that draw are gated out of the build |
+| **Windows SDK** (`d3d12shader.h`) | DXIL *reflection*, and the dx12 backend | SPIR-V reflection still works, through the vendored SPIRV-Reflect |
+
+The Linux windowing entry is headers-only on purpose: SDL loads `libX11` and `libwayland-client` themselves at run time.
+So a machine with the runtime and no headers builds a shaped-rendering with `SR_HAS_WINDOW=0`, and never says why at run time.
+[platforms.md](platforms.md#steamos) has the one platform where that combination is the default rather than an oversight.
+
 ## Developer / IDE tooling
 
 | Tool             | Minimum | Role                                                                   |
@@ -137,9 +155,18 @@ Checks, in order:
 - that **presets parse**, and that the platform **default preset** exists
 - the **coverage** tools, `llvm-cov` and `llvm-profdata`, which coverage and PGO both need
 - the **emscripten** toolchain
+- the **graphics environment** — Vulkan headers and runtime, windowed-surface support, `sr::window`'s SDL3 backend, and DXC
 - **clangd** — found, a published `compile_commands.json` present, and a real file parsed cleanly
 
 A red line names the fix.
+
+The graphics checks are advisory too, and for a stronger reason: nothing there can fail a build.
+Every graphics library degrades instead of disappearing, so a checkout missing all of it still configures, builds and passes the whole suite.
+The first sign of a gap is an example that draws nothing.
+The detail line names what a gap costs, since that is the part no other output states.
+
+They run the header probes through the compiler **the selected preset configures**, not a bare `clang++`, so they see the same include path CMake will.
+That is the whole answer on a machine whose headers live in a sysroot rather than in `/usr/include`.
 
 The emscripten check is advisory.
 With no emsdk signal — `--emsdk-path`, `SC_EMSDK_PATH`, `EMSDK`, or `emcc` on `PATH` — it reports a passing "not configured (optional)" line, so a native-only setup stays green.

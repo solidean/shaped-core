@@ -108,7 +108,11 @@ add_subdirectory(extern)
 # libraries added *before* the compiler need it too — shaped-graphics' test declares a shader package, and
 # an `if(TARGET ...)` there would be false no matter the real answer. A plain variable, not a cached
 # option: like SC_ARCH_X64 it describes the environment, it is not a choice.
-if(WIN32 AND TARGET dxc)
+# DXC is fetched on both platforms and ssc::dxc compiles on both, so the compiler exists wherever the target does.
+# Which bytecode it can emit still differs: DXIL reflection needs the Windows SDK's d3d12shader.h, and SPIR-V
+# reflection reads the emitted module through the vendored SPIRV-Reflect. The consumer picks by asking a context what
+# it accepts, so neither is a build-time choice.
+if(TARGET dxc)
     set(SC_HAS_DXC_COMPILER ON)
 else()
     set(SC_HAS_DXC_COMPILER OFF)

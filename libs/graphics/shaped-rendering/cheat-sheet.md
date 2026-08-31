@@ -53,7 +53,7 @@ wsys->windows();                  // -> cc::span<window* const>, creation order,
 wsys->is_quit_requested();        // latched OS-level quit; clear_quit_request()
 wsys->is_headless();
 
-win->native_window_handle();      // -> void* — HWND on Windows; feeds sg::swapchain_description
+win->native_window();             // -> sg::native_window, platform-tagged; feeds sg::swapchain_description::window
 win->width();  win->height();     // -> int, pixels, as of the last poll_events
 win->position();                  // -> tg::pos2i, desktop coords, may be negative on a multi-monitor desktop
 win->set_position(tg::pos2i(x, y));  win->set_size(tg::vec2i(w, h));  // write-through: the getter reads it back at once
@@ -87,7 +87,7 @@ wsys->has_clipboard_text();
   Size is 0x0 there, and `acquire_backbuffer`'s auto-resize would resize the chain to zero.
 - **`window_system` is main-thread bound and at most one may be alive per process.** Both assert.
 - **A window must not outlive its system**, and `~window_system` asserts if one does.
-- **`native_window_handle()` is null off Windows and under a headless system** — nothing can present against those.
+- **`native_window()` is invalid under a headless system**, and for a windowing system sr has no mapping for — nothing can present against those.
 
 ## Input
 

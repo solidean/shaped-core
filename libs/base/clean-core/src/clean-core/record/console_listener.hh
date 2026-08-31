@@ -60,6 +60,14 @@ struct cc::rec::console_options
     /// exactly, and offline, for every event rather than the ones that happened to be printed.
     bool show_site = false;
 
+    /// Also print stat events, rendered through their unit.
+    ///
+    /// **Off by default**, because a console that printed every stat would be unreadable — a per-frame stat alone
+    /// outpaces anything a human can follow.
+    /// On, a stat reads as `name: 1.50 GiB`, formatted by cc::rec::format_quantity, which is what makes a unit's
+    /// symbol and prefix_base mean something rather than being carried and ignored.
+    bool show_stats = false;
+
     /// Send warnings and errors to stderr, everything else to stdout.
     bool split_streams = true;
 
@@ -74,7 +82,7 @@ struct cc::rec::console_options
     ///   CC_LOG_LEVEL   trace | debug | info | warning | error
     ///   CC_LOG_TIME    none | elapsed | time | datetime
     ///   CC_LOG_COLOR   auto | always | never   (NO_COLOR and FORCE_COLOR are honored by cc::console::resolve)
-    ///   CC_LOG_THREAD  CC_LOG_DOMAIN  CC_LOG_SITE   0/false/no/off for no, anything else for yes
+    ///   CC_LOG_THREAD  CC_LOG_DOMAIN  CC_LOG_SITE  CC_LOG_STATS   0/false/no/off for no, anything else for yes
     ///
     /// An unset variable leaves its field alone, and an unparseable one is ignored rather than diagnosed — a
     /// misspelled log setting must never be the reason a program refuses to start.
@@ -93,8 +101,9 @@ struct cc::rec::console_options
 
 /// Prints log events, in timestamp order across threads.
 ///
-/// Only `event_kind::log` reaches the terminal — a console that also printed every scope and stat would be unreadable,
-/// and those have listeners of their own.
+/// Only `event_kind::log` reaches the terminal by default — a console that also printed every scope and stat would be
+/// unreadable, and those have listeners of their own.
+/// `console_options::show_stats` opts stats in, rendered through their unit.
 struct cc::rec::console_listener final : rec::listener
 {
     /// Takes its options from the environment, over the defaults.

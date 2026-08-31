@@ -15,6 +15,7 @@ This module is imported, not run, so it carries no PEP 723 block — but it need
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import sys
 from pathlib import Path
 
 import yaml
@@ -143,6 +144,20 @@ def load_all(extern_dir: Path) -> list[Upstream]:
     return out
 
 
+def host_os_key() -> str:
+    """The suffix a per-OS manifest key carries for this host: `windows`, `linux` or `macos`.
+
+    An upstream shipping one asset per platform declares `asset_<key>` / `pin_hash_<key>` instead of the bare keys, and
+    the host's pair is what `_build` resolves into the plain fields — so everything downstream sees one asset and one
+    pin without knowing the distinction exists.
+    """
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
 def _build(path: Path, directory: Path, entry: object) -> Upstream:
     if not isinstance(entry, dict):
         raise ValueError(f"{path}: each `upstreams` entry must be a mapping")
@@ -153,13 +168,27 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
             raise ValueError(f"{path}: upstream {entry.get('name', '?')!r} is missing `{key}`")
         return value
 
+    # A per-OS key wins over the bare one where the manifest declares it, so an upstream with one asset per platform
+    # needs no special handling anywhere downstream.
+    # A manifest declaring per-OS keys but not this host's is an error rather than a silent fallback: it means the
+    # dependency has not been ported here, and a bare key from another platform would fetch the wrong archive.
+    suffix = host_os_key()
+
+    def per_os(key: str, *, required: bool) -> str:
+        host_key = f"{key}_{suffix}"
+        if host_key in entry:
+            return need(host_key)
+        if any(k.startswith(f"{key}_") for k in entry):
+            raise ValueError(f"{path}: upstream {entry.get('name', '?')!r} declares per-OS `{key}` but none for {suffix}")
+        return need(key) if required else str(entry.get(key, ""))
+
     up = Upstream(
         name=need("name"),
         directory=directory,
         source=need("source"),
         track=need("track"),
         install=entry.get("install", "vendored"),
-        pin_hash=need("pin_hash"),
+        pin_hash=per_os("pin_hash", required=True),
         digest_algo=need("digest_algo"),
         license=need("license"),
         homepage=entry.get("homepage", ""),
@@ -167,7 +196,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         tag=entry.get("tag"),
         version=str(entry.get("version", "")),
         year=str(entry.get("year", "")),
-        asset=entry.get("asset", ""),
+        asset=per_os("asset", required=False),
         tag_pattern=entry.get("tag_pattern", ""),
         license_files=list(entry.get("license_files", [])),
         license_text=entry.get("license_text", ""),

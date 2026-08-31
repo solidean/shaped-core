@@ -39,7 +39,13 @@ struct stream_poll;                   // value type — a source poll's status a
 class stream_source;                  // the lazy chunk sequence feeding a streaming upload
 
 class context;
-struct adapter_info; // which GPU a context runs on (see context/adapter_info.hh)
+struct adapter_info;       // which GPU a context runs on (see context/adapter_info.hh)
+struct gpu_memory_usage;   // GPU memory as this process sees it (context/gpu_metrics.hh)
+struct gpu_load;           // how busy the GPU was over a sampling interval
+struct gpu_engine_counter; // monotone busy time on one engine class
+struct gpu_counters;       // those counters, per engine class
+struct gpu_engine_load;    // one engine's share of a sampled load
+class gpu_load_sampler;    // GPU load, differenced against its own previous reading
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;
@@ -170,6 +176,8 @@ class buffer; // a typed buffer facade (see resource/buffer.hh)
 
 // Render-target / depth-stencil views (see resource/views.hh) — a texture bound as a color / depth-stencil target.
 // Not shader-facing; they do not erase to raw_view.
+enum class window_platform : u8;
+struct native_window;
 class render_target_view;
 class depth_stencil_view;
 

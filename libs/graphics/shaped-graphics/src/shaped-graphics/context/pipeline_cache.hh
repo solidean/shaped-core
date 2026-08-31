@@ -90,6 +90,13 @@ public:
     /// Runs bookkeeping (e.g. in-memory eviction) on all caches.
     void apply_bookkeeping();
 
+    /// Drops every cached layout and pipeline, for context teardown.
+    ///
+    /// These are device objects, and the cache is what keeps them alive after the last caller has let go — so on a
+    /// backend whose device is not reference counted they would otherwise outlive it.
+    /// Called from the backend's shutdown before the device goes, next to the transient heap's release.
+    void release_at_shutdown();
+
 private:
     [[nodiscard]] cc::hash128 compute_binding_group_layout_key(cc::span<binding const> bindings,
                                                                cc::span<named_sampler const> static_samplers) const;

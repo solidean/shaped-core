@@ -6,7 +6,20 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/fwd.hh> // also what puts the bare sized aliases in scope inside sg
+
+// Under VK_USE_PLATFORM_WIN32_KHR — the surface TUs on Windows — vulkan_win32.h reaches windows.h, and an unsanitized
+// one costs us the `byte` typedef and the min()/max() macros alike, so it goes through clean-core's gate first.
+// See win32_sanitized.hh for why the `byte` rename is needed; the bracket is repeated here the way every other gate repeats it.
+// The clean-core includes stay above the bracket: a C++ header parsed under the macro would lose `std::byte`.
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+#include <clean-core/platform/win32_sanitized.hh>
+
+#define byte win_byte_override
 #include <vulkan/vulkan.h>
+#undef byte
+#else
+#include <vulkan/vulkan.h>
+#endif
 
 namespace sg::backend::vulkan
 {

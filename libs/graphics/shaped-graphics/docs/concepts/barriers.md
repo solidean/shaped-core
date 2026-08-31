@@ -54,6 +54,46 @@ Only a same-resource copy does that today (`cmd.copy` with `src == dst`); skippi
 The machine is **opt-in**: a backend that emits explicit barriers uses it, and a driver-barrier backend (opengl/webgl) ignores it.
 Emission is entirely the backend's own; there is no core "emit this barrier" seam.
 
+## A texture rests in a real layout, and gets there once
+
+A texture is created in a layout no barrier may target — `VK_IMAGE_LAYOUT_UNDEFINED` on Vulkan — so a tracker that *rested*
+textures there had no layout to hand one list back to while another was still recording, and reverting emitted
+`newLayout = UNDEFINED`: a discard, and a spec violation.
+
+So a texture rests somewhere real from the start.
+`texture_description::initial_layout` names it, and `nullopt` derives one from `usage` — most-specific first, with `general`
+last rather than default, since it is the one layout drivers cannot compress.
+`undefined` and `present` are rejected: the first is the state this exists to leave, the second belongs to a swapchain image.
+
+The **one-time** transition out of `UNDEFINED` belongs to no list.
+A list gathers, while recording, the textures it is the first to touch — a *tentative* set, since a concurrently recording
+list may claim one first, so it is a superset and never a subset.
+At **submit**, inside the submission lock, each is claimed against the texture and the survivors' `UNDEFINED -> resting`
+barriers go into a small second command buffer prepended to the same `vkQueueSubmit`.
+Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first, and its
+eager barriers would name an `oldLayout` the image is not in.
+
+dx12 needs none of this and ignores the field.
+A D3D12 resource is created in `COMMON`, which *is* `general`, so its tracker's default is already true of the resource; dx12
+also expresses discard as `D3D12_TEXTURE_BARRIER_FLAG_DISCARD` on the barrier rather than as a layout.
+
+## The transfer queue borrows a layout, and never changes it
+
+The async transfer paths record on a queue the per-list declare/flush rhythm cannot reach.
+They **borrow**: each reads the layout the texture rests in when the transfer is enqueued, transitions from it, and hands the
+texture back in exactly that layout.
+So canonical keeps a single writer — a list's finalize — and the transfer path is a pure reader.
+
+That read is only meaningful because the transfer is ordered against the direct queue in both directions, by the same
+per-resource stamps buffers use: a list submitted before the enqueue is covered by the reverse token, and one submitted after
+waits on the transfer's completion value.
+It is also what makes the streaming tier safe, which deliberately does not stamp its forward value until promoted: a list
+running concurrently with a streaming transfer still finds the texture in the layout its barriers name, and only the *data*
+races.
+
+Interleaving a command list with an async transfer of the same texture is nevertheless **not supported yet** — see
+[TODO](../TODO.md)'s prepare-for-async entry for why, and for the design that fixes it.
+
 ## Subresources: a covering partition (designed-in for textures)
 
 A texture's subresource domain is the grid of mip × array slice × aspect plane.

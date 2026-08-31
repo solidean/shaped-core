@@ -82,8 +82,8 @@ The span overload of `sink` is the guard for contents.
 It does not evict the TLB, the branch predictors or the instruction cache, so a benchmark calling it and reporting
 "cold" is claiming something stronger than it measured.
 Call it between `pause` and `resume` so its milliseconds land outside the measurement.
-Its default size is a provisional constant until shaped-core has a system-information library to ask for the
-last-level cache size.
+Its default size is twice the largest cache cc reports, floored at 64 MiB and capped at 1 GiB — streaming exactly the
+cache size would leave the start of the buffer resident by the time the end is reached.
 
 ## Comparing several things
 
@@ -143,7 +143,7 @@ The per-item rate is unchanged by construction, so the small points stay compara
 ## Reading the report
 
 ```
-host  windows x64  |  unknown  |  20 logical cores  |  build release  CC_ASSERT=off  (system info provisional)
+host  windows x64  |  AMD Ryzen 9 7950X3D 16-Core Processor  |  32 logical cores  |  build release  CC_ASSERT=off
 load  clock 2.918 -> 2.918 ticks/ns (+0.0%)  |  machine 8% busy
 
 nx::bench - the barriers
@@ -211,8 +211,8 @@ It is the format tooling reads instead of scraping the console — the three plo
 ```json
 {
   "suite": "nexus-test",
-  "system": {"os": "windows", "arch": "x64", "cpu": "unknown", "logical_cores": 20,
-             "build": "release", "assertions_enabled": false, "is_provisional": true},
+  "system": {"os": "windows", "arch": "x64", "cpu": "AMD Ryzen 9 7950X3D 16-Core Processor", "logical_cores": 32,
+             "build": "release", "assertions_enabled": false, "is_provisional": false},
   "calibration": {"seconds_per_tick": 3.4e-10, "empty_iteration_secs": 1.1e-10,
                   "clock_pair_secs": 1.3e-08, "has_cheap_counter": true},
   "loops": [

@@ -1,8 +1,11 @@
 // vulkan_context: device-level lifetime bodies (shutdown / teardown) plus small shared helpers.
 // Bring-up lives in vulkan_context.create.cc, the epoch bodies in vulkan_epoch.cc.
 
+#include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
+#include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
 {
@@ -67,12 +70,38 @@ char const* vk_result_name(VkResult r)
     }
 }
 
+// One validation message, to the installed callback or to the log.
+// The layer already decided how bad it is, so the severity maps straight across rather than flattening onto one level.
+void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const
+{
+    if (_message_callback)
+    {
+        _message_callback(severity, message);
+        return;
+    }
+
+    switch (severity)
+    {
+    case vulkan_message_severity::error:
+        CC_LOG_ERROR("validation: {}", message);
+        break;
+    case vulkan_message_severity::warning:
+        CC_LOG_WARNING("validation: {}", message);
+        break;
+    case vulkan_message_severity::info:
+        CC_LOG_INFO("validation: {}", message);
+        break;
+    case vulkan_message_severity::verbose:
+        CC_LOG_DEBUG("validation: {}", message);
+        break;
+    }
+}
+
 u32 vulkan_context::find_memory_type(u32 type_bits, VkMemoryPropertyFlags properties) const
 {
-    VkPhysicalDeviceMemoryProperties mem = {};
-    vkGetPhysicalDeviceMemoryProperties(_physical_device, &mem);
-    for (u32 i = 0; i < mem.memoryTypeCount; ++i)
-        if ((type_bits & (1u << i)) && (mem.memoryTypes[i].propertyFlags & properties) == properties)
+    // The device's memory types never change, so they are queried once at construction rather than per allocation.
+    for (u32 i = 0; i < _memory_properties.memoryTypeCount; ++i)
+        if ((type_bits & (1u << i)) && (_memory_properties.memoryTypes[i].propertyFlags & properties) == properties)
             return i;
     return UINT32_MAX;
 }
@@ -85,14 +114,68 @@ bool vulkan_context::note_device_lost_if_lost(VkResult r, char const* what)
     return true;
 }
 
+void vulkan_context::shutdown_no_throw() noexcept
+{
+    // The teardown still has to run, and nothing above a destructor can act on a failure, so the only honest outcome
+    // is to finish and say what happened.
+    // A lost device is the case this exists for: the drain below throws sg::device_lost_exception, and a destructor
+    // running inside that same exception's unwind would terminate the process instead of letting the caller's handler see it.
+    try
+    {
+        shutdown();
+    }
+    catch (sg::device_lost_exception const& e)
+    {
+        CC_LOG_ERROR("context shutdown on a lost device: {}", e.reason());
+    }
+    catch (sg::exception const& e)
+    {
+        CC_LOG_ERROR("context shutdown failed: {}", e.message());
+    }
+    catch (...)
+    {
+        CC_LOG_ERROR("context shutdown failed with an unknown exception");
+    }
+
+    // Whatever threw, the context must not look live to the base destructor's assert.
+    _is_shut_down = true;
+}
+
 void vulkan_context::shutdown()
 {
     if (_is_shut_down)
         return;
 
+    // The teardown half of the same exclusion the creation path takes; see vulkan_driver_lock.hh.
+    // Taken for the whole shutdown rather than around vkDestroyDevice alone: the drain above it submits, and a
+    // ray-tracing build starting between the drain and the destroy would reopen the window.
+    scoped_device_lifecycle const driver_guard;
+
     // Release per-context routine instances first: they may cache epoch/allocator-managed resources
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.
     routines.clear();
+
+    // The transient bump heap is device memory, so it goes before the device does.
+    // Released before the final drain rather than after, so the epoch that retires below also reclaims whatever the
+    // heap's destruction staged.
+    release_transient_heap();
+
+    // The pipeline cache holds binding-group layouts and pipelines, which are device objects with no reference to the
+    // device — so the cache, not the caller, is what would outlive it.
+    release_cached_pipelines();
+
+    // The async transfer systems go BEFORE the final drain, not after.
+    //
+    // A resource released while a transfer-queue copy still names it is put back for a later cycle rather than freed
+    // (see vulkan_expiring_resource::copy_wait), and the drain below is the last cycle there is — so anything still
+    // waiting on a copy at that point would be re-staged and never reclaimed.
+    // Shutting these down first settles every transfer, which makes every copy_wait satisfied by the time the drain
+    // looks at it.
+    if (_device != VK_NULL_HANDLE)
+    {
+        _upload_async.shutdown();
+        _download_async.shutdown();
+    }
 
     // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
     // resource (in-flight and staged) and running finalizers — before the device is released.
@@ -102,7 +185,22 @@ void vulkan_context::shutdown()
 
     if (_device != VK_NULL_HANDLE)
     {
-        vkDeviceWaitIdle(_device);
+        _queue_guard.lock([&](int&) { vkDeviceWaitIdle(_device); });
+
+        // Before the device: the ring holds a buffer and a mapped allocation on it.
+        _upload_inline.shutdown();
+        _download_inline.shutdown(); // drains its actor first, which memcpys out of the ring
+        _descriptor_heap.shutdown();
+
+        // Views and samplers are device objects a descriptor names, so they go before the device too.
+        _image_views.shutdown();
+        _samplers.shutdown();
+
+        _query_system.shutdown(); // VkQueryPools are device objects like any other
+
+        // The transfer timelines the pool still holds.
+        // A group a live resource still references destroys its own.
+        _group_pool.shutdown();
 
         // Every command pool is idle now (the drain retired every in-flight epoch, returning pools to
         // the free set); destroy them before the device.
@@ -148,3 +246,40 @@ void vulkan_context::shutdown()
     _is_shut_down = true;
 }
 } // namespace sg::backend::vulkan
+
+cc::result<sg::gpu_memory_usage> sg::backend::vulkan::vulkan_context::query_gpu_memory() const
+{
+    if (_physical_device == VK_NULL_HANDLE)
+        return cc::error("no physical device");
+
+    // VK_EXT_memory_budget is what turns the heap sizes into a live budget.
+    // Without it vulkan reports only how big the heaps ARE, which says nothing about what is left.
+    // So this refuses rather than reporting a static number as a reading.
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = {};
+    budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+
+    VkPhysicalDeviceMemoryProperties2 properties = {};
+    properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+    properties.pNext = &budget;
+
+    vkGetPhysicalDeviceMemoryProperties2(_physical_device, &properties);
+
+    auto out = sg::gpu_memory_usage();
+    auto any = false;
+    for (u32 i = 0; i < properties.memoryProperties.memoryHeapCount; ++i)
+    {
+        if ((properties.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0)
+            continue;
+
+        // A driver without the extension leaves these zero, which is how the refusal below is detected: a real device
+        // with a real budget never reports zero for every device-local heap.
+        out.budget_bytes += i64(budget.heapBudget[i]);
+        out.current_usage_bytes += i64(budget.heapUsage[i]);
+        any = true;
+    }
+
+    if (!any || out.budget_bytes == 0)
+        return cc::error("VK_EXT_memory_budget is unavailable, so this device reports no memory budget");
+
+    return out;
+}

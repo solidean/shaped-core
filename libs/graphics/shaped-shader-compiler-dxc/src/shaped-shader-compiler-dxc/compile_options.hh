@@ -8,10 +8,11 @@
 /// Closed enums (not raw strings/ints) so the valid set is fixed and typo-proof; each maps to one flag internally (see command_line_args.cc).
 
 /// Bytecode format DXC should emit.
-/// DXIL (for dx12) is the only target wired today; spirv/metal_lib slot in later behind the same option.
+/// metal_lib slots in later behind the same option.
 enum class ssc::dxc::compile_target
 {
-    dxil,
+    dxil,  ///< for dx12; reflection comes from the DXIL container, which needs the Windows SDK
+    spirv, ///< for vulkan; reflection is read out of the emitted module
 };
 
 /// HLSL shader model — becomes the profile suffix (`sm_6_8` -> "6_8", e.g. profile "cs_6_8").

@@ -1,0 +1,17 @@
+# Lint policy for the external-bug reproductions.
+#
+# A repro.cc must depend on NOTHING of ours — that is the whole point of the format, since a reproduction that
+# includes clean-core cannot answer "is this bug ours".
+# The standard library plus the one library the bug is in is all they have, so the cc:: preference the root config
+# encodes does not apply to them.
+#
+# Scoped to repro.cc by name rather than to the subtree: anything else here is ordinary repo code and stays bound by
+# the usual rules.
+#
+# See _index.md for the format, and tools/shaped-linter/docs/configuration.md for this file's own.
+
+rules:
+  - kind: allow-include
+    value: "<*>"
+    reason: a standalone reproduction of a compiler or driver bug, which must not include anything of ours
+    files: "**/repro.cc"

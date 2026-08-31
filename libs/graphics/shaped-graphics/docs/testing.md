@@ -39,7 +39,11 @@ It becomes runnable against each backend by two pieces working together:
 
 - **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
   A backend that cannot come up `SKIP`s.
-  A backend that is not mature yet stays **unregistered**, so it is neither swept nor aliased — see [`vulkan-entry.cc`](../tests/backends/vulkan-entry.cc).
+  A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
+  Registering defines the aliases, so any one API test runs against it by being named exactly.
+  The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.
+  Nexus's orphan check exempts an alias-reachable invocable for exactly this case, so the suite stays green while the backend grows.
+  The disabled comes off once no seam aborts, and both backends now sweep.
 - **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
   So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 
@@ -66,11 +70,11 @@ Complex and edge-case coverage belongs here too.
 Drop to tier 2 only when you genuinely need backend internals or a backend-specific resource, such as an embedded shader blob.
 
 Tests are split **per topic**, one `.cc` per area (`buffer/`, `transfer/`, `binding/`, `transient/`, …),
-and each topic file is added to the `if(_sg_backends)` block in the library
+and each topic file is added to the `if(_sg_test_drivers)` block in the library
 [`CMakeLists.txt`](../CMakeLists.txt) (agnostic tests need at least one backend to run against).
 
 > A backend-agnostic test still needs *some* backend to execute.
-> Until an always-available CPU/validation backend exists (a TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds — today, dx12 on Windows.
+> Until an always-available CPU/validation backend exists (a TODO in `CMakeLists.txt`), tier 1 runs only where a real backend builds — dx12 on Windows, vulkan wherever the SDK is.
 
 ---
 

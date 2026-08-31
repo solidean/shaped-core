@@ -38,6 +38,11 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
+# SPIRV-Reflect, committed in-source (three files).
+# Backs shaped-shader-compiler-dxc's SPIR-V reflection: a module carries its bindings in its own instruction stream, so
+# reading them back is a parser rather than a query, and DXC emits no reflection container for a -spirv compile.
+option(SC_USE_VENDORED_SPIRV_REFLECT "Build the in-tree vendored SPIRV-Reflect (OFF expects an external `spirv-reflect` target)" ON)
+
 # Dear ImGui, tracked on the docking branch.
 # Consumed by shaped-rendering, which draws it through sg —
 # upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
@@ -101,11 +106,15 @@ if(SC_USE_VENDORED_SPNG)
     add_subdirectory(libspng)
 endif()
 
+if(SC_USE_VENDORED_SPIRV_REFLECT)
+    add_subdirectory(spirv-reflect)
+endif()
+
 if(SC_USE_VENDORED_IMGUI)
     add_subdirectory(imgui)
 endif()
 
-if(SC_USE_VENDORED_DXC AND WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
+if(SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
     add_subdirectory(dxc)
 endif()
 

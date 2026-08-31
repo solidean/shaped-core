@@ -415,7 +415,8 @@ TEST("function_ref - return type preservation")
             static_assert(std::is_same_v<decltype(ref()), int const&>);
             // Real MSVC cl >= 19.51 miscompiles returning a reference to an odr-used const local through a type-erased call under /O2.
             // ref() comes back with a garbage address.
-            // A confirmed compiler codegen bug, reproduced with a dependency-free 15-line repro — not a lifetime issue here.
+            // A confirmed compiler codegen bug, not a lifetime issue here.
+            // The standalone reproduction and the matrix that isolates it are docs/bugs-external/msvc-const-ref-through-type-erased-call.
             // clang-cl, clang/gcc and cl < 19.51 are all correct.
             // Only the runtime value-check is quarantined; the type assertion above still runs everywhere.
             // TODO(msvc-19.51): drop this guard once the compiler fix ships.

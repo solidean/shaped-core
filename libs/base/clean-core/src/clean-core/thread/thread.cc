@@ -21,11 +21,6 @@
 #include <chrono>
 #include <thread>
 
-int cc::num_hardware_threads()
-{
-    unsigned const n = std::thread::hardware_concurrency();
-    return n == 0 ? 1 : int(n);
-}
 void cc::this_thread_yield()
 {
     std::this_thread::yield();
@@ -38,10 +33,6 @@ void cc::this_thread_sleep_secs(double secs)
     std::this_thread::sleep_for(std::chrono::duration<double>(secs));
 }
 #else
-int cc::num_hardware_threads()
-{
-    return 1;
-}
 
 void cc::this_thread_yield()
 {

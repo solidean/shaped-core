@@ -2,6 +2,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/exception.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_thread_pool.hh>
@@ -483,3 +484,48 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
     (void)cc::async_blocking_get_on(pool, hog); // settle it before the pool goes away
 }
 #endif
+
+// A pool must not keep a finished graph's RESULT alive.
+//
+// A scheduled async is submitted to the pool before anyone drives it, and blocking_get then drives its root inline —
+// so with no peers to steal from, the root can resolve without its queue entry ever being popped.
+// A queue entry is a strong reference, so the value would stay alive until the pool itself died.
+//
+// It reads as a leak of "some memory" and is worse than that in practice: the value may own something whose lifetime
+// is scoped to a subsystem the pool outlives, such as a GPU object belonging to a device.
+// Ungated deliberately — the no-threads pool is where this actually bit, and the threaded one must answer the same.
+TEST("async - a pool releases a finished graph's value", nx::config::no_scheduler)
+{
+    auto owned = std::make_shared<int>(7);
+    CHECK(owned.use_count() == 1);
+
+    // The pool OUTLIVES the graph, which is the whole point: checking after the pool dies proves nothing, since its
+    // queue is released with it either way.
+    // It is the DEFAULT scheduler too, because that is what a scheduled async submits itself to at creation — the
+    // shape every `cached.acquire_*` in shaped-graphics has.
+    cc::async_thread_pool pool(2);
+    cc::scoped_default_async_scheduler as_default(pool);
+    {
+        auto node = cc::make_async_scheduled<std::shared_ptr<int>>(
+            [captured = owned](async_context<std::shared_ptr<int>>& actx) -> cc::async_step_status
+            { return actx.success(std::shared_ptr<int>(captured)); });
+
+        auto const value = cc::async_blocking_get(node);
+        CHECK(value != nullptr);
+        CHECK(*value == 7);
+    }
+
+    // Both the frame's capture and the resolved value went with the graph handle, so only `owned` is left.
+    //
+    // The threaded pool needs a moment: blocking_get can return before the worker that popped the submitted node has
+    // dropped its reference, so this settles rather than being immediately true.
+    // The no-threads pool has nobody to settle *for* — the queue is drained only by the drive path — so there the
+    // very first poll is the answer, and it is the mode this was written for.
+    for (int i = 0; i < 200 && owned.use_count() != 1; ++i)
+    {
+#if CC_HAS_THREADS
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+#endif
+    }
+    CHECK(owned.use_count() == 1);
+}

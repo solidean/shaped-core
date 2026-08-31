@@ -1,6 +1,7 @@
 // vulkan epoch system: advance/retire, waits, and deferred-deletion staging.
 // The per-epoch bookkeeping types live in vulkan_epoch.hh, device-level teardown in vulkan_context.cc.
 
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -41,13 +42,45 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &_epoch_timeline,
     };
-    VkResult const r = vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE);
+    VkResult const r = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });
     if (r != VK_SUCCESS)
     {
         if (note_device_lost_if_lost(r, "epoch signal vkQueueSubmit"))
             throw sg::device_lost_exception(device_loss_reason());
         CC_ASSERT(false, "vkQueueSubmit (epoch signal) failed");
     }
+
+    // The ring's bytes were read by GPU copies recorded in `last`, so its span is only reclaimable once `last` retires.
+    // Record where it ended before the epoch is packaged.
+    _upload_inline.on_epoch_advance(last);
+    _download_inline.on_epoch_advance(last);
+    _descriptor_heap.on_epoch_advance(last);
+
+    // Auto-expire `last`'s transient resources: the transient heap reuses their storage for the new epoch, so a
+    // handle held past it must report itself expired rather than name recycled bytes.
+    // Done before the staged drain below, so each release is attributed to `last`.
+    // Outside any lock — expire() re-enters schedule_deferred_deletion, which takes _epoch_state.
+    auto const expiring_buffers = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto const& w : expiring_buffers)
+        if (auto const b = w.lock())
+            b->expire();
+
+    auto const expiring_textures = _transient_expiring_textures.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+    for (auto const& t : expiring_textures)
+        if (auto const tex = t.lock())
+            tex->expire();
 
     // Package everything `last` owns and push it onto the in-flight FIFO.
     // Advance is externally synchronized, so the pool drain races no submit — but the deletion staging below is fed from any thread.
@@ -80,6 +113,15 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
         else
             process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
     }
+
+    // Apply a pending ctx.transient.set_budget() now that the new epoch is open: it drains all in-flight epochs and resizes the transient heap.
+    // Rare — only after a set_budget — so the stall is acceptable.
+    apply_pending_transient_budget();
+}
+
+bool vulkan_context::has_epochs_in_flight()
+{
+    return _epoch_state.lock([](vulkan_epoch_state& s) { return !s.in_flight.empty(); });
 }
 
 void vulkan_context::process_completed_epochs()
@@ -112,10 +154,33 @@ void vulkan_context::process_completed_epochs()
                 }
         });
 
+    // Every epoch up to `completed` has finished on the GPU, so the staging bytes their copies read are free.
+    _upload_inline.on_epochs_completed(sg::epoch(completed));
+    _download_inline.on_epochs_completed(sg::epoch(completed));
+    _descriptor_heap.on_epochs_completed(sg::epoch(completed));
+
+    // A resource still named by an unfinished transfer-queue copy is put back rather than released, and retried on
+    // a later cycle — the epoch says the graphics queue is done with it, not the transfer queue.
+    cc::vector<vulkan_expiring_resource> deferred;
     cc::vector<cc::unique_function<void()>> finalizers;
     for (auto& e : done)
         for (auto& res : e.expiring)
+        {
+            if (res.copy_wait.is_pending() && !res.copy_wait.has_reached())
+            {
+                deferred.push_back(cc::move(res));
+                continue;
+            }
             release_expiring(_device, res, finalizers);
+        }
+
+    if (!deferred.empty())
+        _epoch_state.lock(
+            [&](vulkan_epoch_state& s)
+            {
+                for (auto& res : deferred)
+                    s.staged.push_back(cc::move(res));
+            });
 
     // Run finalizers outside the lock — they may be slow or re-entrant, and the thread is not fixed.
     for (auto& f : finalizers)
@@ -129,6 +194,16 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
         u64 const target = u64(e);
         u64 current = 0;
         vkGetSemaphoreCounterValue(_device, _epoch_timeline, &current);
+
+        // Yield before blocking.
+        //
+        // The GPU work this epoch is waiting on may itself be waiting on an async transfer's completion value, and
+        // where the copy actor has no thread of its own it runs on whoever sweeps the pump registry.
+        // Blocking straight into vkWaitSemaphores would therefore be a deadlock rather than a slow path: the only
+        // thread that could signal the value is the one parked in the wait.
+        while (current < target && cc::thread_pump_all())
+            vkGetSemaphoreCounterValue(_device, _epoch_timeline, &current);
+
         if (current < target)
         {
             auto const wait = VkSemaphoreWaitInfo{
@@ -143,6 +218,27 @@ void vulkan_context::wait_for_epoch(sg::epoch e)
         }
     }
     process_completed_epochs();
+}
+
+void vulkan_context::wait_for_submission_token(sg::submission_token token)
+{
+    if (_submission_timeline == VK_NULL_HANDLE || token == sg::submission_token::not_submitted)
+        return;
+
+    u64 const target = u64(token);
+    u64 current = 0;
+    vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+    if (current >= target)
+        return;
+
+    auto const wait = VkSemaphoreWaitInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+        .semaphoreCount = 1,
+        .pSemaphores = &_submission_timeline,
+        .pValues = &target,
+    };
+    VkResult const r = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+    note_device_lost_if_lost(r, "submission semaphore wait");
 }
 
 void vulkan_context::wait_for_next_inflight_epoch()

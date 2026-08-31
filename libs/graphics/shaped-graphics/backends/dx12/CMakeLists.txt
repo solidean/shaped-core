@@ -5,6 +5,7 @@ project(shaped-graphics-dx12 LANGUAGES CXX)
 # It creates a live D3D12 device, command lists, and GPU buffers, so it links the DirectX 12 libs from the Windows SDK (always present on the Windows path the enclosing CMakeLists gates it to).
 add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.cc
+    src/shaped-graphics/backends/dx12/dx12_gpu_load.cc
     src/shaped-graphics/backends/dx12/dx12_context.create.cc
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
@@ -50,6 +51,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/fwd.hh
     src/shaped-graphics/backends/dx12/dx12_common.hh
     src/shaped-graphics/backends/dx12/dx12_context.hh
+    src/shaped-graphics/backends/dx12/dx12_expected_messages.hh
     src/shaped-graphics/backends/dx12/dx12_epoch.hh
     src/shaped-graphics/backends/dx12/dx12_command_list.hh
     src/shaped-graphics/backends/dx12/dx12_barrier.hh
@@ -94,7 +96,8 @@ target_include_directories(shaped-graphics-dx12
 
 # d3d12/dxgi/dxguid ship with the Windows SDK on the default lib path;
 # d3dcompiler is only needed once we compile shaders (not yet).
-target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid)
+# pdh: the GPU Engine performance counters, which are the only route to GPU busy time on Windows.
+target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid pdh)
 
 # Names dx12_common.hh, this backend's single SDK gate, rather than <d3d12.h> and friends.
 # The gate opens and closes its own `byte` bracket and keeps its clean-core headers above it, so the PCH inherits the sanitization instead of racing it.
@@ -119,6 +122,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
+        tests/dx12-validation-broadcast-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc
         tests/dx12-completion-group-test.cc
@@ -132,6 +136,8 @@ if(SC_BUILD_TESTS)
         tests/dx12-staging-binding-group-test.cc
         tests/dx12-pipeline-cache-test.cc
         tests/dx12-cached-pso-test.cc
+
+        tests/dx12-gpu-metrics-test.cc
         tests/dx12-placed-test.cc
         tests/dx12-transient-test.cc
         tests/dx12-buffer-barrier-test.cc

@@ -31,7 +31,7 @@ uv run dev.py <command> [options]
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
-| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, and the LLVM tools coverage and PGO need. |
+| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, and the graphics environment (Vulkan, windowing, DXC). |
 | `list-presets` / `list-targets` / `list-toolsets` | What is available: build presets, a preset's CMake targets, the installed compiler toolsets. |
 
 `build` and `test` **auto-configure** when CMake inputs or the source listing change (fingerprinted); pass `--no-configure` to skip.

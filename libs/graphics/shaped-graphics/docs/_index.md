@@ -24,6 +24,8 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
 - [coding-guidelines](coding-guidelines.md) — the sg-specific conventions on top of the repo-wide ones.
   Handles, mutable-vs-immutable types, abstract interfaces backends derive from directly, smurf naming, and the duplication-over-abstraction stance.
   Extend it whenever generic advice turns out not to fit sg.
+- [writing a backend](writing-a-backend.md) — the procedure for building one: what to do before any rendering code, the milestone order, which sg abstractions turned out portable and which forked.
+  Written from the vulkan build-out and grown as it goes, because only a second implementation knows which of the first one's choices were the API leaking through.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [TODO](TODO.md) — running list of known follow-ups.
 
@@ -38,6 +40,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
   the frame loop, shutdown, and how device loss surfaces.
 - [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the epoch counter/fence, advance/retire, deferred deletion, and finalizers.
+- [gpu-metrics](concepts/gpu-metrics.md) — GPU memory and load: why they live in sg rather than cc, and why the board size and the process budget are not the same scale.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are concurrency-safe and which must be externally synchronized.
 - [command recording](concepts/command-recording.md) — `sg::command_list`: single-use, submit-or-drop-once, bound to its epoch,
   and the seven recording scopes (`cmd.upload` … `cmd.query`) every GPU operation is reached through.

@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/system_info.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/bench/environment.hh>
@@ -368,13 +369,18 @@ TEST("bench - the system summary is structurally complete even where it cannot b
     // Never absent, so the shape a consumer parses does not change when sysinfo lands.
     CHECK(!sys.os.empty());
     CHECK(!sys.arch.empty());
-    CHECK(!sys.cpu.empty());
     CHECK(!sys.build.empty());
 
     CHECK(sys.logical_cores >= 1);
 
-    // Until there is a system-information library to ask, every run says so rather than leaving a reader to notice.
-    CHECK(sys.is_provisional);
+    // The report is a view of cc's system information rather than a second source of it, so the two must agree.
+    // cpu is not asserted non-empty: a platform that will not name its CPU reports an empty string, which is the honest
+    // answer and was the placeholder "unknown" before.
+    CHECK(cc::string_view(sys.cpu) == cc::string_view(cc::get_system_info().cpu_brand));
+    CHECK(sys.logical_cores == cc::get_system_info().logical_cores());
+
+    // No placeholders left, since cc gained the system-information library this flag was waiting on.
+    CHECK(!sys.is_provisional);
 
     // The one field that decides whether a number means anything, and the compiler knows it exactly.
     CHECK(sys.assertions_enabled == (CC_ASSERT_ENABLED != 0));

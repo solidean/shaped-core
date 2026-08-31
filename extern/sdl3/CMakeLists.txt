@@ -88,6 +88,21 @@ set(SDL_METAL OFF CACHE BOOL "" FORCE)
 set(SDL_X11 ON CACHE BOOL "" FORCE)
 set(SDL_WAYLAND ON CACHE BOOL "" FORCE)
 
+# SDL is left out of the sanitizers, which the repo-wide ignorelist does not manage on its own.
+#
+# It is the only SHARED library in the build, and it links with `--no-undefined`.
+# The sanitizer runtime lives in the executable, so an instrumented shared object has nothing to resolve `__asan_init`
+# against at link time — a hard link error rather than the runtime detail it is for every static vendored library.
+# tools/cmake/sanitizer-ignorelist.txt does not reach it either: a UBSan check inlined from a system header is
+# attributed to that header, which is outside `extern/`.
+#
+# Directory-scoped and set BEFORE add_subdirectory, so every target SDL defines inherits it — the flag order is what
+# does the work, since this lands after the root's -fsanitize=.
+# Our own calls INTO SDL stay instrumented, which is the half we could act on anyway.
+if(SANITIZE AND NOT MSVC)
+    add_compile_options(-fno-sanitize=all)
+endif()
+
 # SYSTEM marks every target SDL defines as a system include, so <SDL3/SDL.h> cannot trip the consuming TU's
 # warnings — the same intent as the SYSTEM include directories on zydis and dxc.
 # EXCLUDE_FROM_ALL keeps SDL out of a plain `cmake --build .`.

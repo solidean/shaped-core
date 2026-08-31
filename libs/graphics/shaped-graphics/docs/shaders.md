@@ -173,6 +173,64 @@ All three are fixed from the shader being compiled, at every depth — an includ
 The last is what reaches a library mounted outside any package, so `#include "common/brdf.hlsli"` resolves against the `mount` above.
 Every path that resolves becomes a reload dependency of the shader that pulled it in.
 
+## Writing HLSL for both backends
+
+One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
+What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
+
+**Every one of them goes behind `#ifdef __spirv__`.**
+DXC ignores a `[[vk::…]]` attribute when it is not generating SPIR-V, and it ignores it *with a warning* — `-Wignored-attributes`.
+ssc compiles with `-WX` (`compile_options::warnings_as_errors`, on by default), so on the DXIL target an unguarded attribute is a compile error rather than a no-op.
+Nothing catches it at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
+
+- **`[[vk::binding(N, set)]]` on every resource.**
+  There is no `-fvk-*-shift` in our compile line, so an unannotated `b0`/`t0`/`u0` collapse onto the same SPIR-V binding number and collide.
+  The set an annotation names becomes the binding's `group_index`, which pins the slot the group must be bound at.
+  So an annotated shader bakes in its group split, and honouring it is the author's contract.
+  HLSL-for-dx12 leaves that split a runtime choice; both models stay supported.
+- **`[[vk::location(N)]]` on every vertex input**, numbered in the order the sg vertex layout lists its attributes.
+  sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
+  A mismatch is silent: the pipeline builds and the geometry is wrong.
+  A `#ifdef` per struct member reads badly, so fork the attribute itself once and use the macro on each line:
+
+```hlsl
+#ifdef __spirv__
+#define VK_LOCATION(n) [[vk::location(n)]]
+#else
+#define VK_LOCATION(n)
+#endif
+
+struct vs_input
+{
+    VK_LOCATION(0) float3 position : POSITION;
+    VK_LOCATION(1) float3 normal : NORMAL;
+};
+```
+- **`[[vk::push_constant]]` for inline constants**, which needs a fork with a real DXIL spelling on the other side rather than an empty one.
+  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
+  A shader that does not say `push_constant` therefore declares a resource the pipeline layout never binds.
+  There is no DXIL spelling of the attribute, and a root constant there is an ordinary `register(b0)`:
+
+```hlsl
+struct cube_constants
+{
+    float4x4 view_projection;
+};
+
+#ifdef __spirv__
+[[vk::push_constant]] ConstantBuffer<cube_constants> gConstants;
+#else
+ConstantBuffer<cube_constants> gConstants : register(b0);
+#endif
+```
+
+`__spirv__` is DXC's own macro, and it works here because **slib flattens a shader's includes once per target rather than once per shader**.
+The preprocess pass is given the same target the compile is, so the fork is resolved against the format actually being built.
+[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example of the last two.
+It declares no descriptor bindings at all, so it demonstrates nothing about the first.
+The worked examples for `[[vk::binding]]` are the vulkan backend's own tier-2 shaders:
+[`triangle.hlsl`](../backends/vulkan/tests/triangle.hlsl) and [`double_compute.hlsl`](../backends/vulkan/tests/double_compute.hlsl).
+
 ## Adding a shader
 
 1. Put the `.hlsl` under your target's `SOURCE_DIR`.
