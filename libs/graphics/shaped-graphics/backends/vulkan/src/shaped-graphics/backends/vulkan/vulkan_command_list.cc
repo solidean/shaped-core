@@ -335,7 +335,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
     cmd->_pre_buffer = VK_NULL_HANDLE;
-    (void)_command_list_slots.release(cmd->slot());
+    _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
 
@@ -384,7 +384,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     cmd._pool = VK_NULL_HANDLE;
     cmd._buffer = VK_NULL_HANDLE;
     cmd._pre_buffer = VK_NULL_HANDLE;
-    (void)_command_list_slots.release(cmd.slot());
+    _command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 

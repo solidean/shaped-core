@@ -8,6 +8,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
+  - **an async transfer does not order against an in-flight *stream* of the same resource.**
+    Command lists do: their access tracking reads the stream stamps alongside the async ones, waits, and warns once per stream.
+    The async tier does not — a download job reads `_pending_async_upload_value` and no stream value, and the upload side mirrors that.
+    So `ctx.stream.bytes_to_buffer` followed by `ctx.download.bytes_from_buffer` on one resource is unordered, and the readback can beat the stream.
+    Found while writing [tests/transfer/stream-test.cc](../tests/transfer/stream-test.cc)'s stream-wait test, whose first draft used the async tier as the consumer and read zeroes on dx12.
+    The fix mirrors what the command lists already do, in the async enqueue paths of both backends.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.

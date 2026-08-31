@@ -776,7 +776,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
     _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_pre_list));
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_pre_allocator), cmd->_queue});
-    (void)_command_list_slots.release(cmd->slot());
+    _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
     return token;
@@ -813,7 +813,7 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
         b->discard_slot(cmd.slot());
     for (auto const& t : cmd._touched_textures)
         t->discard_slot(cmd.slot());
-    (void)_command_list_slots.release(cmd.slot());
+    _command_list_slots.release(cmd.slot());
     cmd._touched_buffers.clear();
     cmd._touched_textures.clear();
 
