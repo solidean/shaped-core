@@ -25,6 +25,27 @@ std::unique_ptr<command_list> context::create_command_list()
     CC_UNREACHABLE("create_command_list failed on a healthy device — internal error");
 }
 
+cc::optional<submission_token> context::prepare_texture_for_async(raw_texture_handle const& texture,
+                                                                  subresource_range const& range,
+                                                                  async_direction direction)
+{
+    CC_ASSERT(texture != nullptr, "prepare_texture_for_async: texture is null");
+
+    auto const required = async_ready_layout(direction);
+    if (current_texture_layout(texture, range) == required)
+        return {};
+
+    if (texture->claim_async_fixup_warning())
+        CC_LOG_WARNING("an async transfer found a texture in a layout its transfer queue cannot use, so a command "
+                       "list holding one transition was submitted for it. Record cmd.prepare_for_async on a list you "
+                       "are already building, or create the texture with texture_description::initial_layout set, to "
+                       "avoid the submit");
+
+    auto cmd = create_command_list();
+    cmd->ensure_layout(texture, required, range);
+    return submit_command_list(cc::move(cmd));
+}
+
 swapchain_handle context::create_swapchain(swapchain_description const& desc)
 {
     auto r = try_create_swapchain(desc);

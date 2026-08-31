@@ -678,6 +678,13 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
     u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
@@ -798,6 +805,13 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
                                                              "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
@@ -875,6 +889,13 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
     CC_ASSERT(src->usage().has(sg::texture_usage::copy_src), "stream download source texture must have "
                                                              "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
+
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
 
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 

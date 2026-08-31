@@ -159,6 +159,14 @@ public:
             on_expired();
     }
 
+    /// Test-and-set the one-time flag behind the async-fixup warning; true only for the first caller.
+    /// Per texture rather than per process, because a second offending texture is a second thing to fix — and per
+    /// texture rather than per occurrence, because a streamed one would otherwise warn every frame.
+    [[nodiscard]] bool claim_async_fixup_warning() const
+    {
+        return !_warned_async_fixup.exchange(true, std::memory_order_relaxed);
+    }
+
 protected:
     explicit raw_texture(texture_description const& desc);
 
@@ -169,4 +177,6 @@ protected:
     texture_description _desc;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
+    mutable std::atomic<bool> _warned_async_fixup
+        = {false}; // mutable: the warning is about the texture, not a change to it
 };

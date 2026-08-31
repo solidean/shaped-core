@@ -528,6 +528,35 @@ public:
     // Epoch contract — bodies in vulkan_epoch.cc.
     // Realized on a pair of timeline semaphores: the epoch timeline gates reclamation, the submission timeline answers per-list queries.
 
+    /// `general` whichever way the transfer goes, so a texture transferred in both directions never changes layout
+    /// between them.
+    ///
+    /// The transfer queue could copy from TRANSFER_SRC_OPTIMAL and into TRANSFER_DST_OPTIMAL, and a direction-specific
+    /// layout would keep whatever compression that buys.
+    /// What rules it out is the validation layer, which tracks image layouts in `vkQueueSubmit` **call** order and
+    /// models no semaphore: an upload enqueued and then a download enqueued before the upload's actor has submitted
+    /// puts the download's fixup, which is a direct-queue submit issued immediately, ahead of the upload's copy in
+    /// call order.
+    /// The layer then reads the upload's copy as naming a layout the image has left, though the semaphores order them
+    /// the other way on the GPU.
+    /// One layout for both directions removes the second fixup, and with it the interleave.
+    ///
+    /// The direction is therefore accepted and ignored, as it is on dx12.
+    /// It stays in the API because it is the caller's statement of intent rather than this backend's answer, and a
+    /// transfer path that submitted its own fixup in queue order could honour it.
+    [[nodiscard]] sg::texture_layout async_ready_layout(sg::async_direction) const override
+    {
+        return sg::texture_layout::general;
+    }
+
+    [[nodiscard]] sg::texture_layout current_texture_layout(sg::raw_texture_handle const& texture,
+                                                            sg::subresource_range const& range) const override
+    {
+        auto const t = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+        CC_ASSERT(t != nullptr, "texture is not a vulkan_texture");
+        return t->current_layout_of(range);
+    }
+
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
     void advance_epoch(cc::optional<int> allowed_in_flight) override;

@@ -410,6 +410,21 @@ void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
     }
 }
 
+void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle texture,
+                                                    sg::texture_layout layout,
+                                                    cc::optional<sg::subresource_range> const& range)
+{
+    auto const t = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+    CC_ASSERT(t != nullptr, "texture is not a vulkan texture");
+    CC_ASSERT(!t->is_expired(), "ensure_layout uses a transient texture past its epoch (expired)");
+
+    // No stages and no access: this asks for a layout and nothing else, so the state machine sees a pure layout
+    // change and the barrier it produces carries the transition alone.
+    auto const whole = sg::subresource_range::whole(subresource_extent_of(t->description()));
+    track_texture_access(*t, range.has_value() ? range.value() : whole, {}, {}, layout);
+    flush_barriers();
+}
+
 void vulkan_command_list::flush_barriers()
 {
     for (auto const* buffer : _pending_barrier_buffers)

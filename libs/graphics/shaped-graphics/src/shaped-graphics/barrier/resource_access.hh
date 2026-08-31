@@ -85,6 +85,18 @@ enum class sg::texture_layout : sg::u32
     present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
 
+/// Which way an async / streaming transfer of a texture goes, for `cmd.prepare_for_async`.
+/// The layout it resolves to is the backend's — vulkan wants a direction-specific transfer layout, while a D3D12 copy
+/// queue cannot run layout barriers at all and needs COMMON either way.
+enum class sg::async_direction : sg::u32
+{
+    upload,   ///< host -> texture: `copy_dst` on vulkan, `general` on dx12
+    download, ///< texture -> host: `copy_src` on vulkan, `general` on dx12
+    /// Both, at the cost of the compression a specialized layout keeps: `general` everywhere.
+    /// Explicit only, and never a default — the trade is the caller's to make once they know they do both.
+    both,
+};
+
 namespace sg
 {
 /// The accesses that constitute an *unordered write* — one the hardware does not auto-serialize, so a following access, read or write, needs an explicit barrier.

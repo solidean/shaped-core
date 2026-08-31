@@ -148,6 +148,33 @@ public:
     // Epochs — frame-level GPU lifetime + CPU↔GPU sync.
     // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
 public:
+    /// The layout a texture must be in for an async or streaming transfer of `direction` to copy it without a barrier
+    /// of its own — `general` on dx12, whose copy queue cannot run layout barriers at all, and a transfer layout on
+    /// vulkan.
+    /// `cmd.prepare_for_async` is what a caller writes; this is the seam it resolves through.
+    [[nodiscard]] virtual texture_layout async_ready_layout(async_direction direction) const = 0;
+
+    /// The layout `range` of `texture` is in as of the last submitted command list.
+    /// A range spanning subresources in different layouts reports the first one, which is all a whole-subresource
+    /// transfer needs.
+    [[nodiscard]] virtual texture_layout current_texture_layout(raw_texture_handle const& texture,
+                                                                subresource_range const& range) const = 0;
+
+    /// Settle `range` of `texture` into the layout an async or streaming transfer of `direction` needs, and return the
+    /// token of the submit that did it — nullopt when the texture was already there and nothing was submitted.
+    ///
+    /// A transfer queue cannot settle a layout for itself: a D3D12 copy queue runs no layout barriers at all, and a
+    /// vulkan transfer queue that runs them puts a claim on a timeline the validation layer reads in submit-call
+    /// order rather than in GPU order.
+    /// So the direct queue does it, here, as a throwaway command list holding one transition.
+    ///
+    /// **It warns, once per texture**, because the caller could have avoided the submit entirely by recording
+    /// `cmd.prepare_for_async` on a list they were already building.
+    /// There is no opt-out on purpose: doing that is both the fix and the thing the warning asks for.
+    [[nodiscard]] cc::optional<submission_token> prepare_texture_for_async(raw_texture_handle const& texture,
+                                                                           subresource_range const& range,
+                                                                           async_direction direction);
+
     /// The epoch new work is currently recorded into.
     [[nodiscard]] virtual epoch current_epoch() const = 0;
 

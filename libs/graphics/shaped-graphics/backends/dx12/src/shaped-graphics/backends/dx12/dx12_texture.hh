@@ -114,6 +114,13 @@ public:
         return _access.lock([&](dx12_texture_access& t) { return t.flush(slot); });
     }
 
+    /// The layout `range` is in as of the last submitted command list.
+    /// Thread-safe.
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.current_layout_of(range); });
+    }
+
     /// Finalize `slot` at submit: its layouts become the current ones, and the transitions returned are the entry
     /// barriers the caller executes from a command list prepended to that same submit.
     /// Thread-safe, and called in submission order.

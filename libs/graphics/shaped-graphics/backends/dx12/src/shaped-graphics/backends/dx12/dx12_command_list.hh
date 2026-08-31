@@ -159,6 +159,10 @@ public:
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
+    void transition_texture_layout(sg::raw_texture_handle texture,
+                                   sg::texture_layout layout,
+                                   cc::optional<sg::subresource_range> const& range) override;
+
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
 
     void upload_bytes_to_texture(sg::raw_texture_handle texture,

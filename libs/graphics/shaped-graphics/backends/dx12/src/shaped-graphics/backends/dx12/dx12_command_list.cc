@@ -143,6 +143,21 @@ void dx12_command_list::flush_barriers()
     _pending_texture_barriers.clear();
 }
 
+void dx12_command_list::transition_texture_layout(sg::raw_texture_handle texture,
+                                                  sg::texture_layout layout,
+                                                  cc::optional<sg::subresource_range> const& range)
+{
+    auto const t = std::dynamic_pointer_cast<dx12_texture const>(texture);
+    CC_ASSERT(t != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!t->is_expired(), "ensure_layout uses a transient texture past its epoch (expired)");
+
+    // No stages and no access: this asks for a layout and nothing else, so the state machine sees a pure layout
+    // change and the barrier it produces carries the transition alone.
+    auto const whole = sg::subresource_range::whole(subresource_extent_of(t->description()));
+    track_texture_access(t, range.has_value() ? range.value() : whole, {}, {}, layout);
+    flush_barriers();
+}
+
 void dx12_command_list::transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout)
 {
     CC_ASSERT(texture != nullptr, "transition_texture_to: texture is null");

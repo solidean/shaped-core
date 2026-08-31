@@ -210,41 +210,12 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
 
         if (job.is_texture)
         {
-            // The transfer queue borrows the layout here, as on the upload side — transition from the layout
-            // captured at enqueue and hand the texture straight back to it.
-            //
-            // A readback never *claims* the one-time transition, and that asymmetry with the upload side is the
-            // point: two transfer queues bidding for one claim can settle it in the order opposite to the one their
-            // cross-wait imposes, leaving the loser naming a layout the image is not in yet.
-            // A readback has nothing to lose by declining — it writes nothing, so a later discard costs it nothing,
-            // and reading a texture no one has written yet is meaningless whatever layout it is in.
-            // So it discards from UNDEFINED while the transition is still owed, and leaves the claim for whoever
-            // writes first.
+            // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
+            // transfer was enqueued, and the semaphore wait that orders this submit after that one also makes its
+            // writes visible here.
+            // That is the whole point of settling the layout up front — a transfer that claims no layout has none
+            // for the validation layer to disagree with, and it reads submit-call order rather than GPU order.
             auto const range = sg::subresource_range(job.subresource);
-            bool const owed = texture->needs_initial_transition();
-            auto const current = owed ? sg::texture_layout::undefined : job.restore_layout;
-            auto const sub_range = VkImageSubresourceRange{.aspectMask = vk_aspect_mask_from(range, texture->format()),
-                                                           .baseMipLevel = u32(job.subresource.mip_level),
-                                                           .levelCount = 1,
-                                                           .baseArrayLayer = u32(job.subresource.array_layer),
-                                                           .layerCount = 1};
-
-            auto const to_copy = VkImageMemoryBarrier2{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-                .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .oldLayout = vk_layout_from(current),
-                .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = texture->_image,
-                .subresourceRange = sub_range,
-            };
-            auto const dep = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                              .imageMemoryBarrierCount = 1,
-                                              .pImageMemoryBarriers = &to_copy};
-            vkCmdPipelineBarrier2(_window_buffers[slot], &dep);
 
             auto const first_row = done / job.row_bytes;
             auto const row_count = chunk / job.row_bytes;
@@ -259,26 +230,10 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                 .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
                 .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
             };
-            vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                   _staging, 1, &copy);
-
-            auto const to_general = VkImageMemoryBarrier2{
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-                .srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                // Back to UNDEFINED-equivalent resting: the claim is still owed, so whoever takes it discards anyway.
-                .newLayout = vk_layout_from(job.restore_layout),
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = texture->_image,
-                .subresourceRange = sub_range,
-            };
-            auto const dep_back = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                                   .imageMemoryBarrierCount = 1,
-                                                   .pImageMemoryBarriers = &to_general};
-            vkCmdPipelineBarrier2(_window_buffers[slot], &dep_back);
+            // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
+            // and one layout for both directions is what keeps a transfer of the other direction from
+            // moving it — see vulkan_context::async_ready_layout.
+            vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_GENERAL, _staging, 1, &copy);
         }
         else
         {
@@ -624,6 +579,16 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
     auto dst = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
     auto completion = cc::make_async_manual<cc::unit>();
 
+    // Settled by the DIRECT queue before the transfer runs: this queue cannot transition an image for itself on
+    // dx12 at all, and on vulkan a claim it makes lands on a timeline the validation layer reads in submit-call
+    // order rather than in GPU order.
+    //
+    // **Before this job's stamps, not after.**
+    // The fixup is an ordinary command list, so its submit reads the texture's pending-transfer values and waits on
+    // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
+    // Running first also means the last-used token read below already covers the fixup.
+    (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     vulkan_async_download_job job;
     job.texture_source = src;
     job.is_texture = true;
@@ -638,7 +603,6 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
 
     src->_pending_async_download_value.store(job.completion_value.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = src->current_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
@@ -685,6 +649,16 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
         return sg::stream_download_handle(cc::move(control), cc::move(future));
     }
 
+    // Settled by the DIRECT queue before the transfer runs: this queue cannot transition an image for itself on
+    // dx12 at all, and on vulkan a claim it makes lands on a timeline the validation layer reads in submit-call
+    // order rather than in GPU order.
+    //
+    // **Before this job's stamps, not after.**
+    // The fixup is an ordinary command list, so its submit reads the texture's pending-transfer values and waits on
+    // them — and a value stamped for a job still being enqueued is one nothing will ever signal.
+    // Running first also means the last-used token read below already covers the fixup.
+    (void)_ctx->prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     vulkan_async_download_job job;
     job.texture_source = src;
     job.is_texture = true;
@@ -701,7 +675,6 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
 
     src->_pending_stream_download_value.store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = src->current_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 

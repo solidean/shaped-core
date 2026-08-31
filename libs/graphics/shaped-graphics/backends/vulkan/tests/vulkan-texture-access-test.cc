@@ -96,18 +96,18 @@ TEST("sg vulkan - the initial transition is claimed exactly once")
     CHECK(!access.claim_initial_transition());
 }
 
-TEST("sg vulkan - reading the current layout does not spend the initial claim")
+TEST("sg vulkan - the current layout is undefined until the initial transition is claimed")
 {
-    // The two are deliberately separate calls, and the async transfer path takes them at different moments: it reads
-    // the layout to restore when the transfer is enqueued, and claims the discard only where it records the barrier.
-    // A claim spent on a job that is later skipped would leave the image in UNDEFINED with every list assuming it
-    // rests somewhere real.
+    // What reads this is the async fixup, deciding whether the transfer queue can copy the image as it stands.
+    // Until the initial transition has been claimed the image really is UNDEFINED, whatever layout this tracker was
+    // seeded to rest in — so it says so, and the fixup submits the list that claims it rather than copying from an
+    // image vkCreateImage has not left yet.
     auto access = tracker(sg::texture_layout::copy_dst);
 
-    CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::copy_dst);
-    CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::copy_dst);
+    CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::undefined);
     CHECK(access.needs_initial_transition());
 
+    // Reading it does not spend the claim, which stays available for whichever submit path takes it.
     CHECK(access.claim_initial_transition());
     CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::copy_dst);
 }

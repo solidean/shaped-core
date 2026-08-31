@@ -106,6 +106,24 @@ class sg::backend::dx12::dx12_texture_access
 public:
     explicit dx12_texture_access(sg::subresource_extent extent) : _current(extent) {}
 
+    /// The layout `range`'s first subresource is in as of the last submitted list.
+    /// For the async transfer path, which records on the copy queue and so cannot go through declare/flush at all.
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range)
+    {
+        sg::texture_layout layout = sg::texture_layout::undefined;
+        bool first = true;
+        _current.for_each_in(range,
+                             [&](sg::resource_access_state const& state)
+                             {
+                                 if (first)
+                                 {
+                                     layout = state.curr_layout;
+                                     first = false;
+                                 }
+                             });
+        return layout;
+    }
+
     /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, entering an untouched box at `layout`, without emitting anything.
     /// Call once per binding — a texture bound several times to one op declares several times, and `flush` then merges them per box.
     /// Thread-safe via the owning dx12_texture's mutex.

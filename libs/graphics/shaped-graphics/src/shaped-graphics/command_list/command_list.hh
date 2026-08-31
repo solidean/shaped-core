@@ -55,6 +55,23 @@ public:
     /// GPU-query facade: `cmd.query.record_gpu_timestamp()` / `.is_supported()`.
     command_list_query_scope query;
 
+    /// Leave `range` of `texture` in `layout` when this list submits, transitioning it here rather than at its next use.
+    /// The point is what the *next* consumer finds: a list that ends somewhere specific saves the one after it a
+    /// transition, and an async transfer needs the texture settled by the direct queue before it runs at all.
+    /// Buffers have no layout and take no overload.
+    /// `layout` must not be `undefined`.
+    void ensure_layout(raw_texture_handle texture, texture_layout layout, cc::optional<subresource_range> range = {});
+
+    /// Leave `range` of `texture` in the layout an async or streaming transfer of `direction` needs.
+    /// A convenience over ensure_layout with the layout the **backend** picks, which is the reason to prefer it: the
+    /// async-ready layout is `general` on dx12 and a transfer layout on vulkan, so a caller naming one by hand has
+    /// written backend-specific code.
+    /// A transfer that finds the texture elsewhere still works — it submits a fixup of its own and warns — so this is
+    /// how a caller avoids the warning rather than a precondition.
+    void prepare_for_async(raw_texture_handle texture,
+                           async_direction direction,
+                           cc::optional<subresource_range> range = {});
+
 protected:
     command_list(sg::context& ctx, epoch created_in);
 
@@ -69,6 +86,12 @@ protected:
     friend class command_list_raster_scope;
     friend class command_list_raster_manual_scope;
     friend class rendering_scope;
+
+    /// Transition `range` of `texture` to `layout`, declared and flushed like any other access.
+    /// `range` unset means the whole texture.
+    virtual void transition_texture_layout(raw_texture_handle texture,
+                                           texture_layout layout,
+                                           cc::optional<subresource_range> const& range) = 0;
 
     virtual void upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) = 0;
 

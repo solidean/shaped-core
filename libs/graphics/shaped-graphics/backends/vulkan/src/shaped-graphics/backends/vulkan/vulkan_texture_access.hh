@@ -143,6 +143,13 @@ public:
     /// Whole-subresource transfers are the only ones that reach it, so one layout describes the range.
     [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range)
     {
+        // While the initial transition is still owed the image really is UNDEFINED, whatever this tracker says it
+        // rests in — so report that rather than the resting layout.
+        // What reads this is the async fixup, and telling it the truth is what makes it submit the list that claims
+        // the transition instead of copying from an image vkCreateImage has not left yet.
+        if (_needs_initial_transition)
+            return sg::texture_layout::undefined;
+
         sg::texture_layout layout = sg::texture_layout::undefined;
         bool first = true;
         _current.for_each_in(range,

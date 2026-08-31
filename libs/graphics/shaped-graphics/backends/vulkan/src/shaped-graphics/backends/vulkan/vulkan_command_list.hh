@@ -183,6 +183,10 @@ public:
 protected:
     // Stages the bytes in the context's upload ring and records a copy out of it.
     // Body in vulkan_command_list.cc.
+    void transition_texture_layout(sg::raw_texture_handle texture,
+                                   sg::texture_layout layout,
+                                   cc::optional<sg::subresource_range> const& range) override;
+
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
     // Body in vulkan_command_list.cc.
     void upload_bytes_to_texture(sg::raw_texture_handle texture,
