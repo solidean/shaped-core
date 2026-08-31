@@ -5,8 +5,8 @@
 
 /// Aggregate forward declarations for babel-serializer.
 /// Each format lives in its own sub-namespace — babel::base64, babel::json, babel::markdown, babel::sqlite,
-/// babel::obj, babel::gltf, babel::png, babel::jpg, babel::hdr, babel::pfm — plus the babel::image aggregator
-/// on top of the four image codecs.
+/// babel::obj, babel::stl, babel::gltf, babel::png, babel::jpg, babel::hdr, babel::pfm — plus the babel::image
+/// aggregator on top of the four image codecs.
 /// Each owns its own header; include that header directly when it is all you need.
 
 namespace babel
@@ -66,6 +66,15 @@ struct data;
 /// The domain every recording site in babel::obj is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::obj
+
+namespace babel::stl
+{
+enum class container : u8;
+struct data;
+
+/// The domain every recording site in babel::stl is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::stl
 
 namespace babel::gltf
 {

@@ -312,14 +312,14 @@ struct sweep_row
 }
 
 /// One sphere per (row, column), each with its own material and its place in the grid.
-[[nodiscard]] cc::vector<sv::mesh> make_grid(sv::triangle_geometry const& geometry,
-                                             sv::mesh_attribute const& frames,
-                                             sv::material_library& lib)
+[[nodiscard]] cc::vector<sv::mesh_data> make_grid(sv::triangle_geometry const& geometry,
+                                                  sv::mesh_attribute const& frames,
+                                                  sv::material_library& lib)
 {
     auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
     auto const rows = make_rows();
 
-    auto out = cc::vector<sv::mesh>();
+    auto out = cc::vector<sv::mesh_data>();
     out.reserve(rows.size() * column_count);
 
     for (auto r = 0; r < rows.size(); ++r)
@@ -366,14 +366,14 @@ struct sweep_row
                           + (float(block % blocks_across) - float(blocks_across - 1) * 0.5f) * block_pitch_x;
             float const z = float(depth) * spacing + float(block / blocks_across) * block_pitch_z;
 
-            out.push_back(
-                sv::mesh{.name = cc::format("{}-{}", row.name, c),
-                         .geometry = geometry,
-                         // A mesh attribute is a value sharing its pinned payload, so every sphere naming the same
-                         // frames costs a refcount bump rather than a copy — and one upload rather than thirty-five.
-                         .attributes = {frames},
-                         .transform = tg::affine_transform3f::make_translation(tg::vec3f(x, sphere_radius, z)),
-                         .material = id});
+            out.push_back(sv::mesh_data{
+                .name = cc::format("{}-{}", row.name, c),
+                .geometry = geometry,
+                // A mesh attribute is a value sharing its pinned payload, so every sphere naming the same
+                // frames costs a refcount bump rather than a copy — and one upload rather than thirty-five.
+                .attributes = {frames},
+                .transform = tg::affine_transform3f::make_translation(tg::vec3f(x, sphere_radius, z)),
+                .material = id});
         }
     }
     return out;
@@ -406,13 +406,14 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         = float(column_count - 1) * spacing * float(blocks_across) + block_gap_x * float(blocks_across - 1);
     float const grid_depth = float(rows_per_block * block_bands - 1) * spacing + block_gap_z * float(block_bands - 1);
 
-    auto const floor = sv::mesh{.name = "ground",
-                                .geometry = sv::triangle_geometry::create_from_positions(
-                                    ground_quad(0.0f, cc::max(grid_width, grid_depth) + 8.0f)),
-                                .material = lib.acquire(sv::material::create(
-                                    "ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
-                                    {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
-                                     sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
+    auto const floor = sv::mesh_data{
+        .name = "ground",
+        .geometry
+        = sv::triangle_geometry::create_from_positions(ground_quad(0.0f, cc::max(grid_width, grid_depth) + 8.0f)),
+        .material = lib.acquire(
+            sv::material::create("ground", lib.acquire_type(sv::builtin_material::openpbr).value(),
+                                 {sv::material_attribute_binding::of("base_color", tg::vec3f(0.32f, 0.32f, 0.34f)),
+                                  sv::material_attribute_binding::of("specular_roughness", 0.55f)}))};
 
     for (auto f : sv::interactive("shaped-viewer/openpbr-spheres"))
     {

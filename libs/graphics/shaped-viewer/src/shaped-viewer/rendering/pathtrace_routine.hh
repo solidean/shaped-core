@@ -75,9 +75,16 @@ struct sv::pt_trace_desc
     ///
     /// `sg::tlas_instance::hit_group_offset` indexes exactly this list, so the caller has already fixed the order and
     /// must not disturb it between building the instances and getting here.
-    /// A permutation whose shader has not compiled — still in flight, or a broken material — makes the whole trace a
-    /// no-op, the same degradation a broken shader edit takes.
+    /// A permutation whose shader has not compiled — still in flight, or a broken material — is replaced by
+    /// `fallback` for this trace, so one bad material costs its own meshes their shading rather than costing the view
+    /// its whole image.
     cc::span<material_permutation const* const> hit_groups;
+
+    /// The neutral hit group a permutation that did not compile is substituted by — `material_shader_cache::acquire_fallback`.
+    ///
+    /// Null means no substitution: a permutation that has not compiled then makes the whole trace a no-op, which is the
+    /// old all-or-nothing behavior and what a caller with no cache at hand gets.
+    material_permutation const* fallback = nullptr;
 
     /// The manager's bindless tables, snapshotted and locked for this recording — bound as the pipeline's second group.
     /// It must outlive the dispatch, which is what `gpu_resource_manager::freeze()`'s scope is for.

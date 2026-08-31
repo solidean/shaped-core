@@ -4,8 +4,10 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/material/resolve.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/shader_library.hh>
 
 namespace sv
@@ -40,6 +42,23 @@ material_shader_options material_shader_cache::generation_options() const
             .runtime_include = _runtime_include,
             .epilogue_include = _epilogue_include,
             .bindless = &_bindless};
+}
+
+material_permutation const& material_shader_cache::acquire_fallback()
+{
+    // An EMPTY signature is the whole trick: with no attributes there is no parameter block to read, so this one hit
+    // group is valid for an instance whose block was laid out for something else entirely.
+    //
+    // Static because a `resolved_material` borrows its type and its material, and this one has to outlive the resolve.
+    // Its name is what its content hash is over, so nothing else can collide with it.
+    static auto const type = material_type::create("sv_fallback", {},
+                                                   "    surface.base_color = float3(0.5, 0.5, 0.5);\n"
+                                                   "    surface.specular_roughness = 1.0;");
+    static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
+
+    // The mesh is what a resolve walks for candidates, and an empty signature asks it for nothing.
+    auto const mesh = sv::mesh();
+    return acquire(resolve_material(type, material, mesh));
 }
 
 material_permutation const* material_shader_cache::find(cc::hash128 key) const

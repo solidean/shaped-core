@@ -15,6 +15,7 @@ enum class sv::material_slot_kind : sv::u8
     constant,             ///< the attribute's value itself, in the layout `attribute_format` names
     attribute_descriptor, ///< an `sv::attribute_desc` — where a mesh attribute's elements live
     texture_index,        ///< a `u32` index into the bindless texture table
+    sample_transform,     ///< two `float4`s — the scale and bias a sampled attribute is remapped by
 };
 
 /// One field of the per-instance parameter block a permutation reads.

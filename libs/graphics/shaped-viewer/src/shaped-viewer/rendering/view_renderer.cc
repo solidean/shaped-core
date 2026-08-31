@@ -412,6 +412,9 @@ void view_renderer::trace(sg::command_list& cmd,
                                      .output = output,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
+                                     // One material still compiling, or one that does not compile, degrades to grey
+                                     // shading on its own meshes rather than costing the view its whole image.
+                                     .fallback = &resources.shaders.acquire_fallback(),
                                      .bindless = &bindless});
 
     if (slot->accum_frame < accumulation_frame_cap)
@@ -482,6 +485,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
                                      .output = slot.texture,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
+                                     // One material still compiling, or one that does not compile, degrades to grey
+                                     // shading on its own meshes rather than costing the view its whole image.
+                                     .fallback = &resources.shaders.acquire_fallback(),
                                      .bindless = &bindless});
 
     if (slot.accum_frame < accumulation_frame_cap)

@@ -44,6 +44,13 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
     src/shaped-viewer/resources/material_shader_cache.cc
+    src/shaped-viewer/asset/uri_resolver.cc
+    src/shaped-viewer/asset/asset_data.cc
+    src/shaped-viewer/asset/asset_loader.cc
+    src/shaped-viewer/asset/impl/tangent_frames.cc
+    src/shaped-viewer/asset/impl/gltf_import.cc
+    src/shaped-viewer/asset/impl/obj_import.cc
+    src/shaped-viewer/asset/impl/stl_import.cc
 )
 
 target_sources(shaped-viewer
@@ -65,6 +72,10 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/background.hh
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/mesh.hh
+    src/shaped-viewer/scene/mesh_data.hh
+    src/shaped-viewer/asset/uri_resolver.hh
+    src/shaped-viewer/asset/asset_data.hh
+    src/shaped-viewer/asset/asset_loader.hh
     src/shaped-viewer/scene/mesh_attribute.hh
     src/shaped-viewer/scene/mesh_flags.hh
     src/shaped-viewer/scene/mesh_texture.hh
@@ -115,7 +126,11 @@ target_include_directories(shaped-viewer
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-target_link_libraries(shaped-viewer PUBLIC shaped-rendering)
+# babel-serializer is what reads the asset formats sv imports (glTF, OBJ) and decodes their images.
+# PUBLIC because `asset_loader` takes an already-parsed `babel::gltf::data` / `babel::obj::data`, so a caller who reads a
+# document for their own reasons can hand it straight over rather than re-reading it.
+# A legal direction — data/ sits below graphics/ — and the first time sv links anything below shaped-rendering.
+target_link_libraries(shaped-viewer PUBLIC shaped-rendering babel-serializer)
 
 # sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
 # PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
@@ -182,6 +197,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-generator-test.cc
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
+        tests/asset-loading-test.cc
     )
 
     target_link_libraries(shaped-viewer-test

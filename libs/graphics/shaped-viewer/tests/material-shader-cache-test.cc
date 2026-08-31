@@ -12,7 +12,9 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
+#include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
+#include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/scene/mesh.hh>
@@ -25,10 +27,18 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// A CPU attribute as the binding a GPU mesh carries.
+/// The id is arbitrary: resolution matches on name, format and frequency, and never reaches for the buffer behind one.
+[[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
+{
+    auto const per_instance = a.frequency == sv::attribute_frequency::per_instance;
+    return sv::mesh_attribute_binding::of(a, per_instance ? sv::attribute_id::invalid : sv::attribute_id(0));
+}
+
 [[nodiscard]] sv::mesh make_mesh()
 {
-    auto const positions = cc::array<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    // Resolution reads the lists and the summary, never the geometry itself, so a stand-in id is all this needs.
+    return {.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
 }
 
 /// Drives a permutation's compiles to completion and fails the test with DXC's own message when one did not build.
@@ -70,6 +80,53 @@ void require_compiled(sv::material_permutation const& p)
 }
 } // namespace
 
+TEST("sv::material_shader_cache - the fallback stands in for a permutation that did not compile")
+{
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the generated shaders");
+
+    auto cache = sv::material_shader_cache::create(
+        sg::shader_format::dxil, {.epilogue_include = sv::material_shader_cache::hit_epilogue_include});
+
+    auto const& fallback = cache.acquire_fallback();
+    require_compiled(fallback);
+
+    // The whole reason it can stand in for anything: an empty signature reads NO parameter block, so an instance whose
+    // block was laid out for some other material is simply never touched.
+    CHECK(fallback.layout.slots.empty());
+    CHECK(fallback.layout.size_bytes == 0);
+
+    // Nothing to sample and nothing to cut out, so it needs neither a sampler nor an any-hit.
+    CHECK(fallback.samplers.empty());
+    CHECK(!fallback.can_cut_out);
+
+    // Compiled once per cache, like any other permutation.
+    CHECK(&cache.acquire_fallback() == &fallback);
+    auto const count = cache.count();
+    CHECK(&cache.acquire_fallback() == &fallback);
+    CHECK(cache.count() == count);
+
+    // The case it exists for: a material type whose fragment does not compile.
+    // Its permutation comes back with an ERROR rather than a shader, which is what the trace substitutes on — and
+    // before this it made the whole view a no-op instead of just its own meshes.
+    auto lib = sv::material_library::create();
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
+    auto const broken = lib.register_type(
+        sv::material_type::create("broken", cc::move(signature), "    surface.nonsense = not_a_function(roughness);"));
+    auto const id = lib.acquire(sv::material::create("broken", broken, {}));
+
+    auto const& bad = cache.acquire(sv::resolve_material(lib, id, make_mesh()));
+    (void)cc::try_async_blocking_get(bad.shader);
+    CHECK(bad.shader->has_error());
+    CHECK(bad.shader->try_value() == nullptr);
+
+    // ...and it is a different permutation from the fallback, so substituting is a choice the trace makes rather than
+    // something the cache did behind it.
+    CHECK(&bad != &fallback);
+}
+
 TEST("sv::material_shader_cache - two materials of one permutation are one compile")
 {
     if (!sv_test::shared_env().has_compiler)
@@ -103,8 +160,8 @@ TEST("sv::material_shader_cache - two materials of one permutation are one compi
     // A texture is the one thing that changes the generated text, so it is the one thing that costs a second compile.
     auto textured = make_mesh();
     textured.attributes.push_back(
-        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
-                                   cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+        bind(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                        cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)})));
     textured.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(1), .uv_attribute = "uv"}});
 
     auto const& sampled = cache.acquire(sv::resolve_material(lib, gold, textured));

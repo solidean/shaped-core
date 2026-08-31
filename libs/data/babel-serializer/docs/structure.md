@@ -108,9 +108,17 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
 - `[planned]` **writer**.
 
+### stl [done]
+
+Both containers, chosen by size rather than by the leading `solid` — a binary file's 80-byte header is free-form vendor text and often starts with it.
+A faithful mirror: three positions per triangle in file order, each facet's declared normal, and binary's reserved per-triangle attribute field.
+Nothing is welded, indexed or derived, because STL is a soup of independent triangles and building a mesh out of one belongs to whoever wants a mesh.
+
+`[planned]` a writer.
+
 ### Other geometry formats [planned]
 
-`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`, `.stl`.
+`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`.
 
 ## image/ [in progress]
 

@@ -184,7 +184,7 @@ private:
     /// The GPU resources this viewer's views draw from — where a mesh and its materials are uploaded.
     ///
     /// Internal, because acquiring is not the caller's job: `scene_ref::add_mesh` does it from the content hashes an
-    /// `sv::mesh` already carries, which is what keeps a per-frame add O(1).
+    /// `sv::mesh_data` already carries, which is what keeps a per-frame add O(1).
     [[nodiscard]] gpu_resource_manager& resources();
 
     /// The window named `id`, appending it (and the root view it presents) on first use.

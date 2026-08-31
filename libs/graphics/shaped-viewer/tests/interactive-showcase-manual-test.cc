@@ -8,7 +8,7 @@ using namespace cc::primitive_defines;
 // The viewer as a caller is meant to use it: `sv::interactive`, real geometry, and a layout of several views.
 //
 // Everything here is the sanctioned path — no context, no window, no swapchain, no shader library, no render plan is
-// touched by hand, and no resource is acquired: an `sv::mesh` carries its own content hashes, so placing one every
+// touched by hand, and no resource is acquired: an `sv::mesh_data` carries its own content hashes, so placing one every
 // frame uploads nothing after the first.
 // The one thing that *is* built outside the loop is the mesh, because that is what pins and hashes.
 //

@@ -139,3 +139,103 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
     CHECK(records[0].is_indexed == 0u);
 }
+
+TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    // A material type whose fragment is not HLSL, which is the case the fallback exists for: before it, one of these
+    // anywhere in a scene made the whole trace a no-op.
+    auto& lib = *sv::acquire_material_library().value();
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
+    auto const type = lib.register_type(
+        sv::material_type::create("sv_test_broken", cc::move(signature), "    surface.x = not_a_function(roughness);"));
+
+    auto const box = sv_test::make_cornell_box();
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto mesh = sv_test::as_mesh("broken", box.positions, box.materials);
+    mesh.material = lib.acquire(sv::material::create("sv_test_broken", type, {}));
+
+    auto const item = resources.acquire_scene_item(mesh);
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
+    REQUIRE(mesh_rec != nullptr);
+
+    auto instances = cc::vector<sg::tlas_instance>();
+    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(permutation);
+
+    auto const size = tg::vec2i(16, 16); // nothing here reads the image, so it is as small as a dispatch can be
+
+    auto const trace = [&](sv::material_permutation const* fallback)
+    {
+        auto cmd = ctx.create_command_list();
+
+        auto records = cc::vector<sv::instance_gpu>();
+        records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
+
+        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd->upload.pod_to_buffer(frame, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1});
+
+        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+
+        auto const target = ctx.transient.create_texture_2d(
+            {.format = sg::pixel_format::rgba32_float,
+             .width = size[0],
+             .height = size[1],
+             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+
+        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        cmd->upload.data_to_buffer(instance_table, records);
+
+        auto const bindless = resources.freeze();
+        sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                              .background = background,
+                                              .instances = instances,
+                                              .output = target,
+                                              .instance_table = instance_table,
+                                              .hit_groups = hit_groups,
+                                              .fallback = fallback,
+                                              .bindless = &bindless});
+
+        auto const ready = sv::pathtrace_routine::is_ready(*cmd);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch_and_wait_for_idle();
+        return ready;
+    };
+
+    // The permutation genuinely does not build, so it cannot be traced with.
+    (void)cc::try_async_blocking_get(permutation->shader);
+    REQUIRE(permutation->shader->has_error());
+
+    // With nothing to stand in for it the trace is a no-op — the old all-or-nothing behavior, still what a caller
+    // supplying no fallback gets.
+    CHECK(!trace(nullptr));
+
+    // With the neutral hit group it dispatches: the mesh is placed and shaded grey rather than the view going dark.
+    CHECK(trace(&resources.shaders.acquire_fallback()));
+}

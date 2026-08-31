@@ -52,6 +52,7 @@ add_library(babel-serializer
     src/babel-serializer/data/sqlite.cc
     src/babel-serializer/geometry/gltf.cc
     src/babel-serializer/geometry/obj.cc
+    src/babel-serializer/geometry/stl.cc
 
     src/babel-serializer/image/hdr.cc
     src/babel-serializer/image/image.cc
@@ -78,6 +79,7 @@ target_sources(babel-serializer
 
     src/babel-serializer/geometry/gltf.hh
     src/babel-serializer/geometry/obj.hh
+    src/babel-serializer/geometry/stl.hh
 
     # image/impl/*.hh is internal (the libspng and stb backend seams) — deliberately NOT in the public FILE_SET.
     src/babel-serializer/image/hdr.hh
@@ -146,6 +148,7 @@ if(SC_BUILD_TESTS)
 
         tests/geometry/gltf-test.cc
         tests/geometry/obj-test.cc
+        tests/geometry/stl-test.cc
 
         tests/image/hdr-test.cc
         tests/image/image-test.cc

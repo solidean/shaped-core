@@ -4,6 +4,7 @@
 #include <shaped-viewer/refs.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/mesh_data.hh>
 
 namespace sv
 {
@@ -36,9 +37,16 @@ layer& scene_ref::target() const
     return _frame->_views[u32(_view)].layers[_layer];
 }
 
-mesh_ref scene_ref::add_mesh(sv::mesh const& mesh)
+mesh_ref scene_ref::add_mesh(sv::mesh_data const& mesh)
 {
     // Every step of it is content-keyed, so a caller re-adding an unchanged mesh every frame pays lookups.
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_scene_item(mesh));
+    return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+mesh_ref scene_ref::add_mesh(sv::mesh const& mesh)
+{
     auto& items = target().items;
     items.push_back(_frame->resources().acquire_scene_item(mesh));
     return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));

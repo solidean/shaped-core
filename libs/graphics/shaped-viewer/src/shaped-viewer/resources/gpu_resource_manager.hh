@@ -248,8 +248,17 @@ public:
     /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
-    /// Everything placing `mesh` in a scene costs, as one `scene_item`: its geometry uploaded and BLAS-built, its
-    /// material resolved against it, and the parameter block that resolution fills acquired.
+    /// `data`'s payloads uploaded and named by id, as the `sv::mesh` a scene item is placed from.
+    ///
+    /// Geometry, every geometric attribute and every texture is acquired through the manager it belongs to, keyed by the content
+    /// hash the payload already carries — so calling this every frame with an unchanged `mesh_data` is lookups rather than
+    /// uploads.
+    /// A `per_instance` attribute is one value for the whole mesh, so it stays bytes and acquires nothing.
+    /// The name, transform, material, flags and the geometry's summary come across unchanged.
+    [[nodiscard]] sv::mesh create_mesh(sv::mesh_data const& data);
+
+    /// Everything placing `mesh` in a scene costs, as one `scene_item`: its material resolved against it, and the parameter
+    /// block that resolution fills acquired.
     ///
     /// The three fields have to come from ONE resolution — the block is filled at the layout the permutation's shader
     /// reads at — which is why this is a single call rather than three the caller sequences.
@@ -259,6 +268,10 @@ public:
     /// The material library is the process-wide one `sv::acquire_material_library` answers with, and must carry the
     /// material the mesh names.
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
+
+    /// The same, from CPU bytes: `create_mesh` followed by the resolution above.
+    /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
+    [[nodiscard]] scene_item acquire_scene_item(sv::mesh_data const& mesh);
 
     /// The layout of the staging group every bindless table is bound through.
     /// A pipeline that traces against those tables composes this as one of its groups, which is what makes the

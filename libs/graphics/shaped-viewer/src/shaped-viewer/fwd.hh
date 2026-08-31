@@ -63,9 +63,26 @@ struct attribute_format;
 enum class attribute_frequency : u8;
 enum class mesh_flag; // per-mesh rendering opt-ins (mesh_flags.hh)
 struct mesh_attribute;
+enum class texture_channel : u8; // where one component of a sampled attribute comes from (mesh_texture.hh)
+struct channel_swizzle;
+struct sample_transform;
 struct texture_sample_source;
 struct mesh_texture;
+struct texture_sample_data;
+struct mesh_texture_data;
+struct mesh_attribute_binding;
 struct mesh;
+struct mesh_data;
+
+// asset loading (see asset/)
+enum class asset_format : u8;     // the containers asset_loader reads (asset_loader.hh)
+enum class frame_generation : u8; // how tangent frames are obtained (asset_loader.hh)
+struct tangent_frame_options;
+struct asset_loader_config;
+struct asset_material;
+struct asset_node;
+struct asset_data;
+class asset_loader;
 
 // the material system (see material/)
 enum class material_frequency : u8;      // where an attribute's value came from; the ORDER is the precedence

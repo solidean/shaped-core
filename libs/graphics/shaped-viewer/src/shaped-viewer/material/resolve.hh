@@ -34,7 +34,7 @@ struct sv::resolved_attribute
     cc::span<byte const> constant;
 
     /// live when `frequency == mesh_attribute`; its own `frequency` is the geometric one a shader indexes by
-    mesh_attribute const* attribute = nullptr;
+    mesh_attribute_binding const* attribute = nullptr;
 
     /// live when `frequency` is `material_texture` or `mesh_texture`
     texture_sample_source const* sample = nullptr;
@@ -43,7 +43,7 @@ struct sv::resolved_attribute
     ///
     /// A sample is only a candidate at all when the mesh carries this, so it is never null when `sample` is not.
     /// Its own frequency is what decides the generated load, which is why it is part of the permutation rather than a value.
-    mesh_attribute const* uv = nullptr;
+    mesh_attribute_binding const* uv = nullptr;
 };
 
 /// A material type, a material and a mesh, resolved into one value per declared attribute — what a shader is generated from and

@@ -29,7 +29,7 @@ class sv::mesh_ref
 public:
     mesh_ref(frame* f, view_index view, u32 layer, u32 item) : _frame(f), _view(view), _layer(layer), _item(item) {}
 
-    /// Where this placement puts the mesh, overriding the `sv::mesh`'s own transform.
+    /// Where this placement puts the mesh, overriding the transform the mesh itself carries.
     void transform(tg::affine_transform3f const& t);
 
 private:
@@ -67,10 +67,14 @@ public:
 
     /// Places a mesh in the scene, at the transform the mesh carries.
     ///
-    /// The geometry and the per-face materials are uploaded here, keyed by the content hashes the mesh already
+    /// The geometry, the attributes and the textures are uploaded here, keyed by the content hashes the mesh already
     /// carries — so calling this every frame with an unchanged mesh uploads nothing and stays O(1).
     /// Per-face PBR is read from the `sv::pbr_attribute` attributes; a mesh carrying none is shaded with
     /// `pbr_material`'s defaults.
+    mesh_ref add_mesh(sv::mesh_data const& mesh);
+
+    /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
+    /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
     mesh_ref add_mesh(sv::mesh const& mesh);
 
     /// Adds an area light.

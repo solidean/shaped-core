@@ -12,9 +12,34 @@
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/mesh_data.hh>
 
 namespace sv
 {
+namespace
+{
+/// The object-space box around a geometry's positions, empty when it has none.
+///
+/// A summary the GPU mesh keeps, since once the positions are only on the GPU nothing else can answer a framing question.
+/// Only the fallback: a `mesh_data` that already carries a box — every glTF one does, since the format states it per
+/// accessor — keeps it rather than paying this scan.
+[[nodiscard]] cc::optional<tg::aabb3f> bounds_of(triangle_geometry const& g)
+{
+    auto const positions = g.positions.span();
+    if (positions.empty())
+        return {};
+
+    auto box = tg::aabb3f(positions[0], positions[0]);
+    for (auto const& p : positions)
+        for (auto i = 0; i < 3; ++i)
+        {
+            box.min[i] = cc::min(box.min[i], p[i]);
+            box.max[i] = cc::max(box.max[i], p[i]);
+        }
+    return box;
+}
+} // namespace
+
 bound_resources::~bound_resources()
 {
     if (_manager != nullptr)
@@ -197,6 +222,8 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
         switch (slot.kind)
         {
         case material_slot_kind::constant:
+        case material_slot_kind::sample_transform:
+            // Both are bytes the resolution already decided; only where they came from differs.
             write(slot.offset, slot.constant);
             break;
 
@@ -263,14 +290,50 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .is_indexed = m.is_indexed ? 1u : 0u};
 }
 
-scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
 {
-    CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+    CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
 
     // Both bridges keep the geometry's own content key, so this resolves to a resident id rather than an upload
     // whenever the mesh has not changed.
-    auto const geometry = mesh.geometry.is_indexed() ? meshes.acquire(indexed_triangle_data::from(mesh.geometry))
-                                                     : meshes.acquire(triangle_data::from(mesh.geometry));
+    auto const geometry = data.geometry.is_indexed() ? meshes.acquire(indexed_triangle_data::from(data.geometry))
+                                                     : meshes.acquire(triangle_data::from(data.geometry));
+
+    auto bindings = cc::vector<mesh_attribute_binding>();
+    bindings.reserve(data.attributes.size());
+    for (auto const& a : data.attributes)
+    {
+        // A per_instance attribute is one value for the whole mesh, read out of the parameter block rather than off a buffer,
+        // so it never becomes a resource and its bytes travel along instead.
+        auto const uploads = a.frequency != attribute_frequency::per_instance;
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+    }
+
+    auto bound_textures = cc::vector<mesh_texture>();
+    bound_textures.reserve(data.textures.size());
+    for (auto const& t : data.textures)
+        bound_textures.push_back({.name = t.name,
+                                  .source = {.texture = textures.acquire(t.source.texture),
+                                             .uv_attribute = t.source.uv_attribute,
+                                             .sampler = t.source.sampler,
+                                             .swizzle = t.source.swizzle,
+                                             .transform = t.source.transform}});
+
+    return {.name = data.name,
+            .geometry = geometry,
+            .attributes = cc::move(bindings),
+            .transform = data.transform,
+            .material = data.material,
+            .flags = data.flags,
+            .textures = cc::move(bound_textures),
+            .bounds = data.bounds.has_value() ? data.bounds : bounds_of(data.geometry),
+            .triangle_count = data.geometry.triangle_count(),
+            .vertex_count = data.geometry.vertex_count()};
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+{
+    CC_ASSERT(mesh.geometry != mesh_id::invalid, "a mesh needs geometry to be placed in a scene");
 
     auto const lib = acquire_material_library();
     CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a mesh's material through");
@@ -279,10 +342,15 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
     auto const resolved = resolve_material(*lib.value(), material, mesh);
     auto const& permutation = shaders.acquire(resolved);
 
-    return {.mesh = geometry,
+    return {.mesh = mesh.geometry,
             .instance = acquire_instance(resolved, permutation.layout),
             .shader_key = permutation.key,
             .transform = mesh.transform};
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::mesh_data const& mesh)
+{
+    return acquire_scene_item(create_mesh(mesh));
 }
 
 bool gpu_resource_manager::contains_instance(instance_id id) const
@@ -325,12 +393,25 @@ instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, m
             // A descriptor slot serves either the attribute itself or, for a sampled one, the uv set it samples through.
             auto const* const source = a.sample != nullptr ? a.uv : a.attribute;
             CC_ASSERT(source != nullptr, "a descriptor slot names a mesh attribute the resolve found");
+            CC_ASSERT(source->attribute != attribute_id::invalid, "a descriptor slot names an uploaded attribute");
             CC_ASSERT(slot.size_bytes == attribute_desc_size, "an sv::attribute_desc slot is exactly its three uints");
             record.slots.push_back({.kind = slot.kind,
                                     .offset = slot.offset,
                                     .size_bytes = slot.size_bytes,
-                                    .attribute = attributes.acquire(*source),
+                                    .attribute = source->attribute,
                                     .element_stride = u32(source->format.size_bytes())});
+            break;
+        }
+
+        case material_slot_kind::sample_transform:
+        {
+            CC_ASSERT(a.sample != nullptr, "a sample transform slot names a sampled attribute");
+            CC_ASSERT(slot.size_bytes == i32(sizeof(tg::vec4f)) * 2, "a sample transform is a scale and a bias");
+            auto bytes = cc::vector<byte>();
+            append_pod(bytes, a.sample->transform.scale);
+            append_pod(bytes, a.sample->transform.bias);
+            record.slots.push_back(
+                {.kind = slot.kind, .offset = slot.offset, .size_bytes = slot.size_bytes, .constant = cc::move(bytes)});
             break;
         }
 

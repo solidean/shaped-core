@@ -80,6 +80,21 @@ material data on the GPU                 [in progress]  attribute_manager upload
                                                         scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance_gpu per item on its own command list, and pathtrace_routine builds a DXR pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
                                                         The trace binds two groups: its own bindings, and the manager's bindless tables.
                                                         Still to come: several parameter blocks per buffer, and a local root signature so two permutations may disagree about a sampler register
+glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported, and deliberately ignored by the path-tracing fragment — a baked AO term double-counts what the integrator computes per bounce).
+                                                        texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
+                                                        The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
+                                                        A sample_transform beside it splits the other way: a per-component scale and bias, of which only the EXISTENCE is shape, so a normal map's decode and its scale never fork a permutation
+mesh_data / mesh type split              [done]         a mesh exists in two forms, and both are first-class: sv::mesh_data is pinned CPU bytes and needs no device, sv::mesh is resources and cannot exist without a manager.
+                                                        gpu_resource_manager::create_mesh is the one-way bridge, scene_ref::add_mesh takes either, and resolution runs against the GPU form — which is what admits geometry that was never on the CPU.
+                                                        Textures are symmetric with geometry now: a mesh_data carries pixels, an sv::mesh a texture_id.
+                                                        The GPU form also keeps the CPU-side summary (bounds, triangle and vertex counts) that nothing else could answer a framing question with
+fallback hit group                       [done]         a permutation that has not compiled — still in flight, or a material that does not build — is replaced for that trace by a neutral hit group over an empty signature, which reads no per-instance block and so stands in for any material.
+                                                        The pipeline is keyed on the substituted set, so the frame the real one lands a new variant is built with it.
+                                                        Before this, one bad material made the whole view a no-op
+asset loading (asset_loader)             [in progress]  glTF 2.0, OBJ and STL load into a CPU-side sv::asset_data that add_mesh takes directly — one mesh per (geometry, material), hierarchy flattened, material names namespaced by the asset.
+                                                        The loader holds no device and opens no file: every uri goes through sv::resolve_uri, a settable process-wide hook over cc::file_read_stream_adapter.
+                                                        Textures ride on the mesh as pixels rather than on the material as ids, which is what keeps the whole importer CPU-side.
+                                                        Still to come: PLY, .mtl, the KHR_materials_* extensions (babel does not read them), generated tangent frames, and the state / recipe / substitution model in [asset-loading.md](asset-loading.md)
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

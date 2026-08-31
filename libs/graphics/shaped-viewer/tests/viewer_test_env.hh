@@ -7,8 +7,8 @@
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
-#include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/mesh_data.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/shader_library.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -161,11 +161,13 @@ inline cc::vector<sv::mesh_attribute> pbr_face_attributes(cc::span<sv::pbr_mater
     return out;
 }
 
-/// A raw triangle list plus its per-face materials, as the `sv::mesh` the authoring API takes.
+/// A raw triangle list plus its per-face materials, as the `sv::mesh_data` the authoring API takes.
 ///
 /// The mesh names the library's unbound `pbr` material, so each of the four attributes above wins over the type's own
 /// default and the generated closest-hit reads them per triangle.
-inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc::span<sv::pbr_material const> materials)
+inline sv::mesh_data as_mesh(cc::string name,
+                             cc::span<tg::pos3f const> positions,
+                             cc::span<sv::pbr_material const> materials)
 {
     return {.name = cc::move(name),
             .geometry = sv::triangle_geometry::create_from_positions(positions),
@@ -174,10 +176,10 @@ inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc
 }
 
 /// The same, over indexed geometry — triangle order follows the index buffer, so the per-face attributes still line up.
-inline sv::mesh as_indexed_mesh(cc::string name,
-                                cc::span<tg::pos3f const> positions,
-                                cc::span<u32 const> indices,
-                                cc::span<sv::pbr_material const> materials)
+inline sv::mesh_data as_indexed_mesh(cc::string name,
+                                     cc::span<tg::pos3f const> positions,
+                                     cc::span<u32 const> indices,
+                                     cc::span<sv::pbr_material const> materials)
 {
     return {.name = cc::move(name),
             .geometry = sv::triangle_geometry::create_from_indexed_triangles(positions, indices),

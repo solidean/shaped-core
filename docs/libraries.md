@@ -208,11 +208,12 @@ Home to the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`),
 Also home to the **window abstraction** (`sr::window_system` / `sr::window`), backed by SDL3 and exposing none of it, whose native handle feeds `sg::swapchain_description`.
 The API is always present: without a backend, because SDL3 was not fetched, `window_system::try_create` fails rather than the types disappearing, and `SR_HAS_WINDOW` says whether one was compiled in.
 
-### shaped-viewer — namespace `sv` — depends on shaped-rendering
+### shaped-viewer — namespace `sv` — depends on shaped-rendering + babel-serializer
 
 [readme](../libs/graphics/shaped-viewer/readme.md) · [docs](../libs/graphics/shaped-viewer/docs/_index.md)
 
 The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, serving Shaped Code's visualization needs.
 The top of the graphics stack, with a first vertical slice: path-traced views blitted into a window.
+It links babel-serializer for `sv::asset_loader`, which reads glTF and OBJ into the CPU-side `sv::asset_data` the scene API takes — a legal direction, since `data/` sits below `graphics/`.
 
 For the build and test workflow shared by all libraries, see [guides/building-and-testing.md](guides/building-and-testing.md).

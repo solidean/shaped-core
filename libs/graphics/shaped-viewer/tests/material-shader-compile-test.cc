@@ -48,16 +48,24 @@ void main(uint3 tid : SV_DispatchThreadID)
 }
 )hlsl";
 
-[[nodiscard]] sv::mesh make_mesh()
+/// A CPU attribute as the binding a GPU mesh carries.
+/// The id is arbitrary: resolution matches on name, format and frequency, and never reaches for the buffer behind one.
+[[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
 {
-    auto const positions = cc::array<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto const per_instance = a.frequency == sv::attribute_frequency::per_instance;
+    return sv::mesh_attribute_binding::of(a, per_instance ? sv::attribute_id::invalid : sv::attribute_id(0));
 }
 
-[[nodiscard]] sv::mesh_attribute make_uvs(sv::attribute_frequency f = sv::attribute_frequency::per_vertex)
+[[nodiscard]] sv::mesh make_mesh()
+{
+    // Resolution reads the lists and the summary, never the geometry itself, so a stand-in id is all this needs.
+    return {.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
+}
+
+[[nodiscard]] sv::mesh_attribute_binding make_uvs(sv::attribute_frequency f = sv::attribute_frequency::per_vertex)
 {
     auto const uvs = cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)};
-    return sv::mesh_attribute::create("uv", f, uvs);
+    return bind(sv::mesh_attribute::create("uv", f, uvs));
 }
 
 /// Compiles one resolved material and fails the test with DXC's own message when it does not build.
@@ -113,11 +121,11 @@ TEST("sv - a permutation compiles at every attribute frequency")
 
     // A per-vertex vector and a per-triangle scalar together, so the interpolated and the flat load are both in one shader.
     auto mesh = make_mesh();
-    mesh.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_vertex, colors));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_vertex, colors)));
     mesh.attributes.push_back(
-        sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f}));
-    mesh.attributes.push_back(sv::mesh_attribute::create("metallic", sv::attribute_frequency::per_corner, scalars));
-    mesh.attributes.push_back(sv::mesh_attribute::create_value("occlusion", 0.5f));
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f})));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create("metallic", sv::attribute_frequency::per_corner, scalars)));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create_value("occlusion", 0.5f)));
     check_compiles(sv::resolve_material(materials, gold, mesh));
 }
 
@@ -142,6 +150,57 @@ TEST("sv - a sampled permutation compiles, at either uv frequency")
 }
 
 
+TEST("sv - a swizzled sample and an alpha cutout compile")
+{
+    if (!sv_test::shared_env().has_compiler)
+        return;
+
+    auto materials = sv::material_library::create();
+    sv::register_builtin_material_types(materials);
+    auto const type = materials.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = materials.acquire(sv::material::create("cutout", type, {}));
+
+    // One packed texture bound three times, the way a glTF import binds a metallic-roughness map and a base color map:
+    // a letter swizzle, a narrowing to one channel, and a constant selector the letter form cannot spell.
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs());
+    mesh.textures.push_back({.name = "base_metalness",
+                             .source = {.texture = sv::texture_id(1),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::b)}});
+    mesh.textures.push_back({.name = "specular_roughness",
+                             .source = {.texture = sv::texture_id(1),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::g)}});
+    mesh.textures.push_back({.name = "base_color",
+                             .source = {.texture = sv::texture_id(2),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of(
+                                            sv::texture_channel::r, sv::texture_channel::g, sv::texture_channel::one)}});
+    // The alpha of that same base color map, which is what makes a cutout one upload rather than two.
+    mesh.textures.push_back({.name = "opacity",
+                             .source = {.texture = sv::texture_id(2),
+                                        .uv_attribute = "uv",
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
+    // And a normal map, whose [0,1] to [-1,1] decode is a sample transform and nothing else.
+    mesh.textures.push_back({.name = "normal",
+                             .source = {.texture = sv::texture_id(3),
+                                        .uv_attribute = "uv",
+                                        .transform = sv::sample_transform::of_signed_normal(0.8f)}});
+
+    auto const resolved = sv::resolve_material(materials, id, mesh);
+    auto const g = sv::generate_material_shader(resolved);
+
+    // Two textures sampled the same way share one sampler, whatever their swizzles say.
+    CHECK(g.source.contains("SamplerState sv_sampler_0"));
+    CHECK(!g.source.contains("SamplerState sv_sampler_1"));
+
+    // A sampled opacity is what makes the permutation able to reject an intersection at all.
+    CHECK(g.can_cut_out);
+
+    check_compiles(resolved);
+}
+
 TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
 {
     if (!sv_test::shared_env().has_compiler)
@@ -155,8 +214,8 @@ TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
     // A mesh exercising both the interpolated and the sampled path, so the hit shader is the real shape rather than a trivial one.
     auto mesh = make_mesh();
     mesh.attributes.push_back(make_uvs());
-    mesh.attributes.push_back(
-        sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, cc::array<f32>{0.1f, 0.2f, 0.3f}));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex,
+                                                              cc::array<f32>{0.1f, 0.2f, 0.3f})));
     mesh.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(1), .uv_attribute = "uv"}});
 
     auto const resolved = sv::resolve_material(materials, gold, mesh);
@@ -233,7 +292,8 @@ TEST("sv - the openpbr closest-hit compiles with a supplied tangent frame")
 
     auto mesh = make_mesh();
     auto const frames = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1)};
-    mesh.attributes.push_back(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex, frames));
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex, frames)));
 
     auto const resolved = sv::resolve_material(materials, id, mesh);
     CHECK(sv::generate_material_shader(resolved).source.contains("SV_ATTR_SUPPLIED_tangent_frame 1"));

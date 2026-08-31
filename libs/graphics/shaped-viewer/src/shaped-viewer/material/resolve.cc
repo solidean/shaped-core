@@ -15,7 +15,7 @@ namespace
 /// The uv attribute a sample needs: two floats, indexed by something the geometry numbers.
 /// A `per_instance` uv would be one coordinate for the whole mesh, which samples a single texel — so it does not count as carrying
 /// uvs at all.
-[[nodiscard]] mesh_attribute const* find_uv_attribute(sv::mesh const& mesh, cc::string_view name)
+[[nodiscard]] mesh_attribute_binding const* find_uv_attribute(sv::mesh const& mesh, cc::string_view name)
 {
     for (auto const& a : mesh.attributes)
         if (a.name == name && a.format == attribute_format::of_vector(scalar_type::f32, 2)
@@ -27,10 +27,10 @@ namespace
 /// The mesh attribute named `name` at the declared format, at `per_instance` or at a geometric frequency.
 /// A format mismatch resolves to null rather than asserting: the mesh and the material were authored apart, and the material is
 /// what falls back.
-[[nodiscard]] mesh_attribute const* find_attribute(sv::mesh const& mesh,
-                                                   cc::string_view name,
-                                                   attribute_format format,
-                                                   bool per_instance)
+[[nodiscard]] mesh_attribute_binding const* find_attribute(sv::mesh const& mesh,
+                                                           cc::string_view name,
+                                                           attribute_format format,
+                                                           bool per_instance)
 {
     for (auto const& a : mesh.attributes)
     {
@@ -78,7 +78,7 @@ namespace
         winner = {.name = d.name,
                   .format = d.format,
                   .frequency = material_frequency::mesh_instance,
-                  .constant = a->data.span()};
+                  .constant = a->value.span()};
 
     if (auto const* const a = find_attribute(mesh, d.name, d.format, false); a != nullptr)
         winner = {.name = d.name, .format = d.format, .frequency = material_frequency::mesh_attribute, .attribute = a};
@@ -163,6 +163,14 @@ resolved_material resolve_material(material_type const& type, material const& ma
             // The uv attribute's own frequency picks its load code, exactly as a directly-sourced attribute's does.
             shape.add_pod(a.uv->frequency);
             impl::add_sampler(shape, a.sample->sampler);
+            // The swizzle is generated code rather than a value, so it belongs in the shape — and only as far as it is read.
+            impl::add_swizzle(shape, a.sample->swizzle, a.format.component_count());
+
+            // The transform splits the other way: whether there is one at all decides the generated code, and what it
+            // scales by is a value the block carries — so a normal map's scale never forks a permutation.
+            shape.add_pod(a.sample->transform.is_identity(a.format.component_count()));
+            values.add_pod(a.sample->transform.scale);
+            values.add_pod(a.sample->transform.bias);
             values.add_pod(a.sample->texture);
             values.add_pod(a.uv->hash);
             break;
