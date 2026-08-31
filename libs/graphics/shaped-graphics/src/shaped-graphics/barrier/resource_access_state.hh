@@ -50,6 +50,16 @@ struct sg::resource_access_state
     texture_layout curr_layout = texture_layout::general;
     texture_layout prev_layout = texture_layout::general;
 
+    // What this command list's FIRST op needs of the resource, recorded at that op's flush.
+    // A list's private state starts empty and enters at this requirement rather than at whatever the resource
+    // happened to be in while it recorded, so nothing it records is trusted about where the resource starts.
+    // The submit resolves it against the state the resource is really in, and prepends the barrier that gets there.
+    bool entry_begun = false;           // this list has declared against the resource at least once
+    bool has_entry_requirement = false; // ...and its first op has flushed, so the requirement below is final
+    pipeline_stage_flags entry_stages = {};
+    access_flags entry_access = {};
+    texture_layout entry_layout = texture_layout::general;
+
     // queries
     [[nodiscard]] bool has_inflight_writes() const { return !inflight_write_access.is_empty(); }
     [[nodiscard]] bool has_any_inflight_access() const
@@ -169,6 +179,53 @@ struct sg::resource_access_state
     [[nodiscard]] bool has_pending_declares() const
     {
         return !curr_read_access.is_empty() || !curr_write_access.is_empty();
+    }
+
+    /// Begin a command list's private view of the resource, entering at `layout`.
+    /// Called on the first declare, before it, so that declare is classified by what it does rather than as a layout
+    /// change out of whatever the resource happened to be in.
+    void begin_entry(texture_layout layout)
+    {
+        entry_begun = true;
+        curr_layout = layout;
+        prev_layout = layout;
+    }
+
+    /// Record what the first op of a command list needs, and take that as the state the list enters in.
+    /// Called once per state, immediately before that op's flush, so it sees the layout every declare of the op
+    /// settled on rather than the first one's.
+    /// Levelling `prev_layout` is what keeps the entry transition out of the list's own body: the prepended barrier
+    /// puts the resource here before the list runs, so the body has nothing to transition from.
+    void capture_entry_requirement()
+    {
+        has_entry_requirement = true;
+        entry_stages = all_curr_stages();
+        entry_access = all_curr_access();
+        entry_layout = curr_layout;
+        prev_layout = curr_layout;
+    }
+
+    /// The barrier taking this — the resource's real state between lists — to what `list_state`'s command list needs
+    /// on entry, or `{needed=false}` when it is already there.
+    /// Read at submit, in submission order, and emitted into the small command buffer prepended to that submit.
+    [[nodiscard]] access_barrier entry_barrier_for(resource_access_state const& list_state) const
+    {
+        if (!list_state.has_entry_requirement)
+            return {};
+
+        auto probe = *this;
+        probe.declare(list_state.entry_stages, list_state.entry_access, list_state.entry_layout);
+        return probe.flush();
+    }
+
+    /// Drop the entry bookkeeping, which belongs to one command list and means nothing once it has been resolved.
+    void clear_entry_requirement()
+    {
+        entry_begun = false;
+        has_entry_requirement = false;
+        entry_stages = {};
+        entry_access = {};
+        entry_layout = texture_layout::general;
     }
 
     /// Reset the timelines to a fresh state, preserving the achieved layout so the committed layout carries into the next command list.

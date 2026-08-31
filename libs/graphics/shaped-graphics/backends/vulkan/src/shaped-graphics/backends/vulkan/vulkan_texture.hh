@@ -57,7 +57,7 @@ protected:
     void on_expired() const override;
 
 public:
-    /// Accumulate one declared access over `range`, seeding from the canonical layout on first touch.
+    /// Accumulate one declared access over `range`, entering an untouched box at `layout`.
     /// Thread-safe.
     void declare_access(sg::command_list_slot slot,
                         sg::subresource_range range,
@@ -68,11 +68,11 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
     }
 
-    /// The canonical layout of `range`.
+    /// The layout `range` is in as of the last submitted command list.
     /// Thread-safe.
-    [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range) const
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range) const
     {
-        return _access.lock([&](vulkan_texture_access& a) { return a.canonical_layout_of(range); });
+        return _access.lock([&](vulkan_texture_access& a) { return a.current_layout_of(range); });
     }
 
     /// Claims the one-time UNDEFINED -> resting transition for the caller, or false if someone already has.
@@ -91,7 +91,7 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.needs_initial_transition(); });
     }
 
-    /// The layout this texture rests in between lists — what an initial transition targets.
+    /// The layout this texture starts in before anything has used it — what the initial transition targets.
     [[nodiscard]] sg::texture_layout resting_layout() const
     {
         return _access.lock([&](vulkan_texture_access& a) { return a.resting_layout(); });
@@ -115,13 +115,14 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.flush(slot); });
     }
 
-    /// `slot`'s list was submitted; the last one out commits its layout, any earlier one reverts to canonical.
+    /// `slot`'s list was submitted: its layouts become the current ones, and the barriers returned are the entry
+    /// transitions the caller prepends to that same submit.
     [[nodiscard]] cc::small_vector<vulkan_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot) const
     {
         return _access.lock([&](vulkan_texture_access& a) { return a.finalize(slot); });
     }
 
-    /// `slot`'s list was dropped; its work never runs, so the canonical layout is untouched.
+    /// `slot`'s list was dropped; its work never runs, so the current layout is untouched.
     void discard_slot(sg::command_list_slot slot) const
     {
         _access.lock([&](vulkan_texture_access& a) { a.discard(slot); });

@@ -104,12 +104,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
-    // Finalize before closing: what this list leaves in flight is what the next list must synchronize against.
-    // Only the last list tracking a buffer promotes it.
-    // Under the same lock as the submit below, so finalize order matches submit order — the later list's canonical
-    // state has to be the one that actually ran last.
-    // Resolve the recorded queries first: it records copies of its own, so it has to happen before the finalize
-    // barriers below and before the buffer is closed.
+    // Resolve the recorded queries first: it records copies of its own, so it has to happen before the buffer is
+    // closed.
+    // Access tracking is finalized further down, inside the submission lock, because what it produces is the entry
+    // barriers for the *prepended* buffer rather than anything appended to this one.
     cmd->finalize_queries_before_close();
 
     // The forward half of async sync: this list waits for any async upload still pending on a buffer it touches, so
@@ -149,17 +147,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         add_async_wait(texture->_download_group, texture->_pending_async_download_value.load(cc::memory_order_acquire));
     }
 
-    for (auto const& buffer : cmd->_touched_buffers)
-        buffer->finalize_slot(cmd->slot());
-
-    // A texture finalize can return barriers — reverting to the canonical layout when other lists are still open —
-    // so they are recorded onto this list before it closes.
-    for (auto const& texture : cmd->_touched_textures)
-        for (auto const& sub : texture->finalize_slot(cmd->slot()))
-            cmd->_pending_image_barriers.push_back(
-                make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
-    submit_barriers(cmd->_buffer, {}, cmd->_pending_image_barriers);
-    cmd->_pending_image_barriers.clear();
+    CC_ASSERT(cmd->_pending_image_barriers.empty(), "a declared access was never flushed by a GPU op");
 
     VkResult const end = vkEndCommandBuffer(cmd->_buffer);
     CC_ASSERT(end == VK_SUCCESS, "vkEndCommandBuffer failed");
@@ -172,13 +160,13 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             sg::submission_token const t = next;
             next = sg::submission_token(u64(next) + 1);
 
-            // Bring every texture this list is the first to *run* into its resting layout, ahead of this list's own
-            // work.
+            // Everything below runs inside this lock because submission order is what it serializes, and the whole
+            // entry-barrier model rests on that: a resource's current state means "after everything submitted so
+            // far", so it may only be read and written here.
             //
-            // Claimed here rather than while recording, and inside this lock rather than outside it: submission order
-            // is what this lock serializes, so the list that claims is the list that runs first.
-            // Claiming at record time would let a list that recorded second submit first, and its barriers would name
-            // an oldLayout the image is not in yet.
+            // First, bring every texture this list is the first to *run* into its resting layout.
+            // Whole-image, and ahead of the entry barriers, since a list that uses one mip leaves the others in the
+            // UNDEFINED vkCreateImage left them in while the tracker says otherwise.
             cc::vector<VkImageMemoryBarrier2> initial_barriers;
             for (auto const& texture : cmd->_tentative_initial_transitions)
             {
@@ -208,19 +196,38 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 initial_barriers.push_back(vk_barrier);
             }
 
+            // Then the entry barriers: what each resource is really in now, taken to what this list's first use of it
+            // needs.
+            // The list's own body never carries these, which is what makes it independent of when it was recorded.
+            cc::vector<VkBufferMemoryBarrier2> entry_buffer_barriers;
+            cc::vector<VkImageMemoryBarrier2> entry_image_barriers;
+            for (auto const& buffer : cmd->_touched_buffers)
+                if (auto const b = buffer->finalize_slot(cmd->slot()); b.needed)
+                    entry_buffer_barriers.push_back(make_buffer_barrier(buffer->_buffer, b));
+            for (auto const& texture : cmd->_touched_textures)
+                for (auto const& sub : texture->finalize_slot(cmd->slot()))
+                    entry_image_barriers.push_back(
+                        make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
+
             VkCommandBuffer submitted_buffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
             u32 submitted_count = 0;
-            if (!initial_barriers.empty())
+            bool const has_entry_barriers = !entry_buffer_barriers.empty() || !entry_image_barriers.empty();
+            if (!initial_barriers.empty() || has_entry_barriers)
             {
                 auto const pre_begin = VkCommandBufferBeginInfo{
                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                 };
                 VkResult const pre = vkBeginCommandBuffer(cmd->_pre_buffer, &pre_begin);
-                CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (initial transitions) failed");
-                submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (entry transitions) failed");
+                // Two dependencies rather than one: an initial transition and an entry barrier can name the same
+                // subresource, and two barriers on one subresource in a single dependency have no order between them.
+                if (!initial_barriers.empty())
+                    submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                if (has_entry_barriers)
+                    submit_barriers(cmd->_pre_buffer, entry_buffer_barriers, entry_image_barriers);
                 VkResult const pre_end = vkEndCommandBuffer(cmd->_pre_buffer);
-                CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (initial transitions) failed");
+                CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (entry transitions) failed");
                 submitted_buffers[submitted_count++] = cmd->_pre_buffer;
             }
             submitted_buffers[submitted_count++] = cmd->_buffer;

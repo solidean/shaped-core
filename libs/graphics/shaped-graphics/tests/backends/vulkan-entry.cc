@@ -37,7 +37,9 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 
 TEST("sg vulkan backend")
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
+    // Synchronization validation is on for the whole tier-1 sweep: it is the only oracle that sees a hazard between
+    // two submissions, which is what the cross-list and cross-queue ordering work is about.
+    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
     else

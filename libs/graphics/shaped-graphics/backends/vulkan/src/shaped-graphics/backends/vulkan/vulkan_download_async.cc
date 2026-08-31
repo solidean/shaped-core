@@ -638,7 +638,7 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
 
     src->_pending_async_download_value.store(job.completion_value.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = src->canonical_layout_of(sg::subresource_range(subresource));
+    job.restore_layout = src->current_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
@@ -701,7 +701,7 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
 
     src->_pending_stream_download_value.store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = src->canonical_layout_of(sg::subresource_range(subresource));
+    job.restore_layout = src->current_layout_of(sg::subresource_range(subresource));
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 

@@ -76,13 +76,15 @@ bool validation_layer_available()
     return false;
 }
 
-// Whether the loader offers `name` as an instance extension.
-bool instance_extension_available(cc::string_view name)
+// Whether `layer` offers `name` as an instance extension; a null layer asks the loader itself.
+// The layer form is what finds an extension a layer implements rather than the driver — VK_EXT_validation_features
+// is only ever listed under the validation layer.
+bool instance_extension_available(cc::string_view name, char const* layer = nullptr)
 {
     uint32_t count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+    vkEnumerateInstanceExtensionProperties(layer, &count, nullptr);
     auto exts = cc::vector<VkExtensionProperties>::create_uninitialized(count);
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, exts.data());
+    vkEnumerateInstanceExtensionProperties(layer, &count, exts.data());
     for (auto const& e : exts)
         if (cc::string_view(e.extensionName) == name)
             return true;
@@ -392,6 +394,12 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     bool const enable_validation
         = config.enable_validation_layers && validation_layer_available() && debug_utils_extension_available();
 
+    // Synchronization validation rides the same layer but is requested separately, through an extension the layer
+    // itself implements rather than the driver.
+    bool const enable_sync_validation
+        = enable_validation && config.enable_sync_validation
+       && instance_extension_available(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, k_validation_layer);
+
     auto const app = VkApplicationInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "shaped-graphics",
@@ -405,6 +413,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         layers.push_back(k_validation_layer);
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
+    if (enable_sync_validation)
+        extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
 
     // Presentation extensions, each enabled only where the loader has it.
     // An instance extension that is not there fails instance creation outright, and a context that cannot present is
@@ -442,9 +452,25 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     auto const dbg_info = make_debug_messenger_info();
 
+    // Chained ahead of the messenger rather than instead of it, so sync-validation findings arrive through the same
+    // callback as every other message and fail a test the same way.
+    VkValidationFeatureEnableEXT const sync_features[] = {VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
+    auto const validation_features = VkValidationFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+        .pNext = &dbg_info,
+        .enabledValidationFeatureCount = 1,
+        .pEnabledValidationFeatures = sync_features,
+    };
+
+    void const* instance_pnext = nullptr;
+    if (enable_sync_validation)
+        instance_pnext = &validation_features;
+    else if (enable_validation)
+        instance_pnext = &dbg_info;
+
     auto const instance_info = VkInstanceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-        .pNext = enable_validation ? &dbg_info : nullptr, // catches messages during instance create/destroy too
+        .pNext = instance_pnext, // catches messages during instance create/destroy too
         .pApplicationInfo = &app,
         .enabledLayerCount = u32(layers.size()),
         .ppEnabledLayerNames = layers.data(),

@@ -39,7 +39,6 @@
 #include <atomic>
 
 /// Per-backend creation config for the Vulkan context.
-/// The two flags are independent.
 struct sg::backend::vulkan::vulkan_config
 {
     /// Enable the Khronos validation layer plus a debug messenger for its messages.
@@ -47,6 +46,12 @@ struct sg::backend::vulkan::vulkan_config
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
     /// The analogue of dx12_config::enable_debug_layer, and off by default for the same reason: it costs real time.
     bool enable_validation_layers = false;
+
+    /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
+    /// submissions and reports hazards no other check can see — a read racing an earlier submission's write.
+    /// Ignored unless enable_validation_layers is on, and off by default because it costs far more than core
+    /// validation: it is the tool for cross-list and cross-queue ordering work rather than a default gate.
+    bool enable_sync_validation = false;
 
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.

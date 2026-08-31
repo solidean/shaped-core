@@ -787,7 +787,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
 
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = dst->canonical_layout_of(sg::subresource_range(subresource));
+    job.restore_layout = dst->current_layout_of(sg::subresource_range(subresource));
 
     _actor->enqueue_message(cc::move(job));
 }
@@ -829,7 +829,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
 
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
-    job.restore_layout = dst->canonical_layout_of(sg::subresource_range(subresource));
+    job.restore_layout = dst->current_layout_of(sg::subresource_range(subresource));
 
     control->on_promote = [dst, value = job.completion.value]
     {
