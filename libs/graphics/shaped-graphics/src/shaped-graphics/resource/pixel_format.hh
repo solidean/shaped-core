@@ -158,6 +158,17 @@ namespace sg
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f);
 }
 
+/// True for a format that can carry a TYPED unordered-access view — the shape `texture_usage::readwrite_texture` binds.
+/// An sRGB format cannot: the transfer function is applied on sampling and on render-target writes, and neither backend
+/// defines it for a UAV write, so both reject the view outright.
+/// A block-compressed format cannot either, and a depth format is never shader-writable.
+/// Renderability is the separate question — an sRGB format IS a legal render target, which is what makes a raster pass
+/// the way to write one.
+[[nodiscard]] constexpr bool supports_typed_uav(pixel_format f)
+{
+    return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f) && !is_srgb_format(f);
+}
+
 /// Edge length of a format's addressable block: 1 for uncompressed (one texel), 4 for BC.
 [[nodiscard]] constexpr int format_block_extent(pixel_format f)
 {

@@ -74,6 +74,15 @@ texture_layout texture_description::resolved_initial_layout() const
 void texture_description::assert_valid() const
 {
     CC_ASSERT(format != pixel_format::undefined, "texture needs a concrete pixel_format");
+
+    // Caught here rather than at the view, because the usage is what makes the view reachable at all.
+    // A typed UAV over an sRGB or block-compressed format is rejected by both backends, and D3D12 answers a
+    // CreateUnorderedAccessView it does not like by REMOVING THE DEVICE — a failure with no return code, arriving a
+    // frame later, nowhere near the description that caused it.
+    // A renderable format that cannot carry a UAV is written through a raster pass instead.
+    CC_ASSERT(!usage.has(texture_usage::readwrite_texture) || supports_typed_uav(format),
+              "readwrite_texture usage needs a format that can carry a typed UAV — sRGB, block-compressed and depth "
+              "formats cannot");
     CC_ASSERT(width >= 1 && height >= 1 && depth >= 1, "texture extents must be >= 1");
     CC_ASSERT(mip_levels >= 1, "texture needs at least one mip level");
     CC_ASSERT(sample_count >= 1, "sample_count must be >= 1 (1 = not multisampled)");
