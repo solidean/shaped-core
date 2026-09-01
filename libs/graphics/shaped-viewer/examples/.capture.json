@@ -16,6 +16,15 @@
             {}
         ]
     },
+    "shaped-viewer/load-asset": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "accumulate": 64,
+        "captures": [
+            {}
+        ]
+    },
     "shaped-viewer/openpbr-spheres": {
         "mechanism": "sv",
         "size": "1280x720",

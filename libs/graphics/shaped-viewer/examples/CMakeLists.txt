@@ -15,6 +15,7 @@ endif()
 sc_add_single_file_examples(shaped-viewer
     FILES
     hello-cube.cc
+    load-asset.cc
     openpbr-spheres.cc
     LINK shaped-viewer
     PCH SG NEXUS
