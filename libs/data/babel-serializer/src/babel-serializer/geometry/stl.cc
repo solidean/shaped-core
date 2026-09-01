@@ -1,6 +1,8 @@
 #include <babel-serializer/geometry/stl.hh>
+#include <clean-core/common/endian.hh> // cc::load_bytes_le
 #include <clean-core/common/profiling.hh>
-#include <clean-core/common/utility.hh> // cc::memcpy, cc::move
+#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 
 #include <charconv> // std::from_chars
@@ -20,34 +22,13 @@ namespace
 constexpr isize stl_header_size = 80;
 constexpr isize stl_binary_stride = 50; // normal + 3 positions, as 12 f32, plus a u16 attribute count
 
-[[nodiscard]] u32 read_le_u32(cc::span<byte const> bytes, isize offset)
-{
-    auto value = u32(0);
-    for (auto k = 0; k < 4; ++k)
-        value |= u32(u8(bytes[offset + k])) << (8 * k);
-    return value;
-}
-
-[[nodiscard]] u16 read_le_u16(cc::span<byte const> bytes, isize offset)
-{
-    return u16(u32(u8(bytes[offset])) | (u32(u8(bytes[offset + 1])) << 8));
-}
-
-[[nodiscard]] f32 read_le_f32(cc::span<byte const> bytes, isize offset)
-{
-    auto const bits = read_le_u32(bytes, offset);
-    auto value = f32(0);
-    cc::memcpy(&value, &bits, sizeof(value));
-    return value;
-}
-
 /// The triangle count a binary file of this size would declare, or -1 when the bytes cannot be one.
 [[nodiscard]] i64 binary_triangle_count(cc::span<byte const> bytes)
 {
     if (bytes.size() < stl_header_size + 4)
         return -1;
 
-    auto const declared = i64(read_le_u32(bytes, stl_header_size));
+    auto const declared = i64(cc::load_bytes_le<u32>(bytes, stl_header_size));
     return stl_header_size + 4 + declared * stl_binary_stride == bytes.size() ? declared : -1;
 }
 
@@ -63,17 +44,12 @@ constexpr isize stl_binary_stride = 50; // normal + 3 positions, as 12 f32, plus
     if (bytes.size() < stl_header_size + 4)
         return false;
 
-    auto const declared = i64(read_le_u32(bytes, stl_header_size));
+    auto const declared = i64(cc::load_bytes_le<u32>(bytes, stl_header_size));
     if (declared <= 0)
         return false;
 
     auto const required = stl_header_size + 4 + declared * stl_binary_stride;
     return required > bytes.size() && stl_header_size + 4 + (declared - 1) * stl_binary_stride <= bytes.size();
-}
-
-[[nodiscard]] bool is_blank(char c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
 /// A minimal whitespace tokenizer over one line, the same shape obj's parser uses.
@@ -86,12 +62,12 @@ struct line_tokenizer
 
     [[nodiscard]] bool next(cc::string_view& out)
     {
-        while (p < end && is_blank(*p))
+        while (p < end && cc::is_space(*p))
             ++p;
         if (p == end)
             return false;
         auto const* const start = p;
-        while (p < end && !is_blank(*p))
+        while (p < end && !cc::is_space(*p))
             ++p;
         out = cc::string_view(start, isize(p - start));
         return true;
@@ -100,10 +76,10 @@ struct line_tokenizer
     /// The remaining text, trimmed — a `solid` name may contain spaces.
     [[nodiscard]] cc::string_view rest()
     {
-        while (p < end && is_blank(*p))
+        while (p < end && cc::is_space(*p))
             ++p;
         auto const* stop = end;
-        while (stop > p && is_blank(*(stop - 1)))
+        while (stop > p && cc::is_space(*(stop - 1)))
             --stop;
         return cc::string_view(p, isize(stop - p));
     }
@@ -136,17 +112,17 @@ struct line_tokenizer
     for (auto t = i64(0); t < count; ++t)
     {
         auto const base = stl_header_size + 4 + t * stl_binary_stride;
-        out.normals.push_back(
-            tg::vec3f(read_le_f32(bytes, base), read_le_f32(bytes, base + 4), read_le_f32(bytes, base + 8)));
+        out.normals.push_back(tg::vec3f(cc::load_bytes_le<f32>(bytes, base), cc::load_bytes_le<f32>(bytes, base + 4),
+                                        cc::load_bytes_le<f32>(bytes, base + 8)));
 
         for (auto v = 0; v < 3; ++v)
         {
             auto const p = base + 12 + v * 12;
-            out.positions.push_back(
-                tg::pos3f(read_le_f32(bytes, p), read_le_f32(bytes, p + 4), read_le_f32(bytes, p + 8)));
+            out.positions.push_back(tg::pos3f(cc::load_bytes_le<f32>(bytes, p), cc::load_bytes_le<f32>(bytes, p + 4),
+                                              cc::load_bytes_le<f32>(bytes, p + 8)));
         }
 
-        out.attribute_counts.push_back(read_le_u16(bytes, base + 48));
+        out.attribute_counts.push_back(cc::load_bytes_le<u16>(bytes, base + 48));
     }
 
     return cc::move(out);
@@ -185,6 +161,13 @@ struct line_tokenizer
             out.name = cc::string(tok.rest());
         else if (keyword == "facet")
         {
+            // A facet opening inside one is what makes the vertex-count check below skippable: it would reset the
+            // count and keep the normal, so `normals` and `positions` stop describing the same triangles and nothing
+            // downstream could tell.
+            if (in_facet)
+                return cc::error(
+                    cc::format("stl: a facet opens on line {} while the previous one is still open", line_number));
+
             // `facet normal nx ny nz`; a facet with no normal keyword is malformed rather than normal-less.
             auto normal_keyword = cc::string_view();
             auto x = 0.0f;
@@ -225,6 +208,12 @@ struct line_tokenizer
 
     if (in_facet)
         return cc::error("stl: the file ends inside a facet");
+
+    // The pairing `data` promises — one normal per triangle, three positions per triangle — asserted once rather than
+    // trusted to the branches above, since every future addition to this parser has to keep it too.
+    if (out.positions.size() != out.normals.size() * 3)
+        return cc::error(cc::format("stl: {} facets carry {} vertices, which is not three each", out.normals.size(),
+                                    out.positions.size()));
 
     return cc::move(out);
 }

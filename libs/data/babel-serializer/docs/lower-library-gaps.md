@@ -119,6 +119,21 @@ does the classification, so only the iteration is missing.
 A line iterator on `cc::string_view` would retire `hdr.cc`'s `next_line` too, though that one also strips a `\r`,
 which is arguably the caller's business.
 
+### The value a hex digit names
+
+**Wanted:** `cc::hex_value(char)` beside `cc::is_hex_digit`, returning 0..15 for a digit and something the caller can
+reject for anything else.
+
+**Why:** classifying a hex digit and decoding one are the same operation split in two, and clean-core ships only the
+first half — so every caller that tests with `cc::is_hex_digit` immediately hand-rolls the other half beside it.
+Percent-decoding a uri is the case that raised it; a `\xNN` escape in a text format, a hex colour literal and a hex dump
+reader all want the same four lines.
+
+**Today:** `sv`'s [uri_resolver.cc](../../../graphics/shaped-viewer/src/shaped-viewer/asset/uri_resolver.cc) hand-rolls
+`hex_value` next to a `cc::is_hex_digit` call, marked with a one-line comment saying `cc` has no nibble decoder.
+Recorded here rather than in sv because the want is clean-core's and babel is where this list lives — the first babel
+format needing an escape decoder inherits it.
+
 ### A pinned strided view
 
 **Wanted:** `pinned_data::as_strided<T>(stride)`, or a `cc::pinned_strided_data<T>` pairing a `strided_span` with a pin.

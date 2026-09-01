@@ -163,6 +163,53 @@ vertex 0 0 0
     CHECK(babel::stl::read("solid s\nfacet normal 0 0\n").has_error());
 }
 
+TEST("babel::stl - a facet that never ends cannot desynchronize the normals from the triangles")
+{
+    // The `endfacet` that would have caught the short facet never arrives, so without a nesting check this parses to
+    // two normals and five positions — and `normals[i]` then describes a different triangle than `positions[3i]`.
+    constexpr cc::string_view missing_endfacet = R"stl(solid s
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+facet normal 0 1 0
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+vertex 0 1 0
+endloop
+endfacet
+endsolid s
+)stl";
+    auto const r = babel::stl::read(missing_endfacet);
+    REQUIRE(r.has_error());
+    CHECK(r.error().to_string().contains("line 6"));
+
+    // The well-formed version of the same file is two triangles, with the pairing intact.
+    constexpr cc::string_view closed = R"stl(solid s
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+vertex 0 1 0
+endloop
+endfacet
+facet normal 0 1 0
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+vertex 0 0 1
+endloop
+endfacet
+endsolid s
+)stl";
+    auto const ok = babel::stl::read(closed);
+    REQUIRE(ok.has_value());
+    CHECK(ok.value().triangle_count() == 2);
+    CHECK(ok.value().normals.size() == 2);
+    CHECK(ok.value().positions.size() == 6);
+}
+
 TEST("babel::stl - an empty solid is a valid file with nothing in it")
 {
     auto const m = babel::stl::read("solid empty\nendsolid empty\n");
