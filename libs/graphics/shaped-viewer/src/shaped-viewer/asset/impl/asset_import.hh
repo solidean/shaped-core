@@ -48,25 +48,6 @@ void acquire_asset_materials(asset_data& out,
                              asset_loader_config const& cfg,
                              material_library& lib);
 
-/// How much of a document an import reads.
-///
-/// `structure` is the cheap half: names, placements, material factors and the box every glTF accessor states — all of
-/// it out of the JSON, touching no payload byte.
-/// The meshes it produces name their geometry by a recipe key rather than carrying it, so they can be placed and drawn
-/// as placeholders while `payloads` is still running.
-enum class import_mode : u8
-{
-    structure,
-    payloads,
-};
-
-/// The key a glTF primitive's geometry is promised and supplied under.
-///
-/// Reproducible from the source alone, which is what a recipe means: the asset's name, the mesh, the primitive — and
-/// the importer's own version, so that changing how a primitive is decoded changes the key rather than letting a stale
-/// payload answer for a new recipe.
-[[nodiscard]] cc::hash128 gltf_primitive_key(cc::string_view asset_name, i32 mesh, i32 primitive);
-
 /// glTF 2.0 into `asset_data`, one mesh per (primitive, material).
 ///
 /// Touches no library: the materials it built come back in `definitions`, for `acquire_asset_materials` to mint.
@@ -76,8 +57,7 @@ enum class import_mode : u8
 [[nodiscard]] cc::result<asset_data> import_gltf(babel::gltf::data const& doc,
                                                  asset_loader_config const& cfg,
                                                  cc::string_view asset_name,
-                                                 cc::vector<asset_material_definition>& definitions,
-                                                 import_mode mode = import_mode::payloads);
+                                                 cc::vector<asset_material_definition>& definitions);
 
 /// Wavefront OBJ into `asset_data`, one mesh per `usemtl` run.
 ///

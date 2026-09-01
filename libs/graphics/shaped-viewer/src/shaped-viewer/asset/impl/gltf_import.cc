@@ -1,13 +1,11 @@
 #include <babel-serializer/geometry/gltf.hh>
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/utility.hh> // cc::move
-#include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/impl/asset_import.hh>
-#include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
@@ -128,18 +126,11 @@ namespace bg = babel::gltf;
     return cc::move(out);
 }
 
-/// Bumped whenever what an import produces from the same bytes changes.
-///
-/// It rides in every recipe key, which is what stops a payload decoded by an older importer answering for a key a
-/// newer one minted — the failure mode a cache makes silent and permanent.
-constexpr u32 gltf_importer_version = 1;
-
 /// Everything one import needs to carry between its passes.
 struct gltf_importer
 {
     bg::data const& doc;
     asset_loader_config const& cfg;
-    impl::import_mode mode = impl::import_mode::payloads;
 
     asset_data out;
 
@@ -265,7 +256,7 @@ struct gltf_importer
         if (m.alpha == bg::alpha_mode::mask)
             bindings.push_back(binding::of("alpha_cutoff", m.alpha_cutoff));
 
-        if (cfg.import_textures && mode == impl::import_mode::payloads)
+        if (cfg.import_textures)
         {
             // Base color is sRGB-encoded and its alpha is not, which is exactly what an sRGB texture format means — so
             // one upload serves both bindings.
@@ -434,8 +425,6 @@ struct gltf_importer
     [[nodiscard]] cc::vector<mesh_attribute> attributes_of(bg::primitive const& p, isize vertex_count)
     {
         auto attributes = cc::vector<mesh_attribute>();
-        if (mode == impl::import_mode::structure)
-            return attributes; // every one of these is an accessor read, which is the payload half by definition
 
         for (auto const& a : doc.attributes_of(p))
         {
@@ -544,43 +533,24 @@ struct gltf_importer
                 continue;
             }
 
-            // The key both halves agree on: the structure pass promises geometry under it, and the payload pass
-            // answers under the same one, so the record minted for the promise is the record that fills in.
-            auto const key = impl::gltf_primitive_key(out.name, int(index), i32(pi));
-
-            auto geometry = triangle_geometry();
-            auto attributes = cc::vector<mesh_attribute>();
-
-            if (mode == impl::import_mode::payloads)
+            auto positions = elements_of<tg::pos3f>(doc.find_attribute(p, "POSITION"));
+            if (positions.empty())
             {
-                auto positions = elements_of<tg::pos3f>(doc.find_attribute(p, "POSITION"));
-                if (positions.empty())
-                {
-                    note(cc::format("gltf: '{}' has no readable POSITION accessor — quantized and normalized-integer "
-                                    "positions are not supported yet",
-                                    name));
-                    continue;
-                }
-
-                auto const vertex_count = positions.size();
-                auto indices = triangle_indices(p, vertex_count);
-                if (indices.empty())
-                {
-                    note(cc::format("gltf: '{}' has no readable triangles", name));
-                    continue;
-                }
-
-                attributes = attributes_of(p, vertex_count);
-                geometry = triangle_geometry::rekeyed(
-                    triangle_geometry::create_from_indexed_triangles(cc::move(positions), cc::move(indices)), key);
-            }
-            else
-            {
-                // Nothing is read here — not one payload byte — and the mesh is still placeable, because a box and a
-                // key is all a placeholder needs.
-                geometry = triangle_geometry::create_deferred(key);
+                note(cc::format("gltf: '{}' has no readable POSITION accessor — quantized and normalized-integer "
+                                "positions are not supported yet",
+                                name));
+                continue;
             }
 
+            auto const vertex_count = positions.size();
+            auto indices = triangle_indices(p, vertex_count);
+            if (indices.empty())
+            {
+                note(cc::format("gltf: '{}' has no readable triangles", name));
+                continue;
+            }
+
+            auto attributes = attributes_of(p, vertex_count);
             auto const slot = slot_of(p.material);
 
             auto textures = cc::vector<mesh_texture_data>();
@@ -590,14 +560,15 @@ struct gltf_importer
             if (slot >= 0)
                 out.materials[slot].meshes.push_back(i32(out.meshes.size()));
 
-            out.meshes.push_back({.name = name,
-                                  .geometry = cc::move(geometry),
-                                  .attributes = cc::move(attributes),
-                                  .transform = placement,
-                                  // Left invalid on purpose: the slot it belongs to points every mesh it covers at the
-                                  // real id once the library has minted one.
-                                  .textures = cc::move(textures),
-                                  .bounds = bounds_of(p)});
+            out.meshes.push_back(
+                {.name = name,
+                 .geometry = triangle_geometry::create_from_indexed_triangles(cc::move(positions), cc::move(indices)),
+                 .attributes = cc::move(attributes),
+                 .transform = placement,
+                 // Left invalid on purpose: the slot it belongs to points every mesh it covers at the real id
+                 // once the library has minted one.
+                 .textures = cc::move(textures),
+                 .bounds = bounds_of(p)});
         }
     }
 
@@ -649,23 +620,12 @@ struct gltf_importer
 };
 } // namespace
 
-cc::hash128 impl::gltf_primitive_key(cc::string_view asset_name, i32 mesh, i32 primitive)
-{
-    auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_string(asset_name);
-    b.add_pod(mesh);
-    b.add_pod(primitive);
-    b.add_pod(gltf_importer_version);
-    return cc::hash128::create(b.written_bytes(), sv::impl::position_hash_seed);
-}
-
 cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
                                          asset_loader_config const& cfg,
                                          cc::string_view asset_name,
-                                         cc::vector<impl::asset_material_definition>& definitions,
-                                         impl::import_mode mode)
+                                         cc::vector<impl::asset_material_definition>& definitions)
 {
-    auto importer = gltf_importer{.doc = doc, .cfg = cfg, .mode = mode};
+    auto importer = gltf_importer{.doc = doc, .cfg = cfg};
     importer.out.name = asset_name.empty() ? cc::string("gltf") : cc::string(asset_name);
 
     // babel's own issues first, so the report reads in the order the file was processed.

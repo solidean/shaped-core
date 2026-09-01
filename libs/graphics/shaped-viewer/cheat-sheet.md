@@ -148,9 +148,6 @@ sv::instance_slot                      // { material_slot_kind kind; i32 offset,
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
 m.create_mesh(sv::mesh_data)           // -> sv::mesh; geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
-                                       //   a DEFERRED geometry mints a pending record from its key alone; the same key with a payload later fills that record
-m.meshes.acquire_deferred(key, bounds) // -> mesh_id, pending, nothing allocated;  m.meshes.supply(id, payload) brings the bytes
-m.meshes.is_awaiting_payload(id)       // -> bool, minted from a key and never supplied
                                        //   `bounds` comes from the mesh_data when it declared one (every glTF does), else from a scan of the positions
                                        //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
 m.acquire_scene_item(sv::mesh)         // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
@@ -352,9 +349,6 @@ sv::mesh_attribute_binding       // { string name; attribute_format format; attr
 sv::mesh_attribute_binding::of(a, id)  // -> the binding for an already-uploaded mesh_attribute; id must be invalid exactly at per_instance
 m.is_visible()                   // -> bool (flags.has(mesh_flag::visible)); on both forms, and the rest of a mesh is plain public data
 sv::triangle_geometry            // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — raw or indexed, one type
-sv::triangle_geometry::create_deferred(key)      // geometry that is only a KEY so far — the smallest form of the from_uri recipe
-sv::triangle_geometry::rekeyed(g, key)           // a payload answering under a recipe key instead of its content hash; loses dedup, gains a name
-g.is_deferred()                  // -> bool; a key with no bytes. is_empty() is neither bytes NOR a promise
 sv::triangle_geometry::create_from_triangles(triangles)            // -> from a range of tg::triangle3f; the pin is reinterpreted onto the positions, never copied
 sv::triangle_geometry::create_from_indexed_triangles(pos, indices) // -> 3 indices per triangle, each < positions.size()
 g.is_indexed() / g.is_empty() / g.vertex_count() / g.triangle_count()  // triangle_count follows the index buffer when there is one
@@ -415,9 +409,7 @@ sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
 sv::asset                        // a load in flight; move-only, and dropping it drops the load
 a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
 a.wait()                         // -> bool; drives the load on THIS thread, then collects
-a.is_ready()                     // -> bool; the STRUCTURE landed — meshes placed, sized and named, geometry maybe still coming
-a.is_complete()                  // -> bool; the payloads landed too
-a.has_error() / a.error()
+a.is_ready() / a.has_error() / a.error()
 a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a frame loop needs no branch
 
 sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
@@ -447,10 +439,8 @@ Gotchas:
 - **`load_async` runs on whatever scheduler `cc::async` was given.** With none installed nothing progresses until `wait` drives it — the same degradation every other async here takes.
 - **Minting materials cannot leave the calling thread**, since `material_library` is not thread-safe.
   That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
-- **`is_ready` is the STRUCTURE, `is_complete` the payloads.**
-  A glTF states its meshes, placements, material factors and a box per accessor entirely in its JSON, so all of that lands first.
-  The meshes are placeable at once, drawn as placeholder boxes at their real size and place.
-- **Both halves re-fetch and re-parse.** Deliberate at this size: a glTF's JSON is cheap beside its accessors, and sharing the parsed document would mean holding it, and its buffers, twice.
+- **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
+  What does arrive progressively is the upload, which the managers stream.
 - **Textures ride on the MESH, not the material.** An imported map travels as `mesh_texture_data` (pixels), because a material binding would need an already-minted `texture_id` and therefore a device.
   The frequency chain makes that the finer rank anyway, so a mesh texture wins over the material's factor exactly as an authored one does.
 - **`asset_material` owns its meshes, and that is what `override_material` rewrites.**

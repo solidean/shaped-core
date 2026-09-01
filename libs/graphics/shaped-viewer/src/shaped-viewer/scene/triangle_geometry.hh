@@ -75,38 +75,8 @@ struct sv::triangle_geometry
         return {.positions = cc::move(pinned_positions), .indices = cc::move(pinned_indices), .hash = hash};
     }
 
-    /// Geometry that is only a KEY so far: its identity, with no bytes behind it yet.
-    ///
-    /// This is the smallest form of the plan's `from_uri` recipe, and what lets a structure pass describe a mesh it
-    /// has not read — a name, a placement and a box, named by the key its payload will arrive under.
-    /// The key must be reproducible from the source alone, and must fold in the importer's version: change how a
-    /// primitive is decoded and the key has to change with it, or a stale payload answers for a new recipe.
-    ///
-    /// A deferred geometry is NOT empty: `create_mesh` mints a pending record for it, drawn as a placeholder, and
-    /// supplying the same key later fills that record in place rather than making a second one.
-    [[nodiscard]] static triangle_geometry create_deferred(cc::hash128 key) { return {.hash = key}; }
-
-    /// The same payload under a caller-chosen key rather than its own content hash.
-    ///
-    /// This is the other half of `create_deferred`: a structure pass promises geometry under a recipe key, and the
-    /// payload that arrives later has to answer under that same name to fill the record the promise minted.
-    ///
-    /// The price is real and worth stating: two primitives with identical bytes no longer dedupe, because a recipe
-    /// names a SOURCE and not a content.
-    /// Use it only where the key is a recipe; ordinary geometry keeps its content hash and keeps the dedup.
-    [[nodiscard]] static triangle_geometry rekeyed(triangle_geometry g, cc::hash128 key)
-    {
-        g.hash = key;
-        return g;
-    }
-
     [[nodiscard]] bool is_indexed() const { return !indices.empty(); }
-
-    /// Whether the payload is still to come — a key with no bytes.
-    [[nodiscard]] bool is_deferred() const { return positions.empty() && hash != cc::hash128(); }
-
-    /// Whether this describes nothing at all, which is neither bytes nor a promise of them.
-    [[nodiscard]] bool is_empty() const { return positions.empty() && !is_deferred(); }
+    [[nodiscard]] bool is_empty() const { return positions.empty(); }
 
     [[nodiscard]] isize vertex_count() const { return positions.size(); }
     [[nodiscard]] isize triangle_count() const { return (is_indexed() ? indices.size() : positions.size()) / 3; }

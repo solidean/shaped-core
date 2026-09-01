@@ -6,10 +6,8 @@
 
 namespace sv
 {
-asset::asset(cc::shared_async<impl::imported_asset> structure,
-             cc::shared_async<impl::imported_asset> payloads,
-             asset_loader const* loader)
-  : _structure(cc::move(structure)), _payloads(cc::move(payloads)), _loader(loader)
+asset::asset(cc::shared_async<impl::imported_asset> node, asset_loader const* loader)
+  : _node(cc::move(node)), _loader(loader)
 {
 }
 
@@ -19,22 +17,25 @@ asset& asset::operator=(asset&&) noexcept = default;
 
 bool asset::is_valid() const
 {
-    return _structure != nullptr || _payloads != nullptr || _ready || !_error.empty();
+    return _node != nullptr || _ready || !_error.empty();
 }
 
-bool asset::_collect(cc::shared_async<impl::imported_asset>& node)
+bool asset::poll()
 {
-    if (node == nullptr || !node->is_ready())
-        return false; // never started, already collected, or still running — and asking must not block
+    if (_ready || !_error.empty() || _node == nullptr)
+        return _ready;
 
-    if (node->has_error())
+    if (!_node->is_ready())
+        return false; // still running, and asking must not block
+
+    if (_node->has_error())
     {
-        _error = node->try_error()->underlying().to_string();
-        node = nullptr;
+        _error = _node->try_error()->underlying().to_string();
+        _node = nullptr;
         return false;
     }
 
-    auto const* const imported = node->try_value();
+    auto const* const imported = _node->try_value();
     CC_ASSERT(imported != nullptr, "a settled node without an error carries a value");
 
     _data = imported->data;
@@ -49,37 +50,15 @@ bool asset::_collect(cc::shared_async<impl::imported_asset>& node)
 
     // Released as soon as it is collected: the payload is in `_data` now, and holding the node would keep a second
     // copy of every buffer alive for as long as the asset is.
-    node = nullptr;
+    _node = nullptr;
+    _ready = true;
     return true;
-}
-
-bool asset::poll()
-{
-    if (!_error.empty())
-        return false;
-
-    // The structure first, and only once: it is what makes the meshes placeable at all.
-    if (!_ready)
-        _ready = _collect(_structure);
-
-    // The payloads REPLACE what the structure produced, under the same keys — so a mesh that was a promise becomes
-    // the same record filled in, rather than a second one.
-    // Deliberately after the structure rather than instead of it: a payload that lands first would still publish a
-    // complete asset, and one that lands second must not be dropped.
-    if (_ready && !_complete && _collect(_payloads))
-        _complete = true;
-
-    return _ready;
 }
 
 bool asset::wait()
 {
-    if (_structure != nullptr)
-        (void)cc::try_async_blocking_get(_structure);
-    (void)poll();
-
-    if (_payloads != nullptr)
-        (void)cc::try_async_blocking_get(_payloads);
+    if (_node != nullptr)
+        (void)cc::try_async_blocking_get(_node);
     return poll();
 }
 } // namespace sv

@@ -120,7 +120,6 @@ struct sv::asset_loader_config
 namespace sv::impl
 {
 struct asset_material_definition;
-enum class import_mode : u8;
 } // namespace sv::impl
 
 namespace sv
@@ -192,8 +191,7 @@ private:
                                                  asset_format format,
                                                  cc::string_view name,
                                                  cc::string_view base_uri,
-                                                 cc::vector<impl::asset_material_definition>& definitions,
-                                                 impl::import_mode mode) const;
+                                                 cc::vector<impl::asset_material_definition>& definitions) const;
 
     /// The main-thread tail of every load: the definitions an import produced, minted into the library.
     [[nodiscard]] cc::result<asset_data> _finish(cc::result<asset_data> imported,
