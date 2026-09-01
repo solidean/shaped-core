@@ -1,6 +1,7 @@
 # Asset loading (plan)
 
-**Status: phases 1 to 5 landed, phase 6 started.**
+**Status: phases 1 to 5 landed.**
+**Phase 6 is deferred, on purpose — see its entry in the phasing below.**
 The CPU / GPU type split is in — `sv::mesh_data`, `sv::mesh`, symmetric textures, `add_mesh` taking either.
 So is the material mapping — `alpha_cutoff`, `occlusion` and the channel swizzle, through resolve, generation and the permutation key.
 And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ and STL, with the resolver hook.
@@ -433,11 +434,17 @@ not yet need would be the wrong order.
    Textures stream too, and a slot sampling one that has not arrived reads its placeholder rather than an empty texture.
    `asset_loader::load_async` hands back an `sv::asset`, and stages 1 to 3 run off the calling thread — which needed the import split in two, since `material_library` is not thread-safe.
    Structure-first landed too: `is_ready` is the mesh list, and the geometry behind it arrives under the recipe key the structure promised.
-6. **Recipes and caching.** *Started at the near end.*
-   `triangle_geometry::create_deferred` is `from_uri` in miniature: a key with no bytes.
-   The importer's version already rides in that key, which is what stops a stale payload answering for a new recipe.
-   What that key does NOT yet do is reproduce its own payload: nothing can hand the manager the bytes for a key it holds, so a deferred record waits to be supplied rather than fetching itself.
-   Still to come: that seam, `derived`, `bcache` on the parse and processing steps, and eviction with re-materialization behind the evictable-iff-it-has-a-recipe invariant.
+6. **Recipes and caching.** *Deferred, and the near end of it already landed.*
+   `triangle_geometry::create_deferred` is `from_uri` in miniature: a key with no bytes, carrying the importer's version so a stale payload cannot answer for a new recipe.
+   That much was worth having early, because structure-first loading needs exactly it.
+   The rest waits for the reason the intro above already gives.
+   `from_memory` plus a key covers everything until assets get big, and a caching subsystem nothing needs yet is the wrong thing to be maintaining.
+   What is left, in dependency order.
+   **The reproduce seam** — the manager asking "produce the payload for this key" — which everything else needs, since a deferred record currently waits to be supplied rather than fetching itself.
+   **`derived`**, for mip generation, block compression and tangent frames as operations over other keys.
+   **`bcache`** on the parse and processing steps, which is where it pays.
+   **Eviction with re-materialization**, behind the evictable-iff-it-has-a-recipe invariant — which also means `lru_pool` must refuse to evict an adopted record.
+   Reopen it when an asset is big enough that holding its payloads resident is the problem; until then the honest answer is that nothing is asking.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
 
 ## Library-extension seams this opens
