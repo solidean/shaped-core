@@ -1,6 +1,6 @@
 # Asset loading (plan)
 
-**Status: phases 1 to 4 landed, phase 5 part-way.**
+**Status: phases 1 to 5 landed, phase 6 started.**
 The CPU / GPU type split is in — `sv::mesh_data`, `sv::mesh`, symmetric textures, `add_mesh` taking either.
 So is the material mapping — `alpha_cutoff`, `occlusion` and the channel swizzle, through resolve, generation and the permutation key.
 And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ and STL, with the resolver hook.
@@ -163,6 +163,7 @@ A recipe is how a payload is produced, and therefore how it is reproduced after 
 
 - **`from_memory`** — the bytes are pinned right here.
   This is what `mesh_data` and `texture_data` are, so the convenience path is not a separate mechanism but the trivial recipe.
+  *Landed*, and it is what everything else is measured against.
 - **`from_uri`** — a source uri, a sub-selector (`car.glb#mesh3.primitive0`, `car.glb#image7`) and the load options.
   Reproducible from nothing but itself.
 - **`derived`** — an operation over other resource keys: mip generation, block compression, tangent-frame generation.
@@ -260,11 +261,10 @@ for (auto const& m : car.meshes())   // empty until it lands, then all of them
     scene.add_mesh(m);
 ```
 
-*Landed, with one difference from the above.*
-`is_ready` is whole-asset rather than structure-first: an asset is either not there or entirely there.
-Making it per-mesh needs a `mesh_data` whose geometry has not been read at all — a mesh that is a name, a transform and
-a box and nothing else — which `create_mesh` has no form for.
-That is the same shape the `from_uri` recipe below wants, so the two want doing together.
+*Landed.*
+`is_ready` means the structure: the mesh list, placed and sized out of the JSON alone, its geometry named by a recipe
+key rather than carried.
+`is_complete` is the payload half, and every later `add_mesh` of the same asset fills the records the promises minted.
 
 OBJ and STL have no structure/payload split, so nothing is known until the whole file is parsed and `is_ready()` simply stays false
 longer.
@@ -432,8 +432,12 @@ not yet need would be the wrong order.
    Priority is the transfer's own rather than a drain order, so attributes outrank the geometry that indexes them and a mesh never draws real triangles against attribute bytes still in flight.
    Textures stream too, and a slot sampling one that has not arrived reads its placeholder rather than an empty texture.
    `asset_loader::load_async` hands back an `sv::asset`, and stages 1 to 3 run off the calling thread — which needed the import split in two, since `material_library` is not thread-safe.
-   Still to come: structure-first parsing, which is what makes `is_ready` per-mesh rather than whole-asset.
-6. **Recipes and caching.** `from_uri` and `derived`, `bcache` on the parse and processing steps, re-materialization after eviction, importer versioning in the keys.
+   Structure-first landed too: `is_ready` is the mesh list, and the geometry behind it arrives under the recipe key the structure promised.
+6. **Recipes and caching.** *Started at the near end.*
+   `triangle_geometry::create_deferred` is `from_uri` in miniature: a key with no bytes.
+   The importer's version already rides in that key, which is what stops a stale payload answering for a new recipe.
+   What that key does NOT yet do is reproduce its own payload: nothing can hand the manager the bytes for a key it holds, so a deferred record waits to be supplied rather than fetching itself.
+   Still to come: that seam, `derived`, `bcache` on the parse and processing steps, and eviction with re-materialization behind the evictable-iff-it-has-a-recipe invariant.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
 
 ## Library-extension seams this opens

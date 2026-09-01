@@ -25,12 +25,12 @@
 /// The one step that cannot move off the calling thread is minting the imported materials, since `material_library` is
 /// not thread-safe: `poll` is where that happens, which is why it is a call rather than a query.
 ///
-/// **`is_ready` is whole-asset, not structure-first.**
-/// The design in libs/graphics/shaped-viewer/docs/asset-loading.md wants the mesh list and its bounds to arrive ahead
-/// of the payloads, so a placeholder can stand in per mesh.
-/// That needs a mesh whose geometry has not been read at all, which `create_mesh` has no form for yet — so for now an
-/// asset is either not there or entirely there, and what arrives progressively is the upload, which the resource
-/// managers already stream.
+/// **`is_ready` means the STRUCTURE, not the payloads.**
+/// A glTF states its meshes, their placements, their materials' factors and a box per accessor entirely in its JSON,
+/// so all of that lands first and the meshes become placeable at once — named by a recipe key, drawn as placeholder
+/// boxes at their real size and place.
+/// The payloads follow, and every later `add_mesh` of the same asset fills the records the promises minted.
+/// `is_complete` is the second half: everything read, everything handed to the managers.
 ///
 /// Move-only: it owns the load, and dropping it drops the load.
 class sv::asset
@@ -53,15 +53,19 @@ public:
     /// It never blocks, so a load still running simply answers false.
     bool poll();
 
-    /// Whether the load finished and produced an asset.
+    /// Whether the STRUCTURE has landed: the mesh list, correctly placed and sized, with its materials.
     /// Only ever true after a `poll` that saw it land.
+    /// The geometry behind those meshes may still be arriving, and until it does they draw as placeholder boxes.
     [[nodiscard]] bool is_ready() const { return _ready; }
+
+    /// Whether the payloads have landed too, so nothing about this asset is a promise any more.
+    [[nodiscard]] bool is_complete() const { return _complete; }
 
     /// Whether the load finished and did not produce one; `error` says why.
     [[nodiscard]] bool has_error() const { return !_error.empty(); }
     [[nodiscard]] cc::string_view error() const { return _error; }
 
-    /// Drives the load to completion on THIS thread, then collects it.
+    /// Drives the whole load — structure AND payloads — to completion on THIS thread, then collects it.
     ///
     /// With a scheduler installed the work is likely already done and this only collects; with none, this is what runs
     /// the whole thing.
@@ -85,15 +89,25 @@ public:
 public:
     /// Wraps a load already in flight — `asset_loader::load_async` is what builds one.
     /// `loader` must outlive the load: its config is what the collecting step reads.
-    asset(cc::shared_async<impl::imported_asset> node, asset_loader const* loader);
+    asset(cc::shared_async<impl::imported_asset> structure,
+          cc::shared_async<impl::imported_asset> payloads,
+          asset_loader const* loader);
 
 private:
-    /// The worker half's result, released once collected.
-    cc::shared_async<impl::imported_asset> _node;
+    /// Collects `node` into `_data` if it has settled, minting its materials; returns whether it did.
+    bool _collect(cc::shared_async<impl::imported_asset>& node);
+
+    /// The cheap half: names, placements, material factors, and a box per mesh.
+    /// Released once collected.
+    cc::shared_async<impl::imported_asset> _structure;
+
+    /// The expensive half: geometry, attributes and decoded images, under the keys the structure promised.
+    cc::shared_async<impl::imported_asset> _payloads;
 
     asset_loader const* _loader = nullptr;
 
     asset_data _data;
     cc::string _error;
     bool _ready = false;
+    bool _complete = false;
 };

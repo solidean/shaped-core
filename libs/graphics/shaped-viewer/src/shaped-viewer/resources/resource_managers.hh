@@ -116,6 +116,25 @@ public:
     /// the BLAS is built from the index buffer and the closest-hit reads through it.
     [[nodiscard]] mesh_id acquire(indexed_triangle_data const& mesh);
 
+    /// A record for `key` with no payload behind it yet, pending until `supply` brings one.
+    ///
+    /// The buffers do not exist either — nothing reads them while a mesh is pending, since a placeholder stands in for
+    /// both its acceleration structure and the geometry an instance record names.
+    /// `bounds` is what that placeholder is sized by, and a deferred mesh without one is never drawn at all.
+    /// A key already resident comes back as it is, so asking twice is a lookup.
+    [[nodiscard]] mesh_id acquire_deferred(cc::hash128 key, cc::optional<tg::aabb3f> bounds);
+
+    /// Brings the payload for an already-minted deferred record, starting its transfer.
+    ///
+    /// The key must be the one the record was minted under — that is the whole point of a recipe key being
+    /// reproducible — and `mesh.hash` is checked against it.
+    /// A no-op for a record that already has its payload, so re-supplying every frame is a comparison.
+    void supply(mesh_id id, triangle_data const& mesh);
+    void supply(mesh_id id, indexed_triangle_data const& mesh);
+
+    /// Whether `id` names a record still waiting for its payload — minted from a key, never supplied.
+    [[nodiscard]] bool is_awaiting_payload(mesh_id id);
+
     /// The unit cube every pending mesh is drawn as, built on first use.
     ///
     /// ONE BLAS for every placeholder in a scene: it spans `[0,1]^3`, and the extent a particular mesh should occupy
@@ -172,6 +191,12 @@ private:
     /// Finishes `id` if its transfers have settled; returns whether it did.
     [[nodiscard]] bool _try_settle(sg::command_list& cmd, mesh_id id, pending_mesh& p);
 
+    /// The shared half of both `supply` overloads: creates the buffers, starts the transfers, charges the budget.
+    void _supply(mesh_id id,
+                 cc::hash128 key,
+                 cc::pinned_data<tg::pos3f const> const& positions,
+                 cc::pinned_data<u32 const> const& indices);
+
     /// The stand-in a non-indexed record binds as `Indices`, created on first use and recorded onto `cmd`.
     /// Its contents are never read — it exists only so the trace's binding group is complete.
     [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
@@ -181,6 +206,9 @@ private:
     sg::blas_handle _placeholder_blas;
     sg::buffer<tg::pos3f> _placeholder_vertices;
     cc::map<mesh_id, pending_mesh> _settling;
+
+    /// Records minted from a key and not yet supplied; the value is the key they must be supplied under.
+    cc::map<mesh_id, cc::hash128> _awaiting;
 };
 
 /// One uploaded material set: a StructuredBuffer of `pbr_material_gpu`, one entry per triangle, indexed by

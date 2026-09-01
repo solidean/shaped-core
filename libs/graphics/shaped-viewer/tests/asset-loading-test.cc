@@ -9,6 +9,7 @@
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
+#include <shaped-viewer/asset/impl/asset_import.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
@@ -557,6 +558,92 @@ TEST("sv::asset - an async load lands whole, and its materials are minted where 
     // Polling again is idempotent, which is what lets a frame loop call it unconditionally.
     CHECK(pending.poll());
     CHECK(pending.meshes().size() == 2);
+}
+
+TEST("sv::asset - a glTF's structure lands before its payloads, as boxes with keys")
+{
+    auto lib = make_library();
+
+    auto const json = triangle_gltf(R"({"attributes": {"POSITION": 1}, "indices": 0, "material": 0})",
+                                    R"("materials": [{"name": "glass"}],)");
+
+    auto const resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
+    {
+        if (uri != "mem/car.gltf")
+            return cc::error(cc::format("no such uri: {}", uri));
+
+        auto text = cc::vector<byte>();
+        for (auto const c : cc::string_view(json))
+            text.push_back(byte(c));
+        return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(text)));
+    };
+
+    auto const loader = sv::asset_loader({.materials = &lib, .resolve = resolve});
+    auto car = loader.load_async("mem/car.gltf");
+
+    // Driving only the structure half is what a caller who polls before the payloads land sees.
+    car.wait();
+    REQUIRE(car.is_ready());
+    CHECK(car.is_complete());
+
+    // Whichever half is showing, the mesh list is the same one — placed, named and sized.
+    REQUIRE(car.meshes().size() == 1);
+    CHECK(car.meshes()[0].name == "tri");
+    REQUIRE(car.meshes()[0].bounds.has_value());
+    CHECK(car.meshes()[0].bounds.value().max == tg::pos3f(1, 1, 0));
+    CHECK(car.data().material("glass") != sv::material_id::invalid);
+
+    // The completed half carries the payload, and it answers under the RECIPE key rather than a content hash — which
+    // is what lets the promise and the payload be one record.
+    CHECK(!car.meshes()[0].geometry.is_deferred());
+    CHECK(car.meshes()[0].geometry.triangle_count() == 1);
+    CHECK(car.meshes()[0].geometry.hash == sv::impl::gltf_primitive_key("mem/car.gltf", 0, 0));
+}
+
+TEST("sv::asset_loader - a structure import reads no payload byte, and promises its geometry")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    auto const json = triangle_gltf(R"({"attributes": {"POSITION": 1}, "indices": 0, "material": 0})",
+                                    R"("materials": [{"name": "glass"}],)");
+    auto const doc = babel::gltf::read(json);
+    REQUIRE(doc.has_value());
+
+    auto definitions = cc::vector<sv::impl::asset_material_definition>();
+    auto const structure
+        = sv::impl::import_gltf(doc.value(), loader.config(), "car.gltf", definitions, sv::impl::import_mode::structure);
+    REQUIRE(structure.has_value());
+
+    REQUIRE(structure.value().meshes.size() == 1);
+    auto const& mesh = structure.value().meshes[0];
+
+    // A promise, not bytes — and not nothing either, which is the distinction `is_empty` has to keep.
+    CHECK(mesh.geometry.is_deferred());
+    CHECK(!mesh.geometry.is_empty());
+    CHECK(mesh.geometry.positions.empty());
+    CHECK(mesh.geometry.hash == sv::impl::gltf_primitive_key("car.gltf", 0, 0));
+
+    // Everything a placeholder needs came out of the JSON: where it goes, how big it is, what it is made of.
+    CHECK(mesh.name == "tri");
+    REQUIRE(mesh.bounds.has_value());
+    CHECK(mesh.bounds.value().max == tg::pos3f(1, 1, 0));
+    CHECK(tg::distance(tg::pos3f(0, 0, 0).transformed(mesh.transform), tg::pos3f(1, 2, 3)) < 1e-5f);
+    REQUIRE(definitions.size() == 1);
+    CHECK(definitions[0].name == "glass");
+
+    // And nothing that costs an accessor read did: no attributes, no uv set, no decoded image.
+    CHECK(mesh.attributes.empty());
+    CHECK(mesh.textures.empty());
+
+    // The payload half agrees about the key, which is the whole contract between the two.
+    auto payload_definitions = cc::vector<sv::impl::asset_material_definition>();
+    auto const payloads = sv::impl::import_gltf(doc.value(), loader.config(), "car.gltf", payload_definitions,
+                                                sv::impl::import_mode::payloads);
+    REQUIRE(payloads.has_value());
+    REQUIRE(payloads.value().meshes.size() == 1);
+    CHECK(payloads.value().meshes[0].geometry.hash == mesh.geometry.hash);
+    CHECK(!payloads.value().meshes[0].geometry.is_deferred());
 }
 
 TEST("sv::asset - a load that cannot be resolved reports it rather than throwing")

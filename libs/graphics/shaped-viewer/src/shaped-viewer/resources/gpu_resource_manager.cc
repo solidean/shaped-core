@@ -357,7 +357,8 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
 
 sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
 {
-    CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+    CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry, or a key its geometry will arrive under, to be "
+                                         "placed in a scene");
 
     // The box travels with the payload rather than being recomputed from it: the manager keeps it after the bytes are
     // gone, and a placeholder drawn while the geometry is still arriving has nothing else to be sized by.
@@ -367,15 +368,25 @@ sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
     // whenever the mesh has not changed.
     auto const geometry = [&]
     {
+        // A key with no bytes yet: the record is minted pending, drawn as a placeholder at `box`, and filled by
+        // whichever later `create_mesh` carries the same key WITH its payload.
+        if (data.geometry.is_deferred())
+            return meshes.acquire_deferred(data.geometry.hash, box);
+
         if (data.geometry.is_indexed())
         {
             auto payload = indexed_triangle_data::from(data.geometry);
             payload.bounds = box;
-            return meshes.acquire(payload);
+            auto const id = meshes.acquire(payload);
+            meshes.supply(id, payload); // a no-op unless this key was deferred first
+            return id;
         }
+
         auto payload = triangle_data::from(data.geometry);
         payload.bounds = box;
-        return meshes.acquire(payload);
+        auto const id = meshes.acquire(payload);
+        meshes.supply(id, payload);
+        return id;
     }();
 
     auto bindings = cc::vector<mesh_attribute_binding>();
