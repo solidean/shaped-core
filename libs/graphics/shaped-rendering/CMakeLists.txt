@@ -11,6 +11,7 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
+    src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
     src/shaped-rendering/imgui_style.cc
@@ -33,6 +34,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/keyed_pipeline_cache.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
+    src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
     src/shaped-rendering/imgui_context.hh
     src/shaped-rendering/imgui_routine.hh
@@ -111,6 +113,8 @@ sc_add_shader_package(
         box_filter_mipmap.hlsl:compute:main_2d_cs
         box_filter_mipmap.hlsl:compute:main_2d_array_cs
         box_filter_mipmap.hlsl:compute:main_3d_cs
+        raster_box_filter_mipmap.hlsl:vertex:main_vs
+        raster_box_filter_mipmap.hlsl:fragment:main_ps
 )
 
 # Test executable.
@@ -171,6 +175,7 @@ if(SC_BUILD_TESTS)
             tests/imgui-manual-test.cc
             tests/keyed-pipeline-cache-test.cc
             tests/box-filter-mipmap-test.cc
+            tests/raster-box-filter-mipmap-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
     endif()

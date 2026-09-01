@@ -311,6 +311,23 @@ sr::box_filter_mipmap_routine::prewarm(ctx);                            // warm 
 // texture needs readonly_texture | readwrite_texture usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
 // source is bound as a single-mip view of level N, target as the UAV of N+1, so no level is read and written by one dispatch
 // no-op when that variant's shader did not compile (a broken 3D shader leaves 2D working), or when there is no level to generate
+// NOT for a format `sg::supports_typed_uav` refuses — an sRGB one above all; that is the raster routine below
+```
+
+## Raster box-filter mipmap routine
+
+The same box filter through the raster pipeline — one rendering scope per generated level instead of one dispatch.
+
+```cpp
+#include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
+sr::raster_box_filter_mipmap_routine::execute(cmd, texture_2d, first_level = 1);  // generates first_level..end from the level below each
+sr::raster_box_filter_mipmap_routine::level_count(texture_2d, first_level = 1);   // -> int — passes it WOULD record, for a work budget
+// FOR the formats the compute routine cannot touch: a typed UAV over an sRGB format is refused, and D3D12 refuses it by REMOVING THE DEVICE
+//   `sg::supports_typed_uav(format)` is the predicate that picks between the two, and the caller commits at creation time:
+//   this one needs readonly_texture | render_target usage, the compute one readonly_texture | readwrite_texture
+// an sRGB render target converts on the sample and on the write, so this averages LINEAR values — a different number, and the right one
+// 2D non-array only (a render-target view is 2D-shaped); every other shape stays on the compute routine
+// source is bound as a single-mip view of level N, target as the render-target view of N+1, one scope per level
 ```
 
 Named for its filter deliberately.
