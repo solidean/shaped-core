@@ -69,6 +69,10 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
+
     // An output split into a row of three cells; each view traces at its cell's size and knows where it sits.
     // The odd width is on purpose: the cells must not have to divide evenly.
     auto const output_size = tg::vec2i(129, 64);
@@ -182,6 +186,10 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
+
     auto const output_size = tg::vec2i(96, 48);
 
     auto def = sv::viewer_definition{};
@@ -255,6 +263,10 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
     auto const cloud = sv_test::make_triangle_cloud(16);
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
 
     auto const output_size = tg::vec2i(128, 64);
 

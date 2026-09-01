@@ -37,6 +37,10 @@ TEST("sv - a view accumulates across frames under its id")
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
 
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
+
     auto const view_named = [&](char const* name)
     {
         auto v = sv::view_data{};
@@ -205,6 +209,10 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
 
     auto const output_size = tg::vec2i(64, 64);
     auto const traced_id = sv::view_id::from_string("planned");
