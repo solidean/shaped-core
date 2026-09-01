@@ -383,6 +383,14 @@ What follows is everything else the importer left behind.
   before the accumulation converges.
   Seeing those wants a load slow enough to catch mid-flight, which is a resolver that stalls on purpose rather than a
   bigger asset.
+- **A file carrying several arrangements frames as their union.**
+  The importer takes no position on which glTF scene is the right one, so every mesh crosses and `asset_data::bounds()`
+  is the world box over all of them.
+  A caller who framed a camera on a file with two arrangements of the same meshes therefore sees both boxed at once,
+  which is the correct consequence of importing everything rather than a defect.
+  What is missing is the other half: a way to say *which* arrangement, which is a scene-level concern and belongs
+  wherever a scene ends up living rather than as a load option.
+  Nothing in the repo carries such a file, so nothing would notice today.
 - **`tangent_frame_options::generate` is accepted and ignored.**
   Only `prefer_file` is implemented: a file's own normals and tangents cross, and `smooth` / `crease` do nothing
   silently, which is worse than rejecting them.
