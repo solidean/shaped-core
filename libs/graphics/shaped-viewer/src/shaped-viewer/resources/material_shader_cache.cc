@@ -7,7 +7,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/material/resolve.hh>
-#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/shader_library.hh>
 
 namespace sv
@@ -57,7 +57,7 @@ material_permutation const& material_shader_cache::acquire_fallback()
     static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
 
     // The mesh is what a resolve walks for candidates, and an empty signature asks it for nothing.
-    auto const mesh = sv::mesh();
+    auto const mesh = sv::resident_mesh();
     return acquire(resolve_material(type, material, mesh));
 }
 

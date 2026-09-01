@@ -36,7 +36,7 @@ struct sv::resolved_attribute
     /// live when `frequency == mesh_attribute`; its own `frequency` is the geometric one a shader indexes by
     mesh_attribute_binding const* attribute = nullptr;
 
-    /// live when `frequency` is `material_texture` or `mesh_texture`
+    /// live when `frequency` is `material_texture` or `mesh_texture_binding`
     texture_sample_source const* sample = nullptr;
 
     /// The best CONSTANT the walk had before a sample won — live alongside `sample`, and never empty beside one.
@@ -101,9 +101,13 @@ namespace sv
 ///
 /// `material.type` is not checked against `type` — the library is what pairs them, and it validates once at registration rather
 /// than on every resolve.
-[[nodiscard]] resolved_material resolve_material(material_type const& type, material const& material, sv::mesh const& mesh);
+[[nodiscard]] resolved_material resolve_material(material_type const& type,
+                                                 material const& material,
+                                                 sv::resident_mesh const& mesh);
 
 /// The same, resolving `id` through `lib` — the form a renderer calls.
 /// `id` must be one `lib` minted.
-[[nodiscard]] resolved_material resolve_material(material_library const& lib, material_id id, sv::mesh const& mesh);
+[[nodiscard]] resolved_material resolve_material(material_library const& lib,
+                                                 material_id id,
+                                                 sv::resident_mesh const& mesh);
 } // namespace sv

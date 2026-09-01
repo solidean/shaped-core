@@ -116,7 +116,7 @@ struct sv::sample_transform
 ///
 /// This is the finest frequency an attribute can be bound at: it varies per pixel.
 ///
-/// The `texture_id` is already minted, which makes this the GPU side of the pair: `texture_sample_data` is the same sample
+/// The `texture_id` is already minted, which makes this the GPU side of the pair: `texture_sample` is the same sample
 /// described by its pixels instead.
 struct sv::texture_sample_source
 {
@@ -136,7 +136,7 @@ struct sv::texture_sample_source
 /// The mesh names *which* texture and how to read it, the material names *what for* — the same contract the attributes travel under.
 /// A slot whose name no attribute of the material's type declares is simply unused; a mesh carrying a texture nobody asked for is
 /// not an error.
-struct sv::mesh_texture
+struct sv::mesh_texture_binding
 {
     /// the material attribute this fills — matched against the type's signature by name
     cc::string name;
@@ -146,10 +146,10 @@ struct sv::mesh_texture
 
 /// The CPU counterpart of `texture_sample_source`: the same sample, carrying pixels rather than an already-minted id.
 ///
-/// This is what removes the asymmetry an `sv::mesh_data` would otherwise have — its geometry and attributes travel as pinned
+/// This is what removes the asymmetry an `sv::mesh` would otherwise have — its geometry and attributes travel as pinned
 /// bytes while its textures would have needed a resource manager to exist before the mesh could be described at all.
 /// `texture_data` is itself pinned and content-hashed, so minting the id is a lookup once a manager is at hand.
-struct sv::texture_sample_data
+struct sv::texture_sample
 {
     sv::texture_data texture;
     cc::string uv_attribute = "uv";
@@ -159,11 +159,11 @@ struct sv::texture_sample_data
     sample_transform transform = {};
 };
 
-/// The CPU counterpart of `mesh_texture` — the slot name plus the sample's pixels.
-struct sv::mesh_texture_data
+/// The CPU counterpart of `mesh_texture_binding` — the slot name plus the sample's pixels.
+struct sv::mesh_texture
 {
     /// the material attribute this fills — matched against the type's signature by name
     cc::string name;
 
-    texture_sample_data source;
+    texture_sample source;
 };

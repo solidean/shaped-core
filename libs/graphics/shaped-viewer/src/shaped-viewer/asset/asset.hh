@@ -76,7 +76,7 @@ public:
     [[nodiscard]] asset_data const& data() const { return _data; }
 
     /// The meshes the load produced, empty until it has.
-    [[nodiscard]] cc::span<sv::mesh_data const> meshes() const { return _data.meshes; }
+    [[nodiscard]] cc::span<sv::mesh const> meshes() const { return _data.meshes; }
 
     /// Everything the importer had to say, empty until the load lands.
     [[nodiscard]] cc::span<cc::string const> issues() const { return _data.issues; }

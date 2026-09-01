@@ -95,7 +95,7 @@ struct image_stats
 /// frame's spread would swamp the deviation the test is trying to measure.
 image_stats trace_furnace(sg::context& ctx,
                           sv::gpu_resource_manager& resources,
-                          sv::mesh_data const& mesh,
+                          sv::mesh const& mesh,
                           tg::vec3f environment,
                           int frames)
 {
@@ -344,9 +344,9 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
     for (auto const& c : cases)
     {
         auto const id = lib.acquire(sv::material::create(cc::string(c.name), type, c.bindings));
-        auto const mesh = sv::mesh_data{.name = cc::string(c.name),
-                                        .geometry = sv::triangle_geometry::create_from_positions(positions),
-                                        .material = id};
+        auto const mesh = sv::mesh{.name = cc::string(c.name),
+                                   .geometry = sv::triangle_geometry::create_from_positions(positions),
+                                   .material = id};
 
         auto const stats = trace_furnace(ctx, resources, mesh, environment, 12);
         auto const mean = luminance_of(stats.mean);

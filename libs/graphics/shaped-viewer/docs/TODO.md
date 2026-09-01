@@ -91,7 +91,7 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 ## What the material system still needs
 
 The chain is joined end to end.
-A `sv::mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
+A `sv::resident_mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
 `pathtrace_routine` then traces a DXR pipeline carrying one hit group per permutation.
 What is left is narrower than it was:
 

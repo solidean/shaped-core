@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
+#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 
 using namespace cc::primitive_defines;
 
@@ -562,7 +563,7 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     m.wait_for_pending_uploads(); // a pending texture's slot would name the placeholder, not this one
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    auto data = sv::mesh_data{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
     data.attributes.push_back(scalar_attribute("metallic", sv::attribute_frequency::per_vertex, 0.4f, 0.5f, 0.6f));
     data.attributes.push_back(
         sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
@@ -798,7 +799,7 @@ TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
         auto const material = sv::default_material(*lib.value());
 
         auto cmd = ctx.create_command_list();
-        auto const item = m.acquire_scene_item(sv::mesh{.geometry = b.geometry, .material = material});
+        auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = b.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
         CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
 
@@ -823,7 +824,7 @@ TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
         auto const material = sv::default_material(*lib.value());
 
         auto cmd = ctx.create_command_list();
-        auto const item = m.acquire_scene_item(sv::mesh{.geometry = a.geometry, .material = material});
+        auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = a.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
         CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
 
@@ -860,7 +861,7 @@ TEST("sv - a texture still streaming samples a placeholder seeded from the mater
     auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    auto data = sv::mesh_data{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
     data.attributes.push_back(
         sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
@@ -882,7 +883,7 @@ TEST("sv - a texture still streaming samples a placeholder seeded from the mater
         return nullptr;
     }();
     REQUIRE(base_color != nullptr);
-    CHECK(base_color->frequency == sv::material_frequency::mesh_texture);
+    CHECK(base_color->frequency == sv::material_frequency::mesh_texture_binding);
     REQUIRE(!base_color->fallback_constant.empty());
 
     auto const generated = sv::generate_material_shader(resolved);
@@ -925,6 +926,60 @@ TEST("sv - a texture still streaming samples a placeholder seeded from the mater
     auto const once_resident
         = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
     CHECK(once_resident == element_of(m, texture));
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+
+    // A mesh nobody has placed is not ready, and says so rather than pretending it has nothing to wait for.
+    CHECK(!mesh.is_ready());
+    CHECK(mesh.cache.manager == nullptr);
+
+    auto const& first = m.create_mesh(mesh);
+    CHECK(mesh.cache.manager != nullptr);
+    CHECK(first.geometry != sv::mesh_id::invalid);
+
+    // Its payloads are streaming, so it is placed but not yet ready — which is what makes it draw as a placeholder.
+    CHECK(!mesh.is_ready());
+
+    // Placing it again hands back the SAME resources rather than looking them up again.
+    auto const& second = m.create_mesh(mesh);
+    CHECK(&second == &first);
+    CHECK(second.geometry == first.geometry);
+
+    // What a caller changes between frames without touching a payload is re-read, so the cache never goes stale on it.
+    mesh.transform = tg::affine_transform3f::make_translation(tg::vec3f(1, 2, 3));
+    auto const& moved = m.create_mesh(mesh);
+    CHECK(tg::distance(tg::pos3f(0, 0, 0).transformed(moved.transform), tg::pos3f(1, 2, 3)) < 1e-5f);
+    CHECK(moved.geometry == first.geometry); // and the geometry was not re-acquired to do it
+
+    // Readiness is a snapshot refreshed by placing, which is the cadence a frame loop already runs at.
+    m.wait_for_pending_uploads();
+    CHECK(!mesh.is_ready()); // not until it is asked again
+    (void)m.create_mesh(mesh);
+    CHECK(mesh.is_ready());
+
+    // A copy carries the cache, and that is sound: every payload is content-hashed, so the ids it names are the ids
+    // the copy would have been given.
+    auto const copy = mesh;
+    CHECK(copy.is_ready());
+    CHECK(m.create_mesh(copy).geometry == first.geometry);
 
     ctx.advance_epoch_and_wait_for_idle();
 }

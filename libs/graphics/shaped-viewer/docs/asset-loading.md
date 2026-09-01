@@ -2,7 +2,7 @@
 
 **Status: phases 1 to 5 landed, bar structure-first loading.**
 **Phase 6 is not ours to build — see its entry in the phasing below.**
-The CPU / GPU type split is in — `sv::mesh_data`, `sv::mesh`, symmetric textures, `add_mesh` taking either.
+The CPU / GPU type split is in — `sv::mesh`, `sv::resident_mesh`, symmetric textures, `add_mesh` taking either.
 So is the material mapping — `alpha_cutoff`, `occlusion` and the channel swizzle, through resolve, generation and the permutation key.
 And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ and STL, with the resolver hook.
 Everything else here is still design, and the phasing at the end is what lands in which order.
@@ -23,48 +23,55 @@ It is blocked on `tg::mesh`, it answers a different question, and neither supers
 
 The central decision is that a mesh exists in two forms, with different invariants, and that both are first-class.
 
-| | `sv::mesh_data` (CPU) | `sv::mesh` (GPU) |
+The split is NOT CPU versus GPU, which was the first attempt and the wrong cut.
+`sv::mesh` is what a caller builds and holds: pinned payloads, plus whatever resources those payloads have been given so
+far, plus whether they have arrived.
+`sv::resident_mesh` is that same mesh once it is nothing but resources — the form the renderer consumes.
+
+| | `sv::mesh` | `sv::resident_mesh` |
 |---|---|---|
-| holds | pinned bytes + content hash | owning refcounted resource handles |
+| holds | pinned bytes, a content hash, and the resources minted for them | resource ids and nothing else |
 | needs a resource manager to exist | no | yes |
-| its GPU copy is | evictable, and always recoverable from the bytes | held resident by the handle |
+| knows whether it has arrived | yes, `is_ready` | no; a record's `residency` is where that lives |
 | geometry produced by a compute pass | impossible | natural |
 | identity | content hash | handle id |
-| what it is for | the simple path, and everything before a device exists | performance, expansion, GPU-generated data |
+| who names it | the caller, constantly | the renderer, and rarely anyone else |
 
-`sv::mesh` becoming a bundle of handles is what admits geometry and attributes that were never on the CPU at all.
-`sv::mesh_data` keeping pinned bytes is what lets the caching stay invisible: the bytes are a recipe that can always be replayed,
-so an eviction is a re-upload rather than a correctness problem.
+That is why the plain name goes to the first one.
+A caller writes `sv::mesh` in every scene they build; `sv::resident_mesh` is what `create_mesh` hands the renderer, and
+most callers never type it.
+The longer name is friction placed where it is least often paid.
 
-Naming follows [resources/resource_data.hh](../src/shaped-viewer/resources/resource_data.hh), where `texture_data` and
-`material_data` already mean "the CPU payload of a resource".
-So the CPU-side mesh is `mesh_data`, and `sv::mesh` is the GPU-side bundle.
-Textures follow the same split, and `mesh_texture` holding `texture_data` on the CPU side is what removes today's asymmetry —
-geometry travels as pinned bytes while a texture travels as an already-minted, evictable `texture_id`.
+`sv::resident_mesh` being a bundle of ids is what admits geometry and attributes that were never on the CPU at all.
+`sv::mesh` keeping its pinned bytes is what lets the caching stay invisible: the bytes can always be replayed, so an
+eviction is a re-upload rather than a correctness problem.
 
-**One call takes either**, and the frame is what supplies the manager, so no global and no singleton is needed:
+Textures split the same way and take the same suffix as attributes do: `mesh_texture` is what a caller writes and
+carries pixels, `mesh_texture_binding` is the resident form and carries a `texture_id` — matching `mesh_attribute` and
+`mesh_attribute_binding`, which were already that way round.
+
+**One call, and the frame is what supplies the manager**, so no global and no singleton is needed:
 
 ```cpp
-auto const cube = sv::mesh_data::from_triangles(cube_triangles(1.0f));
+auto const cube = sv::mesh{.geometry = sv::triangle_geometry::create_from_triangles(cube_triangles(1.0f))};
 for (auto frame : viewer.frames())
     frame.add_scene().add_mesh(cube);   // acquired through frame.resources(), keyed by hash, invisible
-
-auto const m = res.create_mesh(...);    // handles, minted explicitly
-scene.add_mesh(m);                      // nothing to look up
 ```
 
-`mesh_data` may carry a **weak** cache slot — the manager it was last acquired against, and the handle it got — so a repeat
-`add_mesh` is a pointer compare rather than a hash lookup.
-It is weak rather than owning precisely because the bytes are retained: a stale slot falls back to the hash path, or to a
-re-upload, and neither is unsound.
+A mesh carries a **cache slot** — the manager it was last placed against, and the resources it got — so a repeat
+`add_mesh` is a pointer compare rather than a hash lookup per payload.
+The manager is held for identity only and never dereferenced: a mesh owns its bytes and needs no device, so it may well
+outlive the manager, and comparing a stale pointer is sound where following one is not.
+The slot is a cache and never an identity — every payload is content-hashed, so a mesh placed against a manager that has
+never seen it gets exactly the ids the slot would have held.
 
 ## Acquisition
 
 Low-level factories live **on the resource manager**, since a GPU mesh cannot exist without one:
 
 ```cpp
-sv::mesh res.create_mesh(sv::mesh_data const&);          // from CPU bytes
-sv::mesh res.create_mesh(sv::geometry_handle);           // adopt a compute-produced buffer
+sv::resident_mesh res.create_mesh(sv::mesh const&);          // from CPU bytes
+sv::resident_mesh res.create_mesh(sv::geometry_handle);           // adopt a compute-produced buffer
 sv::asset res.create_asset(sv::asset_data const&);       // a whole loaded asset, in one go
 sv::geometry_handle res.create_geometry_from_triangles(cc::span<tg::triangle3f const>);
 sv::buffer_handle res.create_attribute_buffer(...);
@@ -105,7 +112,7 @@ re-reading, and they keep the babel document as the importer's actual input.
 struct sv::asset_data
 {
     cc::string name;
-    cc::vector<sv::mesh_data> meshes;          // flat, world-placed, one per (geometry, material)
+    cc::vector<sv::mesh> meshes;          // flat, world-placed, one per (geometry, material)
     cc::vector<sv::asset_material> materials;  // file order: name plus the material_id minted for it
     cc::vector<sv::asset_node> nodes;          // the hierarchy, kept for callers who want it
     cc::vector<cc::string> issues;             // babel's issues plus the importer's own, forwarded
@@ -129,7 +136,7 @@ tangent-frame options below.
 **One mesh per contiguous (geometry, material) pair**, whatever the format.
 A glTF mesh with three primitives becomes three meshes; an OBJ's `usemtl` runs become one mesh per run, which
 `babel::obj::data::materials` already hands over as spans.
-It falls out of `sv::mesh` carrying exactly one `material_id`.
+It falls out of `sv::resident_mesh` carrying exactly one `material_id`.
 
 **The node hierarchy is flattened by default**, because instancing is already free here: geometry is content-hashed, so ten nodes
 referencing one glTF mesh produce ten meshes with ten transforms over a single upload.
@@ -163,7 +170,7 @@ parallel one.
 A recipe is how a payload is produced, and therefore how it is reproduced after an eviction.
 
 - **`from_memory`** — the bytes are pinned right here.
-  This is what `mesh_data` and `texture_data` are, so the convenience path is not a separate mechanism but the trivial recipe.
+  This is what `mesh` and `texture_data` are, so the convenience path is not a separate mechanism but the trivial recipe.
 - **`from_uri`** — a source uri, a sub-selector (`car.glb#mesh3.primitive0`, `car.glb#image7`) and the load options.
   Reproducible from nothing but itself.
 - **`derived`** — an operation over other resource keys: mip generation, block compression, tangent-frame generation.
@@ -215,7 +222,7 @@ Pointing the slot at a placeholder keeps the permutation stable across the whole
 
 `bounds` must therefore be available before geometry is, which glTF gives us for free: accessor `min` / `max` is a bounding box
 obtained without touching a payload byte.
-*Landed*: `sv::mesh_data::bounds` carries it, and `create_mesh` falls back to scanning the positions only when nothing declared one.
+*Landed*: `sv::mesh::bounds` carries it, and `create_mesh` falls back to scanning the positions only when nothing declared one.
 
 ## Materials: the definition is permanent, the materialization is not
 
@@ -263,7 +270,7 @@ for (auto const& m : car.meshes())   // empty until it lands, then all of them
 
 *Landed, with one difference from the above.*
 `is_ready` is whole-asset rather than structure-first: an asset is either not there or entirely there.
-Making it per-mesh needs a `mesh_data` whose geometry has not been read at all — a mesh that is a name, a transform and
+Making it per-mesh needs a `mesh` whose geometry has not been read at all — a mesh that is a name, a transform and
 a box and nothing else — which `create_mesh` has no form for.
 That is the same shape the `from_uri` recipe below wants, so the two want doing together.
 
@@ -360,7 +367,7 @@ Smoothing is a guess about authoring intent, which is why it is asked for rather
 Because the loader is CPU-side, frame generation is also a **standalone step the caller owns**, not only a load option:
 
 ```cpp
-sv::generate_tangent_frames(mesh_data, {.generate = frame_generation::crease, .crease_angle = 40_deg});
+sv::generate_tangent_frames(mesh, {.generate = frame_generation::crease, .crease_angle = 40_deg});
 ```
 
 The frame is one attribute, so a caller replacing our algorithm with their own has exactly one thing to produce and no renderer
@@ -396,14 +403,14 @@ Returning a `pinned_data` also keeps glTF's zero-copy property intact through th
 
 ## What this changes in existing code
 
-- `sv::mesh` becomes a bundle of owning handles; today's pinned-bytes mesh becomes `sv::mesh_data`.
-- `mesh_texture` carries `texture_data` on the CPU side and a texture handle on the GPU side, which removes the geometry/texture asymmetry.
+- `sv::resident_mesh` becomes a bundle of owning handles; today's pinned-bytes mesh becomes `sv::mesh`.
+- `mesh_texture_binding` carries `texture_data` on the CPU side and a texture handle on the GPU side, which removes the geometry/texture asymmetry.
 - `texture_sample_source` gains a channel swizzle, which `resolve_material`, the shader generator and `permutation_key` all have to carry.
 - `texture_sample_source` also gains a sample transform, which adds a `material_slot_kind::sample_transform` to the parameter block.
 - The openpbr type gains `alpha_cutoff` and `occlusion`; the openpbr fragment steps opacity and ignores occlusion.
 - `resolved_material::parameter_key` folds in handle ids rather than content hashes for handle-backed resources, which is the only thing that works for a compute-produced buffer.
 - Resource records grow a state, a recipe and a summary; the managers grow the substitution paths and the "adopted resources are not evictable" rule.
-- `sv::mesh` carries a CPU-side summary (`cc::optional<tg::aabb3f> bounds`, triangle and vertex counts), because with GPU-only data nothing else can answer a camera-framing question.
+- `sv::resident_mesh` carries a CPU-side summary (`cc::optional<tg::aabb3f> bounds`, triangle and vertex counts), because with GPU-only data nothing else can answer a camera-framing question.
 - shaped-viewer links `babel-serializer`.
 
 ## Phasing
@@ -412,8 +419,8 @@ The recipe machinery is the model, not the first milestone.
 `from_memory` plus `adopted` covers everything until assets get big, and shipping the importer behind a caching subsystem it does
 not yet need would be the wrong order.
 
-1. **The type split.** *Landed*, minus the states: `mesh_data` / `mesh`, symmetric textures, `add_mesh` taking either, examples and tests migrated.
-   `sv::mesh` is a bundle of the ids the managers already mint rather than of owning refcounted handles, and a record carries no state or recipe yet —
+1. **The type split.** *Landed*, minus the states: `mesh` / `mesh`, symmetric textures, `add_mesh` taking either, examples and tests migrated.
+   `sv::resident_mesh` is a bundle of the ids the managers already mint rather than of owning refcounted handles, and a record carries no state or recipe yet —
    the LRU pool keeps owning, and refcounting waits until eviction actually bites.
 2. **The material mapping.** *Landed*: `alpha_cutoff`, `occlusion`, and the channel swizzle through resolve, generation and the permutation key.
    What is not yet measured is the open question below — the permutation count on a real glTF, which needs an importer to ask.
@@ -425,7 +432,7 @@ not yet need would be the wrong order.
    `.mtl` stays deferred, as planned.
 4. **Placeholders.** *Landed.*
    The **fallback hit group** substitutes for a permutation that has not compiled, rather than making the view a no-op.
-   **Bounds from glTF accessors** cross on `mesh_data` and reach the record, so a placeholder is sized without touching a payload byte.
+   **Bounds from glTF accessors** cross on `mesh` and reach the record, so a placeholder is sized without touching a payload byte.
    The **shared cube BLAS** is in, and live: an acquire now queues its upload, so a mesh really is pending until the drain reaches it.
    The **factor-seeded 1x1 texture** is in as well: `resolved_attribute` keeps the constant a sample beat, and the slot names a 1x1 filled with it while the real pixels stream.
 5. **Asynchronous loading.** *The resource half landed; the loading half is next.*

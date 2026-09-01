@@ -63,16 +63,21 @@ struct attribute_format;
 enum class attribute_frequency : u8;
 enum class mesh_flag; // per-mesh rendering opt-ins (mesh_flags.hh)
 struct mesh_attribute;
-enum class texture_channel : u8; // where one component of a sampled attribute comes from (mesh_texture.hh)
+enum class texture_channel : u8; // where one component of a sampled attribute comes from (mesh_texture_binding.hh)
 struct channel_swizzle;
 struct sample_transform;
 struct texture_sample_source;
+struct mesh_texture_binding;
+struct texture_sample;
 struct mesh_texture;
-struct texture_sample_data;
-struct mesh_texture_data;
 struct mesh_attribute_binding;
+struct resident_mesh;
 struct mesh;
-struct mesh_data;
+
+namespace impl
+{
+struct mesh_gpu_slot; // what placing a mesh produced, remembered on it (scene/mesh.hh)
+} // namespace impl
 
 // asset loading (see asset/)
 enum class asset_format : u8;     // the containers asset_loader reads (asset_loader.hh)
@@ -284,7 +289,7 @@ enum class sv::material_type_id : sv::u32
 
 /// Names ONE material definition — how a mesh is drawn — rather than a per-triangle array of them.
 ///
-/// This is the thin handle an `sv::mesh` carries: the definition lives outside the mesh and is shared across many.
+/// This is the thin handle an `sv::resident_mesh` carries: the definition lives outside the mesh and is shared across many.
 /// It is what gives a mesh's attributes, parameters, textures and flags their meaning.
 /// Minted by `material_library::acquire`, and never evicted — a slot in GPU memory outlives the frame that wrote it.
 enum class sv::material_id : sv::u32

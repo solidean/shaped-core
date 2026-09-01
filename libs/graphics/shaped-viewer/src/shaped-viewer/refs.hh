@@ -71,11 +71,11 @@ public:
     /// carries — so calling this every frame with an unchanged mesh uploads nothing and stays O(1).
     /// Per-face PBR is read from the `sv::pbr_attribute` attributes; a mesh carrying none is shaded with
     /// `pbr_material`'s defaults.
-    mesh_ref add_mesh(sv::mesh_data const& mesh);
+    mesh_ref add_mesh(sv::mesh const& mesh);
 
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
     /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
-    mesh_ref add_mesh(sv::mesh const& mesh);
+    mesh_ref add_mesh(sv::resident_mesh const& mesh);
 
     /// Adds an area light.
     /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.

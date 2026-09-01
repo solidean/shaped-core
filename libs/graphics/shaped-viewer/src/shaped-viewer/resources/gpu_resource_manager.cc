@@ -12,7 +12,7 @@
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::pow
 
 namespace sv
@@ -68,7 +68,7 @@ namespace
 /// The object-space box around a geometry's positions, empty when it has none.
 ///
 /// A summary the GPU mesh keeps, since once the positions are only on the GPU nothing else can answer a framing question.
-/// Only the fallback: a `mesh_data` that already carries a box — every glTF one does, since the format states it per
+/// Only the fallback: a `mesh` that already carries a box — every glTF one does, since the format states it per
 /// accessor — keeps it rather than paying this scan.
 [[nodiscard]] cc::optional<tg::aabb3f> bounds_of(triangle_geometry const& g)
 {
@@ -355,9 +355,48 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
 }
 
-sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
+bool gpu_resource_manager::_is_resident(sv::resident_mesh const& m)
+{
+    auto const* const geometry = meshes.get_ptr(m.geometry);
+    if (geometry == nullptr || geometry->state != residency::complete)
+        return false;
+
+    for (auto const& a : m.attributes)
+    {
+        // A per_instance attribute uploads nothing, so there is nothing to wait for.
+        if (a.attribute == attribute_id::invalid)
+            continue;
+        auto const* const record = attributes.get_ptr(a.attribute);
+        if (record == nullptr || record->state != residency::complete)
+            return false;
+    }
+
+    for (auto const& t : m.textures)
+    {
+        auto const* const record = textures.get_ptr(t.source.texture);
+        if (record == nullptr || record->state == residency::pending)
+            return false;
+    }
+
+    return true;
+}
+
+sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
 {
     CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+
+    // Placed against this manager before: the ids are already minted, so all that is left is to say whether they have
+    // arrived since.
+    // The transform, material and flags are re-read anyway, because those are the parts a caller changes between
+    // frames without changing a single payload.
+    if (data.cache.manager == this)
+    {
+        data.cache.resources.transform = data.transform;
+        data.cache.resources.material = data.material;
+        data.cache.resources.flags = data.flags;
+        data.cache.ready = _is_resident(data.cache.resources);
+        return data.cache.resources;
+    }
 
     // The box travels with the payload rather than being recomputed from it: the manager keeps it after the bytes are
     // gone, and a placeholder drawn while the geometry is still arriving has nothing else to be sized by.
@@ -388,7 +427,7 @@ sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
         bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
     }
 
-    auto bound_textures = cc::vector<mesh_texture>();
+    auto bound_textures = cc::vector<mesh_texture_binding>();
     bound_textures.reserve(data.textures.size());
     for (auto const& t : data.textures)
         bound_textures.push_back({.name = t.name,
@@ -398,19 +437,23 @@ sv::mesh gpu_resource_manager::create_mesh(sv::mesh_data const& data)
                                              .swizzle = t.source.swizzle,
                                              .transform = t.source.transform}});
 
-    return {.name = data.name,
-            .geometry = geometry,
-            .attributes = cc::move(bindings),
-            .transform = data.transform,
-            .material = data.material,
-            .flags = data.flags,
-            .textures = cc::move(bound_textures),
-            .bounds = box,
-            .triangle_count = data.geometry.triangle_count(),
-            .vertex_count = data.geometry.vertex_count()};
+    data.cache = {.manager = this,
+                  .resources = {.name = data.name,
+                                .geometry = geometry,
+                                .attributes = cc::move(bindings),
+                                .transform = data.transform,
+                                .material = data.material,
+                                .flags = data.flags,
+                                .textures = cc::move(bound_textures),
+                                .bounds = box,
+                                .triangle_count = data.geometry.triangle_count(),
+                                .vertex_count = data.geometry.vertex_count()}};
+
+    data.cache.ready = _is_resident(data.cache.resources);
+    return data.cache.resources;
 }
 
-scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+scene_item gpu_resource_manager::acquire_scene_item(sv::resident_mesh const& mesh)
 {
     CC_ASSERT(mesh.geometry != mesh_id::invalid, "a mesh needs geometry to be placed in a scene");
 
@@ -427,7 +470,7 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
             .transform = mesh.transform};
 }
 
-scene_item gpu_resource_manager::acquire_scene_item(sv::mesh_data const& mesh)
+scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
 {
     return acquire_scene_item(create_mesh(mesh));
 }

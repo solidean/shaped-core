@@ -265,14 +265,19 @@ public:
     /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
-    /// `data`'s payloads uploaded and named by id, as the `sv::mesh` a scene item is placed from.
+    /// `data`'s payloads named by id, as the `sv::resident_mesh` a scene item is placed from.
+    ///
+    /// The result is remembered ON `data` — see `sv::impl::mesh_gpu_slot` — so the reference is into the mesh's own
+    /// cache and lives as long as it does, or until it is placed against a different manager.
+    /// A repeat placement is then a pointer compare rather than a hash lookup per payload, and it refreshes
+    /// `mesh::is_ready` on the way through.
     ///
     /// Geometry, every geometric attribute and every texture is acquired through the manager it belongs to, keyed by the content
-    /// hash the payload already carries — so calling this every frame with an unchanged `mesh_data` is lookups rather than
+    /// hash the payload already carries — so calling this every frame with an unchanged `mesh` is lookups rather than
     /// uploads.
     /// A `per_instance` attribute is one value for the whole mesh, so it stays bytes and acquires nothing.
     /// The name, transform, material, flags and the geometry's summary come across unchanged.
-    [[nodiscard]] sv::mesh create_mesh(sv::mesh_data const& data);
+    [[nodiscard]] sv::resident_mesh const& create_mesh(sv::mesh const& data);
 
     /// Everything placing `mesh` in a scene costs, as one `scene_item`: its material resolved against it, and the parameter
     /// block that resolution fills acquired.
@@ -284,11 +289,11 @@ public:
     ///
     /// The material library is the process-wide one `sv::acquire_material_library` answers with, and must carry the
     /// material the mesh names.
-    [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
+    [[nodiscard]] scene_item acquire_scene_item(sv::resident_mesh const& mesh);
 
     /// The same, from CPU bytes: `create_mesh` followed by the resolution above.
     /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
-    [[nodiscard]] scene_item acquire_scene_item(sv::mesh_data const& mesh);
+    [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
 
     /// The layout of the staging group every bindless table is bound through.
     /// A pipeline that traces against those tables composes this as one of its groups, which is what makes the
@@ -320,6 +325,10 @@ public:
 
 private:
     friend class bound_resources;
+
+    /// Whether every resource `m` names has reached the GPU — what `mesh::is_ready` is a snapshot of.
+    /// A texture counts as arrived at `base_resident`: it is sampleable, and the rest of its chain is quality.
+    [[nodiscard]] bool _is_resident(sv::resident_mesh const& m);
 
     /// Advances every texture whose pixels landed, and queues the mip work each newly-sampleable one asks for.
     void _collect_textures();

@@ -7,7 +7,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/linalg/quat.hh>
 
 // Wavefront OBJ into sv's vocabulary.

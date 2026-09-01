@@ -84,9 +84,9 @@ glTF material mapping                    [done]         openpbr declares alpha_c
                                                         texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
                                                         The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
                                                         A sample_transform beside it splits the other way: a per-component scale and bias, of which only the EXISTENCE is shape, so a normal map's decode and its scale never fork a permutation
-mesh_data / mesh type split              [done]         a mesh exists in two forms, and both are first-class: sv::mesh_data is pinned CPU bytes and needs no device, sv::mesh is resources and cannot exist without a manager.
+mesh / mesh type split              [done]         a mesh exists in two forms, and both are first-class: sv::mesh is pinned CPU bytes and needs no device, sv::resident_mesh is resources and cannot exist without a manager.
                                                         gpu_resource_manager::create_mesh is the one-way bridge, scene_ref::add_mesh takes either, and resolution runs against the GPU form — which is what admits geometry that was never on the CPU.
-                                                        Textures are symmetric with geometry now: a mesh_data carries pixels, an sv::mesh a texture_id.
+                                                        Textures are symmetric with geometry now: a mesh carries pixels, an sv::resident_mesh a texture_id.
                                                         The GPU form also keeps the CPU-side summary (bounds, triangle and vertex counts) that nothing else could answer a framing question with
 streamed uploads + placeholders          [done]         every record carries an sv::residency, and an acquire hands its payload to sg's ctx.stream rather than uploading it.
                                                         That is the point rather than a detail: ctx.upload makes the next command list touching the resource wait on the copy, which is what turns a large asset from slow into a stalled frame.

@@ -73,8 +73,8 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
     src/shaped-viewer/scene/triangle_geometry.hh
+    src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
-    src/shaped-viewer/scene/mesh_data.hh
     src/shaped-viewer/asset/uri_resolver.hh
     src/shaped-viewer/asset/asset_data.hh
     src/shaped-viewer/asset/asset.hh

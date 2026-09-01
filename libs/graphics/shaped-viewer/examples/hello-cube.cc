@@ -77,7 +77,7 @@ EXAMPLE("shaped-viewer/hello-cube")
 {
     // Built once: this is what pins the buffers and hashes them.
     // A mesh naming no material draws with `sv::default_material` — the builtin unbound `pbr` — so none is set here.
-    auto const cube = sv::mesh_data{
+    auto const cube = sv::mesh{
         .name = "cube",
         .geometry = sv::triangle_geometry::create_from_positions(cube_triangles(2.0f)),
         .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, face_colors())}};

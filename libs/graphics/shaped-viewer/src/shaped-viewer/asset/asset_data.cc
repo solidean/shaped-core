@@ -20,7 +20,7 @@ void grow_to_include(cc::optional<tg::aabb3f>& box, tg::pos3f const& p)
 }
 } // namespace
 
-sv::mesh_data const* asset_data::find_mesh(cc::string_view name) const
+sv::mesh const* asset_data::find_mesh(cc::string_view name) const
 {
     for (auto const& m : meshes)
         if (m.name == name)
@@ -28,9 +28,9 @@ sv::mesh_data const* asset_data::find_mesh(cc::string_view name) const
     return nullptr;
 }
 
-cc::vector<sv::mesh_data const*> asset_data::meshes_with_material(cc::string_view name) const
+cc::vector<sv::mesh const*> asset_data::meshes_with_material(cc::string_view name) const
 {
-    auto out = cc::vector<sv::mesh_data const*>();
+    auto out = cc::vector<sv::mesh const*>();
     for (auto const& slot : materials)
         if (slot.name == name)
             for (auto const index : slot.meshes)

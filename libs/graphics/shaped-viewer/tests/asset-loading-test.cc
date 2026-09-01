@@ -319,7 +319,7 @@ TEST("sv::asset_loader - a glTF normal map and occlusion strength are sample tra
     REQUIRE(asset.value().meshes.size() == 1);
 
     auto const& textures = asset.value().meshes[0].textures;
-    auto const* const normal = [&]() -> sv::mesh_texture_data const*
+    auto const* const normal = [&]() -> sv::mesh_texture const*
     {
         for (auto const& t : textures)
             if (t.name == "normal")
@@ -336,7 +336,7 @@ TEST("sv::asset_loader - a glTF normal map and occlusion strength are sample tra
     // Directions rather than colors, so the texture is linear.
     CHECK(normal->source.texture.format == sg::pixel_format::rgba8_unorm);
 
-    auto const* const occlusion = [&]() -> sv::mesh_texture_data const*
+    auto const* const occlusion = [&]() -> sv::mesh_texture const*
     {
         for (auto const& t : textures)
             if (t.name == "occlusion")

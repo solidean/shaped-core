@@ -7,8 +7,8 @@
 #include <shaped-viewer/material/impl/material_hash.hh>
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
-#include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 
 namespace sv
 {
@@ -243,7 +243,7 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
             break;
 
         case material_frequency::material_texture:
-        case material_frequency::mesh_texture:
+        case material_frequency::mesh_texture_binding:
             push(cc::string(a.name), material_slot_kind::texture_index, i32(sizeof(u32)), a.format, i32(i));
             push(cc::format("{}.uv", a.name), material_slot_kind::attribute_descriptor, attribute_desc_size,
                  attribute_format::of_vector(scalar_type::f32, 2), i32(i));
@@ -435,7 +435,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             }
 
             case material_frequency::material_texture:
-            case material_frequency::mesh_texture:
+            case material_frequency::mesh_texture_binding:
             {
                 auto const& tex = slot_for(layout, i32(i), material_slot_kind::texture_index);
                 auto const& uv_slot = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);

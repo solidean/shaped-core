@@ -6,7 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
 
@@ -63,16 +63,16 @@ struct sv::asset_node
 ///
 /// `meshes` is flat and world-placed by default — one per contiguous (geometry, material) pair, whatever the format.
 /// A glTF mesh with three primitives becomes three meshes; an OBJ's `usemtl` runs become one mesh per run.
-/// That falls out of `sv::mesh` carrying exactly one `material_id`, rather than being a choice the importer made.
+/// That falls out of `sv::resident_mesh` carrying exactly one `material_id`, rather than being a choice the importer made.
 ///
-/// Nothing here has met a device: every payload is a pinned, content-hashed `mesh_data`, so an asset can be loaded on a
+/// Nothing here has met a device: every payload is a pinned, content-hashed `mesh`, so an asset can be loaded on a
 /// worker thread and long before a viewer exists.
 struct sv::asset_data
 {
     /// what the asset was loaded from — a uri, or whatever name the caller passed for a byte range
     cc::string name;
 
-    cc::vector<sv::mesh_data> meshes;
+    cc::vector<sv::mesh> meshes;
 
     /// file order: each material's own name plus the id minted for it
     cc::vector<sv::asset_material> materials;
@@ -92,11 +92,11 @@ public:
 
     /// The mesh named `name`, or nullptr.
     /// First match wins — a name is not an identity here either.
-    [[nodiscard]] sv::mesh_data const* find_mesh(cc::string_view name) const;
+    [[nodiscard]] sv::mesh const* find_mesh(cc::string_view name) const;
 
     /// Every mesh drawn by the material the file called `name`, in mesh order.
     /// The pointers borrow from `meshes`, so they die with this asset and with any push_back into it.
-    [[nodiscard]] cc::vector<sv::mesh_data const*> meshes_with_material(cc::string_view name) const;
+    [[nodiscard]] cc::vector<sv::mesh const*> meshes_with_material(cc::string_view name) const;
 
     /// The id minted for the material the file called `name`, or `material_id::invalid` when it has no such material.
     [[nodiscard]] material_id material(cc::string_view name) const;
@@ -109,6 +109,6 @@ public:
     isize override_material(cc::string_view name, material_id replacement);
 
     /// The world-space box around every mesh, empty when the asset places none.
-    /// What a caller frames a camera on, and the reason `mesh_data` keeps its geometry rather than only an id.
+    /// What a caller frames a camera on, and the reason `mesh` keeps its geometry rather than only an id.
     [[nodiscard]] cc::optional<tg::aabb3f> bounds() const;
 };

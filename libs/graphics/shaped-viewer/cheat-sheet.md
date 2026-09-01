@@ -147,12 +147,13 @@ m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
-m.create_mesh(sv::mesh_data)           // -> sv::mesh; geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
-                                       //   `bounds` comes from the mesh_data when it declared one (every glTF does), else from a scan of the positions
+m.create_mesh(sv::mesh)           // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
+                                       //   geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
+                                       //   `bounds` comes from the mesh when it declared one (every glTF does), else from a scan of the positions
                                        //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
-m.acquire_scene_item(sv::mesh)         // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
+m.acquire_scene_item(sv::resident_mesh)         // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
-m.acquire_scene_item(sv::mesh_data)    // -> the same, from CPU bytes: create_mesh followed by the resolution above
+m.acquire_scene_item(sv::mesh)    // -> the same, from CPU bytes: create_mesh followed by the resolution above
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
@@ -218,7 +219,7 @@ sv::resolved_attribute           // { string_view name; attribute_format format;
                                  //   span<byte const> fallback_constant;  // what a sample beat — seeds its placeholder
                                  //   texture_sample_source const* sample; mesh_attribute_binding const* uv; }
                                  //   exactly one payload is live, `frequency` says which; `uv` rides along with `sample` and is never null when it isn't
-sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
+sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture_binding
 ```
 
 **The enum order IS the precedence** — a value varying more finely beats one varying more coarsely, and `resolve_material` compares nothing else.
@@ -331,19 +332,26 @@ Gotchas:
 
 ## Mesh authoring — geometry + what a material reads
 
-A mesh exists in two forms, and both are first-class: `sv::mesh_data` is CPU bytes and needs no device, `sv::mesh` is resources and cannot exist without a manager.
+A mesh exists in two forms, and both are first-class.
+`sv::mesh` is what a caller holds — pinned payloads plus whatever resources they have been given, and `is_ready` says whether those arrived.
+`sv::resident_mesh` is that mesh once it is nothing but ids, which is what the renderer consumes.
 `gpu_resource_manager::create_mesh` is the one-way bridge, and `scene_ref::add_mesh` takes either.
 See [docs/asset-loading.md](docs/asset-loading.md) for why the split is there.
 
-One header per part — `mesh_data.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
+One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh`, `mesh_texture.hh` and `resident_mesh.hh`.
 
 ```cpp
-sv::mesh_data                    // CPU: { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
-                                 //   material_id material; mesh_flags flags; vector<mesh_texture_data> textures; optional<aabb3f> bounds; }
+sv::mesh                         // what a caller builds and holds — pinned payloads, plus what they have been turned into
+                                 //   { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
+                                 //     material_id material; mesh_flags flags; vector<mesh_texture> textures; optional<aabb3f> bounds;
+                                 //     mutable impl::mesh_gpu_slot cache; }
                                  //   `bounds` empty means "nobody said"; a glTF import fills it from the accessor's own min/max, touching no payload byte
-sv::mesh                         // GPU: the same shape by id — { string name; mesh_id geometry; vector<mesh_attribute_binding> attributes;
-                                 //   affine_transform3f transform; material_id material; mesh_flags flags; vector<mesh_texture> textures;
-                                 //   optional<tg::aabb3f> bounds; isize triangle_count, vertex_count; }
+m.is_ready()                     // -> bool; did its resources reach the GPU, AS OF the last time it was placed. false for one never placed
+m.cache                          // { void const* manager; resident_mesh resources; bool ready; } — manager is identity only, never dereferenced
+sv::resident_mesh                // the same mesh once it is nothing but ids — what the renderer consumes, and rarely named by a caller
+                                 //   { string name; mesh_id geometry; vector<mesh_attribute_binding> attributes;
+                                 //     affine_transform3f transform; material_id material; mesh_flags flags; vector<mesh_texture_binding> textures;
+                                 //     optional<tg::aabb3f> bounds; isize triangle_count, vertex_count; }
 sv::mesh_attribute_binding       // { string name; attribute_format format; attribute_frequency frequency; attribute_id attribute;
                                  //   pinned_data<byte const> value; hash128 hash; } — `attribute` is invalid at per_instance, where `value` carries the element
 sv::mesh_attribute_binding::of(a, id)  // -> the binding for an already-uploaded mesh_attribute; id must be invalid exactly at per_instance
@@ -368,9 +376,9 @@ sv::attribute_frequency          // per_instance (exactly 1 element, create asse
                                  //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
 sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; channel_swizzle swizzle; } — a sample, minus what it is FOR
-sv::mesh_texture                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
-sv::texture_sample_data          // the CPU counterpart: texture_data instead of an id, everything else the same
-sv::mesh_texture_data            // { string name; texture_sample_data source; } — what an sv::mesh_data carries, so it needs no device either
+sv::mesh_texture_binding                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::texture_sample          // the CPU counterpart: texture_data instead of an id, everything else the same
+sv::mesh_texture            // { string name; texture_sample source; } — what an sv::mesh carries, so it needs no device either
 sv::texture_channel              // r | g | b | a | zero | one — where ONE component of a sampled attribute comes from
 sv::channel_swizzle              // { texture_channel components[4]; } — four selectors; only the first component_count() are ever read
 channel_swizzle::of(c0, c1, c2, c3) / ::of_channel(c)  // the tail keeps the identity; of_channel is the scalar case (roughness out of `.g`)
@@ -391,7 +399,7 @@ Nothing renders either form directly: the renderer consumes `sv::scene_item` (id
 `sv::resolve_material` runs against the GPU form, since that is the one whose attributes and textures are already named by id.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
 
-## Asset loading — a file into `sv::mesh_data`
+## Asset loading — a file into `sv::mesh`
 
 babel reads the formats; sv turns a parsed document into things a view can draw.
 The loader holds **no device and opens no file**, which is what buys loading on a worker, loading before a viewer exists, and testing the importer with nothing attached.
@@ -419,9 +427,9 @@ sv::asset_loader_config          // { material_library* materials; uri_resolver_
 sv::tangent_frame_options        // { bool prefer_file = true; frame_generation generate = none; angle_f crease_angle; float weld_epsilon; }
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
-sv::asset_data                   // { string name; vector<mesh_data> meshes; vector<asset_material> materials;
+sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
                                  //   vector<asset_node> nodes; vector<string> issues; }
-a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh_data const* / vector<mesh_data const*> / material_id
+a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
 a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
 a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
 sv::asset_material               // { string name; material_id material; vector<i32> meshes; } — name is the FILE's, meshes are the slot's
@@ -441,7 +449,7 @@ Gotchas:
   That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
 - **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
   What does arrive progressively is the upload, which the managers stream.
-- **Textures ride on the MESH, not the material.** An imported map travels as `mesh_texture_data` (pixels), because a material binding would need an already-minted `texture_id` and therefore a device.
+- **Textures ride on the MESH, not the material.** An imported map travels as `mesh_texture` (pixels), because a material binding would need an already-minted `texture_id` and therefore a device.
   The frequency chain makes that the finer rank anyway, so a mesh texture wins over the material's factor exactly as an authored one does.
 - **`asset_material` owns its meshes, and that is what `override_material` rewrites.**
   `material_library` is content-addressed, so two of a file's materials bound identically come back as ONE id — overriding by id would move both.
@@ -741,8 +749,8 @@ layout.style(box_style)
 
 // on a leaf / a scene
 leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b)
-scene.add_mesh(sv::mesh_data)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
-scene.add_mesh(sv::mesh)         -> mesh_ref                   // already resources: nothing to look up
+scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
+scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
 scene.add_light(area_light)      -> light_ref                  // both hand back a typed handle rather than chaining
 scene.background(bg) / .settings(render_settings)
 mesh_ref.transform(t);  light_ref.light(l)
@@ -767,7 +775,7 @@ A view whose camera the caller set last frame is skipped, so the two never fight
 
 ```cpp
 // the whole loop
-auto const mesh = sv::mesh_data{.geometry = sv::triangle_geometry::create_from_positions(positions),  // once: this pins and hashes
+auto const mesh = sv::mesh{.geometry = sv::triangle_geometry::create_from_positions(positions),  // once: this pins and hashes
                                 .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors)},
                                 .material = sv::default_material(*sv::acquire_material_library().value())};
 

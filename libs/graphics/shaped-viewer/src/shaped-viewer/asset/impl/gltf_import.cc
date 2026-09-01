@@ -9,7 +9,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/quat.hh>
@@ -22,7 +22,7 @@
 // babel does not interpret the KHR_materials_* extensions yet, so what actually crosses today is the core
 // metallic-roughness set plus emission — and an issue names what was left behind.
 //
-// Textures ride on the MESH rather than on the material, as `mesh_texture_data`.
+// Textures ride on the MESH rather than on the material, as `mesh_texture`.
 // That is what lets the importer stay CPU-side: a mesh texture travels as pixels, while a material binding would need
 // an already-minted `texture_id` and therefore a device.
 
@@ -136,7 +136,7 @@ struct gltf_importer
 
     /// one entry per glTF material, plus a trailing one for primitives naming none when any does
     cc::vector<impl::asset_material_definition> definitions;
-    cc::vector<cc::vector<mesh_texture_data>> material_textures;
+    cc::vector<cc::vector<mesh_texture>> material_textures;
     bool has_default_material = false;
 
     /// decoded images, keyed by image index and color space — the same bytes read as sRGB and as linear are two
@@ -188,10 +188,10 @@ struct gltf_importer
     }
 
     /// The sample `ref` describes, or nothing when it names no texture or the image was unusable.
-    [[nodiscard]] cc::optional<texture_sample_data> sample_of(bg::texture_ref const& ref,
-                                                              bool srgb,
-                                                              channel_swizzle swizzle,
-                                                              sample_transform transform)
+    [[nodiscard]] cc::optional<texture_sample> sample_of(bg::texture_ref const& ref,
+                                                         bool srgb,
+                                                         channel_swizzle swizzle,
+                                                         sample_transform transform)
     {
         auto const* const tex = doc.find(ref.texture);
         if (tex == nullptr)
@@ -210,14 +210,14 @@ struct gltf_importer
             sampler.address_v = address_of(s->wrap_t);
         }
 
-        return texture_sample_data{.texture = cc::move(data.value()),
-                                   .uv_attribute = uv_name_of(ref.texcoord),
-                                   .sampler = sampler,
-                                   .swizzle = swizzle,
-                                   .transform = transform};
+        return texture_sample{.texture = cc::move(data.value()),
+                              .uv_attribute = uv_name_of(ref.texcoord),
+                              .sampler = sampler,
+                              .swizzle = swizzle,
+                              .transform = transform};
     }
 
-    void bind_texture(cc::vector<mesh_texture_data>& into,
+    void bind_texture(cc::vector<mesh_texture>& into,
                       cc::string name,
                       bg::texture_ref const& ref,
                       bool srgb,
@@ -232,7 +232,7 @@ struct gltf_importer
     void build_material(bg::material const& m, cc::string_view name)
     {
         auto bindings = cc::vector<material_attribute_binding>();
-        auto textures = cc::vector<mesh_texture_data>();
+        auto textures = cc::vector<mesh_texture>();
 
         using binding = material_attribute_binding;
         bindings.push_back(binding::of(
@@ -326,10 +326,9 @@ struct gltf_importer
         return has_default_material ? definitions.size() - 1 : -1;
     }
 
-    [[nodiscard]] cc::span<mesh_texture_data const> textures_of(isize slot) const
+    [[nodiscard]] cc::span<mesh_texture const> textures_of(isize slot) const
     {
-        return slot >= 0 ? cc::span<mesh_texture_data const>(material_textures[slot])
-                         : cc::span<mesh_texture_data const>();
+        return slot >= 0 ? cc::span<mesh_texture const>(material_textures[slot]) : cc::span<mesh_texture const>();
     }
 
     // geometry
@@ -553,7 +552,7 @@ struct gltf_importer
             auto attributes = attributes_of(p, vertex_count);
             auto const slot = slot_of(p.material);
 
-            auto textures = cc::vector<mesh_texture_data>();
+            auto textures = cc::vector<mesh_texture>();
             for (auto const& t : textures_of(slot))
                 textures.push_back(t);
 

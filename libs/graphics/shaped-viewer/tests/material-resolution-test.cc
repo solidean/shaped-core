@@ -3,7 +3,7 @@
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
-#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 using namespace cc::primitive_defines;
@@ -28,7 +28,7 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
     return sv::mesh_attribute_binding::of(a, per_instance ? sv::attribute_id::invalid : sv::attribute_id(0));
 }
 
-[[nodiscard]] sv::mesh make_mesh()
+[[nodiscard]] sv::resident_mesh make_mesh()
 {
     // Resolution reads the lists and the summary, never the geometry itself, so a stand-in id is all this needs.
     return {.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
@@ -162,7 +162,7 @@ TEST("sv::resolve_material - each frequency overrides its parent")
     mesh_textured.textures.push_back({.name = "roughness", .source = make_sample(sv::texture_id(9))});
     {
         auto const r = sv::resolve_material(type, mat_textured, mesh_textured);
-        CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_texture);
+        CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_texture_binding);
         CHECK(r.attributes[0].sample->texture == sv::texture_id(9));
     }
 }
@@ -189,7 +189,7 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     auto loose = cc::vector<sv::material_attribute_binding>();
     loose.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
     auto const open = sv::material::create("open", sv::material_type_id(0), loose);
-    CHECK(sv::resolve_material(type, open, mesh).attributes[0].frequency == sv::material_frequency::mesh_texture);
+    CHECK(sv::resolve_material(type, open, mesh).attributes[0].frequency == sv::material_frequency::mesh_texture_binding);
 }
 
 TEST("sv::resolve_material - a final texture binding blocks even when its own sample is unusable")

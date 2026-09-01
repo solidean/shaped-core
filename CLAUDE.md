@@ -95,7 +95,7 @@ One-liner per library:
   Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window, dx12 + DXR.
   **`sv::asset_loader` reads glTF and OBJ into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
-  A mesh exists in two forms: `sv::mesh_data` (pinned bytes, no device) and `sv::mesh` (resources); `add_mesh` takes either.
+  A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
   [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
 
 Supporting directories:

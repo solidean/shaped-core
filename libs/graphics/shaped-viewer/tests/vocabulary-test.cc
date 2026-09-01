@@ -8,7 +8,7 @@
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -474,7 +474,7 @@ TEST("sv - a per-instance value is a one-element attribute")
 
 TEST("sv - a mesh carries the data its material draws it with")
 {
-    auto m = sv::mesh_data{.name = "quad"};
+    auto m = sv::mesh{.name = "quad"};
     m.geometry = sv::triangle_geometry::create_from_triangles(
         cc::vector<tg::triangle3f>{tg::triangle3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0))});
     m.attributes.push_back(

@@ -4,7 +4,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/impl/asset_import.hh>
-#include <shaped-viewer/scene/mesh_data.hh>
+#include <shaped-viewer/scene/mesh.hh>
 
 // STL into sv's vocabulary, which is nearly a copy.
 //
