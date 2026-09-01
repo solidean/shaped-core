@@ -32,6 +32,11 @@ namespace
 {
 namespace bg = babel::gltf;
 
+/// How deep a glTF node hierarchy may nest before the walk stops descending.
+/// A cap rather than a stack budget: a hierarchy past this is authored wrongly or malformed rather than merely large,
+/// and the walk is recursive, so the alternative to a cap is a stack overflow on a file from outside the program.
+constexpr int max_node_depth = 256;
+
 /// The uv attribute name a glTF TEXCOORD_n set is imported under.
 /// `uv` for set 0, because that is what every material's default `uv_attribute` looks for.
 [[nodiscard]] cc::string uv_name_of(i32 texcoord)
@@ -145,6 +150,12 @@ struct gltf_importer
 
     /// guards against a malformed file whose node graph is not a tree
     cc::vector<u8> visited;
+
+    /// which meshes a node already placed, so the ones no node references can be imported at the origin afterwards
+    cc::vector<u8> placed;
+
+    /// the depth cap is reported once, however many branches reach it
+    bool depth_capped = false;
 
     void note(cc::string message) { out.issues.push_back(cc::move(message)); }
 
@@ -529,6 +540,11 @@ struct gltf_importer
         if (m == nullptr)
             return;
 
+        // Marked before the filter runs: a mesh a node placed is accounted for whether or not `include_mesh` kept
+        // it, and re-importing it at the origin below would be the wrong answer either way.
+        if (auto const raw = isize(int(index)); raw >= 0 && raw < placed.size())
+            placed[raw] = 1;
+
         auto const primitives = doc.primitives_of(*m);
         auto const base_name = m->name.empty() ? cc::format("mesh{}", int(index)) : cc::string(m->name);
 
@@ -589,12 +605,23 @@ struct gltf_importer
         }
     }
 
-    void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world)
+    void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world, int depth)
     {
         auto const raw = isize(int(index));
         auto const* const n = doc.find(index);
         if (n == nullptr || visited[raw] != 0)
             return;
+
+        if (depth > max_node_depth)
+        {
+            if (!depth_capped)
+            {
+                note(cc::format("gltf: the node hierarchy is deeper than {}, so what is below that is not imported",
+                                max_node_depth));
+                depth_capped = true;
+            }
+            return;
+        }
         visited[raw] = 1;
 
         auto const local = local_transform_of(*n);
@@ -611,28 +638,45 @@ struct gltf_importer
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
 
         for (auto const child : doc.children_of(*n))
-            visit(child, slot, world);
+            visit(child, slot, world, depth + 1);
     }
 
-    void walk_scene()
+    /// Every mesh the document describes, placed by whatever node references it.
+    ///
+    /// `scene` and `default_scene` are deliberately not read.
+    /// A scene is one arrangement out of several a file may carry, and picking one is a decision about what the caller
+    /// wanted rather than about what the file contains — so honouring it would silently drop meshes that
+    /// `asset_data::find_mesh` is then asked for and cannot answer.
+    /// The node graph is walked instead, from every node nothing else parents, which is what places a mesh correctly
+    /// without taking that decision.
+    void walk_nodes()
     {
         visited = cc::vector<u8>::create_filled(doc.nodes.size(), u8(0));
+        placed = cc::vector<u8>::create_filled(doc.meshes.size(), u8(0));
 
-        if (doc.scenes.empty())
-        {
-            // A library file: no scene places anything, so every mesh is imported once at the origin.
-            note("gltf: the document declares no scene, so every mesh was imported at identity");
-            for (auto i = isize(0); i < doc.meshes.size(); ++i)
+        // A root is a node no other node claims as a child, which is the same set every scene's `nodes` draws from.
+        auto is_child = cc::vector<u8>::create_filled(doc.nodes.size(), u8(0));
+        for (auto const& n : doc.nodes)
+            for (auto const child : doc.children_of(n))
+                if (auto const raw = isize(int(child)); raw >= 0 && raw < is_child.size())
+                    is_child[raw] = 1;
+
+        for (auto i = isize(0); i < doc.nodes.size(); ++i)
+            if (is_child[i] == 0)
+                visit(bg::node_index(int(i)), -1, tg::affine_transform3f(), 0);
+
+        // A mesh no node places — a library file with no nodes at all, or one left out of the hierarchy — still exists
+        // and is still something a caller can ask for by name, so it is imported at the origin rather than dropped.
+        auto unplaced = isize(0);
+        for (auto i = isize(0); i < doc.meshes.size(); ++i)
+            if (placed[i] == 0)
+            {
                 emit_mesh(bg::mesh_index(int(i)), tg::affine_transform3f());
-            return;
-        }
+                ++unplaced;
+            }
 
-        auto const* scene = doc.find(doc.default_scene);
-        if (scene == nullptr)
-            scene = &doc.scenes[0];
-
-        for (auto const n : doc.nodes_of(*scene))
-            visit(n, -1, tg::affine_transform3f());
+        if (unplaced > 0)
+            note(cc::format("gltf: {} mesh(es) are placed by no node, so they were imported at identity", unplaced));
     }
 };
 } // namespace
@@ -650,7 +694,7 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
         importer.out.issues.push_back(i.message);
 
     importer.build_materials();
-    importer.walk_scene();
+    importer.walk_nodes();
 
     if (importer.out.meshes.empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));

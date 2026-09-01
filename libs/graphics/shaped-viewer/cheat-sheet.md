@@ -459,6 +459,10 @@ Gotchas:
 - **`import_materials = false` imports no textures either**: a map with no material to bind into is noise, and the fallback `pbr` material declares different attribute names.
 - **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
+- **EVERY glTF mesh crosses, and `scene` / `default_scene` are ignored.**
+  Which arrangement a file called default is a decision about what the caller wanted, and honouring it would drop meshes `find_mesh` is then asked for and cannot answer.
+  A mesh no node places is imported at the origin, with an issue; the node tree is still recorded on `asset_data::nodes`.
+  A hierarchy deeper than 256 stops descending, with an issue.
 - **`.mtl` is not read**, so an OBJ import carries geometry plus material names only — each name mints an unbound `openpbr` material so the slot exists to be overridden.
 - **An STL is one mesh of raw triangles**, with no material and no attributes.
   Its per-facet normals are dropped on purpose: the hit shader derives the geometric frame from the triangle, so a per-triangle normal could only ever match it.

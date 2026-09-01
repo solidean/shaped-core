@@ -96,6 +96,40 @@ void push_le_f32(cc::vector<byte>& out, f32 value)
     return json;
 }
 
+/// A glTF whose three meshes are reachable three different ways: one from the default scene, one only from a second
+/// scene, and one from no node at all.
+[[nodiscard]] cc::string three_scene_gltf()
+{
+    auto const bin = triangle_bin();
+    auto json = cc::string();
+    json += R"({"asset": {"version": "2.0"},
+        "buffers": [{"uri": "data:application/octet-stream;base64,)";
+    json += babel::base64::encode(bin);
+    json += cc::format(R"(", "byteLength": {}}}],)", bin.size());
+    json += R"(
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": 6},
+            {"buffer": 0, "byteOffset": 8, "byteLength": 36}
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5123, "count": 3, "type": "SCALAR"},
+            {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3",
+             "min": [0, 0, 0], "max": [1, 1, 0]}
+        ],
+        "meshes": [
+            {"name": "in_default",  "primitives": [{"attributes": {"POSITION": 1}, "indices": 0}]},
+            {"name": "in_variant",  "primitives": [{"attributes": {"POSITION": 1}, "indices": 0}]},
+            {"name": "in_no_scene", "primitives": [{"attributes": {"POSITION": 1}, "indices": 0}]}
+        ],
+        "nodes": [
+            {"name": "a", "mesh": 0, "translation": [1, 0, 0]},
+            {"name": "b", "mesh": 1, "translation": [0, 2, 0]}
+        ],
+        "scenes": [{"nodes": [0], "name": "main"}, {"nodes": [1], "name": "variant"}],
+        "scene": 0})";
+    return json;
+}
+
 /// A quad under `red` and a triangle under `blue`, with uvs and one shared normal.
 constexpr cc::string_view two_material_obj = R"obj(
 v 0 0 0
@@ -439,6 +473,41 @@ TEST("sv::asset_loader - a mesh with several primitives becomes several meshes")
         REQUIRE(asset.value().meshes.size() == 1);
         CHECK(asset.value().meshes[0].name == "tri.1");
     }
+}
+
+TEST("sv::asset_loader - every mesh crosses, whichever scene names it")
+{
+    // Which arrangement a file called default is a decision about what the caller wanted rather than about what the
+    // file contains, so the importer takes neither `scene` nor `default_scene` into account.
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    auto const doc = babel::gltf::read(three_scene_gltf());
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "variants.gltf");
+    REQUIRE(asset.has_value());
+    auto const& a = asset.value();
+
+    REQUIRE(a.meshes.size() == 3);
+    CHECK(a.find_mesh("in_default") != nullptr);
+    CHECK(a.find_mesh("in_variant") != nullptr);
+    CHECK(a.find_mesh("in_no_scene") != nullptr);
+
+    // A mesh a node places keeps that node's transform; one no node places sits at the origin.
+    CHECK(a.find_mesh("in_default")->transform.translation() == tg::vec3f(1, 0, 0));
+    CHECK(a.find_mesh("in_variant")->transform.translation() == tg::vec3f(0, 2, 0));
+    CHECK(a.find_mesh("in_no_scene")->transform.translation() == tg::vec3f(0, 0, 0));
+
+    // Imported at identity is a guess about placement, so it is reported rather than done quietly.
+    auto reported = false;
+    for (auto const& issue : a.issues)
+        if (issue.contains("placed by no node"))
+            reported = true;
+    CHECK(reported);
+
+    // The tree the file described is still recorded, for a caller who wants to compose it themselves.
+    CHECK(a.nodes.size() >= 2);
 }
 
 TEST("sv::asset_loader - the material_override hook replaces a material before one is built")

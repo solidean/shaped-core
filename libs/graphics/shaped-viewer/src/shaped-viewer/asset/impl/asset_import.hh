@@ -54,6 +54,10 @@ void acquire_asset_materials(asset_data& out,
 /// That is what lets the whole of this run on a worker.
 /// Never fails on a file it can partially read: an unusable primitive, an undecodable image or an unsupported feature
 /// becomes an issue on the result, and only a document with nothing at all to import is an error.
+///
+/// EVERY mesh crosses, and `scene` / `default_scene` are not read.
+/// Which arrangement a file called default is a decision about what the caller wanted rather than about what the file
+/// contains, and honouring it would drop meshes `asset_data::find_mesh` is then asked for and cannot answer.
 [[nodiscard]] cc::result<asset_data> import_gltf(babel::gltf::data const& doc,
                                                  asset_loader_config const& cfg,
                                                  cc::string_view asset_name,

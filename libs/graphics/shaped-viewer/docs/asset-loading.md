@@ -146,6 +146,12 @@ It falls out of `sv::resident_mesh` carrying exactly one `material_id`.
 referencing one glTF mesh produce ten meshes with ten transforms over a single upload.
 `asset_data::nodes` keeps the tree for callers who want it.
 
+**A scene is not the importer's concept**, so `scene` and `default_scene` are read by nothing.
+A file may carry several arrangements of the same meshes, and picking one is a decision about what the caller wanted rather than
+about what the file contains — an importer that took it would drop meshes `find_mesh` is then asked for and cannot answer.
+Every mesh crosses: placed by whatever node references it, or at the origin with an issue when none does.
+Selecting an arrangement is a scene-level concern and belongs wherever a scene ends up living.
+
 Imported material names are namespaced by the asset (`"car.glb/glass"`), since `material_library`'s name lookup is last-wins and a
 convenience rather than an identity.
 Content addressing still dedupes genuinely identical materials across files.
