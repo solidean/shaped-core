@@ -297,18 +297,30 @@ texture_id texture_manager::acquire(texture_data const& texture)
     CC_ASSERT(texture.width > 0 && texture.height > 0, "a texture needs a positive extent");
     CC_ASSERT(texture.mip_count >= 1, "a texture carries at least its base level");
 
+    // Which routine can fill the levels an upload did not supply is a property of the FORMAT, and the usage it needs
+    // is fixed at creation — so the choice is made here rather than where the generation is recorded.
+    // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
+    // compressed case with no path at all; it allocates only the levels its file supplied.
+    auto const compute_mips = sg::supports_typed_uav(texture.format);
+    auto const raster_mips = !compute_mips && sg::is_render_target_format(texture.format);
+
     // The full chain is allocated up front even when only the base level is supplied, so generating the rest
     // later fills this texture in place rather than replacing it.
-    auto const total_mips = impl::mip_count_of(texture.width, texture.height);
+    auto const total_mips
+        = compute_mips || raster_mips ? impl::mip_count_of(texture.width, texture.height) : texture.mip_count;
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
+
+    auto usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    if (compute_mips)
+        usage = usage | sg::texture_usage::readwrite_texture;
+    else if (raster_mips)
+        usage = usage | sg::texture_usage::render_target;
 
     auto gpu = _ctx.persistent.create_texture_2d({.format = texture.format,
                                                   .width = texture.width,
                                                   .height = texture.height,
                                                   .mip_levels = total_mips,
-                                                  .usage = sg::texture_usage::readonly_texture
-                                                         | sg::texture_usage::readwrite_texture
-                                                         | sg::texture_usage::copy_dst});
+                                                  .usage = usage});
 
     // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
     // this call without the manager holding a copy of it.

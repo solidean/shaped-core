@@ -59,7 +59,7 @@ id stack (push_id / scoped_id)           [done]         seeds view_id so one nam
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
 temporal accumulation                    [in progress]  a traced layer blends into one rgba32_float target in place, uncapped; the camera or the scene changing restarts it, nothing else does
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
-                                                        Follow-up steps (mip generation through sr::box_filter_mipmap_routine) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
+                                                        Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
                                                         Still to come: async streaming, placeholders while pending, and mapping visibility onto sg's stream priorities
 material system (material/)              [in progress]  material_type (signature + HLSL fragment) -> material (a type with attributes bound) -> material_library (content-addressed, never evicted, provider hook like the context's).
                                                         resolve_material walks one attribute down the frequency chain — type default, material, per-instance, mesh attribute, material texture, mesh texture — finest wins, `final` blocks finer.

@@ -849,8 +849,11 @@ void viewer::finish_frame(frame& f)
             im.ctx->advance_epoch(im.swapchain->buffer_count());
         }
     }
-    catch (sg::device_lost_exception const&)
+    catch (sg::device_lost_exception const& e)
     {
+        // Logged rather than swallowed: this stops the loop, so every later frame is a no-op and a capture writes
+        // nothing — symptoms that read as "the example did nothing" unless the loss itself says so.
+        CC_LOG_ERROR("the device was lost, so this viewer stops rendering: {}", e.reason());
         im.stopped = true;
     }
 

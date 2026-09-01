@@ -6,6 +6,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
@@ -721,6 +722,8 @@ void gpu_resource_manager::_queue_mip_work(cc::span<texture_id const> landed)
             continue;
 
         // Queued rather than done here: generating a full chain inline is exactly the stall the budget spreads out.
+        // Both routines count a level the same way, and a texture that reached neither path allocated no level
+        // beyond what it was given — so this is zero for it and it is never queued.
         auto const dispatches = sr::box_filter_mipmap_routine::level_count(record->texture, record->uploaded_mips);
         if (dispatches > 0)
             _pending.push_back({.texture = id, .dispatches = dispatches});
@@ -766,7 +769,12 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
             continue;
         }
 
-        sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        // The format decides, and it decided already: `texture_manager::acquire` gave this texture the usage the
+        // matching routine needs, so asking the same question here lands on the same answer.
+        if (sg::supports_typed_uav(record->texture.format()))
+            sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        else
+            sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
         spent += w.dispatches;
         textures.mark_mips_complete(w.texture);
     }

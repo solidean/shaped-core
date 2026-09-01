@@ -23,7 +23,7 @@
 /// otherwise record forty mip chains before it draws anything.
 ///
 /// The unit is dispatches rather than milliseconds because it is the one the manager can count without
-/// measuring: a level is one dispatch, and `sr::box_filter_mipmap_routine::level_count` says how many a
+/// measuring: a level is one dispatch or one raster pass, and `sr::box_filter_mipmap_routine::level_count` says how many a
 /// texture needs before committing to any of them.
 struct sv::work_budget
 {
@@ -40,7 +40,7 @@ struct sv::work_budget
 /// for the whole scene, and one who wants them wants them for everything the budget can reach.
 struct sv::texture_policy
 {
-    /// Fill the levels an acquire did not supply, through `sr::box_filter_mipmap_routine`.
+    /// Fill the levels an acquire did not supply, through whichever mipmap routine the format admits.
     bool generate_mips = true;
 };
 
