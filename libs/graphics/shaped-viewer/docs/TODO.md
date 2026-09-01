@@ -376,13 +376,13 @@ The design and its phasing are [asset-loading.md](asset-loading.md); phase 6 is 
 it.
 What follows is everything else the importer left behind.
 
-- **Nothing in the repo loads an asset except a test.**
-  `sv::asset_loader` has never been used in anger, so nobody has found out whether the API is pleasant, and the
-  structure-first placeholders have never actually been *seen* — only asserted on.
-  An example is the fix, and the awkward part is what it loads: no glTF, OBJ or STL is vendored anywhere in the repo.
-  babel's own geometry tests build their documents in code, which is the pattern to follow rather than committing a
-  binary asset for one example.
-  A capture would also be the first picture of a partially-loaded scene, which is worth having.
+- **A partially-loaded scene has still never been seen.**
+  `shaped-viewer/load-asset` closed most of this: it builds a glTF in code, serves it through `sv::set_resolve_uri` and
+  draws what comes out, so the loader has now been driven by a caller rather than only by a test.
+  What its capture does not show is the placeholders, because a synchronous load of a document this small is resident
+  before the accumulation converges.
+  Seeing those wants a load slow enough to catch mid-flight, which is a resolver that stalls on purpose rather than a
+  bigger asset.
 - **`tangent_frame_options::generate` is accepted and ignored.**
   Only `prefer_file` is implemented: a file's own normals and tangents cross, and `smooth` / `crease` do nothing
   silently, which is worse than rejecting them.
