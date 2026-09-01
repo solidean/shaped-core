@@ -421,7 +421,9 @@ struct gltf_importer
     }
 
     /// The uv sets, tangent frames and handedness a primitive supplies, as sv mesh attributes.
-    [[nodiscard]] cc::vector<mesh_attribute> attributes_of(bg::primitive const& p, isize vertex_count)
+    [[nodiscard]] cc::vector<mesh_attribute> attributes_of(bg::primitive const& p,
+                                                           isize vertex_count,
+                                                           cc::string_view mesh_name)
     {
         auto attributes = cc::vector<mesh_attribute>();
 
@@ -450,6 +452,22 @@ struct gltf_importer
         auto const normals = elements_of<tg::vec3f>(doc.find_attribute(p, "NORMAL"));
         if (normals.size() != vertex_count)
             return attributes;
+
+        // One unusable normal drops the whole attribute rather than being substituted per vertex: a made-up frame
+        // beside real ones shows as a seam, while supplying none lets the hit shader's geometric fallback answer for
+        // the whole mesh, which is correct everywhere.
+        auto unusable = isize(0);
+        for (auto const& n : normals)
+            if (!impl::is_usable_normal(n))
+                ++unusable;
+
+        if (unusable > 0)
+        {
+            note(cc::format("gltf: '{}' has {} of {} normals that cannot be normalized, so no tangent frame is "
+                            "imported and the geometric one is used instead",
+                            mesh_name, unusable, vertex_count));
+            return attributes;
+        }
 
         // TANGENT is a vec4: xyz is the tangent, w the mirror bit no rotation can carry.
         auto const tangents = elements_of<tg::vec4f>(doc.find_attribute(p, "TANGENT"));
@@ -549,7 +567,7 @@ struct gltf_importer
                 continue;
             }
 
-            auto attributes = attributes_of(p, vertex_count);
+            auto attributes = attributes_of(p, vertex_count, name);
             auto const slot = slot_of(p.material);
 
             auto textures = cc::vector<mesh_texture>();

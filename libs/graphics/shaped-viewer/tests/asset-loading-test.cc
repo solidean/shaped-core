@@ -214,6 +214,45 @@ TEST("sv::asset_loader - an OBJ import triangulates, dedups and splits at usemtl
     CHECK(box.value().max == tg::pos3f(1, 1, 0));
 }
 
+TEST("sv::asset_loader - a normal that cannot be normalized drops the frame rather than importing a NaN")
+{
+    // A zero normal is what a degenerate triangle and a careless exporter both write.
+    // Normalizing one yields a NaN quaternion the hit shader would then trust, which is strictly worse than supplying
+    // no frame at all — the geometric fallback is correct.
+    constexpr cc::string_view zero_normal_obj = R"obj(
+v 0 0 0
+v 1 0 0
+v 0 1 0
+vn 0 0 1
+vn 0 0 0
+f 1//1 2//2 3//1
+)obj";
+
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    auto const doc = babel::obj::read(zero_normal_obj);
+    REQUIRE(doc.has_value());
+
+    auto asset = loader.load(doc.value(), "degenerate.obj");
+    REQUIRE(asset.has_value());
+    auto const& a = asset.value();
+
+    REQUIRE(a.meshes.size() == 1);
+    for (auto const& attr : a.meshes[0].attributes)
+    {
+        CHECK(attr.name != "tangent_frame");
+        CHECK(attr.name != "tangent_handedness");
+    }
+
+    // Dropped loudly rather than silently: a caller reading `issues` is told which mesh lost its frames and why.
+    auto reported = false;
+    for (auto const& issue : a.issues)
+        if (issue.contains("cannot be normalized"))
+            reported = true;
+    CHECK(reported);
+}
+
 TEST("sv::asset_data - override_material moves every mesh bound to the slot")
 {
     auto lib = make_library();

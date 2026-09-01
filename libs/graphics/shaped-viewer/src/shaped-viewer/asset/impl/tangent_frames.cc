@@ -29,6 +29,15 @@ namespace
 }
 } // namespace
 
+bool impl::is_usable_normal(tg::vec3f n)
+{
+    auto const length_sqr = tg::dot(n, n);
+
+    // A NaN fails the self-comparison, an infinity fails the upper bound, and a zero fails the lower one.
+    // The bounds are generous on purpose: this rejects what cannot be normalized, not what looks unusual.
+    return length_sqr == length_sqr && length_sqr > 1e-16f && length_sqr < 1e16f;
+}
+
 tg::quat_f impl::tangent_frame_of(tg::vec3f normal, tg::vec3f tangent)
 {
     auto const n = normal.normalized();

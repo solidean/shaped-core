@@ -1,5 +1,6 @@
 #include <babel-serializer/geometry/obj.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
@@ -71,8 +72,14 @@ struct run_builder
     bool any_uv = false;
     bool any_normal = false;
 
-    /// per source position, the new vertices built from it
+    /// Per source position, the new vertices built from it.
+    ///
+    /// Sized by the whole FILE's position count and shared across every run, because a run only ever touches a few of
+    /// its entries: rebuilding it per run would cost `runs * positions` to do `corners` worth of work.
+    /// `touched` is what makes that reuse correct — the entries to clear before the next run.
     cc::vector<cc::vector<u32>> buckets;
+    cc::vector<i32> touched;
+
     /// the corner each new vertex came from, so a bucket scan can compare the other two indices
     cc::vector<bo::corner> source_corners;
 
@@ -98,14 +105,33 @@ struct run_builder
         any_uv = any_uv || c.texcoord >= 0;
         any_normal = any_normal || c.normal >= 0;
 
+        if (bucket.empty())
+            touched.push_back(c.position);
         bucket.push_back(index);
         source_corners.push_back(c);
         return index;
     }
 
+    /// Welds one run, reusing the bucket table the previous run left behind.
+    ///
+    /// Everything the previous run wrote is dropped first — the outputs whole, and only the bucket entries it actually
+    /// touched, which is what keeps the table's cost proportional to corners rather than to positions per run.
     void build(face_run const& run)
     {
-        buckets = cc::vector<cc::vector<u32>>::create_defaulted(doc.positions.size());
+        if (buckets.empty())
+            buckets = cc::vector<cc::vector<u32>>::create_defaulted(doc.positions.size());
+
+        for (auto const index : touched)
+            buckets[isize(index)].clear();
+        touched.clear();
+
+        positions.clear();
+        uvs.clear();
+        normals.clear();
+        indices.clear();
+        source_corners.clear();
+        any_uv = false;
+        any_normal = false;
 
         for (auto f = run.first_face; f < run.first_face + run.face_count; ++f)
         {
@@ -151,14 +177,13 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
     auto const runs = runs_of(doc);
 
     // A repeated `usemtl` is several runs sharing one material, so the name alone would not tell two meshes apart.
-    auto const name_count = [&](cc::string_view name)
-    {
-        auto n = isize(0);
-        for (auto const& r : runs)
-            if (r.material_name == name)
-                ++n;
-        return n;
-    };
+    // Counted once rather than per run, which a scan inside the loop would make quadratic in the run count.
+    auto name_counts = cc::map<cc::string_view, isize>();
+    for (auto const& r : runs)
+        name_counts[r.material_name] += 1;
+
+    // One builder for every run: its bucket table is sized by the file and reused rather than rebuilt.
+    auto builder = run_builder{.doc = doc};
 
     auto seen = isize(0);
     for (auto ri = isize(0); ri < runs.size(); ++ri)
@@ -166,12 +191,11 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
         auto const& run = runs[ri];
 
         auto const base = run.material_name.empty() ? out.name : run.material_name;
-        auto const name = name_count(run.material_name) > 1 ? cc::format("{}.{}", base, ri) : cc::string(base);
+        auto const name = name_counts[run.material_name] > 1 ? cc::format("{}.{}", base, ri) : cc::string(base);
 
         if (cfg.include_mesh && !cfg.include_mesh(name))
             continue;
 
-        auto builder = run_builder{.doc = doc};
         builder.build(run);
         if (builder.indices.empty())
             continue;
@@ -180,9 +204,23 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
         if (builder.any_uv)
             attributes.push_back(mesh_attribute::create("uv", attribute_frequency::per_vertex, builder.uvs));
 
+        // One normal that cannot be normalized drops the whole attribute rather than being substituted per vertex: a
+        // made-up frame beside real ones shows as a seam, while supplying none lets the hit shader's geometric
+        // fallback answer for the whole mesh.
+        auto unusable = isize(0);
+        if (builder.any_normal)
+            for (auto const& n : builder.normals)
+                if (!impl::is_usable_normal(n))
+                    ++unusable;
+
+        if (unusable > 0)
+            out.issues.push_back(cc::format("obj: '{}' has {} of {} normals that cannot be normalized, so no tangent "
+                                            "frame is imported and the geometric one is used instead",
+                                            name, unusable, builder.normals.size()));
+
         // A frame per vertex, with an arbitrary tangent: OBJ carries no tangent at all, and a normal alone is still
         // what separates a smooth surface from a faceted one.
-        if (builder.any_normal && cfg.frames.prefer_file)
+        if (builder.any_normal && unusable == 0 && cfg.frames.prefer_file)
         {
             auto frames = cc::vector<tg::quat_f>();
             auto handedness = cc::vector<f32>();

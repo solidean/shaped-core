@@ -79,6 +79,16 @@ void acquire_asset_materials(asset_data& out,
                                                 cc::string_view asset_name,
                                                 cc::vector<asset_material_definition>& definitions);
 
+/// Whether `n` can be normalized into a frame at all.
+///
+/// A zero, infinite or NaN normal is what a degenerate triangle and a careless exporter both produce, and normalizing
+/// one yields a NaN quaternion the hit shader then trusts — which is strictly worse than supplying no frame, since the
+/// geometric fallback is correct and a NaN is not shading at all.
+/// So an importer tests this BEFORE building a frame, and drops the whole attribute for a mesh that fails it.
+/// Written as a self-comparison plus a bound because `cc` has no float classification yet
+/// (libs/base/clean-core/docs/TODO.md).
+[[nodiscard]] bool is_usable_normal(tg::vec3f n);
+
 /// The tangent frame a supplied normal and glTF TANGENT describe, as a rotation taking tangent space to object space.
 ///
 /// The tangent is re-orthogonalized against the normal, because an interpolated or authored TANGENT is rarely exactly

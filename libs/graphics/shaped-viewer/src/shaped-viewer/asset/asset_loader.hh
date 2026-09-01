@@ -83,6 +83,12 @@ enum class sv::asset_format : sv::u8
 /// `asset_data`, which is why there is so little here.
 ///
 /// The two hooks own their callables, since a loader outlives the expression that built it.
+///
+/// **Every hook here is called from a WORKER**, and from several at once when several `load_async` loads are in
+/// flight — they are the only caller-supplied code an import runs, and the import is what moved off the main thread.
+/// So whatever they close over has to tolerate that: a resolver holding an open file handle or a mutable cache needs
+/// its own synchronization, and none is provided here.
+/// `material_override` is the exception, since it returns a library id and therefore runs where `sv::asset::poll` does.
 struct sv::asset_loader_config
 {
     /// where imported materials are minted; null means the process-wide `sv::acquire_material_library`
@@ -135,14 +141,18 @@ namespace sv
 /// And load options are almost always shared across many loads, so a loader holding them beats repeating an options
 /// struct per call.
 ///
-/// Move-only, because its config owns its hooks.
+/// **Neither copyable nor movable, and the move is what matters.**
+/// A `load_async` node captures this loader and the `sv::asset` it hands back keeps a pointer to it, so the address has
+/// to stay put for as long as any load from it is alive — and moving a loader is the natural thing a caller does to one
+/// otherwise.
+/// Hold it where it will not move: a member, a `cc::unique_ptr`, or a local the loads do not outlive.
 class sv::asset_loader
 {
 public:
     explicit asset_loader(asset_loader_config cfg = {}) : _config(cc::move(cfg)) {}
 
-    asset_loader(asset_loader&&) noexcept = default;
-    asset_loader& operator=(asset_loader&&) noexcept = default;
+    asset_loader(asset_loader&&) = delete;
+    asset_loader& operator=(asset_loader&&) = delete;
     asset_loader(asset_loader const&) = delete;
     asset_loader& operator=(asset_loader const&) = delete;
     ~asset_loader() = default;
@@ -174,7 +184,8 @@ public:
     ///
     /// Fetching, parsing and importing run on whatever scheduler `cc::async` was given; with none installed nothing
     /// progresses until `sv::asset::wait` drives it, which is the same degradation every other async here takes.
-    /// THIS LOADER MUST OUTLIVE THE LOAD: its config is what the load reads, including the resolver and the hooks.
+    /// THIS LOADER MUST OUTLIVE THE LOAD, at the address it has now: its config is what the load reads, which is also
+    /// why the type is neither movable nor copyable.
     [[nodiscard]] sv::asset load_async(cc::string_view uri) const;
 
     [[nodiscard]] asset_loader_config const& config() const { return _config; }

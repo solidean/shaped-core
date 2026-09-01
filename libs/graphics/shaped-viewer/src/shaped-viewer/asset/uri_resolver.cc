@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/uri_resolver.hh>
 
@@ -15,11 +16,7 @@ namespace
 /// resolver would deadlock the moment a resolver resolves something itself.
 uri_resolver_provider g_resolve_uri;
 
-[[nodiscard]] bool is_hex_digit(char c)
-{
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-}
-
+/// The value one hex digit names; `cc` has `is_hex_digit` but no nibble decoder yet.
 [[nodiscard]] int hex_value(char c)
 {
     if (c >= '0' && c <= '9')
@@ -53,8 +50,7 @@ uri_resolver_provider g_resolve_uri;
         auto const c = uri[i];
         if (c == ':')
             return i > 1;
-        auto const schemely = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '+'
-                           || c == '-' || c == '.';
+        auto const schemely = cc::is_alphanumeric(c) || c == '+' || c == '-' || c == '.';
         if (!schemely)
             return false;
     }
@@ -97,7 +93,7 @@ cc::string impl::percent_decode(cc::string_view uri)
 
     for (auto i = isize(0); i < uri.size(); ++i)
     {
-        if (uri[i] == '%' && i + 2 < uri.size() && is_hex_digit(uri[i + 1]) && is_hex_digit(uri[i + 2]))
+        if (uri[i] == '%' && i + 2 < uri.size() && cc::is_hex_digit(uri[i + 1]) && cc::is_hex_digit(uri[i + 2]))
         {
             out += char(hex_value(uri[i + 1]) * 16 + hex_value(uri[i + 2]));
             i += 2;
@@ -150,8 +146,7 @@ cc::string impl::extension_of(cc::string_view uri)
             auto out = cc::string(name.subview({.offset = i, .size = name.size() - i}));
             auto* const chars = out.data();
             for (auto k = isize(0); k < out.size(); ++k)
-                if (chars[k] >= 'A' && chars[k] <= 'Z')
-                    chars[k] = char(chars[k] - 'A' + 'a');
+                chars[k] = cc::to_lower(chars[k]);
             return out;
         }
     }
