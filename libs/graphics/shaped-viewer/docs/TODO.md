@@ -370,6 +370,53 @@ importance-samples the continuation — so what is left is coverage of the model
   and then fails the pipeline build.
   `pt_cutout_rejects` is the test itself, and the two entry points over it differ only in what they declare.
 
+## What asset loading still needs
+
+The design and its phasing are [asset-loading.md](asset-loading.md); phase 6 is deferred there, with what would reopen
+it.
+What follows is everything else the importer left behind.
+
+- **Nothing in the repo loads an asset except a test.**
+  `sv::asset_loader` has never been used in anger, so nobody has found out whether the API is pleasant, and the
+  structure-first placeholders have never actually been *seen* — only asserted on.
+  An example is the fix, and the awkward part is what it loads: no glTF, OBJ or STL is vendored anywhere in the repo.
+  babel's own geometry tests build their documents in code, which is the pattern to follow rather than committing a
+  binary asset for one example.
+  A capture would also be the first picture of a partially-loaded scene, which is worth having.
+- **`tangent_frame_options::generate` is accepted and ignored.**
+  Only `prefer_file` is implemented: a file's own normals and tangents cross, and `smooth` / `crease` do nothing
+  silently, which is worse than rejecting them.
+  `smooth` is `per_vertex` after a position weld; `crease` is `per_corner`, welded then split by `crease_angle`.
+  Both want the mesh-processing helpers that eventually move down to `tg::mesh`, so they are written as free functions
+  over spans when they land.
+- **Our tangents will not match MikkTSpace**, once we generate any.
+  Nearly every DCC tool bakes normal maps against it, so an asset only reproduces exactly if the runtime basis matches
+  the baker's.
+  Per-corner area- and angle-weighted accumulation is close but not identical, and diverges visibly on high-frequency
+  normal maps and mirrored uv shells.
+  Fixing it means porting MikkTSpace's algorithm into the same mesh-processing helpers.
+  Blocked on the entry above: there is nothing to diverge yet.
+- **Per-texture priority is not implemented.**
+  Transfers are ordered attributes over geometry over textures, which is the plan's "geometry before textures".
+  Its other half — base colour before roughness — needs the importer to say which map matters more, and nothing
+  carries that today.
+- **Both halves of an async load re-fetch and re-parse.**
+  Deliberate at this size, since a glTF's JSON is cheap beside its accessors and sharing the parsed document would
+  mean holding it, and its buffers, twice over.
+  Worth revisiting if a profile ever disagrees — the fix is a third node the other two depend on.
+
+### What it wants from babel
+
+- **`.mtl`**, referenced by OBJ and planned in babel.
+  Until it lands an OBJ import carries geometry plus material NAMES only, and every name becomes the same unbound
+  `openpbr` material.
+- **PLY**, planned in babel and worth having, though sv has no point-cloud item kind to put one in yet.
+- **The `KHR_materials_*` extensions**, which babel records but does not interpret.
+  This is the one that costs something today: targeting OpenPBR instead of `pbr` was justified by transmission, ior,
+  clearcoat and sheen mapping onto `transmission_*`, `coat_*` and `fuzz_*` natively — and none of them cross, so that
+  payoff is still unrealised.
+  A glTF import reports what it dropped, so the gap is visible rather than silent.
+
 ## Everything else
 
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.

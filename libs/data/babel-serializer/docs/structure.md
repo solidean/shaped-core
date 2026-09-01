@@ -101,6 +101,11 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
 - `[planned]` **sparse accessors** — a hard error today, deliberately: silently ignoring the sparse override hands back the wrong geometry.
 - `[planned]` **typed decode** — normalized-integer dequantization, cross-component conversion (a `u16` accessor read as `f32`), and unpacking a padded matrix column layout into a tight `tg::mat3f`.
   The bytes and the metadata for all three are already exposed.
+- `[planned]` **the `KHR_materials_*` material extensions**, parsed into `material` rather than skipped — transmission, ior, clearcoat, sheen, emissive_strength.
+  The one planned item with a caller already waiting: shaped-viewer maps a glTF material onto OpenPBR.
+  It chose OpenPBR over metallic-roughness precisely because those five land on `transmission_*`, `coat_*` and `fuzz_*` natively.
+  None of them cross today, so that payoff is unrealised and every sv import says so in its issues.
+  Typed fields on `material` rather than raw JSON, since the set is small, stable and specified.
 - `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
   Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
   A stored `json::ref` would also dangle across a `cc::move(data)`.
