@@ -3,10 +3,12 @@
 #include <babel-serializer/fwd.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-viewer/asset/asset.hh>
 #include <shaped-viewer/asset/asset_data.hh>
 #include <shaped-viewer/asset/uri_resolver.hh>
 #include <typed-geometry/scalar/angle.hh>
@@ -115,6 +117,11 @@ struct sv::asset_loader_config
     sv::tangent_frame_options frames = {};
 };
 
+namespace sv::impl
+{
+struct asset_material_definition;
+} // namespace sv::impl
+
 namespace sv
 {
 /// The format `uri`'s extension names, or empty when it names none this loader reads.
@@ -163,12 +170,32 @@ public:
     [[nodiscard]] cc::result<asset_data> load(babel::obj::data const& doc, cc::string_view name = {}) const;
     [[nodiscard]] cc::result<asset_data> load(babel::stl::data const& doc, cc::string_view name = {}) const;
 
+    /// Loads `uri` off the calling thread, handing back a handle that fills in.
+    ///
+    /// Fetching, parsing and importing run on whatever scheduler `cc::async` was given; with none installed nothing
+    /// progresses until `sv::asset::wait` drives it, which is the same degradation every other async here takes.
+    /// THIS LOADER MUST OUTLIVE THE LOAD: its config is what the load reads, including the resolver and the hooks.
+    [[nodiscard]] sv::asset load_async(cc::string_view uri) const;
+
     [[nodiscard]] asset_loader_config const& config() const { return _config; }
     [[nodiscard]] asset_loader_config& config() { return _config; }
 
-private:
     /// The library imported materials are minted into, or an error when none could be reached.
+    /// Public because `sv::asset` finishes a load with it, and that step is deliberately not the loader's to sequence.
     [[nodiscard]] cc::result<material_library*> _library() const;
+
+private:
+    /// The library-free half of a byte load: parse, then import.
+    /// Safe to run anywhere, which is what `load_async` relies on.
+    [[nodiscard]] cc::result<asset_data> _import(cc::pinned_data<byte const> bytes,
+                                                 asset_format format,
+                                                 cc::string_view name,
+                                                 cc::string_view base_uri,
+                                                 cc::vector<impl::asset_material_definition>& definitions) const;
+
+    /// The main-thread tail of every load: the definitions an import produced, minted into the library.
+    [[nodiscard]] cc::result<asset_data> _finish(cc::result<asset_data> imported,
+                                                 cc::vector<impl::asset_material_definition> const& definitions) const;
 
     asset_loader_config _config;
 };

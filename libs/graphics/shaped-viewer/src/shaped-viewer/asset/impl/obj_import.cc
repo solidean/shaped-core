@@ -138,13 +138,9 @@ struct run_builder
 
 cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
                                         asset_loader_config const& cfg,
-                                        material_library& lib,
-                                        cc::string_view asset_name)
+                                        cc::string_view asset_name,
+                                        cc::vector<impl::asset_material_definition>& definitions)
 {
-    auto const type = lib.acquire_type(builtin_material::openpbr);
-    if (!type.has_value())
-        return cc::error("shaped-viewer: the material library carries no 'openpbr' type to import into");
-
     auto out = asset_data();
     out.name = asset_name.empty() ? cc::string("obj") : cc::string(asset_name);
 
@@ -203,7 +199,6 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
                 mesh_attribute::create("tangent_handedness", attribute_frequency::per_vertex, cc::move(handedness)));
         }
 
-        auto material = material_id::invalid;
         auto slot = isize(-1);
         if (cfg.import_materials && !run.material_name.empty())
         {
@@ -213,21 +208,13 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
 
             if (slot < 0)
             {
-                if (cfg.material_override)
-                    material = cfg.material_override(run.material_name);
-
-                // With no `.mtl`, every name mints the same unbound openpbr material — and a content-addressed library
-                // hands back one id for all of them.
+                // With no `.mtl`, every name becomes the same unbound openpbr material — and a content-addressed
+                // library hands back one id for all of them.
                 // That is why a slot owns its meshes: the id cannot tell two of the file's names apart.
-                if (material == material_id::invalid)
-                    material = lib.acquire(
-                        sv::material::create(cc::format("{}/{}", out.name, run.material_name), type.value(), {}));
-
                 slot = out.materials.size();
-                out.materials.push_back({.name = run.material_name, .material = material});
+                definitions.push_back({.name = run.material_name});
+                out.materials.push_back({.name = run.material_name});
             }
-            else
-                material = out.materials[slot].material;
 
             out.materials[slot].meshes.push_back(i32(out.meshes.size()));
         }
@@ -235,8 +222,7 @@ cc::result<asset_data> impl::import_obj(babel::obj::data const& doc,
         out.meshes.push_back({.name = name,
                               .geometry = triangle_geometry::create_from_indexed_triangles(cc::move(builder.positions),
                                                                                            cc::move(builder.indices)),
-                              .attributes = cc::move(attributes),
-                              .material = material});
+                              .attributes = cc::move(attributes)});
         ++seen;
     }
 

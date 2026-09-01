@@ -255,10 +255,16 @@ So an asynchronous load is *structurally* complete after stage 2 — the full me
 material factors, drawn as placeholder boxes — and sharpens per resource as stages 3 and 4 land.
 
 ```cpp
-if (car.is_ready())                  // structure known; payloads may still be arriving
-    for (auto const& m : car.meshes)
-        scene.add_mesh(m);
+car.poll();                          // collects a landed load; never blocks
+for (auto const& m : car.meshes())   // empty until it lands, then all of them
+    scene.add_mesh(m);
 ```
+
+*Landed, with one difference from the above.*
+`is_ready` is whole-asset rather than structure-first: an asset is either not there or entirely there.
+Making it per-mesh needs a `mesh_data` whose geometry has not been read at all — a mesh that is a name, a transform and
+a box and nothing else — which `create_mesh` has no form for.
+That is the same shape the `from_uri` recipe below wants, so the two want doing together.
 
 OBJ and STL have no structure/payload split, so nothing is known until the whole file is parsed and `is_ready()` simply stays false
 longer.
@@ -425,7 +431,8 @@ not yet need would be the wrong order.
    Every record carries a `residency`, an acquire hands its payload to `sg::context_stream_scope` (`ctx.stream`), and `record_pending_work` collects what landed.
    Priority is the transfer's own rather than a drain order, so attributes outrank the geometry that indexes them and a mesh never draws real triangles against attribute bytes still in flight.
    Textures stream too, and a slot sampling one that has not arrived reads its placeholder rather than an empty texture.
-   Still to come: the four-stage load pipeline itself, an `sv::asset` handle that fills in, and structure-first glTF parsing.
+   `asset_loader::load_async` hands back an `sv::asset`, and stages 1 to 3 run off the calling thread — which needed the import split in two, since `material_library` is not thread-safe.
+   Still to come: structure-first parsing, which is what makes `is_ready` per-mesh rather than whole-asset.
 6. **Recipes and caching.** `from_uri` and `derived`, `bcache` on the parse and processing steps, re-materialization after eviction, importer versioning in the keys.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
 

@@ -82,7 +82,13 @@ struct asset_loader_config;
 struct asset_material;
 struct asset_node;
 struct asset_data;
+class asset;
 class asset_loader;
+
+namespace impl
+{
+struct imported_asset; // an import's output, before a library has minted its materials (asset/impl/asset_import.hh)
+} // namespace impl
 
 // the material system (see material/)
 enum class material_frequency : u8;      // where an attribute's value came from; the ORDER is the precedence

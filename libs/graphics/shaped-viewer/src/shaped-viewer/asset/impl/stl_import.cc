@@ -21,10 +21,10 @@ namespace sv
 {
 cc::result<asset_data> impl::import_stl(babel::stl::data const& doc,
                                         asset_loader_config const& cfg,
-                                        material_library& lib,
-                                        cc::string_view asset_name)
+                                        cc::string_view asset_name,
+                                        cc::vector<impl::asset_material_definition>& definitions)
 {
-    (void)lib; // STL carries no materials, so there is nothing to mint
+    (void)definitions; // STL carries no materials, so there is nothing to define
 
     auto out = asset_data();
     out.name = asset_name.empty() ? cc::string("stl") : cc::string(asset_name);

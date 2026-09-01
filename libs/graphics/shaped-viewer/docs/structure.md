@@ -98,6 +98,9 @@ streamed uploads + placeholders          [done]         every record carries an 
 fallback hit group                       [done]         a permutation that has not compiled — still in flight, or a material that does not build — is replaced for that trace by a neutral hit group over an empty signature, which reads no per-instance block and so stands in for any material.
                                                         The pipeline is keyed on the substituted set, so the frame the real one lands a new variant is built with it.
                                                         Before this, one bad material made the whole view a no-op
+async loading (sv::asset)                [in progress]  asset_loader::load_async fetches, parses and imports off the calling thread, handing back an sv::asset that poll() collects.
+                                                        The import touches no material library, which is what lets it move: it produces material DEFINITIONS, and minting them is the small step poll runs where the library is owned.
+                                                        is_ready is whole-asset rather than structure-first — the mesh list arriving before the payloads needs a mesh whose geometry has not been read, which create_mesh has no form for yet
 asset loading (asset_loader)             [in progress]  glTF 2.0, OBJ and STL load into a CPU-side sv::asset_data that add_mesh takes directly — one mesh per (geometry, material), hierarchy flattened, material names namespaced by the asset.
                                                         The loader holds no device and opens no file: every uri goes through sv::resolve_uri, a settable process-wide hook over cc::file_read_stream_adapter.
                                                         Textures ride on the mesh as pixels rather than on the material as ids, which is what keeps the whole importer CPU-side.

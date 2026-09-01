@@ -131,13 +131,11 @@ struct gltf_importer
 {
     bg::data const& doc;
     asset_loader_config const& cfg;
-    material_library& lib;
-    material_type_id openpbr = material_type_id::invalid;
 
     asset_data out;
 
     /// one entry per glTF material, plus a trailing one for primitives naming none when any does
-    cc::vector<material_id> material_ids;
+    cc::vector<impl::asset_material_definition> definitions;
     cc::vector<cc::vector<mesh_texture_data>> material_textures;
     bool has_default_material = false;
 
@@ -286,24 +284,11 @@ struct gltf_importer
                          sample_transform::of_signed_normal(m.normal_scale));
         }
 
-        auto id = material_id::invalid;
-        if (cfg.material_override)
-            id = cfg.material_override(name);
-
-        if (id == material_id::invalid)
-        {
-            // Namespaced by the asset, because `material_library`'s name lookup is last-wins and a convenience rather
-            // than an identity — two files each with a "glass" would otherwise fight over it.
-            // Content addressing still dedupes genuinely identical materials across files.
-            auto const library_name = cc::format("{}/{}", out.name, name);
-            id = lib.acquire(material::create(library_name, openpbr, bindings));
-        }
-        else
-            textures.clear(); // the caller's material brings whatever maps it wants
-
-        material_ids.push_back(id);
+        // No library is touched here: the definition is what `acquire_asset_materials` mints, on the thread that owns
+        // one — which is what lets everything above this run on a worker.
+        definitions.push_back({.name = cc::string(name), .bindings = cc::move(bindings)});
         material_textures.push_back(cc::move(textures));
-        out.materials.push_back({.name = cc::string(name), .material = id});
+        out.materials.push_back({.name = cc::string(name)});
     }
 
     void build_materials()
@@ -332,18 +317,13 @@ struct gltf_importer
     /// The slot in `out.materials` a primitive's material index lands in, or -1 when materials are not imported.
     [[nodiscard]] isize slot_of(bg::material_index index) const
     {
-        if (material_ids.empty())
+        if (definitions.empty())
             return -1;
 
         auto const raw = isize(int(index));
         if (raw >= 0 && raw < doc.materials.size())
             return raw;
-        return has_default_material ? material_ids.size() - 1 : -1;
-    }
-
-    [[nodiscard]] material_id material_of(isize slot) const
-    {
-        return slot >= 0 ? material_ids[slot] : material_id::invalid;
+        return has_default_material ? definitions.size() - 1 : -1;
     }
 
     [[nodiscard]] cc::span<mesh_texture_data const> textures_of(isize slot) const
@@ -585,7 +565,8 @@ struct gltf_importer
                  .geometry = triangle_geometry::create_from_indexed_triangles(cc::move(positions), cc::move(indices)),
                  .attributes = cc::move(attributes),
                  .transform = placement,
-                 .material = material_of(slot),
+                 // Left invalid on purpose: the slot it belongs to points every mesh it covers at the real id
+                 // once the library has minted one.
                  .textures = cc::move(textures),
                  .bounds = bounds_of(p)});
         }
@@ -641,14 +622,10 @@ struct gltf_importer
 
 cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
                                          asset_loader_config const& cfg,
-                                         material_library& lib,
-                                         cc::string_view asset_name)
+                                         cc::string_view asset_name,
+                                         cc::vector<impl::asset_material_definition>& definitions)
 {
-    auto const type = lib.acquire_type(builtin_material::openpbr);
-    if (!type.has_value())
-        return cc::error("shaped-viewer: the material library carries no 'openpbr' type to import into");
-
-    auto importer = gltf_importer{.doc = doc, .cfg = cfg, .lib = lib, .openpbr = type.value()};
+    auto importer = gltf_importer{.doc = doc, .cfg = cfg};
     importer.out.name = asset_name.empty() ? cc::string("gltf") : cc::string(asset_name);
 
     // babel's own issues first, so the report reads in the order the file was processed.
@@ -661,6 +638,7 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
     if (importer.out.meshes.empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));
 
+    definitions = cc::move(importer.definitions);
     return cc::move(importer.out);
 }
 } // namespace sv

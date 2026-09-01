@@ -403,7 +403,14 @@ loader.load(pinned, fmt, name, base_uri)   // the same from bytes in hand; base_
 // glTF's normalTexture (with its scale) and occlusionTexture (with its strength) both import as sample transforms
 loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read for a caller who parsed it themselves
 loader.load(babel::obj::data) / loader.load(babel::stl::data)
+loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
 sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
+
+sv::asset                        // a load in flight; move-only, and dropping it drops the load
+a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
+a.wait()                         // -> bool; drives the load on THIS thread, then collects
+a.is_ready() / a.has_error() / a.error()
+a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a frame loop needs no branch
 
 sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
                                  //   unique_function<bool(string_view)> include_mesh; bool import_materials, import_textures;
@@ -429,6 +436,11 @@ sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_f
 
 Gotchas:
 
+- **`load_async` runs on whatever scheduler `cc::async` was given.** With none installed nothing progresses until `wait` drives it — the same degradation every other async here takes.
+- **Minting materials cannot leave the calling thread**, since `material_library` is not thread-safe.
+  That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
+- **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
+  What does arrive progressively is the upload, which the managers stream.
 - **Textures ride on the MESH, not the material.** An imported map travels as `mesh_texture_data` (pixels), because a material binding would need an already-minted `texture_id` and therefore a device.
   The frequency chain makes that the finer rank anyway, so a mesh texture wins over the material's factor exactly as an authored one does.
 - **`asset_material` owns its meshes, and that is what `override_material` rewrites.**

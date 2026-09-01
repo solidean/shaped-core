@@ -46,11 +46,13 @@ add_library(shaped-viewer
     src/shaped-viewer/resources/material_shader_cache.cc
     src/shaped-viewer/asset/uri_resolver.cc
     src/shaped-viewer/asset/asset_data.cc
+    src/shaped-viewer/asset/asset.cc
     src/shaped-viewer/asset/asset_loader.cc
     src/shaped-viewer/asset/impl/tangent_frames.cc
     src/shaped-viewer/asset/impl/gltf_import.cc
     src/shaped-viewer/asset/impl/obj_import.cc
     src/shaped-viewer/asset/impl/stl_import.cc
+    src/shaped-viewer/asset/impl/asset_materials.cc
 )
 
 target_sources(shaped-viewer
@@ -75,6 +77,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/scene/mesh_data.hh
     src/shaped-viewer/asset/uri_resolver.hh
     src/shaped-viewer/asset/asset_data.hh
+    src/shaped-viewer/asset/asset.hh
     src/shaped-viewer/asset/asset_loader.hh
     src/shaped-viewer/scene/mesh_attribute.hh
     src/shaped-viewer/scene/mesh_flags.hh

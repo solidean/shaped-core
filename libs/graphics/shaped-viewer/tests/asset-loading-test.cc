@@ -515,3 +515,67 @@ endsolid widget
 
     CHECK(sv::asset_format_of_uri("widget.stl").value() == sv::asset_format::stl);
 }
+
+TEST("sv::asset - an async load lands whole, and its materials are minted where the library is")
+{
+    auto lib = make_library();
+
+    // No filesystem: the load's fetch stage goes through this, on whatever thread runs it.
+    auto const resolve = [](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
+    {
+        if (uri != "mem/quad.obj")
+            return cc::error(cc::format("no such uri: {}", uri));
+
+        auto text = cc::vector<byte>();
+        for (auto const c : two_material_obj)
+            text.push_back(byte(c));
+        return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(text)));
+    };
+
+    auto const loader = sv::asset_loader({.materials = &lib, .resolve = resolve});
+
+    auto pending = loader.load_async("mem/quad.obj");
+    CHECK(pending.is_valid());
+
+    // Nothing is available until a poll sees it land, and asking never blocks.
+    CHECK(!pending.is_ready());
+    CHECK(pending.meshes().empty());
+
+    // `wait` drives the load wherever it is — already done on a pool, or not started at all with none installed.
+    CHECK(pending.wait());
+    CHECK(pending.is_ready());
+    CHECK(!pending.has_error());
+
+    // The same asset the synchronous path produces, materials included — which is the point of splitting the import
+    // rather than only moving it.
+    REQUIRE(pending.meshes().size() == 2);
+    CHECK(pending.meshes()[0].name == "red");
+    CHECK(pending.data().material("red") != sv::material_id::invalid);
+    CHECK(pending.meshes()[0].material == pending.data().material("red"));
+    CHECK(lib.get(pending.data().material("red")).name == "mem/quad.obj/red");
+
+    // Polling again is idempotent, which is what lets a frame loop call it unconditionally.
+    CHECK(pending.poll());
+    CHECK(pending.meshes().size() == 2);
+}
+
+TEST("sv::asset - a load that cannot be resolved reports it rather than throwing")
+{
+    auto lib = make_library();
+
+    auto const resolve = [](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
+    { return cc::error(cc::format("no such uri: {}", uri)); };
+
+    auto const loader = sv::asset_loader({.materials = &lib, .resolve = resolve});
+
+    auto missing = loader.load_async("mem/missing.obj");
+    CHECK(!missing.wait());
+    CHECK(missing.has_error());
+    CHECK(!missing.is_ready());
+    CHECK(missing.meshes().empty());
+
+    // A uri naming no format this loader reads fails the same way, without the resolver being asked.
+    auto unknown = loader.load_async("mem/quad.fbx");
+    CHECK(!unknown.wait());
+    CHECK(unknown.has_error());
+}

@@ -27,6 +27,7 @@
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
 // loading an asset from a file
+#include <shaped-viewer/asset/asset.hh>
 #include <shaped-viewer/asset/asset_data.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/uri_resolver.hh>
