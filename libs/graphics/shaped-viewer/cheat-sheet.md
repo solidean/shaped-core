@@ -147,13 +147,13 @@ m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
-m.create_mesh(sv::mesh)           // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
+m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
                                        //   geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
                                        //   `bounds` comes from the mesh when it declared one (every glTF does), else from a scan of the positions
                                        //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
-m.acquire_scene_item(sv::resident_mesh)         // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
+m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
-m.acquire_scene_item(sv::mesh)    // -> the same, from CPU bytes: create_mesh followed by the resolution above
+m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
@@ -375,10 +375,11 @@ sv::attribute_format_of<T>       // the format of an element type — scalars an
 sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
                                  //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; channel_swizzle swizzle; } — a sample, minus what it is FOR
-sv::mesh_texture_binding                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
-sv::texture_sample          // the CPU counterpart: texture_data instead of an id, everything else the same
-sv::mesh_texture            // { string name; texture_sample source; } — what an sv::mesh carries, so it needs no device either
+sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; channel_swizzle swizzle; sample_transform transform; }
+                                 //   everything a sample needs but what it is FOR
+sv::mesh_texture_binding         // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::texture_sample               // the CPU counterpart: texture_data instead of an id, everything else the same
+sv::mesh_texture                 // { string name; texture_sample source; } — what an sv::mesh carries, so it needs no device either
 sv::texture_channel              // r | g | b | a | zero | one — where ONE component of a sampled attribute comes from
 sv::channel_swizzle              // { texture_channel components[4]; } — four selectors; only the first component_count() are ever read
 channel_swizzle::of(c0, c1, c2, c3) / ::of_channel(c)  // the tail keeps the identity; of_channel is the scalar case (roughness out of `.g`)

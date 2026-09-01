@@ -214,6 +214,6 @@ The API is always present: without a backend, because SDL3 was not fetched, `win
 
 The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, serving Shaped Code's visualization needs.
 The top of the graphics stack, with a first vertical slice: path-traced views blitted into a window.
-It links babel-serializer for `sv::asset_loader`, which reads glTF and OBJ into the CPU-side `sv::asset_data` the scene API takes — a legal direction, since `data/` sits below `graphics/`.
+It links babel-serializer for `sv::asset_loader`, which reads glTF, OBJ and STL into the CPU-side `sv::asset_data` the scene API takes — a legal direction, since `data/` sits below `graphics/`.
 
 For the build and test workflow shared by all libraries, see [guides/building-and-testing.md](guides/building-and-testing.md).

@@ -27,14 +27,6 @@ namespace
     return false;
 }
 
-/// The static samplers `hit_groups` declare, by the generated name each register carries.
-///
-/// The generated text names `sv_sampler_i` at `s{i}` and nothing else records which sampler STATE that is, which is why
-/// a permutation carries the states alongside its source.
-/// Two permutations claiming one name with the SAME state share it silently; disagreeing about it asserts, because the
-/// alternative is an image shaded through the wrong filter with nothing to point at.
-/// A per-hit-group local root signature is what resolves the collision, and sg's shader table carries none yet
-/// (libs/graphics/shaped-viewer/docs/TODO.md).
 /// Whether `p` has everything a hit group needs, driving its compiles to completion to find out.
 ///
 /// The cache hands back cold nodes and no async pool is guaranteed here, so they are driven inline exactly as
@@ -55,6 +47,14 @@ namespace
     return p->any_hit->try_value() != nullptr && p->shadow_any_hit->try_value() != nullptr;
 }
 
+/// The static samplers `hit_groups` declare, by the generated name each register carries.
+///
+/// The generated text names `sv_sampler_i` at `s{i}` and nothing else records which sampler STATE that is, which is why
+/// a permutation carries the states alongside its source.
+/// Two permutations claiming one name with the SAME state share it silently; disagreeing about it asserts, because the
+/// alternative is an image shaded through the wrong filter with nothing to point at.
+/// A per-hit-group local root signature is what resolves the collision, and sg's shader table carries none yet
+/// (libs/graphics/shaped-viewer/docs/TODO.md).
 [[nodiscard]] cc::vector<sg::named_sampler> collect_samplers(cc::span<material_permutation const* const> hit_groups)
 {
     auto out = cc::vector<sg::named_sampler>();

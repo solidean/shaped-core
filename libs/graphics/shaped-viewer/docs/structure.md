@@ -84,7 +84,7 @@ glTF material mapping                    [done]         openpbr declares alpha_c
                                                         texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
                                                         The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
                                                         A sample_transform beside it splits the other way: a per-component scale and bias, of which only the EXISTENCE is shape, so a normal map's decode and its scale never fork a permutation
-mesh / mesh type split              [done]         a mesh exists in two forms, and both are first-class: sv::mesh is pinned CPU bytes and needs no device, sv::resident_mesh is resources and cannot exist without a manager.
+mesh / resident_mesh type split           [done]         a mesh exists in two forms, and both are first-class: sv::mesh is pinned CPU bytes and needs no device, sv::resident_mesh is resources and cannot exist without a manager.
                                                         gpu_resource_manager::create_mesh is the one-way bridge, scene_ref::add_mesh takes either, and resolution runs against the GPU form — which is what admits geometry that was never on the CPU.
                                                         Textures are symmetric with geometry now: a mesh carries pixels, an sv::resident_mesh a texture_id.
                                                         The GPU form also keeps the CPU-side summary (bounds, triangle and vertex counts) that nothing else could answer a framing question with
@@ -98,7 +98,7 @@ streamed uploads + placeholders          [done]         every record carries an 
 fallback hit group                       [done]         a permutation that has not compiled — still in flight, or a material that does not build — is replaced for that trace by a neutral hit group over an empty signature, which reads no per-instance block and so stands in for any material.
                                                         The pipeline is keyed on the substituted set, so the frame the real one lands a new variant is built with it.
                                                         Before this, one bad material made the whole view a no-op
-async loading (sv::asset)                [done]  asset_loader::load_async fetches, parses and imports off the calling thread, handing back an sv::asset that poll() collects.
+async loading (sv::asset)                [done]         asset_loader::load_async fetches, parses and imports off the calling thread, handing back an sv::asset that poll() collects.
                                                         The import touches no material library, which is what lets it move: it produces material DEFINITIONS, and minting them is the small step poll runs where the library is owned.
                                                         is_ready is whole-asset rather than structure-first: the mesh list arriving before the payloads needs a mesh that is a key and a box before it is bytes, which is the general resource system's job rather than sv's
 asset loading (asset_loader)             [done]         glTF 2.0, OBJ and STL load into a CPU-side sv::asset_data that add_mesh takes directly — one mesh per (geometry, material), hierarchy flattened, material names namespaced by the asset.
