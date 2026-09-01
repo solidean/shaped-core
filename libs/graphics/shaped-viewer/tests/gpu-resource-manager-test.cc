@@ -975,11 +975,53 @@ TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arriv
     (void)m.create_mesh(mesh);
     CHECK(mesh.is_ready());
 
-    // A copy carries the cache, and that is sound: every payload is content-hashed, so the ids it names are the ids
-    // the copy would have been given.
+    // A copy carries the cache, and that is sound while nothing has evicted: every payload is content-hashed, so the
+    // ids it names are the ids the copy would have been given.
     auto const copy = mesh;
     CHECK(copy.is_ready());
     CHECK(m.create_mesh(copy).geometry == first.geometry);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv::mesh - an evicted payload is re-acquired rather than named dead")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+
+    auto const& first = m.create_mesh(mesh);
+    auto const evicted_id = first.geometry;
+    m.wait_for_pending_uploads();
+    CHECK(m.create_mesh(mesh).geometry == evicted_id);
+    CHECK(mesh.is_ready());
+
+    // The budget and the idle timeout both reach this, and evicting by hand is the deterministic way to say so.
+    CHECK(m.meshes.evict(evicted_id));
+
+    // The cache still names this manager, so an unchecked slot would hand back the dead id forever and never re-upload
+    // the bytes the mesh is still holding.
+    auto const& again = m.create_mesh(mesh);
+    CHECK(again.geometry != sv::mesh_id::invalid);
+    CHECK(again.geometry != evicted_id); // a fresh id: a pool never reuses one it retired
+    CHECK(m.meshes.contains(again.geometry));
+
+    // And it is a real re-upload rather than a fresh id over nothing: it streams, then arrives.
+    CHECK(!mesh.is_ready());
+    m.wait_for_pending_uploads();
+    CHECK(m.create_mesh(mesh).geometry == again.geometry);
+    CHECK(mesh.is_ready());
 
     ctx.advance_epoch_and_wait_for_idle();
 }

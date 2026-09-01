@@ -355,6 +355,27 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
 }
 
+bool gpu_resource_manager::_is_live(sv::resident_mesh const& m)
+{
+    if (meshes.get_ptr(m.geometry) == nullptr)
+        return false;
+
+    for (auto const& a : m.attributes)
+    {
+        // A per_instance attribute uploads nothing, so it names no record that could go away.
+        if (a.attribute == attribute_id::invalid)
+            continue;
+        if (attributes.get_ptr(a.attribute) == nullptr)
+            return false;
+    }
+
+    for (auto const& t : m.textures)
+        if (textures.get_ptr(t.source.texture) == nullptr)
+            return false;
+
+    return true;
+}
+
 bool gpu_resource_manager::_is_resident(sv::resident_mesh const& m)
 {
     auto const* const geometry = meshes.get_ptr(m.geometry);
@@ -385,11 +406,18 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
 {
     CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
 
-    // Placed against this manager before: the ids are already minted, so all that is left is to say whether they have
-    // arrived since.
+    // Placed against this manager before, and every id it named still resolves: the ids are already minted, so all
+    // that is left is to say whether they have arrived since.
     // The transform, material and flags are re-read anyway, because those are the parts a caller changes between
     // frames without changing a single payload.
-    if (data.cache.manager == this)
+    //
+    // `_is_live` is what makes the slot a cache rather than a promise.
+    // An id whose record was evicted — the byte budget, or the idle timeout — is dead, and a later acquire of the same
+    // content mints a NEW one, so trusting the slot unconditionally would hand the renderer an id nothing resolves and
+    // never re-upload the bytes the mesh is still holding.
+    // Falling through re-acquires from those bytes, which is the "an eviction is a re-upload" property the design
+    // rests on.
+    if (data.cache.manager == this && _is_live(data.cache.resources))
     {
         data.cache.resources.transform = data.transform;
         data.cache.resources.material = data.material;
@@ -633,19 +661,23 @@ texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
 
 sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel, sg::pixel_format format)
 {
-    auto const encode = [&](float v)
+    // An sRGB view decodes what it reads, so the value has to be stored encoded to come back as itself.
+    // The curve covers the colour channels ONLY: alpha in an sRGB format is stored and sampled linearly, so encoding it
+    // would hand the shader a number nothing ever decodes — a base-colour map bound as `opacity` through `.a` is
+    // exactly that case.
+    auto const encode = [&](float v, int component)
     {
         auto const clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 
-        // An sRGB view decodes what it reads, so the value has to be stored encoded to come back as itself.
         auto const stored
-            = sg::is_srgb_format(format)
+            = sg::is_srgb_format(format) && component < 3
                 ? (clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * tg::pow(clamped, 1.0f / 2.4f) - 0.055f)
                 : clamped;
         return u32(stored * 255.0f + 0.5f);
     };
 
-    auto const rgba = encode(texel[0]) | (encode(texel[1]) << 8) | (encode(texel[2]) << 16) | (encode(texel[3]) << 24);
+    auto const rgba
+        = encode(texel[0], 0) | (encode(texel[1], 1) << 8) | (encode(texel[2], 2) << 16) | (encode(texel[3], 3) << 24);
     auto const key = u64(rgba) | (u64(u32(format)) << 32);
 
     if (auto const* const resident = _placeholder_textures.get_ptr(key); resident != nullptr)

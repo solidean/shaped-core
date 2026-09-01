@@ -326,6 +326,13 @@ public:
 private:
     friend class bound_resources;
 
+    /// Whether every id `m` names still resolves to a record here — which is a different question from whether those
+    /// records have arrived, and the one a cached placement has to ask first.
+    ///
+    /// An eviction retires an id for good: a later acquire of the same content mints a new one.
+    /// So a `mesh::cache` naming an evicted resource must be rebuilt rather than believed, and this is what says so.
+    [[nodiscard]] bool _is_live(sv::resident_mesh const& m);
+
     /// Whether every resource `m` names has reached the GPU — what `mesh::is_ready` is a snapshot of.
     /// A texture counts as arrived at `base_resident`: it is sampleable, and the rest of its chain is quality.
     [[nodiscard]] bool _is_resident(sv::resident_mesh const& m);

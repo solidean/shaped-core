@@ -36,9 +36,6 @@ struct sv::resolved_attribute
     /// live when `frequency == mesh_attribute`; its own `frequency` is the geometric one a shader indexes by
     mesh_attribute_binding const* attribute = nullptr;
 
-    /// live when `frequency` is `material_texture` or `mesh_texture_binding`
-    texture_sample_source const* sample = nullptr;
-
     /// The best CONSTANT the walk had before a sample won — live alongside `sample`, and never empty beside one.
     ///
     /// It is what a placeholder is seeded from while the texture is still arriving: a material whose base color map
@@ -46,6 +43,9 @@ struct sv::resolved_attribute
     /// appearing dark and an asset appearing unlit.
     /// The declaration's default at worst, since every declaration has one.
     cc::span<byte const> fallback_constant;
+
+    /// live when `frequency` is `material_texture` or `mesh_texture_binding`
+    texture_sample_source const* sample = nullptr;
 
     /// the mesh attribute `sample->uv_attribute` resolved to, live alongside `sample`
     ///

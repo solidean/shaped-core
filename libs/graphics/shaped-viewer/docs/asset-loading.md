@@ -45,6 +45,10 @@ The longer name is friction placed where it is least often paid.
 `sv::resident_mesh` being a bundle of ids is what admits geometry and attributes that were never on the CPU at all.
 `sv::mesh` keeping its pinned bytes is what lets the caching stay invisible: the bytes can always be replayed, so an
 eviction is a re-upload rather than a correctness problem.
+That only holds because the cache slot is CHECKED rather than believed — `create_mesh` verifies every id it holds still
+resolves, and re-acquires from the bytes when one does not.
+An `adopted` resource, whose bytes were never on the CPU, is the case this cannot cover, and the recipe model below is
+what eventually does.
 
 Textures split the same way and take the same suffix as attributes do: `mesh_texture` is what a caller writes and
 carries pixels, `mesh_texture_binding` is the resident form and carries a `texture_id` — matching `mesh_attribute` and
@@ -419,7 +423,7 @@ The recipe machinery is the model, not the first milestone.
 `from_memory` plus `adopted` covers everything until assets get big, and shipping the importer behind a caching subsystem it does
 not yet need would be the wrong order.
 
-1. **The type split.** *Landed*, minus the states: `mesh` / `mesh`, symmetric textures, `add_mesh` taking either, examples and tests migrated.
+1. **The type split.** *Landed*, minus the states: `mesh` / `resident_mesh`, symmetric textures, `add_mesh` taking either, examples and tests migrated.
    `sv::resident_mesh` is a bundle of the ids the managers already mint rather than of owning refcounted handles, and a record carries no state or recipe yet —
    the LRU pool keeps owning, and refcounting waits until eviction actually bites.
 2. **The material mapping.** *Landed*: `alpha_cutoff`, `occlusion`, and the channel swizzle through resolve, generation and the permutation key.

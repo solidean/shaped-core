@@ -15,9 +15,13 @@
 /// What this mesh has been turned into, the last time it was placed.
 ///
 /// It is a CACHE and never an identity: every payload is content-hashed, so placing a mesh against a manager that has never
-/// seen it produces exactly the ids the slot would have held.
+/// seen it produces the same resources the slot would have held, whatever ids those end up carrying.
 /// What the slot buys is that a repeat placement is a pointer compare instead of a hash lookup per payload, and that
 /// `mesh::is_ready` is answerable from the mesh alone.
+///
+/// It is VERIFIED before it is trusted, and that is what makes it a cache rather than a promise.
+/// An evicted record retires its id for good, so `create_mesh` checks that every id here still resolves and re-acquires
+/// from the mesh's own bytes when one does not.
 struct sv::impl::mesh_gpu_slot
 {
     /// Identity ONLY, and never dereferenced.
