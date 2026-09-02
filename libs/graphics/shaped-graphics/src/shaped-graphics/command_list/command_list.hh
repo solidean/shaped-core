@@ -63,9 +63,9 @@ public:
     void ensure_layout(raw_texture_handle texture, texture_layout layout, cc::optional<subresource_range> range = {});
 
     /// Leave `range` of `texture` in the layout an async or streaming transfer of `direction` needs.
-    /// A convenience over ensure_layout with the layout the **backend** picks, which is the reason to prefer it: the
-    /// async-ready layout is `general` on dx12 and a transfer layout on vulkan, so a caller naming one by hand has
-    /// written backend-specific code.
+    /// A convenience over ensure_layout with the layout the **backend** picks, which is the reason to prefer it: a
+    /// caller who names a layout by hand has to revisit it whenever a backend's answer changes, and today's answer
+    /// is `general` everywhere only because honouring the direction is postponed.
     /// A transfer that finds the texture elsewhere still works — it submits a fixup of its own and warns — so this is
     /// how a caller avoids the warning rather than a precondition.
     void prepare_for_async(raw_texture_handle texture,

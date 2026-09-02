@@ -86,13 +86,18 @@ enum class sg::texture_layout : sg::u32
 };
 
 /// Which way an async / streaming transfer of a texture goes, for `cmd.prepare_for_async`.
-/// The layout it resolves to is the backend's — vulkan wants a direction-specific transfer layout, while a D3D12 copy
-/// queue cannot run layout barriers at all and needs COMMON either way.
+/// The layout it resolves to is the backend's, through `context::async_ready_layout`.
+///
+/// **Every backend answers `general` today, whichever way the transfer goes**, so the direction is recorded and then
+/// ignored.
+/// It is kept because a direction-specific layout is postponed rather than ruled out: vulkan would keep more
+/// compression with one, the shape extends to that easily, and it would be hard to add back once dropped.
+/// libs/graphics/shaped-graphics/docs/TODO.md carries what taking it up costs.
 enum class sg::async_direction : sg::u32
 {
-    upload,   ///< host -> texture: `copy_dst` on vulkan, `general` on dx12
-    download, ///< texture -> host: `copy_src` on vulkan, `general` on dx12
-    /// Both, at the cost of the compression a specialized layout keeps: `general` everywhere.
+    upload,   ///< host -> texture
+    download, ///< texture -> host
+    /// Both, which forgoes whatever compression a specialized layout would keep once directions are honoured.
     /// Explicit only, and never a default — the trade is the caller's to make once they know they do both.
     both,
 };

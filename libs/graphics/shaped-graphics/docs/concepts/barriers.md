@@ -83,6 +83,31 @@ dx12 needs none of this and ignores the field for the transition's purposes.
 A D3D12 resource is created in `COMMON`, which *is* `general`, so its tracker's default is already true of the resource;
 dx12 also expresses discard as `D3D12_TEXTURE_BARRIER_FLAG_DISCARD` on the barrier rather than as a layout.
 
+## What orders what: the calls on the context
+
+Everything below rests on one model, so it is worth stating before any of it.
+
+**The events are the calls on the `context`**, and there are exactly two kinds:
+
+- `ctx.submit_command_list` — a command list's recorded work enters the timeline;
+- an async or streaming transfer's entry point — `ctx.upload.*`, `ctx.download.*`, `ctx.stream.*` — a transfer enters the timeline.
+
+**Their call order is the order.**
+A transfer enqueued before a list is submitted happens-before that list, and a list submitted before a transfer is enqueued happens-before that transfer.
+Every wait, stamp and entry barrier exists to realize that order on the device; none of them defines it.
+
+**Recording is not an event.**
+A command list is recorded at one time and submitted at another, and only the submit is on the timeline.
+So nothing observed while recording — what a resource's layout was, whether a transfer was in flight — is a fact the model gives meaning to.
+A resource's state is resolved at submit for exactly this reason, and that is what the concurrency section below is about.
+
+**The transfer systems' threading is below the line.**
+A `cc::threaded_actor`, its windows, and when it happens to pick a job up are implementation.
+They may not be reasoned about from outside, and a caller never has to.
+
+This is the contract a backend implements rather than a description of what one does.
+Where an implementation reads something the model does not define — a check taken during recording, say — that is a defect in the implementation whether or not it currently misbehaves.
+
 ## The transfer queue never changes a layout — the direct queue settles it first
 
 An async or streaming transfer runs on a queue that cannot settle a texture's layout for itself.
@@ -121,7 +146,7 @@ That is a **covering partition** — a set of range-boxes that always exactly ti
 Declaring an access to a sub-range *splits* boxes so the range aligns to box boundaries, keeping the tiling exact, then touches only the covered boxes.
 `try_merge` collapses back to one box once every box's state is equal, so a texture used uniformly costs one entry rather than one per subresource.
 It is an explicit call after each flush, not something the partition does on its own.
-A backend keeps one partition per open command-list slot, plus a canonical one.
+A backend keeps one partition per open command-list slot, plus one for the current between-lists state.
 
 ## Concurrent command lists (the concurrency model)
 

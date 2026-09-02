@@ -216,3 +216,41 @@ INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, and the 
 
     ctx->advance_epoch_and_wait_for_idle();
 }
+
+INVOCABLE_TEST("sg - a list recorded before an async transfer, and submitted after it", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const tex = make_texture(ctx);
+
+    {
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd != nullptr);
+        cmd->upload.bytes_to_texture(tex, cc::span<byte const>(pattern(97)));
+        ctx->submit_command_list(cc::move(cmd));
+    }
+
+    // A list whose entry requirement was recorded before a transfer existed, submitted after that transfer was
+    // enqueued — with nothing awaited in between, unlike every case above.
+    //
+    // `has_pending_transfer` cannot see this one: it is read while recording, and no transfer was pending then.
+    // So the list asks for `shader_readonly`, the upload's fixup settles the texture at the async-ready layout, and
+    // the list's entry barrier moves it off that layout at a submit the transfer's copy does not wait for.
+    // The copy names the async-ready layout and carries no image barrier of its own.
+    //
+    // That composes correctly today, and this pins it — the ordering it rests on is the transfer's own, and nothing
+    // in the layout bookkeeping is what makes it hold.
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);
+
+    ctx->upload.bytes_to_texture(tex, pinned_pattern(101));
+
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The bytes are the transfer's: the list declared a layout and wrote nothing.
+    auto const bytes = read_back(ctx, tex);
+    REQUIRE(bytes.has_value());
+    CHECK(matches(bytes.value(), 101)).context("the async upload did not land");
+
+    ctx->advance_epoch_and_wait_for_idle();
+}

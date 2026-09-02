@@ -28,10 +28,17 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The vulkan initial-transition prepend deliberately avoids that, since a ray-tracing stage is invalid on a device without the extension.
     So it wants a marker on `access_barrier` and on the in-flight state — "full scope, widen at emission".
     Each backend already knows how to spell that: `ALL_COMMANDS` plus `MEMORY_READ | MEMORY_WRITE` on vulkan.
-  - a **direction-specific async-ready layout**, which the transfer path cannot hold today.
+    **The vulkan present path pays for this today, and the workaround is a wait mask.**
+    A presenting submit waits the acquire semaphore at `ALL_COMMANDS` rather than at `COLOR_ATTACHMENT_OUTPUT`, the stage that actually writes the back buffer.
+    A wait dst stage orders that stage and later ones, and the back buffer's entry transition runs ahead of every stage in the prepended buffer.
+    So the narrower mask left the transition unordered against the acquire — a `WRITE_AFTER_READ` against `vkAcquireNextImageKHR`.
+    Once a transition carries a full scope of its own, the mask can go back to naming the stage the work is in.
+  - a **direction-specific async-ready layout** — postponed for simplicity, not blocked.
     `async_ready_layout` returns `general` on both backends, so `sg::async_direction` is accepted and ignored — a caller's statement of intent rather than an answer.
     Vulkan could copy from `TRANSFER_SRC_OPTIMAL` and into `TRANSFER_DST_OPTIMAL` and keep whatever compression that buys, and dx12 could not: its copy queue needs COMMON either way.
-    **What rules it out is submit-call order.**
+    **One layout everywhere is what needs no implementation.**
+    It is slower in general and it is the reason the direction stays in the API: the shape extends easily and would be hard to add back.
+    **What the naive attempt runs into is submit-call order.**
     The fixup that settles a texture's layout runs at *enqueue*, on the calling thread, while a transfer already enqueued has not necessarily been submitted by its actor yet.
     An upload followed by a download of one texture therefore puts the download's fixup ahead of the upload's copy in call order.
     The validation layer tracks image layouts in `vkQueueSubmit` call order and models no semaphore, so it reads the upload's copy as naming a layout the image has left.
@@ -39,8 +46,28 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     One layout for both directions removes the second fixup, and with it the interleave.
     The reproduction is [tests/transfer/stream-test.cc](../tests/transfer/stream-test.cc)'s `a texture sink receives whole tightly-packed rows`.
     It failed about one run in ten with direction-specific layouts, and passes 40/40 with one.
-    **What would earn it back** is submitting the fixup from the transfer actor, immediately before the job it belongs to, so call order matches queue order.
-    That needs a direct-queue submit from the actor thread and a job whose wait token is settled after the fact, which is why it is a follow-up rather than part of the change that found it.
+    **What earns it back is ordering the fixups rather than avoiding them.**
+    Submission and the async / stream entry points are all serialized against each other already.
+    An upload and a download of one resource cannot overlap either, since each waits on the other.
+    So the transitions a transfer needs can be inserted on the direct queue in that same order, which makes call order match queue order and the interleave impossible.
+    That is a real piece of work: a direct-queue submit placed against each job rather than at enqueue.
+    So it is a quality-of-implementation follow-up rather than part of the change that found it.
+  - **`has_pending_transfer` is consulted while recording, and recording is not a point on sg's ordering timeline.**
+    Both backends' `track_texture_access` force a texture to `general` when any transfer stamp is unreached, so a list does not move a layout a transfer still needs.
+    But sg's happens-before model is the order of calls on the *context* — a submit, an async or stream enqueue — and recording is none of those.
+    [concepts/barriers.md](concepts/barriers.md#what-orders-what-the-calls-on-the-context) is the contract.
+    Whether a transfer was pending at the unrelated moment a list happened to record is therefore not a property the model gives meaning to, which makes the check hard to argue for as written.
+    It also has no coverage: disabling it outright leaves the whole sg suite green on vulkan under synchronization validation.
+    The layer demonstrably catches this class, so that is absence of the hazard rather than absence of an oracle — deliberately mis-naming an async copy's layout fails the suite at once.
+    dx12 is the case it reads as written for, since a D3D12 copy queue cannot run a layout barrier at all, and that is untested here.
+    **So: work out whether it can go**, on dx12 first, and delete it if nothing needs it.
+    If something does, the condition wants restating in terms of context-call order rather than of what was pending during recording.
+  - **an async download could cancel as soon as nobody can observe it.**
+    A readback's job owns its source, so dropping every handle to the resource never cancels a download the caller still holds a future for.
+    That is settled semantics, and [tests/transfer/download-async-test.cc](../tests/transfer/download-async-test.cc) pins it.
+    Dropping the *future* does cancel, and today that is noticed when the actor next picks the job up.
+    Finer would be to notice it per window and stop mid-copy, releasing the source with it.
+    Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
   - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
