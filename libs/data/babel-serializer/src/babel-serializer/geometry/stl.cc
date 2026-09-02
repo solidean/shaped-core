@@ -32,6 +32,19 @@ constexpr isize stl_binary_stride = 50; // normal + 3 positions, as 12 f32, plus
     return stl_header_size + 4 + declared * stl_binary_stride == bytes.size() ? declared : -1;
 }
 
+/// The triangle count the bytes DECLARE, whether or not a file this size could hold that many; -1 when there is no
+/// count to read at all.
+///
+/// `binary_triangle_count` answers -1 unless the size matches exactly, which is what makes it the container test —
+/// so a truncation check, which is about the size NOT matching, needs the declared number on its own.
+[[nodiscard]] i64 declared_triangle_count(cc::span<byte const> bytes)
+{
+    if (bytes.size() < stl_header_size + 4)
+        return -1;
+
+    return i64(cc::load_bytes_le<u32>(bytes, stl_header_size));
+}
+
 /// Whether the bytes are a binary file with its LAST record cut short.
 ///
 /// Every record before the last one fits exactly and only the final one runs off the end, which no ascii file reaches
@@ -41,10 +54,7 @@ constexpr isize stl_binary_stride = 50; // normal + 3 positions, as 12 f32, plus
 /// the one failure mode nobody would think to check for.
 [[nodiscard]] bool is_truncated_binary(cc::span<byte const> bytes)
 {
-    if (bytes.size() < stl_header_size + 4)
-        return false;
-
-    auto const declared = i64(cc::load_bytes_le<u32>(bytes, stl_header_size));
+    auto const declared = declared_triangle_count(bytes);
     if (declared <= 0)
         return false;
 
@@ -235,12 +245,26 @@ cc::result<data> read(cc::span<byte const> bytes)
     if (count >= 0)
         return babel::impl::read_binary(bytes, count);
 
-    if (babel::impl::is_truncated_binary(bytes))
-        return cc::error(cc::format("stl: the binary file is truncated — it declares more triangles than its {} bytes "
-                                    "can hold",
-                                    bytes.size()));
+    auto const truncated = cc::format("stl: the binary file is truncated — it declares more triangles than its {} "
+                                      "bytes can hold",
+                                      bytes.size());
 
-    return babel::impl::read_ascii(bytes);
+    if (babel::impl::is_truncated_binary(bytes))
+        return cc::error(truncated);
+
+    auto ascii = babel::impl::read_ascii(bytes);
+
+    // The ascii parse's OWN ANSWER is the discriminator a size test cannot be.
+    // `is_truncated_binary` only fires when the shortfall is under one record, and deliberately so — a wider size test
+    // would swallow ascii files.
+    // A binary file cut anywhere earlier reaches here instead, and comes back as a solid with nothing in it, because
+    // its remaining bytes do not spell `facet`.
+    // Nothing else produces that combination: an empty solid that is also 84 bytes long with a non-zero count where a
+    // binary header keeps one.
+    if (ascii.has_value() && ascii.value().is_empty() && babel::impl::declared_triangle_count(bytes) > 0)
+        return cc::error(truncated);
+
+    return ascii;
 }
 
 cc::result<data> read(cc::string_view text)

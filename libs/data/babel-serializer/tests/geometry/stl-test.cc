@@ -51,6 +51,31 @@ void push_le_f32(cc::vector<byte>& out, f32 value)
     return out;
 }
 
+/// A binary .stl declaring `count` triangles and carrying all of them, with the same "solid" header trap.
+[[nodiscard]] cc::vector<byte> binary_triangles(u32 count)
+{
+    auto out = cc::vector<byte>();
+
+    constexpr cc::string_view header = "solid exported by a tool that writes binary";
+    for (auto const c : header)
+        out.push_back(byte(c));
+    while (out.size() < 80)
+        out.push_back(byte(0));
+
+    push_le_u32(out, count);
+
+    for (auto i = u32(0); i < count; ++i)
+    {
+        for (auto const v : {0.0f, 0.0f, 1.0f}) // normal
+            push_le_f32(out, v);
+        for (auto const v : {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f})
+            push_le_f32(out, float(i) + v);
+        push_le_u16(out, 0);
+    }
+
+    return out;
+}
+
 constexpr cc::string_view ascii_two_triangles = R"stl(solid quad
   facet normal 0 0 1
     outer loop
@@ -108,6 +133,27 @@ TEST("babel::stl - a truncated binary file is an error, not an empty solid")
     // Its header opens with `solid`, nothing after it spells `facet`, and the answer would be a valid, empty solid —
     // which is why the truncation is caught before the fall-through rather than after it.
     CHECK(babel::stl::detect_container(bytes) == babel::stl::container::ascii);
+}
+
+// The size test catches only a shortfall under one record, so a file cut earlier than that falls through to the
+// ascii parse — where it reads as a perfectly valid solid with nothing in it.
+// That empty answer is what the truncation is recognized by, since no real ascii file is 84 bytes long with a
+// non-zero count sitting where a binary header keeps one.
+TEST("babel::stl - a binary file cut in half is an error, not an empty solid")
+{
+    auto const full = binary_triangles(4);
+    REQUIRE(full.size() == 80 + 4 + 4 * 50);
+
+    auto bytes = cc::vector<byte>(); // 142 bytes: past the header, three records short
+    for (auto i = isize(0); i < full.size() / 2; ++i)
+        bytes.push_back(full[i]);
+
+    // Not what the size test covers: the shortfall here is more than one record, which is the whole point.
+    CHECK(babel::stl::detect_container(bytes) == babel::stl::container::ascii);
+
+    auto const r = babel::stl::read(cc::span<byte const>(bytes));
+    REQUIRE(r.has_error());
+    CHECK(r.error().to_string().contains("truncated"));
 }
 
 TEST("babel::stl - an ascii file mirrors its facets in order")
