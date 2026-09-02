@@ -157,8 +157,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                         buffer);
     }
 
-    // Textures take the same pair, and must: the async transfer path reads a texture's canonical layout and restores
-    // it, so without these edges that read names a layout the image is only in by luck.
+    // Textures take the same pair, and must: a transfer emits no image barrier of its own, so these edges are the
+    // only thing keeping this list's work off a texture a copy is still reading or writing.
     for (auto const& texture : cmd->_touched_textures)
     {
         add_async_wait(texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire));
@@ -271,7 +271,12 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             {
                 waits.push_back(cmd->_present_wait);
                 wait_values.push_back(0); // binary, so its value is ignored
-                wait_stages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                // ALL_COMMANDS rather than COLOR_ATTACHMENT_OUTPUT, which is the stage that actually writes the
+                // back buffer.
+                // A wait dst stage creates an execution dependency for that stage and later ones only, and the back
+                // buffer's entry transition runs ahead of every stage in the prepended buffer — so the narrower mask
+                // leaves it unordered against the acquire.
+                wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             }
             u32 const wait_count = u32(waits.size());
 
@@ -362,8 +367,8 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
     cmd._consumed = true;
 
-    // The recorded work never runs, so this list's declared accesses leave no hazard behind and canonical is
-    // untouched — including when it was the last list tracking a buffer.
+    // The recorded work never runs, so this list's declared accesses leave no hazard behind and every resource's
+    // current state is untouched.
     cmd.release_queries_on_drop();
 
     for (auto const& buffer : cmd._touched_buffers)
