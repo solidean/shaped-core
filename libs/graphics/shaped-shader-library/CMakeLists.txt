@@ -18,6 +18,33 @@ add_library(shaped-shader-library
     src/shaped-shader-library/impl/reload_watcher.cc
 )
 
+# The portable-HLSL prelude is authored as HLSL (shaders/sc/portable.hlsli) and baked into the library, so
+# `#include "sc/portable.hlsli"` resolves with no per-application mount and a shipped binary carries it.
+# Generated at configure time rather than by a build rule: the file is one small header that changes rarely,
+# and CMAKE_CONFIGURE_DEPENDS is what makes editing it re-run this.
+set(_slib_prelude_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/sc/portable.hlsli")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_slib_prelude_source}")
+file(READ "${_slib_prelude_source}" _slib_prelude_text)
+
+# The delimiter matches the package generator's, and nothing in HLSL can close it accidentally.
+set(_slib_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/portable_prelude.generated.cc")
+file(WRITE "${_slib_prelude_generated}"
+"// Generated from shaders/sc/portable.hlsli by shaped-shader-library's CMakeLists. Do not edit.\n"
+"#include <shaped-shader-library/impl/portable_prelude.hh>\n"
+"\n"
+"namespace\n"
+"{\n"
+"constexpr char const* k_portable_prelude = R\"slibsrc(${_slib_prelude_text})slibsrc\";\n"
+"\n"
+"constexpr slib::embedded_file k_files[] = {\n"
+"    {.path = \"portable.hlsli\", .text = k_portable_prelude},\n"
+"};\n"
+"} // namespace\n"
+"\n"
+"cc::span<slib::embedded_file const> slib::impl::portable_prelude_files() { return k_files; }\n"
+)
+target_sources(shaped-shader-library PRIVATE "${_slib_prelude_generated}")
+
 # Public headers (co-located in src/, grouped by topic).
 # impl/ headers are internal -- reachable via the src/ include dir below, but intentionally not part of
 # the public FILE_SET.

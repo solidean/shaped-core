@@ -164,4 +164,78 @@ TEST("slib - dxc hot-reloads a real shader", exclusive("slib-shader-library"))
     CHECK(asset->generation() == 1);
 }
 
+namespace
+{
+// The prelude's whole surface in one compute shader, so a target that rejects any part of it fails here.
+constexpr char const* k_prelude_shader = R"(
+#include "sc/portable.hlsli"
+
+struct spike_constants { uint scale; };
+SC_INLINE_CONSTANTS(spike_constants, Push);
+
+#define SC_GROUP 0
+SC_BINDING Texture2D<float4> Albedo;
+SC_BINDING SamplerState LinearSampler;
+#undef SC_GROUP
+
+#define SC_GROUP 1
+SC_BINDING RWTexture2D<float4> Output;
+#undef SC_GROUP
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    float2 uv = (float2(tid.xy) + 0.5f) / 64.0f;
+    Output[tid.xy] = Albedo.SampleLevel(LinearSampler, uv, 0) * Push.scale;
+}
+)";
+} // namespace
+
+TEST("slib - the portable prelude is mounted and needs no wiring", exclusive("slib-shader-library"))
+{
+    // No mount() call anywhere: `sc` is there because a shader_library exists.
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+
+    auto const shader = lib.compile_source(k_prelude_shader, sg::shader_stage::compute, "main", k_target_format);
+    auto const& compiled = await(shader);
+
+    // Three bindings plus the inline constants, whatever the target spells them as.
+    CHECK(compiled.bindings.size() == 4);
+    CHECK(compiled.workgroup_size.value().x == 8);
+}
+
+TEST("slib - one prelude source reflects the same names and kinds on both targets", exclusive("slib-shader-library"))
+{
+    // This is the equivalence a package-wide check would assert; here it covers the prelude itself.
+    // Indices are deliberately not compared — SPIR-V takes the counter's number and DXIL takes DXC's own assignment.
+    slib::shader_library lib;
+    auto dxil = slib::create_dxc_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler();
+    REQUIRE(dxil.has_value());
+    REQUIRE(spirv.has_value());
+    lib.add_compiler(cc::move(dxil.value()));
+    lib.add_compiler(cc::move(spirv.value()));
+
+    auto const as_dxil = lib.compile_source(k_prelude_shader, sg::shader_stage::compute, "main", sg::shader_format::dxil);
+    auto const as_spirv
+        = lib.compile_source(k_prelude_shader, sg::shader_stage::compute, "main", sg::shader_format::spirv);
+    auto const& a = await(as_dxil);
+    auto const& b = await(as_spirv);
+
+    REQUIRE(a.bindings.size() == b.bindings.size());
+    for (auto const& binding : b.bindings)
+    {
+        sg::binding const* other = nullptr;
+        for (auto const& candidate : a.bindings)
+            if (candidate.name == binding.name)
+                other = &candidate;
+
+        REQUIRE(other != nullptr);
+        CHECK(other->type == binding.type);
+    }
+}
+
 #endif
