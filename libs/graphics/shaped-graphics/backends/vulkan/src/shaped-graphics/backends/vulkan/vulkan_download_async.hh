@@ -20,12 +20,17 @@
 
 /// One async download handed to the readback actor.
 ///
-/// The source is a weak ref resolved at stage time — a source whose every handle was dropped before the actor ran
-/// cancels the future rather than delivering bytes that were never read.
+/// **The job owns its source**, and that is a semantic guarantee rather than a convenience.
+/// A caller who starts a readback and then drops every handle to the resource still gets their bytes: the future is
+/// what keeps the source alive, and dropping the resource must never cancel a download somebody can still observe.
+/// The destination is the caller's own memory, so there is always somewhere for the bytes to land.
+///
+/// Dropping the *future* is the other direction and does still cancel, since nothing can observe the result then.
+/// See libs/graphics/shaped-graphics/docs/TODO.md for how far that cancellation could be pushed.
 struct sg::backend::vulkan::vulkan_async_download_job
 {
-    std::weak_ptr<vulkan_buffer const> buffer_source;
-    std::weak_ptr<vulkan_texture const> texture_source;
+    std::shared_ptr<vulkan_buffer const> buffer_source;
+    std::shared_ptr<vulkan_texture const> texture_source;
     bool is_texture = false;
     sg::subresource_index subresource; // texture readbacks
     sg::texture_region region;         // texture readbacks
@@ -45,7 +50,6 @@ struct sg::backend::vulkan::vulkan_async_download_job
 
     /// Defer the read until this graphics-queue token completes, so it reads what the last writer left.
     sg::submission_token wait_token = sg::submission_token::not_submitted;
-
 
     /// Set only for a STREAMING readback; null marks the async tier.
     std::shared_ptr<sg::impl::stream_control> stream;

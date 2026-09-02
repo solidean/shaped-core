@@ -129,13 +129,14 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
 {
     CC_RECORD_SCOPE("sg.download.async.copy");
 
-    auto const source = job.buffer_source.lock();
-    auto const texture = job.texture_source.lock();
-    bool const alive = job.is_texture ? texture != nullptr : source != nullptr;
+    auto const& source = job.buffer_source;
+    auto const& texture = job.texture_source;
     bool const wanted = job.pin.lock() != nullptr;
 
-    // A source dropped mid-flight, or a caller that dropped the future, is a cancellation rather than a delivery:
-    // the bytes were never written anywhere the caller can see.
+    // The source is owned by the job, so it cannot go away underneath this — a caller that dropped every handle to
+    // the resource still gets the bytes they hold a future for.
+    // Only a caller that dropped the FUTURE is a cancellation rather than a delivery: there is nowhere left for the
+    // bytes to be observed.
     // The completion value is signaled either way, so a later writer waiting on it never hangs — which is the whole
     // point of reserving it at enqueue.
     // `signal_here` is false on the delivered path: the last chunk's submit already signalled the completion value
@@ -174,7 +175,7 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
 
     // A sink-driven readback has no resident destination, so a dropped future is not a cancellation there.
     bool const has_destination = job.sink ? true : wanted;
-    if (!alive || !has_destination || job.size_in_bytes == 0)
+    if (!has_destination || job.size_in_bytes == 0)
     {
         // Nothing was queued, so the value has to be signalled here or a later writer waiting on it hangs.
         if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
