@@ -40,9 +40,7 @@ public:
                       sg::command_list_slot slot,
                       D3D12_COMMAND_LIST_TYPE queue,
                       ComPtr<ID3D12CommandAllocator> allocator,
-                      ComPtr<ID3D12GraphicsCommandList> list,
-                      ComPtr<ID3D12CommandAllocator> pre_allocator,
-                      ComPtr<ID3D12GraphicsCommandList> pre_list);
+                      ComPtr<ID3D12GraphicsCommandList> list);
 
     // Auto-drops, with a warning, a list left neither submitted nor dropped.
     // The explicit path is submit_dx12_command_list / drop_dx12_command_list, and this is a no-op once either has run.
@@ -77,7 +75,11 @@ public:
 
     // The list executed AHEAD of _list in the same ExecuteCommandLists call, carrying the entry barriers that take
     // each touched resource from what it is really in to what this list's first use of it needs.
-    // Acquired with the list rather than at submit, so the submission lock never has to run a fallible acquire.
+    //
+    // **Null until something needs it**, since a command list plus its allocator is not free and most submits carry
+    // no entry barrier at all.
+    // dx12_context::acquire_pre_list is the only thing that creates it, and non-null is exactly the condition for
+    // executing it — so emptiness is a property of this list rather than of whatever the caller happened to compute.
     ComPtr<ID3D12CommandAllocator> _pre_allocator;
     ComPtr<ID3D12GraphicsCommandList> _pre_list;
 

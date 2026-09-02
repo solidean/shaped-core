@@ -26,17 +26,13 @@ dx12_command_list::dx12_command_list(dx12_context& ctx,
                                      sg::command_list_slot slot,
                                      D3D12_COMMAND_LIST_TYPE queue,
                                      ComPtr<ID3D12CommandAllocator> allocator,
-                                     ComPtr<ID3D12GraphicsCommandList> list,
-                                     ComPtr<ID3D12CommandAllocator> pre_allocator,
-                                     ComPtr<ID3D12GraphicsCommandList> pre_list)
+                                     ComPtr<ID3D12GraphicsCommandList> list)
   : sg::command_list(ctx, created_in),
     _ctx(ctx),
     _slot(slot),
     _queue(queue),
     _allocator(cc::move(allocator)),
-    _list(cc::move(list)),
-    _pre_allocator(cc::move(pre_allocator)),
-    _pre_list(cc::move(pre_list))
+    _list(cc::move(list))
 {
 }
 
@@ -648,19 +644,33 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
     auto acquired = _cmd_pool.acquire_command_list(queue);
     CC_RETURN_IF_ERROR(acquired);
 
-    // A second, tiny list for the entry barriers, executed ahead of the first in the same submit.
-    // Acquired here rather than at submit, so the submission lock never has to run something that can fail.
-    auto pre_acquired = _cmd_pool.acquire_command_list(queue);
-    CC_RETURN_IF_ERROR(pre_acquired);
-
     _open_command_lists.fetch_add(1, std::memory_order_relaxed); // must reach 0 before the epoch can advance
     // Left open (recording); submit closes it.
     // Stamped with the epoch it must be submitted/dropped in, plus an access-tracking slot that keys its private per-resource state, released on submit/drop.
     // The slot allocator is internally synchronized, and creation touches no resource layout, so it needs no extra sync.
-    return std::make_unique<dx12_command_list>(
-        *this, current_epoch(), _command_list_slots.acquire(), queue, cc::move(acquired.value().allocator.allocator),
-        cc::move(acquired.value().list), cc::move(pre_acquired.value().allocator.allocator),
-        cc::move(pre_acquired.value().list));
+    // No pre-list here: it is created only if this list turns out to need entry barriers at submit.
+    return std::make_unique<dx12_command_list>(*this, current_epoch(), _command_list_slots.acquire(), queue,
+                                               cc::move(acquired.value().allocator.allocator),
+                                               cc::move(acquired.value().list));
+}
+
+ID3D12GraphicsCommandList* dx12_context::acquire_pre_list(dx12_command_list& cmd)
+{
+    if (cmd._pre_list)
+        return cmd._pre_list.Get();
+
+    // Fallible, and reached from inside the submission lock.
+    // Throwing rather than returning null: the caller records into whatever comes back, and a null there would drop
+    // the entry barriers silently in a release build.
+    // The unwind releases the submission guard, exactly as the Close failure below it does.
+    auto acquired = _cmd_pool.acquire_command_list(cmd._queue);
+    if (acquired.has_error())
+        throw sg::allocation_exception("could not acquire a command list for a submit's entry barriers", 0,
+                                       acquired.error());
+
+    cmd._pre_allocator = cc::move(acquired.value().allocator.allocator);
+    cmd._pre_list = cc::move(acquired.value().list);
+    return cmd._pre_list.Get();
 }
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
@@ -702,9 +712,13 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             CC_ASSERT(cmd->_pending_texture_barriers.empty() && cmd->_pending_buffer_barriers.empty(),
                       "a declared access was never flushed by a GPU op");
 
-            submit_barriers(cmd->_pre_list.Get(), {}, entry_barriers);
-            HRESULT const pre_closed = cmd->_pre_list->Close();
-            CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+            if (!entry_barriers.empty())
+                submit_barriers(acquire_pre_list(*cmd), {}, entry_barriers);
+            if (cmd->_pre_list)
+            {
+                HRESULT const pre_closed = cmd->_pre_list->Close();
+                CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+            }
 
             HRESULT const hr = cmd->_list->Close();
             if (FAILED(hr))
@@ -731,12 +745,14 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 
             // The pre-list first, so its entry transitions have run before anything the list itself recorded.
             //
-            // Always executed, even when `entry_barriers` above is empty.
-            // That vector says what THIS function put in the pre-list, not what the pre-list holds: anything else
-            // that recorded into it — a test driving the declare/emit path by hand, say — would be dropped by an
-            // emptiness check made here.
-            ID3D12CommandList* lists[] = {cmd->_pre_list.Get(), cmd->_list.Get()};
-            _queue->ExecuteCommandLists(2, lists);
+            // Executed iff one was ever acquired, which is the condition rather than whether `entry_barriers` above
+            // is empty: that vector says what THIS function put there, and anything else that recorded into the
+            // pre-list — a test driving the declare/emit path by hand, say — would be dropped by that test.
+            ID3D12CommandList* lists[2] = {cmd->_pre_list.Get(), cmd->_list.Get()};
+            if (cmd->_pre_list)
+                _queue->ExecuteCommandLists(2, lists);
+            else
+                _queue->ExecuteCommandLists(1, &lists[1]);
 
             // Take a monotonic completion token and signal it under this same lock, so token order equals queue submission and signal order.
             // The queue is free-threaded, but out-of-order signals would move the fence's completed value backwards and break is_submission_complete.
@@ -780,8 +796,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // The list is already closed and can be reused now — resetting an in-flight list onto a fresh, GPU-safe allocator is legal — so return it to the pool for the next acquire.
     _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
-    _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_pre_list));
-    _cmd_pool.return_submitted_allocator({cc::move(cmd->_pre_allocator), cmd->_queue});
+    if (cmd->_pre_list)
+    {
+        _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_pre_list));
+        _cmd_pool.return_submitted_allocator({cc::move(cmd->_pre_allocator), cmd->_queue});
+    }
     _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
@@ -828,12 +847,15 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     // It was never executed, so no epoch gates it; reset happens at reuse.
     HRESULT const closed = cmd._list->Close();
     CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
-    HRESULT const pre_closed = cmd._pre_list->Close();
-    CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
     _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
     _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
-    _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
-    _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
+    if (cmd._pre_list)
+    {
+        HRESULT const pre_closed = cmd._pre_list->Close();
+        CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+        _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
+        _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
+    }
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 

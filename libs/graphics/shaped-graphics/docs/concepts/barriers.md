@@ -217,7 +217,8 @@ Each `dx12_texture` owns a per-command-list covering partition, [dx12_texture_ac
 `declare` accumulates the covered subresource boxes' access.
 `flush` rolls them through the state machine and returns the per-box `D3D12_TEXTURE_BARRIER`s the command list batches and emits before the op.
 Each is scoped to a `D3D12_BARRIER_SUBRESOURCE_RANGE`, carrying `LayoutBefore→LayoutAfter`.
-A submit returns the box's **entry** transitions, which go into the second command list executed ahead of this one in the same `ExecuteCommandLists` call.
+A submit returns the box's **entry** transitions, which go into a second command list executed ahead of this one in the same `ExecuteCommandLists` call.
+That list is created only when there is a transition to put in it, since a command list and its allocator are not free and most submits need none.
 Never into the list's own body, since a list that recorded second may submit first.
 This is dx12-owned end to end — SG core hands out no barriers, only the neutral state machine and partition.
 Barrier models differ enough across backends (Vulkan image layouts / aspects / queue ownership) that each owns its tracking and emission.

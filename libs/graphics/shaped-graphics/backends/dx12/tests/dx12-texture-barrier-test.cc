@@ -326,7 +326,8 @@ INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers on WARP", (dx12::dx
     dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::compute,
                                  sg::access_flag::shader_read, sg::texture_layout::shader_readonly);
     emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
-    emit(cmd.value()->_pre_list.Get(), dtex->finalize_slot(cmd.value()->slot()));
+    // The pre-list is created on demand, so a caller recording into it by hand has to ask for one.
+    emit(c.acquire_pre_list(*cmd.value()), dtex->finalize_slot(cmd.value()->slot()));
 
     c.submit_dx12_command_list(cc::move(cmd.value()));
     c.advance_epoch_and_wait_for_idle();

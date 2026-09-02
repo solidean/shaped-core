@@ -21,22 +21,21 @@ TEST("sg dx12 - command allocators are recycled across epochs")
 
     auto const free_count = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
 
-    // Two per list: one for the recorded body, one for the entry barriers prepended at submit.
     auto cmd = c.create_dx12_command_list();
     REQUIRE(cmd.has_value());
     c.submit_dx12_command_list(cc::move(cmd.value()));
     CHECK(free_count() == 0); // still in flight — captured by the current epoch
 
     c.advance_epoch_and_wait_for_idle();
-    CHECK(free_count() == 2); // reset and returned to the free pool on retire
+    CHECK(free_count() == 1); // reset and returned to the free pool on retire
 
-    // The next list reuses the pooled allocators rather than creating new ones.
+    // The next list reuses the pooled allocator rather than creating a new one.
     auto cmd2 = c.create_dx12_command_list();
     REQUIRE(cmd2.has_value());
     CHECK(free_count() == 0);
     c.submit_dx12_command_list(cc::move(cmd2.value()));
     c.advance_epoch_and_wait_for_idle();
-    CHECK(free_count() == 2);
+    CHECK(free_count() == 1);
 }
 
 TEST("sg dx12 - command lists are pooled and reused")
@@ -50,18 +49,18 @@ TEST("sg dx12 - command lists are pooled and reused")
     CHECK(free_lists() == 0);
 
     // A submitted list is closed and returned to the pool immediately (lists are not epoch-gated).
-    // Two of them: the body and the entry-barrier list prepended to its submit.
+    // One of them: this list touches no resource, so it never asks for a pre-list.
     auto cmd = c.create_dx12_command_list();
     REQUIRE(cmd.has_value());
     c.submit_dx12_command_list(cc::move(cmd.value()));
-    CHECK(free_lists() == 2);
+    CHECK(free_lists() == 1);
 
-    // The next create reuses the pooled lists (cheap reset) rather than creating fresh ones.
+    // The next create reuses the pooled list (cheap reset) rather than creating a fresh one.
     auto cmd2 = c.create_dx12_command_list();
     REQUIRE(cmd2.has_value());
     CHECK(free_lists() == 0);
     c.submit_dx12_command_list(cc::move(cmd2.value()));
-    CHECK(free_lists() == 2);
+    CHECK(free_lists() == 1);
 }
 
 TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately")
@@ -77,7 +76,7 @@ TEST("sg dx12 - a dropped list returns its allocator and list to the pool immedi
     REQUIRE(cmd.has_value());
     c.drop_dx12_command_list(cc::move(cmd.value()));
 
-    // Never submitted, so the GPU never touched either allocator: all four go straight back, no epoch needed.
-    CHECK(free_allocs() == 2);
-    CHECK(free_lists() == 2);
+    // Never submitted, so the GPU never touched the allocator: both go straight back, no epoch needed.
+    CHECK(free_allocs() == 1);
+    CHECK(free_lists() == 1);
 }
