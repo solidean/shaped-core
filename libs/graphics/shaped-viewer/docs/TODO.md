@@ -376,6 +376,14 @@ The design and its phasing are [asset-loading.md](asset-loading.md); phase 6 is 
 it.
 What follows is everything else the importer left behind.
 
+- **The 1x1 placeholder is written as four 8-bit channels, whatever the format says.**
+  `gpu_resource_manager::_placeholder_texture` creates the stand-in at the record's own format and uploads exactly four
+  bytes into it, one channel each, in rgba order.
+  Every format the glTF importer produces is that shape, but `sv::texture_data` carries an arbitrary `sg::pixel_format`
+  and `acquire_texture` is public — a 1x1 `rgba16_float` subresource is 8 bytes and would get 4, an `r8_unorm` one is 1.
+  Neither the upload scope nor the backend compares a payload against the region it fills, so nothing catches it in
+  transit; a `CC_ASSERT` on the block size holds the line until the encode is written per format.
+  The sRGB curve's channel choice is the same assumption — it encodes components 0..2 and not 3, which is rgba.
 - **A partially-loaded scene has still never been seen.**
   `shaped-viewer/load-asset` closed most of this: it builds a glTF in code, serves it through `sv::set_resolve_uri` and
   draws what comes out, so the loader has now been driven by a caller rather than only by a test.

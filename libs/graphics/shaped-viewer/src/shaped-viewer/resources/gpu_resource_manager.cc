@@ -676,6 +676,14 @@ texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
 
 sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel, sg::pixel_format format)
 {
+    // The write below is four bytes, one 8-bit channel each, in rgba order.
+    // Every format the importer produces is that shape, and a caller reaching `acquire_texture` with another one gets
+    // an assert rather than a subresource filled with the wrong number of bytes — which neither the upload scope nor
+    // the backend checks.
+    // Encoding per format is the real fix and is deferred; see libs/graphics/shaped-viewer/docs/TODO.md.
+    CC_ASSERT(sg::format_block_extent(format) == 1 && sg::format_block_size(format) == 4,
+              "a 1x1 placeholder is written as four 8-bit channels");
+
     // An sRGB view decodes what it reads, so the value has to be stored encoded to come back as itself.
     // The curve covers the colour channels ONLY: alpha in an sRGB format is stored and sampled linearly, so encoding it
     // would hand the shader a number nothing ever decodes — a base-colour map bound as `opacity` through `.a` is
