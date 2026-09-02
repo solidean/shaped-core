@@ -99,6 +99,16 @@ public:
     /// The returned reference is stable across later acquires.
     material_permutation const& acquire(resolved_material const& r);
 
+    /// The neutral permutation every material degrades to, generated and compiled once per cache.
+    ///
+    /// It is a real permutation over a type with an EMPTY signature, which is what makes it read no per-instance
+    /// parameter block at all — so it can stand in for any material whatever that material's layout was.
+    /// It cuts out nothing and samples nothing, so it needs no any-hit and no sampler either.
+    ///
+    /// What it buys: one material still compiling, or one that does not compile, degrades to grey shading on its own
+    /// meshes instead of making the whole view a no-op.
+    material_permutation const& acquire_fallback();
+
     /// The permutation for `key`, or null if nothing has acquired it.
     [[nodiscard]] material_permutation const* find(cc::hash128 key) const;
 

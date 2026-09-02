@@ -21,8 +21,9 @@ struct gpu_boolean;
 // Concrete render routines land here as they are implemented;
 // the routine framework itself lives in shaped-graphics (sg::render_routine / ctx.routines).
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
-class box_filter_mipmap_routine; // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
-struct mipmap_program;           // one mipmap variant's group layout + compute pipeline
+class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
+class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
+struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context

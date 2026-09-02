@@ -1,11 +1,13 @@
 #include "viewer_test_env.hh"
 
+#include <babel-serializer/geometry/obj.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
+#include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 
 using namespace cc::primitive_defines;
 
@@ -243,6 +245,7 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
 
     auto const base_only = sv::texture_data::create(make_pixels(16, 16, 1, false), sg::pixel_format::rgba8_unorm, 16, 16);
     auto const id = m.acquire_texture(base_only);
+    m.wait_for_pending_uploads(); // the pixels stream in, so residency is what the settle pass reports
     REQUIRE(m.textures.contains(id));
 
     auto const* const record = m.textures.get_ptr(id);
@@ -313,6 +316,7 @@ TEST("sv - a texture given every mip is complete")
     auto const full = sv::texture_data::create(make_pixels(8, 8, 4, true), sg::pixel_format::rgba8_unorm, 8, 8,
                                                sv::impl::mip_count_of(8, 8));
     auto const id = m.acquire_texture(full);
+    m.wait_for_pending_uploads();
     auto const* const record = m.textures.get_ptr(id);
     REQUIRE(record != nullptr);
 
@@ -336,6 +340,7 @@ TEST("sv - a texture's element is declared for the epoch that acquired it, and o
 
     auto const id
         = m.acquire_texture(sv::texture_data::create(make_pixels(8, 8, 5, false), sg::pixel_format::rgba8_unorm, 8, 8));
+    m.wait_for_pending_uploads();
     auto const index = element_of(m, id);
 
     {
@@ -374,15 +379,18 @@ TEST("sv - mip generation is queued, not done inline")
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
 
-    // An acquire is on the caller's critical path, so the follow-up is queued rather than recorded there.
+    // An acquire is on the caller's critical path, so the pixels stream and the follow-up is queued once they land.
     auto const id = m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 6, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    CHECK(m.pending_work_count() == 0); // nothing to generate from a texture that has not arrived
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
     CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
 
     // Re-acquiring the same content does not queue it a second time.
     (void)m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 6, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
 
     auto cmd = ctx.create_command_list();
@@ -418,6 +426,7 @@ TEST("sv - the work budget spreads mip generation across epochs")
     for (auto seed = u8(0); seed < 3; ++seed)
         (void)m.acquire_texture(
             sv::texture_data::create(make_pixels(16, 16, u8(20 + seed), false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 3);
 
     auto const drain = [&]
@@ -454,6 +463,7 @@ TEST("sv - a texture policy that wants no mips queues nothing")
 
     auto const id = m.acquire_texture(
         sv::texture_data::create(make_pixels(16, 16, 7, false), sg::pixel_format::rgba8_unorm, 16, 16));
+    m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 0);
 
     // It stays at its base level, which is a resolvable state rather than a failure.
@@ -548,15 +558,21 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     auto const gold = lib.acquire(sv::material::create("gold", pbr, overrides));
 
     auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
-    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+    auto const pixel_data = sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4);
+    auto const texture = m.acquire_texture(pixel_data);
+    m.wait_for_pending_uploads(); // a pending texture's slot would name the placeholder, not this one
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
-    mesh.attributes.push_back(scalar_attribute("metallic", sv::attribute_frequency::per_vertex, 0.4f, 0.5f, 0.6f));
-    mesh.attributes.push_back(
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    data.attributes.push_back(scalar_attribute("metallic", sv::attribute_frequency::per_vertex, 0.4f, 0.5f, 0.6f));
+    data.attributes.push_back(
         sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
-    mesh.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+    data.textures.push_back({.name = "base_color", .source = {.texture = pixel_data, .uv_attribute = "uv"}});
+
+    // The texture the mesh carries hashes to the id acquired above, so uploading it here is the same lookup.
+    auto const mesh = m.create_mesh(data);
+    CHECK(mesh.textures[0].source.texture == texture);
 
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
@@ -584,7 +600,7 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     // The mesh-sourced attribute enters as a descriptor: its buffer's bindless index, offset 0, its element stride.
     auto const& metallic = slot_of("metallic");
     CHECK(metallic.kind == sv::material_slot_kind::attribute_descriptor);
-    auto const metallic_buffer = m.attributes.get(m.attributes.acquire(mesh.attributes[0])).data.as_readonly_buffer();
+    auto const metallic_buffer = m.attributes.get(mesh.attributes[0].attribute).data.as_readonly_buffer();
     CHECK(u32_at(block, metallic.offset) == u32(m.acquire_buffer(metallic_buffer)));
     CHECK(u32_at(block, metallic.offset + 4) == 0u);
     CHECK(u32_at(block, metallic.offset + 8) == u32(sizeof(f32)));
@@ -620,12 +636,14 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const gold = lib.acquire(sv::material::create("gold", pbr, {}));
 
     auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    auto const mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto const mesh = m.create_mesh({.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)});
 
     auto const resolved = sv::resolve_material(lib, gold, mesh);
     auto const generated = sv::generate_material_shader(resolved);
 
-    auto const mesh_id = m.meshes.acquire(sv::triangle_data::from(mesh.geometry));
+    m.wait_for_pending_uploads(); // the record has to be resident before anything reads its buffers back
+
+    auto const mesh_id = mesh.geometry;
     auto const instance = m.acquire_instance(resolved, generated.layout);
 
     auto cmd = ctx.create_command_list();
@@ -657,11 +675,353 @@ TEST("sv - an instance record names its own geometry and parameters")
     auto const indexed_geometry
         = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
     auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
+    m.wait_for_pending_uploads();
     CHECK(m.describe_instance(*cmd, indexed, instance).is_indexed == 1u);
 
     // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
     CHECK(m.describe_instance(*cmd, indexed, instance).vertices != record.vertices);
 
     ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - an imported asset uploads and resolves like any other mesh")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    // The PROCESS-WIDE library, because that is the one `acquire_scene_item` resolves a mesh's material through — a
+    // loader minting into a library of its own would hand back ids that mean nothing here.
+    auto const lib = sv::acquire_material_library();
+    REQUIRE(lib.has_value());
+
+    constexpr cc::string_view quad_obj = R"obj(
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+vn 0 0 1
+usemtl paint
+f 1/1/1 2/2/1 3/3/1 4/4/1
+)obj";
+
+    auto const loader = sv::asset_loader({.materials = lib.value()});
+    auto const doc = babel::obj::read(quad_obj);
+    REQUIRE(doc.has_value());
+    auto const asset = loader.load(doc.value(), "quad.obj");
+    REQUIRE(asset.has_value());
+    REQUIRE(asset.value().meshes.size() == 1);
+
+    // The whole point of the CPU/GPU split: what the loader produced needs no adaptation to become a resource.
+    auto const mesh = m.create_mesh(asset.value().meshes[0]);
+    CHECK(mesh.geometry != sv::mesh_id::invalid);
+    CHECK(mesh.triangle_count == 2);
+    CHECK(mesh.vertex_count == 4);
+    REQUIRE(mesh.bounds.has_value());
+    CHECK(mesh.bounds.value().max == tg::pos3f(1, 1, 0));
+
+    // uv, tangent_frame and tangent_handedness all uploaded, and each names a buffer of its own.
+    CHECK(mesh.attributes.size() == 3);
+    for (auto const& a : mesh.attributes)
+        CHECK(a.attribute != sv::attribute_id::invalid);
+
+    // Re-importing the same bytes lands on every id it already minted, since every payload is content-keyed.
+    auto const again = m.create_mesh(asset.value().meshes[0]);
+    CHECK(again.geometry == mesh.geometry);
+    CHECK(again.attributes[0].attribute == mesh.attributes[0].attribute);
+
+    // And the imported material resolves against it, which is what places it in a scene.
+    auto const item = m.acquire_scene_item(mesh);
+    m.wait_for_pending_uploads();
+    CHECK(item.mesh == mesh.geometry);
+    CHECK(item.instance != sv::instance_id::invalid);
+
+    // Resolving started a permutation compile; a compile left undriven is async work still holding this test's context
+    // when it ends, which nexus reports as a failure of the test itself.
+    if (auto const* const permutation = m.shaders.find(item.shader_key); permutation != nullptr)
+        for (auto const* const node : {&permutation->shader, &permutation->any_hit, &permutation->shadow_any_hit})
+            if (*node != nullptr)
+                (void)cc::try_async_blocking_get(*node);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const first = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto const second = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 1), tg::pos3f(1, 0, 1), tg::pos3f(0, 1, 1)};
+
+    auto const box = tg::aabb3f(tg::pos3f(0, 0, 1), tg::pos3f(1, 1, 1));
+    auto const a = m.create_mesh({.name = "a", .geometry = sv::triangle_geometry::create_from_positions(first)});
+    auto const b
+        = m.create_mesh({.name = "b", .geometry = sv::triangle_geometry::create_from_positions(second), .bounds = box});
+
+    // An acquire hands the payload to the streaming actor and mints an id; nothing is resident yet.
+    //
+    // Deterministic despite the transfer running on another thread: a record's state advances only where the settle
+    // pass runs, so what the copy queue has actually managed by now cannot change what this observes.
+    CHECK(m.meshes.get(a.geometry).state == sv::residency::pending);
+    CHECK(m.meshes.get(b.geometry).state == sv::residency::pending);
+    CHECK(m.settling_count() == 2);
+
+    // The summary crosses at acquire rather than on arrival — which is what lets a placeholder be sized before the
+    // geometry it stands in for exists at all.
+    CHECK(m.meshes.get(b.geometry).bounds.value().max == tg::pos3f(1, 1, 1));
+
+    // A pending mesh has no acceleration structure of its own, which is why the shared placeholder stands in.
+    CHECK(m.meshes.get(a.geometry).blas == nullptr);
+    CHECK(m.meshes.placeholder_blas() != nullptr);
+
+    // And its instance record names the PLACEHOLDER's geometry, not its own: a hit recomputes the geometric normal
+    // from the positions the record points at, and the cube's triangles are the ones actually intersected.
+    {
+        auto const lib = sv::acquire_material_library();
+        REQUIRE(lib.has_value());
+        auto const material = sv::default_material(*lib.value());
+
+        auto cmd = ctx.create_command_list();
+        auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = b.geometry, .material = material});
+        auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
+        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
+
+        // Resolving started a permutation compile; one left undriven is async work still holding this test's context.
+        if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
+            (void)cc::try_async_blocking_get(p->shader);
+
+        ctx.submit_command_list(cc::move(cmd));
+    }
+
+    // Waiting is what a caller with no frame loop does; a viewer instead drains what has landed, once per frame.
+    m.wait_for_pending_uploads();
+
+    CHECK(m.meshes.get(a.geometry).state == sv::residency::complete);
+    CHECK(m.meshes.get(b.geometry).state == sv::residency::complete);
+    CHECK(m.settling_count() == 0);
+    CHECK(m.meshes.get(a.geometry).blas != nullptr);
+
+    // Once resident, the record names its own geometry again.
+    {
+        auto const lib = sv::acquire_material_library();
+        auto const material = sv::default_material(*lib.value());
+
+        auto cmd = ctx.create_command_list();
+        auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = a.geometry, .material = material});
+        auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
+        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
+
+        if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
+            (void)cc::try_async_blocking_get(p->shader);
+
+        ctx.submit_command_list(cc::move(cmd));
+    }
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+
+    // A material whose base color is dark red, and whose base color MAP has not arrived.
+    auto overrides = cc::vector<sv::material_attribute_binding>();
+    overrides.push_back(sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.0f, 0.0f)));
+    auto const id = lib.acquire(sv::material::create("dark-red", type, overrides));
+
+    auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
+    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    data.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+    auto const mesh_gpu = m.create_mesh(data);
+
+    auto textured = mesh_gpu;
+    textured.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+    textured.material = id;
+
+    auto const resolved = sv::resolve_material(lib, id, textured);
+
+    // The sample won, and what it beat is kept — which is the whole reason a placeholder can be the right colour.
+    REQUIRE(resolved.attributes.size() > 0);
+    auto const* const base_color = [&]() -> sv::resolved_attribute const*
+    {
+        for (auto const& a : resolved.attributes)
+            if (a.name == "base_color")
+                return &a;
+        return nullptr;
+    }();
+    REQUIRE(base_color != nullptr);
+    CHECK(base_color->frequency == sv::material_frequency::mesh_texture_binding);
+    REQUIRE(!base_color->fallback_constant.empty());
+
+    auto const generated = sv::generate_material_shader(resolved);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+
+    // The slot carries the seed the placeholder is filled with, already inverted through the sample's transform.
+    // Identity transform and identity swizzle here, so it is the factor itself.
+    auto const& record = m.get_instance(instance);
+    auto const* const slot = [&]() -> sv::instance_slot const*
+    {
+        for (auto const& s : record.slots)
+            if (s.kind == sv::material_slot_kind::texture_index)
+                return &s;
+        return nullptr;
+    }();
+    REQUIRE(slot != nullptr);
+    CHECK(slot->placeholder_texel[0] == 0.5f);
+    CHECK(slot->placeholder_texel[1] == 0.0f);
+    CHECK(slot->placeholder_texel[2] == 0.0f);
+
+    auto const slot_offset = [&]
+    {
+        for (auto const& sl : generated.layout.slots)
+            if (sl.name == "base_color" && sl.kind == sv::material_slot_kind::texture_index)
+                return sl.offset;
+        FAIL("no such texture slot");
+        return 0;
+    }();
+
+    // While the texture is pending the block names the PLACEHOLDER, not it.
+    CHECK(m.textures.get(texture).state == sv::residency::pending);
+    auto const while_pending
+        = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
+    CHECK(while_pending != element_of(m, texture));
+
+    // Once it lands the same block names the real thing, with no permutation change in between — which is the point
+    // of substituting at the slot rather than letting the sample lose to a coarser rank.
+    m.wait_for_pending_uploads();
+    CHECK(m.textures.get(texture).state != sv::residency::pending);
+    auto const once_resident
+        = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
+    CHECK(once_resident == element_of(m, texture));
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+
+    // A mesh nobody has placed is not ready, and says so rather than pretending it has nothing to wait for.
+    CHECK(!mesh.is_ready());
+    CHECK(mesh.cache.manager == nullptr);
+
+    auto const& first = m.create_mesh(mesh);
+    CHECK(mesh.cache.manager != nullptr);
+    CHECK(first.geometry != sv::mesh_id::invalid);
+
+    // Its payloads are streaming, so it is placed but not yet ready — which is what makes it draw as a placeholder.
+    CHECK(!mesh.is_ready());
+
+    // Placing it again hands back the SAME resources rather than looking them up again.
+    auto const& second = m.create_mesh(mesh);
+    CHECK(&second == &first);
+    CHECK(second.geometry == first.geometry);
+
+    // What a caller changes between frames without touching a payload is re-read, so the cache never goes stale on it.
+    mesh.transform = tg::affine_transform3f::make_translation(tg::vec3f(1, 2, 3));
+    auto const& moved = m.create_mesh(mesh);
+    CHECK(tg::distance(tg::pos3f(0, 0, 0).transformed(moved.transform), tg::pos3f(1, 2, 3)) < 1e-5f);
+    CHECK(moved.geometry == first.geometry); // and the geometry was not re-acquired to do it
+
+    // Readiness is a snapshot refreshed by placing, which is the cadence a frame loop already runs at.
+    m.wait_for_pending_uploads();
+    CHECK(!mesh.is_ready()); // not until it is asked again
+    (void)m.create_mesh(mesh);
+    CHECK(mesh.is_ready());
+
+    // A copy carries the cache, and that is sound while nothing has evicted: every payload is content-hashed, so the
+    // ids it names are the ids the copy would have been given.
+    auto const copy = mesh;
+    CHECK(copy.is_ready());
+    CHECK(m.create_mesh(copy).geometry == first.geometry);
+
+    ctx.advance_epoch_and_wait_for_idle();
+}
+
+TEST("sv::mesh - an evicted payload is re-acquired rather than named dead")
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+
+    auto const& first = m.create_mesh(mesh);
+    auto const evicted_id = first.geometry;
+    m.wait_for_pending_uploads();
+    CHECK(m.create_mesh(mesh).geometry == evicted_id);
+    CHECK(mesh.is_ready());
+
+    // The budget and the idle timeout both reach this, and evicting by hand is the deterministic way to say so.
+    CHECK(m.meshes.evict(evicted_id));
+
+    // The cache still names this manager, so an unchecked slot would hand back the dead id forever and never re-upload
+    // the bytes the mesh is still holding.
+    auto const& again = m.create_mesh(mesh);
+    CHECK(again.geometry != sv::mesh_id::invalid);
+    CHECK(again.geometry != evicted_id); // a fresh id: a pool never reuses one it retired
+    CHECK(m.meshes.contains(again.geometry));
+
+    // And it is a real re-upload rather than a fresh id over nothing: it streams, then arrives.
+    CHECK(!mesh.is_ready());
+    m.wait_for_pending_uploads();
+    CHECK(m.create_mesh(mesh).geometry == again.geometry);
+    CHECK(mesh.is_ready());
+
     ctx.advance_epoch_and_wait_for_idle();
 }

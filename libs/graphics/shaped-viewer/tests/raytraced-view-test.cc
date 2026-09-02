@@ -36,6 +36,10 @@ TEST("sv - flat-PBR raytraced view (headless)")
     auto const cloud = sv_test::make_triangle_cloud(64);
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const mesh = resources.meshes.acquire(sv::triangle_data::create(cloud.positions));
+
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop to drain
+    // that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
     auto const materials = resources.materials.acquire(sv::material_data::create(cloud.materials));
     REQUIRE(resources.meshes.contains(mesh));
     REQUIRE(resources.materials.contains(materials));

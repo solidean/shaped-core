@@ -87,6 +87,21 @@ protected:
         return e == nullptr ? nullptr : &e->record;
     }
 
+    /// Adds `delta` bytes to what `id` is charged, then re-enforces the budget.
+    ///
+    /// For the one thing a record cannot know at insert: a resource whose payload lands later, whose real cost — a
+    /// BLAS's size, say — is only measurable once it has been built.
+    /// Everything else fixes its size at insert, and this is deliberately not a general resize.
+    void add_bytes(Id id, isize delta)
+    {
+        auto* const e = _entries.get_ptr(id);
+        if (e == nullptr)
+            return;
+        e->size_in_bytes += delta;
+        _total_bytes += delta;
+        _enforce_budget();
+    }
+
     /// The resident id for content hash `hash`, or null if nothing with that hash is resident (never inserted,
     /// or evicted since). Marks a hit used this epoch (an LRU touch), so the acquire happy path keeps it alive.
     [[nodiscard]] cc::optional<Id> find_by_hash(cc::hash128 hash)

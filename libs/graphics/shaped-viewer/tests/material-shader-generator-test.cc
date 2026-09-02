@@ -5,7 +5,7 @@
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
-#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 using namespace cc::primitive_defines;
@@ -16,16 +16,24 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-[[nodiscard]] sv::mesh make_mesh()
+/// A CPU attribute as the binding a GPU mesh carries.
+/// The id is arbitrary: resolution matches on name, format and frequency, and never reaches for the buffer behind one.
+[[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
 {
-    auto const positions = cc::array<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto const per_instance = a.frequency == sv::attribute_frequency::per_instance;
+    return sv::mesh_attribute_binding::of(a, per_instance ? sv::attribute_id::invalid : sv::attribute_id(0));
 }
 
-[[nodiscard]] sv::mesh_attribute make_uvs(sv::attribute_frequency f = sv::attribute_frequency::per_vertex)
+[[nodiscard]] sv::resident_mesh make_mesh()
+{
+    // Resolution reads the lists and the summary, never the geometry itself, so a stand-in id is all this needs.
+    return {.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
+}
+
+[[nodiscard]] sv::mesh_attribute_binding make_uvs(sv::attribute_frequency f = sv::attribute_frequency::per_vertex)
 {
     auto const uvs = cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)};
-    return sv::mesh_attribute::create("uv", f, uvs);
+    return bind(sv::mesh_attribute::create("uv", f, uvs));
 }
 
 /// A type with one f32 and one vec3f attribute, so both the scalar and the vector paths are covered.
@@ -139,7 +147,8 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
 
     auto per_vertex = make_mesh();
     auto const values = cc::array<f32>{0.1f, 0.2f, 0.3f};
-    per_vertex.attributes.push_back(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, values));
+    per_vertex.attributes.push_back(
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, values)));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_vertex));
         CHECK(g.source.contains("sv::attribute_desc desc = sv::load_attribute_desc(params, ctx.param_offset + 0);"));
@@ -152,7 +161,8 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
 
     // per_corner reads the same way but numbers its elements off the primitive rather than off the vertex indices.
     auto per_corner = make_mesh();
-    per_corner.attributes.push_back(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_corner, values));
+    per_corner.attributes.push_back(
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_corner, values)));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_corner));
         CHECK(g.source.contains("sv::interpolate_f1"));
@@ -162,7 +172,7 @@ TEST("sv::generate_material_shader - a mesh attribute is loaded through its desc
     // per_triangle is flat — one element for the whole primitive, so it loads rather than interpolates.
     auto per_triangle = make_mesh();
     per_triangle.attributes.push_back(
-        sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f}));
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_triangle, cc::array<f32>{0.4f})));
     {
         auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), per_triangle));
         CHECK(g.source.contains("sv::load_element_f1"));
@@ -186,12 +196,75 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
     CHECK(g.source.contains("float2 uv = sv::interpolate_f2("));
     CHECK(g.source.contains("uint tex = params.Load(ctx.param_offset + "));
     // SampleLevel, because a ray tracing hit shader has no derivatives to pick a mip from.
-    CHECK(g.source.contains("SampleLevel(sv_sampler_0, uv, 0).rgb;"));
+    CHECK(g.source.contains("float4 texel = "
+                            "gBindlessTextures2D[NonUniformResourceIndex(tex)].SampleLevel(sv_sampler_0, "
+                            "uv, 0);"));
+    // An identity swizzle narrows to the declaration's three components and stays a letter swizzle.
+    CHECK(g.source.contains("base_color = texel.rgb;"));
 
     // A sampled attribute takes two slots: the texture index, and the uv descriptor it is sampled through.
     CHECK(slot_named(g.layout, "base_color").kind == sv::material_slot_kind::texture_index);
     CHECK(slot_named(g.layout, "base_color.uv").kind == sv::material_slot_kind::attribute_descriptor);
     CHECK(slot_named(g.layout, "base_color.uv").format == sv::attribute_format::of_vector(sv::scalar_type::f32, 2));
+}
+
+TEST("sv::generate_material_shader - a channel swizzle picks what each component reads")
+{
+    auto const type = make_type(); // roughness (f32) and base_color (vec3f), so both widths are covered
+
+    // The packing this exists for: one metallic-roughness map, whose green channel is the roughness.
+    auto packed = make_mesh();
+    packed.attributes.push_back(make_uvs());
+    packed.textures.push_back({.name = "roughness",
+                               .source = {.texture = sv::texture_id(3),
+                                          .uv_attribute = "uv",
+                                          .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::g)}});
+
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), packed));
+    CHECK(g.source.contains("roughness = texel.g;"));
+
+    // A constant selector is not a channel, so it cannot be spelled as a letter swizzle and widens through the type instead.
+    auto with_constant = make_mesh();
+    with_constant.attributes.push_back(make_uvs());
+    with_constant.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_id(3),
+                    .uv_attribute = "uv",
+                    .swizzle = sv::channel_swizzle::of(sv::texture_channel::b, sv::texture_channel::g,
+                                                       sv::texture_channel::one)}});
+
+    auto const c = sv::generate_material_shader(sv::resolve_material(type, bare_material(), with_constant));
+    CHECK(c.source.contains("base_color = float3(texel.b, texel.g, 1.0);"));
+}
+
+TEST("sv::generate_material_shader - a sample transform is a multiply-add over parameters")
+{
+    auto const type = make_type(); // roughness (f32) and base_color (vec3f)
+
+    auto const with = [&](cc::string name, sv::sample_transform transform)
+    {
+        auto mesh = make_mesh();
+        mesh.attributes.push_back(make_uvs());
+        mesh.textures.push_back({.name = cc::move(name),
+                                 .source = {.texture = sv::texture_id(3), .uv_attribute = "uv", .transform = transform}});
+        return sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
+    };
+
+    // An identity transform costs neither a slot nor an instruction — which is what makes it free to have this field.
+    auto const plain = with("base_color", {});
+    CHECK(!plain.source.contains("sv_scale"));
+    CHECK(plain.layout.slots.size() == 3); // roughness' constant, plus base_color's texture index and uv descriptor
+
+    // A normal map's decode reads its numbers out of the block rather than out of the source.
+    auto const decoded = with("base_color", sv::sample_transform::of_signed_normal());
+    CHECK(decoded.source.contains("float4 sv_scale = asfloat(params.Load4("));
+    CHECK(decoded.source.contains("base_color = float3(texel.rgb * sv_scale.xyz + sv_bias.xyz);"));
+    CHECK(slot_named(decoded.layout, "base_color.transform").kind == sv::material_slot_kind::sample_transform);
+    CHECK(slot_named(decoded.layout, "base_color.transform").size_bytes == 32);
+
+    // A scalar attribute reads one lane of each.
+    auto const scalar = with("roughness", sv::sample_transform::of_strength(0.5f));
+    CHECK(scalar.source.contains("roughness = float(texel.r * sv_scale.x + sv_bias.x);"));
 }
 
 TEST("sv::generate_material_shader - the permutation split holds at the level of the text")
@@ -267,7 +340,7 @@ TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion
     // hemispheres of the same rotation against each other.
     auto mesh = make_mesh();
     auto const frames = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1), tg::vec4f(0, 0, 0, 1)};
-    mesh.attributes.push_back(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_vertex, frames));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_vertex, frames)));
 
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
     CHECK(g.source.contains("sv::interpolate_rotation("));
@@ -277,7 +350,7 @@ TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion
     // A flat frequency reads one element, so there is nothing to blend and the mode changes no code.
     auto flat = make_mesh();
     auto const one = cc::array<tg::vec4f>{tg::vec4f(0, 0, 0, 1)};
-    flat.attributes.push_back(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_triangle, one));
+    flat.attributes.push_back(bind(sv::mesh_attribute::create("frame", sv::attribute_frequency::per_triangle, one)));
 
     auto const f = sv::generate_material_shader(sv::resolve_material(type, bare_material(), flat));
     CHECK(!f.source.contains("sv::interpolate_rotation"));

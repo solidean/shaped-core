@@ -2,6 +2,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::move
 #include <clean-core/streams/span_stream.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 
 #include <charconv> // std::from_chars
@@ -15,8 +16,8 @@ namespace babel::impl
 {
 namespace
 {
-// A minimal whitespace tokenizer over one line.
-// '\r' is treated as blank so a stray CR (already mostly handled by read_line) never sticks to a token.
+// A minimal whitespace tokenizer over one line, splitting on `cc::is_space`.
+// That includes '\r', so a stray CR (already mostly handled by read_line) never sticks to a token.
 struct line_tokenizer
 {
     char const* p = nullptr;
@@ -24,16 +25,14 @@ struct line_tokenizer
 
     explicit line_tokenizer(cc::string_view s) : p(s.data()), end(s.data() + s.size()) {}
 
-    static bool is_blank(char c) { return c == ' ' || c == '\t' || c == '\r'; }
-
     [[nodiscard]] bool next(cc::string_view& out)
     {
-        while (p < end && is_blank(*p))
+        while (p < end && cc::is_space(*p))
             ++p;
         if (p == end)
             return false;
         auto const* const start = p;
-        while (p < end && !is_blank(*p))
+        while (p < end && !cc::is_space(*p))
             ++p;
         out = cc::string_view(start, isize(p - start));
         return true;
@@ -42,10 +41,10 @@ struct line_tokenizer
     /// The remaining text (trimmed of surrounding blanks) — used for `o` / `g` names that may contain spaces.
     [[nodiscard]] cc::string_view rest()
     {
-        while (p < end && is_blank(*p))
+        while (p < end && cc::is_space(*p))
             ++p;
         auto const* stop = end;
-        while (stop > p && is_blank(*(stop - 1)))
+        while (stop > p && cc::is_space(*(stop - 1)))
             --stop;
         return cc::string_view(p, isize(stop - p));
     }

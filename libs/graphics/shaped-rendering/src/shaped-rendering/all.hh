@@ -15,5 +15,6 @@
 #include <shaped-rendering/imgui_style.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/keyed_pipeline_cache.hh>
+#include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/window.hh>

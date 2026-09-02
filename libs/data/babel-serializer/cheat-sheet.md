@@ -168,6 +168,31 @@ for (auto ci = f.first_corner; ci < f.first_corner + f.corner_count; ++ci)
     auto const p = m.positions[m.corners[ci].position];
 ```
 
+## STL (`babel::stl`)
+
+```cpp
+#include <babel-serializer/geometry/stl.hh>
+
+babel::stl::container detect_container(cc::span<cc::byte const> bytes); // ascii | binary; decided by SIZE
+cc::result<babel::stl::data> read(cc::span<cc::byte const> bytes);      // + string_view / read_stream overloads
+
+babel::stl::data m = read(bytes).value();
+m.source;            // container — which one it turned out to be
+m.name;              // cc::string        — the ascii `solid` name; always empty for binary
+m.normals;           // cc::vector<tg::vec3f> — one per triangle, AS WRITTEN (zero means "derive it")
+m.positions;         // cc::vector<tg::pos3f> — 3 per triangle, in file order
+m.attribute_counts;  // cc::vector<u16>   — binary only; the reserved field exporters abuse for color
+m.triangle_count();  // positions.size() / 3;  m.is_empty()
+```
+
+Gotchas:
+
+- **A binary file is detected by its SIZE, not by its leading keyword.**
+  Its 80-byte header is free-form vendor text and plenty of exporters write "solid" into it, so only `84 + 50 * count == size` tells the truth.
+- **A truncated binary file is an error rather than an empty solid.**
+  Without that check it would fall through to the ascii parse, whose header line reads as a `solid` and whose remaining bytes spell no `facet`.
+- **Nothing is welded, indexed or derived.** STL is a soup of independent triangles and this keeps it one; a zero normal stays zero.
+
 ## glTF 2.0 / GLB (`babel::gltf`)
 
 Takes **bytes, not a stream**: every embedded buffer comes back as a `cc::pinned_data` subview sharing the input's owner.

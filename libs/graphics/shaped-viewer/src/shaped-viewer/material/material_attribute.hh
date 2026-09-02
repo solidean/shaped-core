@@ -23,12 +23,12 @@
 /// Both vary per pixel, so ranking them needs a rule either way; saying outright that the mesh's wins leaves nothing hidden for a reader to discover.
 enum class sv::material_frequency : sv::u8
 {
-    material_type,    ///< the declaration's own default
-    material,         ///< a constant on the material
-    mesh_instance,    ///< a `per_instance` mesh attribute — one value for the whole mesh
-    mesh_attribute,   ///< a `per_vertex` / `per_corner` / `per_triangle` mesh attribute
-    material_texture, ///< uv-sampled, named by the material
-    mesh_texture,     ///< uv-sampled, offered by the mesh
+    material_type,        ///< the declaration's own default
+    material,             ///< a constant on the material
+    mesh_instance,        ///< a `per_instance` mesh attribute — one value for the whole mesh
+    mesh_attribute,       ///< a `per_vertex` / `per_corner` / `per_triangle` mesh attribute
+    material_texture,     ///< uv-sampled, named by the material
+    mesh_texture_binding, ///< uv-sampled, offered by the mesh
 };
 
 /// How an attribute's three corner values are blended into the one the hit reads.

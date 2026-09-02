@@ -71,7 +71,15 @@ constexpr cc::string_view openpbr_shader = R"hlsl(
     surface.geometry_thin_walled = thin_walled;
     surface.geometry_normal = normalize(normal);
     surface.geometry_coat_normal = normalize(coat_normal);
-    surface.geometry_opacity = saturate(opacity);
+    // A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
+    // surface either fully present or fully absent at that threshold.
+    // Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
+    surface.geometry_opacity = alpha_cutoff > 0.0 ? step(alpha_cutoff, opacity) : saturate(opacity);
+
+    // `occlusion` is declared and imported, and deliberately not read here.
+    // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
+    // per bounce, so applying a baked term on top darkens the surface twice.
+    // It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
 
     surface.geometry_tangent_frame = tangent_frame;
     surface.geometry_tangent = tangent;
@@ -170,6 +178,13 @@ constexpr cc::string_view unlit_shader = R"hlsl(
     // Tangent space, so the default is the shading normal rather than any particular direction in world space.
     signature.push_back(material_signature_entry::of("normal", tg::vec3f(0.0f, 0.0f, 1.0f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
+
+    // The threshold a cutout steps `opacity` against, which is glTF's `MASK` alpha mode.
+    // 0 disables it, so `OPAQUE` and `BLEND` both bind nothing here and opacity stays continuous.
+    signature.push_back(material_signature_entry::of("alpha_cutoff", 0.0f));
+
+    // Baked ambient occlusion, imported but ignored by the path-tracing fragment — see the fragment for why it is carried.
+    signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
     signature.push_back(material_signature_entry::of("thin_walled", 0.0f));

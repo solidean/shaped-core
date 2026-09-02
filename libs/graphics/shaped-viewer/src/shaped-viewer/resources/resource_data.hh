@@ -5,11 +5,13 @@
 #include <clean-core/common/utility.hh> // cc::forward, cc::move
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
+#include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 // What a caller hands a resource manager: the payload plus the content hash that identifies it.
@@ -27,6 +29,14 @@ struct sv::triangle_data
 {
     cc::pinned_data<tg::pos3f const> positions;
     cc::hash128 hash;
+
+    /// The object-space box, when the caller already knew it — glTF states one per accessor.
+    ///
+    /// NOT part of the hash: it is a summary of the same bytes, so two acquires of one geometry that disagree about it
+    /// are a caller error rather than two resources.
+    /// It is here because the manager keeps it after the payload is gone, and a placeholder box needs an extent to be
+    /// drawn at before the geometry itself has arrived.
+    cc::optional<tg::aabb3f> bounds;
 
     /// Pins `positions` and hashes their bytes.
     template <class Positions>
@@ -56,6 +66,9 @@ struct sv::indexed_triangle_data
     cc::pinned_data<tg::pos3f const> positions;
     cc::pinned_data<u32 const> indices;
     cc::hash128 hash;
+
+    /// The object-space box, when the caller already knew it; see `triangle_data::bounds`.
+    cc::optional<tg::aabb3f> bounds;
 
     /// Pins both buffers and combines their two digests into the content hash.
     template <class Positions, class Indices>

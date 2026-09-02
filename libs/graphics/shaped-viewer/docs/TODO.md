@@ -91,7 +91,7 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 ## What the material system still needs
 
 The chain is joined end to end.
-A `sv::mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
+A `sv::resident_mesh` names a material, `scene_ref::add_mesh` resolves it against the mesh, and `gpu_resource_manager` generates and compiles its permutation and fills its parameter block.
 `pathtrace_routine` then traces a DXR pipeline carrying one hit group per permutation.
 What is left is narrower than it was:
 
@@ -369,6 +369,69 @@ importance-samples the continuation — so what is left is coverage of the model
   include inout payload structure parameter"), and putting `PtPayload` on the shadow trace as well compiles every shader
   and then fails the pipeline build.
   `pt_cutout_rejects` is the test itself, and the two entry points over it differ only in what they declare.
+
+## What asset loading still needs
+
+The design and its phasing are [asset-loading.md](asset-loading.md); phase 6 is deferred there, with what would reopen
+it.
+What follows is everything else the importer left behind.
+
+- **The 1x1 placeholder is written as four 8-bit channels, whatever the format says.**
+  `gpu_resource_manager::_placeholder_texture` creates the stand-in at the record's own format and uploads exactly four
+  bytes into it, one channel each, in rgba order.
+  Every format the glTF importer produces is that shape, but `sv::texture_data` carries an arbitrary `sg::pixel_format`
+  and `acquire_texture` is public — a 1x1 `rgba16_float` subresource is 8 bytes and would get 4, an `r8_unorm` one is 1.
+  Neither the upload scope nor the backend compares a payload against the region it fills, so nothing catches it in
+  transit; a `CC_ASSERT` on the block size holds the line until the encode is written per format.
+  The sRGB curve's channel choice is the same assumption — it encodes components 0..2 and not 3, which is rgba.
+- **A partially-loaded scene has still never been seen.**
+  `shaped-viewer/load-asset` closed most of this: it builds a glTF in code, serves it through `sv::set_resolve_uri` and
+  draws what comes out, so the loader has now been driven by a caller rather than only by a test.
+  What its capture does not show is the placeholders, because a synchronous load of a document this small is resident
+  before the accumulation converges.
+  Seeing those wants a load slow enough to catch mid-flight, which is a resolver that stalls on purpose rather than a
+  bigger asset.
+- **A file carrying several arrangements frames as their union.**
+  The importer takes no position on which glTF scene is the right one, so every mesh crosses and `asset_data::bounds()`
+  is the world box over all of them.
+  A caller who framed a camera on a file with two arrangements of the same meshes therefore sees both boxed at once,
+  which is the correct consequence of importing everything rather than a defect.
+  What is missing is the other half: a way to say *which* arrangement, which is a scene-level concern and belongs
+  wherever a scene ends up living rather than as a load option.
+  Nothing in the repo carries such a file, so nothing would notice today.
+- **`tangent_frame_options::generate` is accepted and ignored.**
+  Only `prefer_file` is implemented: a file's own normals and tangents cross, and `smooth` / `crease` do nothing
+  silently, which is worse than rejecting them.
+  `smooth` is `per_vertex` after a position weld; `crease` is `per_corner`, welded then split by `crease_angle`.
+  Both want the mesh-processing helpers that eventually move down to `tg::mesh`, so they are written as free functions
+  over spans when they land.
+- **Our tangents will not match MikkTSpace**, once we generate any.
+  Nearly every DCC tool bakes normal maps against it, so an asset only reproduces exactly if the runtime basis matches
+  the baker's.
+  Per-corner area- and angle-weighted accumulation is close but not identical, and diverges visibly on high-frequency
+  normal maps and mirrored uv shells.
+  Fixing it means porting MikkTSpace's algorithm into the same mesh-processing helpers.
+  Blocked on the entry above: there is nothing to diverge yet.
+- **Per-texture priority is not implemented.**
+  Transfers are ordered attributes over geometry over textures, which is the plan's "geometry before textures".
+  Its other half — base colour before roughness — needs the importer to say which map matters more, and nothing
+  carries that today.
+- **Both halves of an async load re-fetch and re-parse.**
+  Deliberate at this size, since a glTF's JSON is cheap beside its accessors and sharing the parsed document would
+  mean holding it, and its buffers, twice over.
+  Worth revisiting if a profile ever disagrees — the fix is a third node the other two depend on.
+
+### What it wants from babel
+
+- **`.mtl`**, referenced by OBJ and planned in babel.
+  Until it lands an OBJ import carries geometry plus material NAMES only, and every name becomes the same unbound
+  `openpbr` material.
+- **PLY**, planned in babel and worth having, though sv has no point-cloud item kind to put one in yet.
+- **The `KHR_materials_*` extensions**, which babel records but does not interpret.
+  This is the one that costs something today: targeting OpenPBR instead of `pbr` was justified by transmission, ior,
+  clearcoat and sheen mapping onto `transmission_*`, `coat_*` and `fuzz_*` natively — and none of them cross, so that
+  payoff is still unrealised.
+  A glTF import reports what it dropped, so the gap is visible rather than silent.
 
 ## Everything else
 

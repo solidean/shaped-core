@@ -481,7 +481,10 @@ TEST("sv - a mesh carries the data its material draws it with")
         sv::mesh_attribute::create("normal", sv::attribute_frequency::per_vertex,
                                    cc::vector<tg::vec3f>{tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1), tg::vec3f(0, 0, 1)}));
     m.attributes.push_back(sv::mesh_attribute::create_value("fade", 0.5f));
-    m.textures.push_back({.name = "albedo", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
+    auto const white = cc::vector<byte>::create_filled(4, byte(0xFF));
+    m.textures.push_back({.name = "albedo",
+                          .source = {.texture = sv::texture_data::create(white, sg::pixel_format::rgba8_unorm, 1, 1),
+                                     .uv_attribute = "uv"}});
 
     // The lists are the material's input, keyed by name; the mesh only holds them.
     REQUIRE(m.attributes.size() == 2);
@@ -490,7 +493,10 @@ TEST("sv - a mesh carries the data its material draws it with")
     CHECK(m.attributes[1].name == "fade"); // a per-instance value rides the same list
     CHECK(m.attributes[1].value_as<f32>() == 0.5f);
     REQUIRE(m.textures.size() == 1);
-    CHECK(m.textures[0].source.texture == sv::texture_id(3));
+    CHECK(m.textures[0].name == "albedo");
+
+    // A mesh's texture travels as pixels, exactly as its geometry does — nothing here has met a device.
+    CHECK(m.textures[0].source.texture.width == 1);
 
     // An unauthored mesh draws, casts and receives — the empty flag set would draw nothing.
     CHECK(m.is_visible());

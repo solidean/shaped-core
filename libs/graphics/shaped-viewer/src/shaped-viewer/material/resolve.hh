@@ -34,16 +34,24 @@ struct sv::resolved_attribute
     cc::span<byte const> constant;
 
     /// live when `frequency == mesh_attribute`; its own `frequency` is the geometric one a shader indexes by
-    mesh_attribute const* attribute = nullptr;
+    mesh_attribute_binding const* attribute = nullptr;
 
-    /// live when `frequency` is `material_texture` or `mesh_texture`
+    /// The best CONSTANT the walk had before a sample won — live alongside `sample`, and never empty beside one.
+    ///
+    /// It is what a placeholder is seeded from while the texture is still arriving: a material whose base color map
+    /// has not landed shows its own base color factor rather than black, which is the difference between an asset
+    /// appearing dark and an asset appearing unlit.
+    /// The declaration's default at worst, since every declaration has one.
+    cc::span<byte const> fallback_constant;
+
+    /// live when `frequency` is `material_texture` or `mesh_texture_binding`
     texture_sample_source const* sample = nullptr;
 
     /// the mesh attribute `sample->uv_attribute` resolved to, live alongside `sample`
     ///
     /// A sample is only a candidate at all when the mesh carries this, so it is never null when `sample` is not.
     /// Its own frequency is what decides the generated load, which is why it is part of the permutation rather than a value.
-    mesh_attribute const* uv = nullptr;
+    mesh_attribute_binding const* uv = nullptr;
 };
 
 /// A material type, a material and a mesh, resolved into one value per declared attribute — what a shader is generated from and
@@ -93,9 +101,13 @@ namespace sv
 ///
 /// `material.type` is not checked against `type` — the library is what pairs them, and it validates once at registration rather
 /// than on every resolve.
-[[nodiscard]] resolved_material resolve_material(material_type const& type, material const& material, sv::mesh const& mesh);
+[[nodiscard]] resolved_material resolve_material(material_type const& type,
+                                                 material const& material,
+                                                 sv::resident_mesh const& mesh);
 
 /// The same, resolving `id` through `lib` — the form a renderer calls.
 /// `id` must be one `lib` minted.
-[[nodiscard]] resolved_material resolve_material(material_library const& lib, material_id id, sv::mesh const& mesh);
+[[nodiscard]] resolved_material resolve_material(material_library const& lib,
+                                                 material_id id,
+                                                 sv::resident_mesh const& mesh);
 } // namespace sv

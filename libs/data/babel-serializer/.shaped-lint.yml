@@ -27,3 +27,4 @@ rules:
     files:
       - src/babel-serializer/data/json.cc
       - src/babel-serializer/geometry/obj.cc
+      - src/babel-serializer/geometry/stl.cc

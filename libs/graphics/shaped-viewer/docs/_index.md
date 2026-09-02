@@ -9,6 +9,7 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 ## Topics
 
 - [structure](structure.md) — the module roadmap, with a status tag per entry.
+- [asset-loading](asset-loading.md) — the mesh / asset importer: the CPU / GPU type split, the resource recipe model, and the glTF to OpenPBR mapping.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
 - [TODO](TODO.md) — running list of known follow-ups.
 

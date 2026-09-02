@@ -42,7 +42,7 @@ One-liner per library:
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
   So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
-  Plus Wavefront OBJ + glTF 2.0/GLB readers (`geometry/`).
+  Plus Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`).
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
@@ -92,8 +92,11 @@ One-liner per library:
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
-  Namespace `sv`. Depends on shaped-rendering.
+  Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window, dx12 + DXR.
+  **`sv::asset_loader` reads glTF, OBJ and STL into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
+  A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
+  [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
 
 Supporting directories:
 

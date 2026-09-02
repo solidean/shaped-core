@@ -22,8 +22,15 @@
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
+
+// loading an asset from a file
+#include <shaped-viewer/asset/asset.hh>
+#include <shaped-viewer/asset/asset_data.hh>
+#include <shaped-viewer/asset/asset_loader.hh>
+#include <shaped-viewer/asset/uri_resolver.hh>
 
 // how a mesh is shaded
 #include <shaped-viewer/material/material.hh>

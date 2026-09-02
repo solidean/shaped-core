@@ -5,6 +5,7 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/shader_generator.hh> // material_slot_kind, which a slot carries
+#include <typed-geometry/linalg/vec.hh>
 
 /// One scene item as a closest-hit reads it, indexed by `InstanceID()` — mirrors `sv::instance` in shaders/material_runtime.hlsli.
 ///
@@ -60,6 +61,14 @@ struct sv::instance_slot
 
     /// `kind == texture_index`: the uploaded texture the block names
     texture_id texture = texture_id::invalid;
+
+    /// `kind == texture_index`: the texel a 1x1 placeholder is filled with while that texture is still arriving.
+    ///
+    /// Already inverted through the sample's transform and scattered through its swizzle, so what the shader computes
+    /// from it is the material's own factor — a base color map that has not landed reads as the base color rather
+    /// than as black.
+    /// Channels the swizzle never reads are 1, since nothing samples them through this slot.
+    tg::vec4f placeholder_texel = tg::vec4f(1, 1, 1, 1);
 };
 
 /// One instance's material parameter block: the slots it is built from, and the buffer it is built into.

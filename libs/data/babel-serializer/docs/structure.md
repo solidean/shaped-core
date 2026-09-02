@@ -101,6 +101,11 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
 - `[planned]` **sparse accessors** — a hard error today, deliberately: silently ignoring the sparse override hands back the wrong geometry.
 - `[planned]` **typed decode** — normalized-integer dequantization, cross-component conversion (a `u16` accessor read as `f32`), and unpacking a padded matrix column layout into a tight `tg::mat3f`.
   The bytes and the metadata for all three are already exposed.
+- `[planned]` **the `KHR_materials_*` material extensions**, parsed into `material` rather than skipped — transmission, ior, clearcoat, sheen, emissive_strength.
+  The one planned item with a caller already waiting: shaped-viewer maps a glTF material onto OpenPBR.
+  It chose OpenPBR over metallic-roughness precisely because those five land on `transmission_*`, `coat_*` and `fuzz_*` natively.
+  None of them cross today, so that payoff is unrealised and every sv import says so in its issues.
+  Typed fields on `material` rather than raw JSON, since the set is small, stable and specified.
 - `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
   Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
   A stored `json::ref` would also dangle across a `cc::move(data)`.
@@ -108,9 +113,17 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
 - `[planned]` **writer**.
 
+### stl [done]
+
+Both containers, chosen by size rather than by the leading `solid` — a binary file's 80-byte header is free-form vendor text and often starts with it.
+A faithful mirror: three positions per triangle in file order, each facet's declared normal, and binary's reserved per-triangle attribute field.
+Nothing is welded, indexed or derived, because STL is a soup of independent triangles and building a mesh out of one belongs to whoever wants a mesh.
+
+`[planned]` a writer.
+
 ### Other geometry formats [planned]
 
-`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`, `.stl`.
+`[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`.
 
 ## image/ [in progress]
 

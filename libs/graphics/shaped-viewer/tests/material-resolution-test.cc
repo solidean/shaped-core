@@ -3,7 +3,7 @@
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
-#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 using namespace cc::primitive_defines;
@@ -20,17 +20,25 @@ namespace
 constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32, 2);
 
 /// A one-triangle mesh, which is enough for every frequency: three vertices, three corners, one triangle.
-[[nodiscard]] sv::mesh make_mesh()
+/// A CPU attribute as the binding a GPU mesh carries.
+/// The id is arbitrary: resolution matches on name, format and frequency, and never reaches for the buffer behind one.
+[[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
 {
-    auto const positions = cc::array<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
-    return {.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    auto const per_instance = a.frequency == sv::attribute_frequency::per_instance;
+    return sv::mesh_attribute_binding::of(a, per_instance ? sv::attribute_id::invalid : sv::attribute_id(0));
+}
+
+[[nodiscard]] sv::resident_mesh make_mesh()
+{
+    // Resolution reads the lists and the summary, never the geometry itself, so a stand-in id is all this needs.
+    return {.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
 }
 
 /// A uv set at `name`, so a texture-sourced attribute has something to sample through.
-[[nodiscard]] sv::mesh_attribute make_uvs(cc::string name)
+[[nodiscard]] sv::mesh_attribute_binding make_uvs(cc::string name)
 {
     auto const uvs = cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)};
-    return sv::mesh_attribute::create(cc::move(name), sv::attribute_frequency::per_vertex, uvs);
+    return bind(sv::mesh_attribute::create(cc::move(name), sv::attribute_frequency::per_vertex, uvs));
 }
 
 /// A type with one f32 attribute, which is all the chain needs to be exercised.
@@ -118,7 +126,7 @@ TEST("sv::resolve_material - each frequency overrides its parent")
 
     // A per_instance mesh attribute beats the material.
     auto instanced = make_mesh();
-    instanced.attributes.push_back(sv::mesh_attribute::create_value("roughness", 0.75f));
+    instanced.attributes.push_back(bind(sv::mesh_attribute::create_value("roughness", 0.75f)));
     {
         auto const r = sv::resolve_material(type, rough, instanced);
         CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_instance);
@@ -128,7 +136,8 @@ TEST("sv::resolve_material - each frequency overrides its parent")
     // A geometric mesh attribute beats the per_instance one, and carries no constant — it is an indexed load.
     auto per_corner = instanced;
     auto const corners = cc::array<f32>{0.1f, 0.2f, 0.3f};
-    per_corner.attributes.push_back(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_corner, corners));
+    per_corner.attributes.push_back(
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_corner, corners)));
     {
         auto const r = sv::resolve_material(type, rough, per_corner);
         CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_attribute);
@@ -153,7 +162,7 @@ TEST("sv::resolve_material - each frequency overrides its parent")
     mesh_textured.textures.push_back({.name = "roughness", .source = make_sample(sv::texture_id(9))});
     {
         auto const r = sv::resolve_material(type, mat_textured, mesh_textured);
-        CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_texture);
+        CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_texture_binding);
         CHECK(r.attributes[0].sample->texture == sv::texture_id(9));
     }
 }
@@ -163,7 +172,7 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     // The case the feature exists for: the mesh has a roughness texture we know to be bad, and a final binding refuses it.
     auto mesh = make_mesh();
     mesh.attributes.push_back(make_uvs("uv"));
-    mesh.attributes.push_back(sv::mesh_attribute::create_value("roughness", 0.75f));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create_value("roughness", 0.75f)));
     mesh.textures.push_back({.name = "roughness", .source = make_sample(sv::texture_id(9))});
 
     auto const type = make_type();
@@ -180,7 +189,7 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     auto loose = cc::vector<sv::material_attribute_binding>();
     loose.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
     auto const open = sv::material::create("open", sv::material_type_id(0), loose);
-    CHECK(sv::resolve_material(type, open, mesh).attributes[0].frequency == sv::material_frequency::mesh_texture);
+    CHECK(sv::resolve_material(type, open, mesh).attributes[0].frequency == sv::material_frequency::mesh_texture_binding);
 }
 
 TEST("sv::resolve_material - a final texture binding blocks even when its own sample is unusable")
@@ -214,7 +223,7 @@ TEST("sv::resolve_material - a final texture binding blocks even when its own sa
 TEST("sv::resolve_material - a final declaration cannot be overridden at all")
 {
     auto mesh = make_mesh();
-    mesh.attributes.push_back(sv::mesh_attribute::create_value("roughness", 0.75f));
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create_value("roughness", 0.75f)));
 
     auto const type = make_type(true);
     auto overrides = cc::vector<sv::material_attribute_binding>();
@@ -235,7 +244,7 @@ TEST("sv::resolve_material - a candidate that cannot be used falls back rather t
     auto wrong_format = make_mesh();
     auto const colors = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec3f(0, 0, 1)};
     wrong_format.attributes.push_back(
-        sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, colors));
+        bind(sv::mesh_attribute::create("roughness", sv::attribute_frequency::per_vertex, colors)));
     CHECK(sv::resolve_material(type, m, wrong_format).attributes[0].frequency == sv::material_frequency::material_type);
 
     // A texture whose uv attribute the mesh does not carry cannot be sampled, so it loses its turn.
@@ -245,7 +254,7 @@ TEST("sv::resolve_material - a candidate that cannot be used falls back rather t
 
     // Uvs at the wrong frequency are no uvs: one coordinate for the whole mesh samples a single texel.
     auto instance_uvs = make_mesh();
-    instance_uvs.attributes.push_back(sv::mesh_attribute::create_value("uv", tg::vec2f(0.5f, 0.5f)));
+    instance_uvs.attributes.push_back(bind(sv::mesh_attribute::create_value("uv", tg::vec2f(0.5f, 0.5f))));
     instance_uvs.textures.push_back({.name = "roughness", .source = make_sample(sv::texture_id(9))});
     CHECK(sv::resolve_material(type, m, instance_uvs).attributes[0].frequency == sv::material_frequency::material_type);
 }
@@ -283,6 +292,93 @@ TEST("sv::resolve_material - the two keys separate the shader from its parameter
         = sv::resolve_material(type, sv::material::create("gold", sv::material_type_id(0), gold_b), other_texture);
     CHECK(sampled_other.permutation_key == sampled.permutation_key);
     CHECK(sampled_other.parameter_key != sampled.parameter_key);
+}
+
+TEST("sv::resolve_material - a channel swizzle is shape, but only as far as it is read")
+{
+    auto const type = make_type(); // one f32 attribute, so exactly one selector is ever read
+    auto const bare = sv::material::create("bare", sv::material_type_id(0), {});
+
+    auto const sampled_with = [&](sv::channel_swizzle z)
+    {
+        auto mesh = make_mesh();
+        mesh.attributes.push_back(make_uvs("uv"));
+        auto source = make_sample(sv::texture_id(9));
+        source.swizzle = z;
+        mesh.textures.push_back({.name = "roughness", .source = cc::move(source)});
+        return sv::resolve_material(type, bare, mesh);
+    };
+
+    auto const from_g = sampled_with(sv::channel_swizzle::of_channel(sv::texture_channel::g));
+    auto const from_b = sampled_with(sv::channel_swizzle::of_channel(sv::texture_channel::b));
+
+    // Which channel a component reads is generated code rather than a value, so it forks the permutation...
+    CHECK(from_g.permutation_key != from_b.permutation_key);
+    // ...and leaves the parameters alone, which is what lets one packed texture bind twice over a single upload.
+    CHECK(from_g.parameter_key == from_b.parameter_key);
+
+    // A selector past the declaration's component count is never read, so it cannot fork anything.
+    // That is the canonicalization: an identity swizzle hashes identically however its unread tail was spelled.
+    auto tail = sv::channel_swizzle();
+    tail.components[2] = sv::texture_channel::zero;
+    tail.components[3] = sv::texture_channel::one;
+    CHECK(sampled_with(tail).permutation_key == sampled_with(sv::channel_swizzle()).permutation_key);
+}
+
+TEST("sv::resolve_material - a sample transform is a VALUE, unlike the swizzle beside it")
+{
+    auto const type = make_type(); // one f32 attribute
+    auto const bare = sv::material::create("bare", sv::material_type_id(0), {});
+
+    auto const sampled_with = [&](sv::sample_transform transform)
+    {
+        auto mesh = make_mesh();
+        mesh.attributes.push_back(make_uvs("uv"));
+        auto source = make_sample(sv::texture_id(9));
+        source.transform = transform;
+        mesh.textures.push_back({.name = "roughness", .source = cc::move(source)});
+        return sv::resolve_material(type, bare, mesh);
+    };
+
+    auto const identity = sampled_with({});
+    auto const half = sampled_with(sv::sample_transform::of_strength(0.5f));
+    auto const quarter = sampled_with(sv::sample_transform::of_strength(0.25f));
+
+    // Having a transform at all changes the generated code, so it forks the permutation once.
+    CHECK(identity.permutation_key != half.permutation_key);
+
+    // ...but two different transforms do NOT, which is the whole point of putting the numbers in the block.
+    // A material that only rescales its normal map re-uses the shader, exactly as gold and copper do.
+    CHECK(half.permutation_key == quarter.permutation_key);
+    CHECK(half.parameter_key != quarter.parameter_key);
+
+    // A component the declaration never reads cannot make a transform non-identity either.
+    auto tail = sv::sample_transform();
+    tail.scale[3] = 7.0f;
+    tail.bias[2] = -3.0f;
+    CHECK(sampled_with(tail).permutation_key == identity.permutation_key);
+    CHECK(sv::sample_transform::of_signed_normal().is_identity(1) == false);
+    CHECK(sv::sample_transform().is_identity(4));
+}
+
+TEST("sv - openpbr declares the two attributes a glTF import cannot lose")
+{
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const& openpbr = lib.get_type(lib.acquire_type(sv::builtin_material::openpbr).value());
+
+    // The threshold glTF's MASK alpha mode needs, defaulting to disabled — so OPAQUE and BLEND bind nothing and get
+    // the continuous opacity they want.
+    auto const* const cutoff = openpbr.find("alpha_cutoff");
+    REQUIRE(cutoff != nullptr);
+    CHECK(cutoff->format == sv::attribute_format::of_scalar(sv::scalar_type::f32));
+    CHECK(cc::span<byte const>(cutoff->default_value).try_reinterpret_as<f32 const>().value()[0] == 0.0f);
+
+    // Baked occlusion: declared and imported although the path-tracing fragment ignores it, because an asset that loses
+    // its AO map on load cannot get it back.
+    auto const* const occlusion = openpbr.find("occlusion");
+    REQUIRE(occlusion != nullptr);
+    CHECK(cc::span<byte const>(occlusion->default_value).try_reinterpret_as<f32 const>().value()[0] == 1.0f);
 }
 
 TEST("sv::material_library - content addressing, names and validation")

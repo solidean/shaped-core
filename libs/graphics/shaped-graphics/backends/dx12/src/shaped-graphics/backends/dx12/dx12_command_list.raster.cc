@@ -15,7 +15,8 @@
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
-#include <shaped-graphics/barrier/access_inference.hh> // shader_access_of / shader_layout_of
+#include <shaped-graphics/backends/dx12/dx12_texture_access.hh> // subresource_extent_of
+#include <shaped-graphics/barrier/access_inference.hh>          // shader_access_of / shader_layout_of
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -37,6 +38,31 @@ namespace
 {
     CC_ASSERT(std::dynamic_pointer_cast<dx12_buffer const>(buf) != nullptr, "buffer is not a dx12 buffer");
     return std::static_pointer_cast<dx12_buffer const>(buf);
+}
+
+/// Discards exactly the subresources a target's view names.
+///
+/// A null discard region means EVERY subresource of the resource, and a rendering scope transitions only the ones
+/// its view covers — so a view of one mip level discards the levels beside it while they are still in whatever
+/// layout their last use left them in, which the runtime rejects rather than ignores.
+/// Only the mip axis is contiguous in D3D12's subresource numbering, so an arbitrary range takes one region per
+/// (aspect plane, array slice).
+void discard_target_subresources(ID3D12GraphicsCommandList* list,
+                                 dx12_texture_handle const& texture,
+                                 sg::subresource_range const& range)
+{
+    auto const extent = subresource_extent_of(texture->description());
+    for (auto aspect = range.aspect_range.start; aspect < range.aspect_range.end; ++aspect)
+        for (auto layer = range.array_range.start; layer < range.array_range.end; ++layer)
+        {
+            auto const first
+                = range.mip_range.start + layer * extent.mip_count + aspect * extent.mip_count * extent.array_count;
+            D3D12_DISCARD_REGION const region = {.NumRects = 0,
+                                                 .pRects = nullptr,
+                                                 .FirstSubresource = UINT(first),
+                                                 .NumSubresources = UINT(range.mip_range.end - range.mip_range.start)};
+            list->DiscardResource(texture->_resource.Get(), &region);
+        }
 }
 } // namespace
 
@@ -88,7 +114,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
         if (ct.op == sg::target_op::clear)
             _list->ClearRenderTargetView(rtv_handles[i], ct.clear_color.data, 0, nullptr);
         else if (ct.op == sg::target_op::discard)
-            _list->DiscardResource(as_dx12_texture(ct.view.texture())->_resource.Get(), nullptr);
+            discard_target_subresources(_list.Get(), as_dx12_texture(ct.view.texture()), ct.view.range());
     }
     if (info.depth_stencil_target.has_value())
     {
@@ -102,7 +128,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
                                          0, nullptr);
         }
         else if (dt.op == sg::target_op::discard)
-            _list->DiscardResource(as_dx12_texture(dt.view.texture())->_resource.Get(), nullptr);
+            discard_target_subresources(_list.Get(), as_dx12_texture(dt.view.texture()), dt.view.range());
     }
 
     // 4) Bind the targets to the output-merger.

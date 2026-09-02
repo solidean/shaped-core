@@ -147,8 +147,13 @@ m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
-m.acquire_scene_item(sv::mesh)         // -> scene_item; geometry + BLAS, the material resolved, its permutation compiled, its block resolved
+m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
+                                       //   geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
+                                       //   `bounds` comes from the mesh when it declared one (every glTF does), else from a scan of the positions
+                                       //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
+m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
+m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
@@ -199,6 +204,7 @@ lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> ma
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
+                                 //   openpbr also declares `alpha_cutoff` (0 = off, glTF's MASK) and `occlusion` (imported, ignored here)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -209,10 +215,11 @@ sv::resolve_material(type, material, mesh)           // -> resolved_material; th
 sv::resolve_material(lib, material_id, mesh)         // -> the same, resolving the id through the library
 sv::resolved_material            // { material_type const*; material const*; vector<resolved_attribute>; hash128 permutation_key, parameter_key; }
 sv::resolved_attribute           // { string_view name; attribute_format format; material_frequency frequency;
-                                 //   span<byte const> constant; mesh_attribute const* attribute;
-                                 //   texture_sample_source const* sample; mesh_attribute const* uv; }
+                                 //   span<byte const> constant; mesh_attribute_binding const* attribute;
+                                 //   span<byte const> fallback_constant;  // what a sample beat — seeds its placeholder
+                                 //   texture_sample_source const* sample; mesh_attribute_binding const* uv; }
                                  //   exactly one payload is live, `frequency` says which; `uv` rides along with `sample` and is never null when it isn't
-sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture
+sv::material_frequency           // material_type < material < mesh_instance < mesh_attribute < material_texture < mesh_texture_binding
 ```
 
 **The enum order IS the precedence** — a value varying more finely beats one varying more coarsely, and `resolve_material` compares nothing else.
@@ -222,7 +229,8 @@ A candidate that cannot be used is skipped rather than fatal: a mesh attribute a
 So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
 
 **The two keys are the point.**
-`permutation_key` covers only the SHAPE of the resolution (which rank won, the geometric frequency, the uv attribute and sampler) plus the type's hash, so gold and copper share one generated shader.
+`permutation_key` covers only the SHAPE of the resolution, plus the type's hash — so gold and copper share one generated shader.
+That shape is which rank won, the geometric frequency, the uv attribute, the sampler, and the read part of the channel swizzle.
 `parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's own hash), and keys the per-instance slot they are written into.
 Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
 Neither is what a shader cache is keyed on: `material_shader_key` folds `permutation_key` together with the options it is generated under, and a `scene_item::shader_key` is that.
@@ -235,9 +243,37 @@ Gotchas:
 - **`material::create` validates nothing** against the type, because it cannot see one.
   `material_library::acquire` is where a binding naming an undeclared attribute asserts.
 - **A `material_type::shader` is a FRAGMENT, not a shader.** It reads each signature attribute as an already-initialized local and assigns `surface`; the generator writes everything around it.
+- **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
+  `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
+  The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
+- **A record's state advances where the settle pass runs, never where the transfer finishes.**
+  So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a built BLAS.
+  A viewer calls it once per frame; anyone else calls `wait_for_pending_uploads`, and a test that traces what it just built must.
+- **Priority is the transfer's, not a drain order**: `set_priority` at acquire — attributes (20) over geometry (10), so an attribute is up before the mesh indexing it draws.
+  Dropping a transfer cancels it, which is what makes evicting a still-streaming mesh free.
+- **A pending TEXTURE is substituted at the slot**, by a 1x1 seeded from `fallback_constant` — the factor the sample beat.
+  The seed is pushed back through the sample's transform and swizzle, so a normal map's placeholder comes out (0.5, 0.5, 1) and decodes to the default normal.
+  At the slot rather than by letting the sample lose to a coarser rank.
+  Losing would flip the PERMUTATION when the texture lands, recompiling every affected mesh and restarting its accumulation mid-load.
+- **A pending mesh is traced as the shared placeholder cube**, sized by the `bounds` its payload declared, shaded through the fallback hit group.
+  Its instance record names the CUBE's vertices, since a hit recomputes the geometric normal from what the record points at.
+  A pending mesh that declared no bounds is skipped instead — there is no honest extent to draw it at.
+- **A permutation that did not compile is substituted, not fatal.**
+  `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
+  `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
+  A `pt_trace_desc` with no `fallback` keeps the old all-or-nothing behavior: one material still compiling makes the whole trace a no-op.
 - **A cutout is a DECLARATION, not a detection.** `material_type::opacity_attribute` names which attribute the fragment writes `geometry_opacity` from.
   A permutation can cut out only where something other than the signature's own default supplied that attribute.
   That is what becomes the instance's `opaque_override`, so a type that leaves it empty keeps the hardware's opaque path on every ray.
+- **A sample transform splits the OTHER way from the swizzle.**
+  Only *whether* there is one reaches `permutation_key`, since that decides whether the shader carries a multiply-add; the numbers live in the parameter block.
+  So two materials differing only in a normal scale share one permutation, exactly as gold and copper do — and an identity transform costs neither a slot nor an instruction.
+- **A channel swizzle is generated code, not a value**, so it lives in `permutation_key` and never in `parameter_key`.
+  One metallic-roughness map therefore binds twice (`base_metalness` from `.b`, `specular_roughness` from `.g`) over a SINGLE upload — the content hash is the same bytes either way.
+  Only the selectors the declaration's `component_count()` reads enter the key, which is what makes identity swizzles hash identically.
+  A `zero` / `one` selector cannot be spelled as a letter swizzle, so the generator widens it through the declaration's own type (`float3(texel.b, texel.g, 1.0)`).
+- **Color space is part of `texture_data`'s `sg::pixel_format`**, and therefore part of its hash — so a texture bound as both sRGB and linear uploads twice.
+  Rare, correct, and better than a per-sample decode flag that makes one resident texture mean two things.
 - **`surface` is OpenPBR's parameter set** (`sv::surface`, `shaders/openpbr.hlsli`), not a metallic-roughness struct.
   Every type writes that one vocabulary, which is what lets the integrator evaluate a single layered BSDF whatever the material was authored as.
 - **The generator emits `#define SV_ATTR_SUPPLIED_<name> 0/1` per attribute**, one constant per permutation.
@@ -296,12 +332,30 @@ Gotchas:
 
 ## Mesh authoring — geometry + what a material reads
 
-One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh` and `mesh_texture.hh`.
+A mesh exists in two forms, and both are first-class.
+`sv::mesh` is what a caller holds — pinned payloads plus whatever resources they have been given, and `is_ready` says whether those arrived.
+`sv::resident_mesh` is that mesh once it is nothing but ids, which is what the renderer consumes.
+`gpu_resource_manager::create_mesh` is the one-way bridge, and `scene_ref::add_mesh` takes either.
+See [docs/asset-loading.md](docs/asset-loading.md) for why the split is there.
+
+One header per part — `mesh.hh` pulls in `triangle_geometry.hh`, `mesh_attribute.hh`, `mesh_flags.hh`, `mesh_texture.hh` and `resident_mesh.hh`.
 
 ```cpp
-sv::mesh                         // { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
-                                 //   material_id material; mesh_flags flags; vector<mesh_texture> textures; }
-m.is_visible()                   // -> bool (flags.has(mesh_flag::visible)); the rest of a mesh is plain public data
+sv::mesh                         // what a caller builds and holds — pinned payloads, plus what they have been turned into
+                                 //   { string name; triangle_geometry geometry; vector<mesh_attribute> attributes; affine_transform3f transform;
+                                 //     material_id material; mesh_flags flags; vector<mesh_texture> textures; optional<aabb3f> bounds;
+                                 //     mutable impl::mesh_gpu_slot cache; }
+                                 //   `bounds` empty means "nobody said"; a glTF import fills it from the accessor's own min/max, touching no payload byte
+m.is_ready()                     // -> bool; did its resources reach the GPU, AS OF the last time it was placed. false for one never placed
+m.cache                          // { void const* manager; resident_mesh resources; bool ready; } — manager is identity only, never dereferenced
+sv::resident_mesh                // the same mesh once it is nothing but ids — what the renderer consumes, and rarely named by a caller
+                                 //   { string name; mesh_id geometry; vector<mesh_attribute_binding> attributes;
+                                 //     affine_transform3f transform; material_id material; mesh_flags flags; vector<mesh_texture_binding> textures;
+                                 //     optional<tg::aabb3f> bounds; isize triangle_count, vertex_count; }
+sv::mesh_attribute_binding       // { string name; attribute_format format; attribute_frequency frequency; attribute_id attribute;
+                                 //   pinned_data<byte const> value; hash128 hash; } — `attribute` is invalid at per_instance, where `value` carries the element
+sv::mesh_attribute_binding::of(a, id)  // -> the binding for an already-uploaded mesh_attribute; id must be invalid exactly at per_instance
+m.is_visible()                   // -> bool (flags.has(mesh_flag::visible)); on both forms, and the rest of a mesh is plain public data
 sv::triangle_geometry            // { pinned_data<pos3f const> positions; pinned_data<u32 const> indices; hash128 hash; } — raw or indexed, one type
 sv::triangle_geometry::create_from_triangles(triangles)            // -> from a range of tg::triangle3f; the pin is reinterpreted onto the positions, never copied
 sv::triangle_geometry::create_from_indexed_triangles(pos, indices) // -> 3 indices per triangle, each < positions.size()
@@ -321,8 +375,19 @@ sv::attribute_format_of<T>       // the format of an element type — scalars an
 sv::attribute_frequency          // per_instance (exactly 1 element, create asserts) | per_vertex | per_corner (3 per triangle, in triangle order) | per_triangle
                                  //   per_edge is RESERVED and create asserts on it
 sv::mesh_flag / sv::mesh_flags   // visible | casts_shadow | receives_shadow (cc::flags); mesh_flags_default is all three — the EMPTY set draws nothing
-sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; } — everything a sample needs but what it is FOR
-sv::mesh_texture                 // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::texture_sample_source        // { texture_id texture; string uv_attribute; sg::sampler sampler; channel_swizzle swizzle; sample_transform transform; }
+                                 //   everything a sample needs but what it is FOR
+sv::mesh_texture_binding         // { string name; texture_sample_source source; } — a sample offered under the attribute name it fills
+sv::texture_sample               // the CPU counterpart: texture_data instead of an id, everything else the same
+sv::mesh_texture                 // { string name; texture_sample source; } — what an sv::mesh carries, so it needs no device either
+sv::texture_channel              // r | g | b | a | zero | one — where ONE component of a sampled attribute comes from
+sv::channel_swizzle              // { texture_channel components[4]; } — four selectors; only the first component_count() are ever read
+channel_swizzle::of(c0, c1, c2, c3) / ::of_channel(c)  // the tail keeps the identity; of_channel is the scalar case (roughness out of `.g`)
+z.is_identity(component_count)   // -> bool; the unread tail cannot make it false, which is what canonicalizes the permutation key
+sv::sample_transform             // { tg::vec4f scale, bias; } — value = texel * scale + bias, per component, AFTER the swizzle
+sample_transform::of_signed_normal(xy_scale = 1)  // [0,1] read as [-1,1], with glTF's normalTexture.scale folded in
+sample_transform::of_strength(s) // s * texel + (1 - s) — glTF's occlusionTexture.strength
+t.is_identity(component_count)   // -> bool; only the read components count, exactly as with the swizzle
 sv::material_id                  // thin handle naming ONE material definition, minted by material_library::acquire
 ```
 
@@ -331,9 +396,79 @@ Per-mesh values are attributes too, at `per_instance` — one list, so a rendere
 So a mesh may carry data no material uses and miss data another would want — a material falls back rather than failing.
 The mesh offers no by-name lookup, deliberately: a material resolves the names it wants once, into whatever binding table it draws from, rather than scanning strings per draw.
 Copying a mesh shares the pinned payloads (a refcount bump), so passing one around is cheap.
-Nothing renders an `sv::mesh` yet: the renderer still consumes `sv::scene_item` (ids into the managers), and the bridge is `triangle_data::from(triangle_geometry)`.
-`mesh.material` is likewise authored and not yet drawn — `sv::resolve_material` says what it means, but no shader is generated from the answer.
+Nothing renders either form directly: the renderer consumes `sv::scene_item` (ids into the managers), and `acquire_scene_item` is the bridge.
+`sv::resolve_material` runs against the GPU form, since that is the one whose attributes and textures are already named by id.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
+
+## Asset loading — a file into `sv::mesh`
+
+babel reads the formats; sv turns a parsed document into things a view can draw.
+The loader holds **no device and opens no file**, which is what buys loading on a worker, loading before a viewer exists, and testing the importer with nothing attached.
+
+```cpp
+sv::asset_loader(config)         // neither movable nor copyable; the config owns its hooks
+loader.load("car.glb")           // -> result<asset_data>; format from the extension, bytes through the resolver
+loader.load(pinned, fmt, name, base_uri)   // the same from bytes in hand; base_uri is what the document's relative uris join against
+// glTF's normalTexture (with its scale) and occlusionTexture (with its strength) both import as sample transforms
+loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read for a caller who parsed it themselves
+loader.load(babel::obj::data) / loader.load(babel::stl::data)
+loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
+sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
+
+sv::asset                        // a load in flight; move-only, and dropping it drops the load
+a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
+a.wait()                         // -> bool; drives the load on THIS thread, then collects
+a.is_ready() / a.has_error() / a.error()
+a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a frame loop needs no branch
+
+sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
+                                 //   unique_function<bool(string_view)> include_mesh; bool import_materials, import_textures;
+                                 //   unique_function<material_id(string_view)> material_override; bool flatten_hierarchy;
+                                 //   tangent_frame_options frames; }
+sv::tangent_frame_options        // { bool prefer_file = true; frame_generation generate = none; angle_f crease_angle; float weld_epsilon; }
+sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
+
+sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
+                                 //   vector<asset_node> nodes; vector<string> issues; }
+a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
+a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
+a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
+sv::asset_material               // { string name; material_id material; vector<i32> meshes; } — name is the FILE's, meshes are the slot's
+sv::asset_node                   // { string name; i32 parent; affine_transform3f transform; i32 first_mesh, mesh_count; }
+
+// the resolver seam — nothing in the importer opens a file
+sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>(string_view)> — the borrowed, per-call form
+sv::uri_resolver_provider        // the owning form a hook and a config hold
+sv::set_resolve_uri(provider)    // process-wide; {} restores the filesystem default
+sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_from_filesystem
+```
+
+Gotchas:
+
+- **`load_async` runs on whatever scheduler `cc::async` was given.** With none installed nothing progresses until `wait` drives it — the same degradation every other async here takes.
+- **Minting materials cannot leave the calling thread**, since `material_library` is not thread-safe.
+  That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
+- **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
+  What does arrive progressively is the upload, which the managers stream.
+- **Textures ride on the MESH, not the material.** An imported map travels as `mesh_texture` (pixels), because a material binding would need an already-minted `texture_id` and therefore a device.
+  The frequency chain makes that the finer rank anyway, so a mesh texture wins over the material's factor exactly as an authored one does.
+- **`asset_material` owns its meshes, and that is what `override_material` rewrites.**
+  `material_library` is content-addressed, so two of a file's materials bound identically come back as ONE id — overriding by id would move both.
+- **Material names are namespaced by the asset** (`"car.glb/glass"`) in the library, since name lookup there is last-wins.
+  `asset_material::name` keeps the file's own.
+- **`import_materials = false` imports no textures either**: a map with no material to bind into is noise, and the fallback `pbr` material declares different attribute names.
+- **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
+- **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
+- **EVERY glTF mesh crosses, and `scene` / `default_scene` are ignored.**
+  Which arrangement a file called default is a decision about what the caller wanted, and honouring it would drop meshes `find_mesh` is then asked for and cannot answer.
+  A mesh no node places is imported at the origin, with an issue; the node tree is still recorded on `asset_data::nodes`.
+  A hierarchy deeper than 256 stops descending, with an issue.
+- **`.mtl` is not read**, so an OBJ import carries geometry plus material names only — each name mints an unbound `openpbr` material so the slot exists to be overridden.
+- **An STL is one mesh of raw triangles**, with no material and no attributes.
+  Its per-facet normals are dropped on purpose: the hit shader derives the geometric frame from the triangle, so a per-triangle normal could only ever match it.
+- **`generate` beyond `none` is not implemented.**
+  What lands is `prefer_file`: glTF NORMAL + TANGENT become a `tangent_frame` + `tangent_handedness`.
+  A normal with no tangent gets an arbitrary perpendicular one, which is fine for everything but anisotropy and normal mapping.
 
 ## Camera control — orbit and first-person
 
@@ -435,10 +570,15 @@ m.has_table(table) / m.table_capacity(table)
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
 m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
 m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; }
-sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
-m.record_pending_work(cmd) -> i32   // records what THIS epoch's budget allows, oldest first; returns dispatches spent
+m.record_pending_work(cmd) -> i32   // collects whatever transfers landed, then records follow-up work; returns dispatches spent
+m.wait_for_pending_uploads()       // blocks until every transfer lands, then finishes them — for a caller with no frame loop
+m.settling_count()                 // -> isize, payloads still in flight across the managers
+sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
+m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as
+m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
 // config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// payload transfers are NOT budgeted here — they ride ctx.stream, paced by its copy actor and ordered by priority
 ```
 
 **The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).
@@ -613,7 +753,8 @@ layout.style(box_style)
 
 // on a leaf / a scene
 leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b)
-scene.add_mesh(sv::mesh)         -> mesh_ref                   // geometry + per-face materials upload here, keyed by the mesh's own hashes
+scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
+scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
 scene.add_light(area_light)      -> light_ref                  // both hand back a typed handle rather than chaining
 scene.background(bg) / .settings(render_settings)
 mesh_ref.transform(t);  light_ref.light(l)

@@ -9,6 +9,7 @@
 #include <babel-serializer/data/sqlite.hh>
 #include <babel-serializer/geometry/gltf.hh>
 #include <babel-serializer/geometry/obj.hh>
+#include <babel-serializer/geometry/stl.hh>
 #include <babel-serializer/image/hdr.hh>
 #include <babel-serializer/image/image.hh>
 #include <babel-serializer/image/jpg.hh>

@@ -9,7 +9,7 @@ namespace sv
 /// Opens an interactive viewer named `id` and returns its frame loop, which owns it.
 ///
 ///     for (auto f : sv::interactive("my viewer"))
-///         f.scene().add_mesh(mesh, materials);
+///         f.add_scene().add_mesh(mesh);
 ///
 /// The viewer lives as long as the returned range, so a caller needs no variable for it and nothing to tear down.
 /// `id` names the viewer's persistent state, so the same string reopens the same cameras and accumulated images.

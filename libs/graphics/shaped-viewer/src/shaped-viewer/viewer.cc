@@ -819,6 +819,13 @@ void viewer::finish_frame(frame& f)
         // The view store already advanced on the same epoch, back in next_frame.
         im.resources.advance_to(im.ctx->current_epoch());
 
+        // Follow-up GPU work — mip generation today, uploads once acquires defer — drained at this epoch's budget and
+        // recorded BEFORE the traces, so what lands is visible to the frame that paid for it.
+        //
+        // Nothing called this until now, which is why a viewer's textures never grew their mip chains: the work was
+        // queued every frame and drained by nobody.
+        (void)im.resources.record_pending_work(*im.current_cmd);
+
         // With no views authored this places nothing and the clear alone lands, so the window is never left with
         // stale contents.
         //
@@ -842,8 +849,11 @@ void viewer::finish_frame(frame& f)
             im.ctx->advance_epoch(im.swapchain->buffer_count());
         }
     }
-    catch (sg::device_lost_exception const&)
+    catch (sg::device_lost_exception const& e)
     {
+        // Logged rather than swallowed: this stops the loop, so every later frame is a no-op and a capture writes
+        // nothing — symptoms that read as "the example did nothing" unless the loss itself says so.
+        CC_LOG_ERROR("the device was lost, so this viewer stops rendering: {}", e.reason());
         im.stopped = true;
     }
 

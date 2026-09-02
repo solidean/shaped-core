@@ -2,7 +2,7 @@
 
 The professional visualization library: a modern, RTX-enabled renderer with a dev-friendly API, built on [shaped-rendering](../shaped-rendering/readme.md).
 Namespace `sv`.
-Depends on **shaped-rendering** (and transitively shaped-graphics + typed-geometry + clean-core).
+Depends on **shaped-rendering** (and transitively shaped-graphics + typed-geometry + clean-core), plus **babel-serializer** for asset loading.
 Part of the [graphics family](../../../docs/graphics.md) (`sv → sr → sg → tg/cc`).
 
 sv will grow into Shaped Code's visualization renderer — the top of the graphics stack, serving SOLIDEAN, internal tools, and customer visualization needs.

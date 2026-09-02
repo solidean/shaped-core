@@ -23,12 +23,15 @@
 /// otherwise record forty mip chains before it draws anything.
 ///
 /// The unit is dispatches rather than milliseconds because it is the one the manager can count without
-/// measuring: a level is one dispatch, and `sr::box_filter_mipmap_routine::level_count` says how many a
+/// measuring: a level is one dispatch or one raster pass, and `sr::box_filter_mipmap_routine::level_count` says how many a
 /// texture needs before committing to any of them.
 struct sv::work_budget
 {
     /// Dispatches per epoch; <= 0 disables follow-up work entirely, leaving every texture at its base level.
     i32 max_dispatches_per_epoch = 16;
+
+    // Payload transfers are NOT budgeted here: they ride `ctx.stream`, whose copy actor paces them by its own windows
+    // and orders them by the priority each acquire sets.
 };
 
 /// What the manager does with a resource once it has landed.
@@ -37,7 +40,7 @@ struct sv::work_budget
 /// for the whole scene, and one who wants them wants them for everything the budget can reach.
 struct sv::texture_policy
 {
-    /// Fill the levels an acquire did not supply, through `sr::box_filter_mipmap_routine`.
+    /// Fill the levels an acquire did not supply, through whichever mipmap routine the format admits.
     bool generate_mips = true;
 };
 
@@ -205,6 +208,20 @@ public:
     /// How many resources are still waiting for their follow-up work.
     [[nodiscard]] isize pending_work_count() const { return _pending.size(); }
 
+    /// Blocks until every queued transfer has landed, then finishes them all.
+    ///
+    /// For a caller that needs residency before it can proceed and has no frame loop to wait for — a test tracing a
+    /// scene it just built, or a tool doing one pass over an asset.
+    /// A viewer never calls this: letting the transfers run at their own pace is the whole point, and a placeholder
+    /// covers the gap.
+    void wait_for_pending_uploads();
+
+    /// How many payloads are still in flight, across every manager.
+    [[nodiscard]] isize settling_count() const
+    {
+        return meshes.settling_count() + attributes.settling_count() + textures.settling_count();
+    }
+
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
     ///
     /// `layout` must be the one `generate_material_shader` produced for `r`, since it is what the generated shader reads
@@ -248,8 +265,22 @@ public:
     /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
-    /// Everything placing `mesh` in a scene costs, as one `scene_item`: its geometry uploaded and BLAS-built, its
-    /// material resolved against it, and the parameter block that resolution fills acquired.
+    /// `data`'s payloads named by id, as the `sv::resident_mesh` a scene item is placed from.
+    ///
+    /// The result is remembered ON `data` — see `sv::impl::mesh_gpu_slot` — so the reference is into the mesh's own
+    /// cache and lives as long as it does, or until it is placed against a different manager.
+    /// A repeat placement is then a pointer compare rather than a hash lookup per payload, and it refreshes
+    /// `mesh::is_ready` on the way through.
+    ///
+    /// Geometry, every geometric attribute and every texture is acquired through the manager it belongs to, keyed by the content
+    /// hash the payload already carries — so calling this every frame with an unchanged `mesh` is lookups rather than
+    /// uploads.
+    /// A `per_instance` attribute is one value for the whole mesh, so it stays bytes and acquires nothing.
+    /// The name, transform, material, flags and the geometry's summary come across unchanged.
+    [[nodiscard]] sv::resident_mesh const& create_mesh(sv::mesh const& data);
+
+    /// Everything placing `mesh` in a scene costs, as one `scene_item`: its material resolved against it, and the parameter
+    /// block that resolution fills acquired.
     ///
     /// The three fields have to come from ONE resolution — the block is filled at the layout the permutation's shader
     /// reads at — which is why this is a single call rather than three the caller sequences.
@@ -258,6 +289,10 @@ public:
     ///
     /// The material library is the process-wide one `sv::acquire_material_library` answers with, and must carry the
     /// material the mesh names.
+    [[nodiscard]] scene_item acquire_scene_item(sv::resident_mesh const& mesh);
+
+    /// The same, from CPU bytes: `create_mesh` followed by the resolution above.
+    /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
 
     /// The layout of the staging group every bindless table is bound through.
@@ -291,6 +326,29 @@ public:
 private:
     friend class bound_resources;
 
+    /// Whether every id `m` names still resolves to a record here — which is a different question from whether those
+    /// records have arrived, and the one a cached placement has to ask first.
+    ///
+    /// An eviction retires an id for good: a later acquire of the same content mints a new one.
+    /// So a `mesh::cache` naming an evicted resource must be rebuilt rather than believed, and this is what says so.
+    [[nodiscard]] bool _is_live(sv::resident_mesh const& m);
+
+    /// Whether every resource `m` names has reached the GPU — what `mesh::is_ready` is a snapshot of.
+    /// A texture counts as arrived at `base_resident`: it is sampleable, and the rest of its chain is quality.
+    [[nodiscard]] bool _is_resident(sv::resident_mesh const& m);
+
+    /// Advances every texture whose pixels landed, and queues the mip work each newly-sampleable one asks for.
+    void _collect_textures();
+
+    /// Queues mip generation for whichever of `landed` supplied fewer levels than its shape allows.
+    void _queue_mip_work(cc::span<texture_id const> landed);
+
+    /// The 1x1 texture a slot samples while its own is still arriving, created on first use per (texel, format).
+    ///
+    /// Per format as well as per color because an sRGB view decodes what it reads: the same factor has to be STORED
+    /// differently to come back the same, and a placeholder that ignored that would be visibly off.
+    [[nodiscard]] sg::texture_2d const& _placeholder_texture(tg::vec4f texel, sg::pixel_format format);
+
     /// One entry per declared table, in table order; a table budgeted at 0 has none.
     /// `_slot_of` maps a table onto its entry, so a caller never indexes this by table.
     struct table_entry
@@ -305,7 +363,8 @@ private:
         cc::vector<u64> recorded_in;
     };
 
-    gpu_resource_manager(mesh_manager meshes,
+    gpu_resource_manager(sg::context& ctx,
+                         mesh_manager meshes,
                          material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
@@ -358,6 +417,14 @@ private:
 
     texture_policy _texture_policy;
     work_budget _work_budget;
+
+    /// The context every manager here was built over — needed for the placeholders, which are created on demand from
+    /// a path that has no command list of its own to reach one through.
+    /// A pointer rather than a reference so the type stays movable, which `create` returns by value.
+    sg::context* _ctx = nullptr;
+
+    /// keyed on the packed texel and the format it is stored in; never evicted, since one 1x1 costs nothing to keep
+    cc::map<u64, sg::texture_2d> _placeholder_textures;
 
     sg::epoch _epoch = sg::epoch(0);
 

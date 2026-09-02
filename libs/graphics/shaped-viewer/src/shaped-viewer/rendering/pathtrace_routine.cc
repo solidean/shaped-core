@@ -27,6 +27,26 @@ namespace
     return false;
 }
 
+/// Whether `p` has everything a hit group needs, driving its compiles to completion to find out.
+///
+/// The cache hands back cold nodes and no async pool is guaranteed here, so they are driven inline exactly as
+/// `init_declare` drives the shared shaders — without this a build with no pool finds every permutation cold and
+/// traces nothing, forever.
+[[nodiscard]] bool is_usable(material_permutation const* p)
+{
+    (void)cc::try_async_blocking_get(p->shader);
+    if (p->shader->try_value() == nullptr)
+        return false;
+
+    if (!p->can_cut_out)
+        return true;
+
+    // The cutout test, twice, because the two rays that reach it carry different payloads.
+    (void)cc::try_async_blocking_get(p->any_hit);
+    (void)cc::try_async_blocking_get(p->shadow_any_hit);
+    return p->any_hit->try_value() != nullptr && p->shadow_any_hit->try_value() != nullptr;
+}
+
 /// The static samplers `hit_groups` declare, by the generated name each register carries.
 ///
 /// The generated text names `sv_sampler_i` at `s{i}` and nothing else records which sampler STATE that is, which is why
@@ -82,61 +102,63 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 {
     CC_ASSERT(d.bindless != nullptr, "a path trace binds the manager's bindless tables");
 
+    // Driven here, and whether or not a substitution ends up needing it.
+    //
+    // It is a cold node like every other permutation, and one nobody drives is async work still outstanding when the
+    // frame ends — which is a leak the caller cannot see, since it never asked for this compile in the first place.
+    // Before the early-out below for the same reason: a trace that no-ops on its shared shaders must not leave it cold.
+    auto const* const fallback = d.fallback != nullptr && is_usable(d.fallback) ? d.fallback : nullptr;
+
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
     auto const* const compiled_sms = _shadow_miss_shader->try_value();
     if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_sms == nullptr)
         return nullptr; // a broken edit, or a context accepting no format we can produce — execute no-ops
 
+    // Every generated closest-hit is driven to completion first, and whatever did not land is replaced by the neutral
+    // fallback — so the SUBSTITUTED set is what the pipeline is keyed on and built from.
+    //
+    // Keying on the substitution rather than on what the caller asked for is what makes this self-correcting: the frame
+    // a real permutation finally compiles, the key changes and a new variant is built with it.
+    auto groups = cc::vector<material_permutation const*>();
+    groups.reserve(d.hit_groups.size());
+    for (auto const* p : d.hit_groups)
+    {
+        CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
+        if (!is_usable(p))
+            p = fallback; // still in flight, or a material that does not build
+
+        if (p == nullptr)
+            return nullptr; // nothing compiled and nothing to stand in for it — trace no-ops, as it always did
+        groups.push_back(p);
+    }
+
     // The hit groups in order plus the schema the second group is bound through: the two things a pipeline is built
     // from that a caller can vary between traces.
     auto key_bytes = cc::vector<cc::hash128>();
-    key_bytes.reserve(d.hit_groups.size() + 1);
+    key_bytes.reserve(groups.size() + 1);
     key_bytes.push_back(d.bindless->layout()->structural_hash());
-    for (auto const* const p : d.hit_groups)
-    {
-        CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
+    for (auto const* const p : groups)
         key_bytes.push_back(p->key);
-    }
     auto const key = cc::hash128::create(cc::span<cc::hash128 const>(key_bytes).as_bytes(), 0);
 
     if (auto const* const resident = _variants.get_ptr(key); resident != nullptr)
         return resident->pipeline == nullptr ? nullptr : resident;
 
-    // Every generated closest-hit must have landed before a pipeline over the set can be built at all.
-    //
-    // The cache hands back cold nodes and no async pool is guaranteed here, so they are driven inline exactly as
-    // init_declare drives the shared shaders — without this a build with no pool finds every permutation cold and
-    // traces nothing, forever.
+    // `is_usable` already drove every one of these to completion, so the compiled shaders are simply read out here.
     auto hits = cc::vector<sg::compiled_shader const*>();
     auto any_hits = cc::vector<sg::compiled_shader const*>();
     auto shadow_any_hits = cc::vector<sg::compiled_shader const*>();
-    hits.reserve(d.hit_groups.size());
-    any_hits.reserve(d.hit_groups.size());
-    shadow_any_hits.reserve(d.hit_groups.size());
-    for (auto const* const p : d.hit_groups)
+    hits.reserve(groups.size());
+    any_hits.reserve(groups.size());
+    shadow_any_hits.reserve(groups.size());
+    for (auto const* const p : groups)
     {
-        (void)cc::try_async_blocking_get(p->shader);
-        auto const* const compiled = p->shader->try_value();
-        if (compiled == nullptr)
-            return nullptr; // still in flight, or a material that does not compile — retried on a later frame
-        hits.push_back(compiled);
+        hits.push_back(p->shader->try_value());
 
         // The cutout test, where the material has one — twice, because the two rays that reach it carry different payloads.
-        // Driven inline for the same reason the closest-hit is.
-        auto const* compiled_ah = static_cast<sg::compiled_shader const*>(nullptr);
-        auto const* compiled_sah = static_cast<sg::compiled_shader const*>(nullptr);
-        if (p->can_cut_out)
-        {
-            (void)cc::try_async_blocking_get(p->any_hit);
-            (void)cc::try_async_blocking_get(p->shadow_any_hit);
-            compiled_ah = p->any_hit->try_value();
-            compiled_sah = p->shadow_any_hit->try_value();
-            if (compiled_ah == nullptr || compiled_sah == nullptr)
-                return nullptr;
-        }
-        any_hits.push_back(compiled_ah);
-        shadow_any_hits.push_back(compiled_sah);
+        any_hits.push_back(p->can_cut_out ? p->any_hit->try_value() : nullptr);
+        shadow_any_hits.push_back(p->can_cut_out ? p->shadow_any_hit->try_value() : nullptr);
     }
 
     // The global root signature must cover every binding *any* stage uses, minus the manager's tables — those are the
@@ -160,7 +182,7 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         if (!is_bindless_table(b))
             own.push_back(cc::move(b));
 
-    auto const samplers = collect_samplers(d.hit_groups);
+    auto const samplers = collect_samplers(groups);
 
     auto variant = pipeline_variant{};
     variant.group_layout = ctx.cached.acquire_binding_group_layout(own, samplers);

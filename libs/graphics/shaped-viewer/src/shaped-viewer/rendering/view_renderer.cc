@@ -14,6 +14,7 @@
 #include <shaped-viewer/view/view_data.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
+#include <typed-geometry/transform/compose.hh>
 
 namespace sv
 {
@@ -66,6 +67,21 @@ struct resolved_view
     return u32(out.hit_groups.size() - 1);
 }
 
+/// What a pending mesh is traced as: the shared unit-cube BLAS, mapped onto the mesh's own object-space box.
+///
+/// The box is folded into the TLAS transform rather than into a BLAS of its own, which is what makes every placeholder
+/// in a scene one acceleration structure and a 3x4 matrix each.
+/// The cube spans `[0,1]^3`, so the mapping is a scale by the box's extent followed by a translation to its corner —
+/// and then the item's own placement on top of that, since the box is in object space.
+[[nodiscard]] tg::affine_transform3f placeholder_transform(tg::aabb3f const& box, tg::affine_transform3f const& placement)
+{
+    auto const extent = box.max - box.min;
+    auto const onto_box
+        = tg::compose(tg::affine_transform3f::make_translation(tg::vec3f(box.min[0], box.min[1], box.min[2])),
+                      tg::affine_transform3f::make_scaling(extent));
+    return tg::compose(placement, onto_box);
+}
+
 resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources)
 {
     auto out = resolved_view{};
@@ -86,12 +102,26 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // under an opaque material and a cutout one would otherwise need two acceleration structures.
         // Two records per permutation — the primary one and the shadow one — so the offset is the permutation's index
         // doubled, and `pt_occluded` reaches the second by adding 1 at the trace.
-        auto const permutation = hit_group_of(out, item.shader_key, resources);
-        auto inst = sg::tlas_instance{.blas = mesh->blas,
+        // A mesh whose geometry has not landed keeps its place in the scene as a box, so a load reads as an asset
+        // sharpening rather than as objects popping into existence one at a time.
+        // One that declared no bounds is skipped instead: there is no honest extent to draw it at, and an invented one
+        // would put it somewhere it is not.
+        auto const is_pending = mesh->state != residency::complete;
+        if (is_pending && !mesh->bounds.has_value())
+            continue;
+
+        // A placeholder shades through the NEUTRAL hit group rather than the item's own permutation.
+        //
+        // Not a shortcut: the cube's triangles have nothing to do with the mesh's, so per-vertex attributes read
+        // through them would be indexed out of the data they belong to.
+        // The fallback reads no attributes and no parameter block, which is exactly what makes it safe here.
+        auto const& fallback = resources.shaders.acquire_fallback();
+        auto const permutation = hit_group_of(out, is_pending ? fallback.key : item.shader_key, resources);
+        auto inst = sg::tlas_instance{.blas = is_pending ? resources.meshes.placeholder_blas() : mesh->blas,
                                       .instance_id = u32(out.instances.size()),
                                       .hit_group_offset = permutation * 2,
                                       .opaque_override = !out.hit_groups[permutation]->can_cut_out};
-        pack_transform(inst, item.transform);
+        pack_transform(inst, is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform);
         out.instances.push_back(cc::move(inst));
 
         // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
@@ -412,6 +442,9 @@ void view_renderer::trace(sg::command_list& cmd,
                                      .output = output,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
+                                     // One material still compiling, or one that does not compile, degrades to grey
+                                     // shading on its own meshes rather than costing the view its whole image.
+                                     .fallback = &resources.shaders.acquire_fallback(),
                                      .bindless = &bindless});
 
     if (slot->accum_frame < accumulation_frame_cap)
@@ -482,6 +515,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
                                      .output = slot.texture,
                                      .instance_table = instance_table,
                                      .hit_groups = resolved.hit_groups,
+                                     // One material still compiling, or one that does not compile, degrades to grey
+                                     // shading on its own meshes rather than costing the view its whole image.
+                                     .fallback = &resources.shaders.acquire_fallback(),
                                      .bindless = &bindless});
 
     if (slot.accum_frame < accumulation_frame_cap)

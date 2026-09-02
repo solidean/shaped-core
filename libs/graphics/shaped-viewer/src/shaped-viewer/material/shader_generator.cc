@@ -8,13 +8,15 @@
 #include <shaped-viewer/material/material_type.hh>
 #include <shaped-viewer/resources/bindless_tables.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
 
 namespace sv
 {
 namespace
 {
-constexpr i32 slot_alignment = 4;       ///< ByteAddressBuffer loads are 4-byte granular, so every slot starts on 4
-constexpr i32 attribute_desc_size = 12; ///< sv::attribute_desc: buffer, offset, stride
+constexpr i32 slot_alignment = 4;         ///< ByteAddressBuffer loads are 4-byte granular, so every slot starts on 4
+constexpr i32 attribute_desc_size = 12;   ///< sv::attribute_desc: buffer, offset, stride
+constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the bias
 
 [[nodiscard]] i32 align_up(i32 value, i32 alignment)
 {
@@ -39,22 +41,85 @@ constexpr i32 attribute_desc_size = 12; ///< sv::attribute_desc: buffer, offset,
     }
 }
 
-/// The `.rgba` swizzle that narrows a sample to the attribute's component count.
-[[nodiscard]] cc::string_view sample_swizzle(int components)
+/// The `xyzw` prefix that narrows a `float4` to `components` — what a scale or a bias is read through.
+[[nodiscard]] cc::string_view component_swizzle(int components)
 {
     switch (components)
     {
     case 1:
-        return ".r";
+        return "x";
     case 2:
-        return ".rg";
+        return "xy";
     case 3:
-        return ".rgb";
-    case 4:
-        return "";
+        return "xyz";
     default:
-        return "";
+        return "xyzw";
     }
+}
+
+/// The `.rgba` letter one selector names, or empty for a constant one, which no letter swizzle can spell.
+[[nodiscard]] cc::string_view channel_letter(texture_channel c)
+{
+    switch (c)
+    {
+    case texture_channel::r:
+        return "r";
+    case texture_channel::g:
+        return "g";
+    case texture_channel::b:
+        return "b";
+    case texture_channel::a:
+        return "a";
+    case texture_channel::zero:
+    case texture_channel::one:
+        return {};
+    }
+    return {};
+}
+
+/// What one component of the attribute reads out of the texel.
+[[nodiscard]] cc::string component_expression(texture_channel c)
+{
+    if (c == texture_channel::zero)
+        return "0.0";
+    if (c == texture_channel::one)
+        return "1.0";
+    return cc::format("texel.{}", channel_letter(c));
+}
+
+/// The expression filling an attribute of `format` from the `float4` named `texel`.
+///
+/// A swizzle whose every READ selector names a channel stays a letter swizzle — `texel.rgb`, or `texel` itself when all four
+/// are taken straight through — which is what a texture written for its own attribute generates.
+/// A `zero` or `one` selector cannot be spelled that way, so those widen through the declaration's own type instead.
+/// Either form narrows or widens to `component_count()`, so a 4-channel texture serving a scalar attribute reads one channel.
+[[nodiscard]] cc::string texel_expression(channel_swizzle const& z, attribute_format format)
+{
+    auto const components = format.component_count();
+
+    auto letters = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        auto const letter = channel_letter(z.components[i]);
+        if (letter.empty())
+        {
+            letters.clear();
+            break;
+        }
+        letters += letter;
+    }
+
+    if (!letters.empty())
+        return components == 4 && z.is_identity(4) ? cc::string("texel") : cc::format("texel.{}", letters);
+
+    auto args = cc::string();
+    for (auto i = 0; i < components; ++i)
+    {
+        if (i > 0)
+            args += ", ";
+        args += component_expression(z.components[i]);
+    }
+    return cc::format("{}({})", hlsl_type_of(format), args);
 }
 
 /// The expression naming the three element indices a frequency reads, and whether it interpolates at all.
@@ -178,10 +243,16 @@ constexpr i32 attribute_desc_size = 12; ///< sv::attribute_desc: buffer, offset,
             break;
 
         case material_frequency::material_texture:
-        case material_frequency::mesh_texture:
+        case material_frequency::mesh_texture_binding:
             push(cc::string(a.name), material_slot_kind::texture_index, i32(sizeof(u32)), a.format, i32(i));
             push(cc::format("{}.uv", a.name), material_slot_kind::attribute_descriptor, attribute_desc_size,
                  attribute_format::of_vector(scalar_type::f32, 2), i32(i));
+
+            // Only when there is something to apply: an identity transform is the overwhelming majority, and it must
+            // cost neither a slot nor an instruction.
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                push(cc::format("{}.transform", a.name), material_slot_kind::sample_transform, sample_transform_size,
+                     attribute_format::of_vector(scalar_type::f32, 4), i32(i));
             break;
         }
     }
@@ -364,7 +435,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             }
 
             case material_frequency::material_texture:
-            case material_frequency::mesh_texture:
+            case material_frequency::mesh_texture_binding:
             {
                 auto const& tex = slot_for(layout, i32(i), material_slot_kind::texture_index);
                 auto const& uv_slot = slot_for(layout, i32(i), material_slot_kind::attribute_descriptor);
@@ -386,12 +457,28 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                 cc::format_append(src, "            uint tex = params.Load(ctx.param_offset + {});\n", tex.offset);
                 // SampleLevel rather than Sample: there are no derivatives in a ray tracing hit shader, so the mip has to be
                 // named.
+                // The texel is named before it is read, because a swizzle carrying a constant selector reads it more than once.
                 cc::format_append(src,
-                                  "            {} = {}[NonUniformResourceIndex(tex)].SampleLevel(sv_sampler_{}, uv, "
-                                  "0){};\n"
-                                  "        }}\n",
-                                  a.name, name_of(bindless_table::textures_2d),
-                                  index_of_sampler(samplers, a.sample->sampler), sample_swizzle(components));
+                                  "            float4 texel = {}[NonUniformResourceIndex(tex)]"
+                                  ".SampleLevel(sv_sampler_{}, uv, 0);\n",
+                                  name_of(bindless_table::textures_2d), index_of_sampler(samplers, a.sample->sampler));
+
+                auto value = texel_expression(a.sample->swizzle, a.format);
+
+                // The scale and the bias are parameters rather than literals, so a material that only changes its normal
+                // scale re-uses this exact source.
+                if (!a.sample->transform.is_identity(components))
+                {
+                    auto const& tf = slot_for(layout, i32(i), material_slot_kind::sample_transform);
+                    auto const lanes = component_swizzle(components);
+                    cc::format_append(src,
+                                      "            float4 sv_scale = asfloat(params.Load4(ctx.param_offset + {}));\n"
+                                      "            float4 sv_bias = asfloat(params.Load4(ctx.param_offset + {}));\n",
+                                      tf.offset, tf.offset + 16);
+                    value = cc::format("{}({} * sv_scale.{} + sv_bias.{})", hlsl_type_of(a.format), value, lanes, lanes);
+                }
+
+                cc::format_append(src, "            {} = {};\n        }}\n", a.name, value);
                 break;
             }
             }

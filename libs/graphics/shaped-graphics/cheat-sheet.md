@@ -358,6 +358,8 @@ sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
 sg::has_stencil(f)              // bool  — carries a stencil plane
 sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer function on read/write
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
+sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::readwrite_texture; false for sRGB, BC and depth
+                                //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)

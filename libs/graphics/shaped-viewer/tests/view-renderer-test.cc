@@ -33,6 +33,10 @@ TEST("sv - view renderer end to end (headless)")
     auto const cloud = sv_test::make_triangle_cloud(64);
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
     REQUIRE(resources.meshes.contains(item.mesh));
     REQUIRE(resources.contains_instance(item.instance));
 
@@ -94,6 +98,10 @@ TEST("sv - view renderer renders indexed geometry (headless)")
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(
         sv_test::as_indexed_mesh("cornell box", welded.positions, welded.indices, box.materials));
+
+    // An acquire queues the upload and the BLAS build; a test tracing what it just built has no frame loop
+    // to drain that queue, so it drains it itself.
+    resources.wait_for_pending_uploads();
 
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);

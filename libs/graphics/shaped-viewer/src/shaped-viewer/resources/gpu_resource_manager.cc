@@ -6,15 +6,94 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <shaped-viewer/scene/resident_mesh.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::pow
 
 namespace sv
 {
+namespace
+{
+/// One constant read back as up to four floats, for seeding a placeholder.
+/// Anything that is not f32 comes back white: a placeholder is a stand-in, and guessing at an integer encoding would
+/// be a worse answer than a neutral one.
+[[nodiscard]] tg::vec4f constant_as_vec4(cc::span<byte const> bytes, attribute_format format)
+{
+    auto out = tg::vec4f(1, 1, 1, 1);
+    if (format.scalar != scalar_type::f32)
+        return out;
+
+    auto const floats = bytes.try_reinterpret_as<f32 const>();
+    if (!floats.has_value())
+        return out;
+
+    auto const count = cc::min(isize(4), floats.value().size());
+    for (auto i = isize(0); i < count; ++i)
+        out[int(i)] = floats.value()[i];
+    return out;
+}
+
+/// What a texture that will never arrive is drawn as.
+///
+/// Opaque magenta, and not the attribute's own placeholder texel: a load that failed must not look like one that
+/// succeeded with the material's defaults, or the only report of it is a log line nobody reads.
+constexpr tg::vec4f k_failed_texel = tg::vec4f(1, 0, 1, 1);
+
+/// The texel a 1x1 placeholder for `a` must hold for the shader to compute the material's own factor from it.
+///
+/// Both directions are undone here rather than approximated: the swizzle says which CHANNEL each component is read
+/// from, and the transform says what is done to it after — so the texel is the factor pushed back through both.
+/// A normal map's placeholder therefore comes out as (0.5, 0.5, 1), which is what decodes to the default normal.
+[[nodiscard]] tg::vec4f placeholder_texel_for(resolved_attribute const& a)
+{
+    CC_ASSERT(a.sample != nullptr, "a placeholder texel is only meaningful for a sampled attribute");
+
+    auto const desired = constant_as_vec4(a.fallback_constant, a.format);
+    auto const& transform = a.sample->transform;
+    auto const& swizzle = a.sample->swizzle;
+
+    // Opaque white to start: a channel the swizzle never reads is never sampled through this slot.
+    auto texel = tg::vec4f(1, 1, 1, 1);
+    for (auto i = 0; i < a.format.component_count(); ++i)
+    {
+        auto const scale = transform.scale[i];
+        auto const value = scale != 0.0f ? (desired[i] - transform.bias[i]) / scale : 0.0f;
+
+        // zero and one name no channel, so there is nothing to put anywhere for them.
+        if (auto const channel = swizzle.components[i]; channel <= texture_channel::a)
+            texel[int(channel)] = value;
+    }
+    return texel;
+}
+
+/// The object-space box around a geometry's positions, empty when it has none.
+///
+/// A summary the GPU mesh keeps, since once the positions are only on the GPU nothing else can answer a framing question.
+/// Only the fallback: a `mesh` that already carries a box — every glTF one does, since the format states it per
+/// accessor — keeps it rather than paying this scan.
+[[nodiscard]] cc::optional<tg::aabb3f> bounds_of(triangle_geometry const& g)
+{
+    auto const positions = g.positions.span();
+    if (positions.empty())
+        return {};
+
+    auto box = tg::aabb3f(positions[0], positions[0]);
+    for (auto const& p : positions)
+        for (auto i = 0; i < 3; ++i)
+        {
+            box.min[i] = cc::min(box.min[i], p[i]);
+            box.max[i] = cc::max(box.max[i], p[i]);
+        }
+    return box;
+}
+} // namespace
+
 bound_resources::~bound_resources()
 {
     if (_manager != nullptr)
@@ -71,7 +150,8 @@ cc::span<u32 const> bound_resources::elements(bindless_table table) const
     return _manager->_tables[_manager->_slot_of[u32(table)]].acquired;
 }
 
-gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
+gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
+                                           mesh_manager meshes,
                                            material_manager materials,
                                            texture_manager textures,
                                            attribute_manager attributes,
@@ -88,7 +168,8 @@ gpu_resource_manager::gpu_resource_manager(mesh_manager meshes,
     _group(cc::move(group)),
     _tables(cc::move(tables)),
     _texture_policy(texture_policy),
-    _work_budget(work_budget)
+    _work_budget(work_budget),
+    _ctx(&ctx)
 {
     for (auto& s : _slot_of)
         s = -1;
@@ -129,7 +210,7 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
     auto const format = ctx.accepted_shader_formats().front();
 
     return gpu_resource_manager(
-        mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
+        ctx, mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
         texture_manager::create(ctx, cfg.textures), attribute_manager::create(ctx, cfg.attributes),
         material_shader_cache::create(
             format, {.epilogue_include = material_shader_cache::hit_epilogue_include, .bindless = &cfg.bindless}),
@@ -197,6 +278,8 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
         switch (slot.kind)
         {
         case material_slot_kind::constant:
+        case material_slot_kind::sample_transform:
+            // Both are bytes the resolution already decided; only where they came from differs.
             write(slot.offset, slot.constant);
             break;
 
@@ -216,8 +299,26 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
         case material_slot_kind::texture_index:
         {
             auto const& record = textures.get(slot.texture);
+
+            // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
+            // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
+            // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
+            // is for.
+            // Pointing the slot elsewhere keeps the permutation stable across the whole load.
+            //
+            // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
+            // written, so sampling it reads whatever that allocation happened to hold.
+            // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
+            // own factor, `failed` is "never" and wants to be seen.
+            // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
+            auto const& texture
+                = record.state == residency::pending
+                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
+                    : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
+                                                         : record.texture);
+
             auto index = cc::vector<byte>();
-            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, record.texture.as_readonly_view())));
+            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_readonly_view())));
             write(slot.offset, index);
             break;
         }
@@ -254,23 +355,150 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
         r.uploaded = cc::move(bytes);
     }
 
+    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
+    // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
+    auto const pending = m.state != residency::complete;
+    auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
+    auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+
     // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
     // declaration `freeze()` hands the trace.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
-            .vertices = u32(acquire_buffer(m.vertices.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(m.indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u};
+            .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
+            .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
 }
 
-scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+bool gpu_resource_manager::_is_live(sv::resident_mesh const& m)
 {
-    CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+    if (meshes.get_ptr(m.geometry) == nullptr)
+        return false;
+
+    for (auto const& a : m.attributes)
+    {
+        // A per_instance attribute uploads nothing, so it names no record that could go away.
+        if (a.attribute == attribute_id::invalid)
+            continue;
+        if (attributes.get_ptr(a.attribute) == nullptr)
+            return false;
+    }
+
+    for (auto const& t : m.textures)
+        if (textures.get_ptr(t.source.texture) == nullptr)
+            return false;
+
+    return true;
+}
+
+bool gpu_resource_manager::_is_resident(sv::resident_mesh const& m)
+{
+    auto const* const geometry = meshes.get_ptr(m.geometry);
+    if (geometry == nullptr || geometry->state != residency::complete)
+        return false;
+
+    for (auto const& a : m.attributes)
+    {
+        // A per_instance attribute uploads nothing, so there is nothing to wait for.
+        if (a.attribute == attribute_id::invalid)
+            continue;
+        auto const* const record = attributes.get_ptr(a.attribute);
+        if (record == nullptr || record->state != residency::complete)
+            return false;
+    }
+
+    for (auto const& t : m.textures)
+    {
+        auto const* const record = textures.get_ptr(t.source.texture);
+        if (record == nullptr || record->state == residency::pending)
+            return false;
+    }
+
+    return true;
+}
+
+sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
+{
+    CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+
+    // Placed against this manager before, and every id it named still resolves: the ids are already minted, so all
+    // that is left is to say whether they have arrived since.
+    // The transform, material and flags are re-read anyway, because those are the parts a caller changes between
+    // frames without changing a single payload.
+    //
+    // `_is_live` is what makes the slot a cache rather than a promise.
+    // An id whose record was evicted — the byte budget, or the idle timeout — is dead, and a later acquire of the same
+    // content mints a NEW one, so trusting the slot unconditionally would hand the renderer an id nothing resolves and
+    // never re-upload the bytes the mesh is still holding.
+    // Falling through re-acquires from those bytes, which is the "an eviction is a re-upload" property the design
+    // rests on.
+    if (data.cache.manager == this && _is_live(data.cache.resources))
+    {
+        data.cache.resources.transform = data.transform;
+        data.cache.resources.material = data.material;
+        data.cache.resources.flags = data.flags;
+        data.cache.ready = _is_resident(data.cache.resources);
+        return data.cache.resources;
+    }
+
+    // The box travels with the payload rather than being recomputed from it: the manager keeps it after the bytes are
+    // gone, and a placeholder drawn while the geometry is still arriving has nothing else to be sized by.
+    auto const box = data.bounds.has_value() ? data.bounds : bounds_of(data.geometry);
 
     // Both bridges keep the geometry's own content key, so this resolves to a resident id rather than an upload
     // whenever the mesh has not changed.
-    auto const geometry = mesh.geometry.is_indexed() ? meshes.acquire(indexed_triangle_data::from(mesh.geometry))
-                                                     : meshes.acquire(triangle_data::from(mesh.geometry));
+    auto const geometry = [&]
+    {
+        if (data.geometry.is_indexed())
+        {
+            auto payload = indexed_triangle_data::from(data.geometry);
+            payload.bounds = box;
+            return meshes.acquire(payload);
+        }
+        auto payload = triangle_data::from(data.geometry);
+        payload.bounds = box;
+        return meshes.acquire(payload);
+    }();
+
+    auto bindings = cc::vector<mesh_attribute_binding>();
+    bindings.reserve(data.attributes.size());
+    for (auto const& a : data.attributes)
+    {
+        // A per_instance attribute is one value for the whole mesh, read out of the parameter block rather than off a buffer,
+        // so it never becomes a resource and its bytes travel along instead.
+        auto const uploads = a.frequency != attribute_frequency::per_instance;
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+    }
+
+    auto bound_textures = cc::vector<mesh_texture_binding>();
+    bound_textures.reserve(data.textures.size());
+    for (auto const& t : data.textures)
+        bound_textures.push_back({.name = t.name,
+                                  .source = {.texture = textures.acquire(t.source.texture),
+                                             .uv_attribute = t.source.uv_attribute,
+                                             .sampler = t.source.sampler,
+                                             .swizzle = t.source.swizzle,
+                                             .transform = t.source.transform}});
+
+    data.cache = {.manager = this,
+                  .resources = {.name = data.name,
+                                .geometry = geometry,
+                                .attributes = cc::move(bindings),
+                                .transform = data.transform,
+                                .material = data.material,
+                                .flags = data.flags,
+                                .textures = cc::move(bound_textures),
+                                .bounds = box,
+                                .triangle_count = data.geometry.triangle_count(),
+                                .vertex_count = data.geometry.vertex_count()}};
+
+    data.cache.ready = _is_resident(data.cache.resources);
+    return data.cache.resources;
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::resident_mesh const& mesh)
+{
+    CC_ASSERT(mesh.geometry != mesh_id::invalid, "a mesh needs geometry to be placed in a scene");
 
     auto const lib = acquire_material_library();
     CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a mesh's material through");
@@ -279,10 +507,15 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
     auto const resolved = resolve_material(*lib.value(), material, mesh);
     auto const& permutation = shaders.acquire(resolved);
 
-    return {.mesh = geometry,
+    return {.mesh = mesh.geometry,
             .instance = acquire_instance(resolved, permutation.layout),
             .shader_key = permutation.key,
             .transform = mesh.transform};
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
+{
+    return acquire_scene_item(create_mesh(mesh));
 }
 
 bool gpu_resource_manager::contains_instance(instance_id id) const
@@ -325,21 +558,37 @@ instance_id gpu_resource_manager::acquire_instance(resolved_material const& r, m
             // A descriptor slot serves either the attribute itself or, for a sampled one, the uv set it samples through.
             auto const* const source = a.sample != nullptr ? a.uv : a.attribute;
             CC_ASSERT(source != nullptr, "a descriptor slot names a mesh attribute the resolve found");
+            CC_ASSERT(source->attribute != attribute_id::invalid, "a descriptor slot names an uploaded attribute");
             CC_ASSERT(slot.size_bytes == attribute_desc_size, "an sv::attribute_desc slot is exactly its three uints");
             record.slots.push_back({.kind = slot.kind,
                                     .offset = slot.offset,
                                     .size_bytes = slot.size_bytes,
-                                    .attribute = attributes.acquire(*source),
+                                    .attribute = source->attribute,
                                     .element_stride = u32(source->format.size_bytes())});
+            break;
+        }
+
+        case material_slot_kind::sample_transform:
+        {
+            CC_ASSERT(a.sample != nullptr, "a sample transform slot names a sampled attribute");
+            CC_ASSERT(slot.size_bytes == i32(sizeof(tg::vec4f)) * 2, "a sample transform is a scale and a bias");
+            auto bytes = cc::vector<byte>();
+            append_pod(bytes, a.sample->transform.scale);
+            append_pod(bytes, a.sample->transform.bias);
+            record.slots.push_back(
+                {.kind = slot.kind, .offset = slot.offset, .size_bytes = slot.size_bytes, .constant = cc::move(bytes)});
             break;
         }
 
         case material_slot_kind::texture_index:
             CC_ASSERT(a.sample != nullptr, "a texture slot names a sampled attribute");
             CC_ASSERT(slot.size_bytes == i32(sizeof(u32)), "a texture slot is exactly one bindless index");
-            // The texture must already be resident: a `texture_id` on a mesh is one the caller acquired.
-            record.slots.push_back(
-                {.kind = slot.kind, .offset = slot.offset, .size_bytes = slot.size_bytes, .texture = a.sample->texture});
+            // The id is one the caller acquired; whether its PIXELS have arrived is what the block decides per epoch.
+            record.slots.push_back({.kind = slot.kind,
+                                    .offset = slot.offset,
+                                    .size_bytes = slot.size_bytes,
+                                    .texture = a.sample->texture,
+                                    .placeholder_texel = placeholder_texel_for(a)});
             break;
         }
     }
@@ -419,22 +668,110 @@ texture_id gpu_resource_manager::acquire_texture(texture_data const& texture)
     CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
     auto const id = textures.acquire(texture);
 
-    auto const* const record = textures.get_ptr(id);
-    CC_ASSERT(record != nullptr, "a freshly acquired texture must be resident");
+    // Nothing is queued here any more: a freshly acquired texture is `pending`, so whether it will need its chain
+    // filled is not knowable until its pixels land.
+    // `_queue_mip_work` is what decides that, from the ids `collect_settled` reports.
+    return id;
+}
 
-    // Queued rather than done here: an acquire is on the caller's critical path, and generating a full chain
-    // inline is exactly the stall the budget exists to spread out.
-    if (_texture_policy.generate_mips && record->state == residency::base_resident && !_is_pending(id))
+sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel, sg::pixel_format format)
+{
+    // The write below is four bytes, one 8-bit channel each, in rgba order.
+    // Every format the importer produces is that shape, and a caller reaching `acquire_texture` with another one gets
+    // an assert rather than a subresource filled with the wrong number of bytes — which neither the upload scope nor
+    // the backend checks.
+    // Encoding per format is the real fix and is deferred; see libs/graphics/shaped-viewer/docs/TODO.md.
+    CC_ASSERT(sg::format_block_extent(format) == 1 && sg::format_block_size(format) == 4,
+              "a 1x1 placeholder is written as four 8-bit channels");
+
+    // An sRGB view decodes what it reads, so the value has to be stored encoded to come back as itself.
+    // The curve covers the colour channels ONLY: alpha in an sRGB format is stored and sampled linearly, so encoding it
+    // would hand the shader a number nothing ever decodes — a base-colour map bound as `opacity` through `.a` is
+    // exactly that case.
+    auto const encode = [&](float v, int component)
     {
+        auto const clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+
+        auto const stored
+            = sg::is_srgb_format(format) && component < 3
+                ? (clamped <= 0.0031308f ? clamped * 12.92f : 1.055f * tg::pow(clamped, 1.0f / 2.4f) - 0.055f)
+                : clamped;
+        return u32(stored * 255.0f + 0.5f);
+    };
+
+    auto const rgba
+        = encode(texel[0], 0) | (encode(texel[1], 1) << 8) | (encode(texel[2], 2) << 16) | (encode(texel[3], 3) << 24);
+    auto const key = u64(rgba) | (u64(u32(format)) << 32);
+
+    if (auto const* const resident = _placeholder_textures.get_ptr(key); resident != nullptr)
+        return *resident;
+
+    auto gpu = _ctx->persistent.create_texture_2d(
+        {.format = format,
+         .width = 1,
+         .height = 1,
+         .mip_levels = 1,
+         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst});
+
+    // Four bytes, and needed by the very next recording: `ctx.upload`'s automatic wait is exactly right here, which is
+    // the same reasoning that puts the bulk traffic on `ctx.stream` instead.
+    byte const pixels[4]
+        = {byte(rgba & 0xFFu), byte((rgba >> 8) & 0xFFu), byte((rgba >> 16) & 0xFFu), byte((rgba >> 24) & 0xFFu)};
+    auto cmd = _ctx->create_command_list();
+    cmd->upload.bytes_to_texture(gpu.raw(), pixels, {});
+    _ctx->submit_command_list(cc::move(cmd));
+
+    _placeholder_textures[key] = cc::move(gpu);
+    return _placeholder_textures[key];
+}
+
+void gpu_resource_manager::_collect_textures()
+{
+    auto landed = cc::vector<texture_id>();
+    (void)textures.collect_settled(landed);
+    _queue_mip_work(landed);
+}
+
+void gpu_resource_manager::_queue_mip_work(cc::span<texture_id const> landed)
+{
+    if (!_texture_policy.generate_mips)
+        return;
+
+    for (auto const id : landed)
+    {
+        auto const* const record = textures.get_ptr(id);
+        if (record == nullptr || record->state != residency::base_resident || _is_pending(id))
+            continue;
+
+        // Queued rather than done here: generating a full chain inline is exactly the stall the budget spreads out.
+        // Both routines count a level the same way, and a texture that reached neither path allocated no level
+        // beyond what it was given — so this is zero for it and it is never queued.
         auto const dispatches = sr::box_filter_mipmap_routine::level_count(record->texture, record->uploaded_mips);
         if (dispatches > 0)
             _pending.push_back({.texture = id, .dispatches = dispatches});
     }
-    return id;
+}
+
+void gpu_resource_manager::wait_for_pending_uploads()
+{
+    attributes.wait_for_settled();
+    meshes.wait_for_settled();
+
+    auto landed = cc::vector<texture_id>();
+    textures.wait_for_settled(landed);
+    _queue_mip_work(landed);
 }
 
 i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
 {
+    // Whatever landed since the last epoch is finished first, so a mesh whose geometry arrived draws its real
+    // triangles this frame rather than next.
+    // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
+    // acquire set — this only collects the results.
+    (void)attributes.collect_settled();
+    (void)meshes.record_settled(cmd);
+    _collect_textures();
+
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
         return 0;
 
@@ -454,7 +791,12 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
             continue;
         }
 
-        sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        // The format decides, and it decided already: `texture_manager::acquire` gave this texture the usage the
+        // matching routine needs, so asking the same question here lands on the same answer.
+        if (sg::supports_typed_uav(record->texture.format()))
+            sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        else
+            sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
         spent += w.dispatches;
         textures.mark_mips_complete(w.texture);
     }

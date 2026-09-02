@@ -3,6 +3,7 @@
 #include <clean-core/container/byte_stream_builder.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/scene/mesh_texture.hh>
 
 namespace sv::impl
 {
@@ -25,5 +26,15 @@ inline void add_sampler(cc::byte_stream_builder& b, sg::sampler const& s)
     b.add_pod(s.max_lod);
     b.add_optional(s.compare);
     b.add_pod(s.border_color);
+}
+
+/// Appends the `component_count` selectors of `z` that are actually read.
+///
+/// Only those, which is the canonicalization the plan calls for: two swizzles that differ solely in a selector no attribute of
+/// this format reads are one permutation, and hash alike.
+inline void add_swizzle(cc::byte_stream_builder& b, channel_swizzle const& z, int component_count)
+{
+    for (auto i = 0; i < component_count; ++i)
+        b.add_pod(z.components[i]);
 }
 } // namespace sv::impl

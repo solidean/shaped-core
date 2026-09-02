@@ -28,6 +28,11 @@ namespace babel::obj
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.obj");
 } // namespace babel::obj
 
+namespace babel::stl
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.stl");
+} // namespace babel::stl
+
 namespace babel::gltf
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.gltf");
