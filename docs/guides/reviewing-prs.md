@@ -461,6 +461,38 @@ The same shape, in three variants seen in one comment:
 telling the author to check what their own header says, quoting their own doc comment back at them to establish a point they wrote, and restating their TODO as news.
 None of it is rudeness in the wording; it is the *stance*, and it reads as lecturing however politely the sentence is built.
 
+**The variant that survives this rule is the contract-mismatch finding**, because there the author's own doc is the evidence.
+pr-161 is the worked case: a failed texture sampled an uninitialized resource rather than its placeholder.
+The finding quoted `residency::failed`'s doc comment and the branch's own substitution table at length, to establish that it should have been substituted.
+Both were written by the author, on that branch, and the whole force of the finding was that the code did not match them.
+**Cite the contract and move on.**
+A pointer says the same thing as a block quote, and the block quote is what turns "your code disagrees with your doc" into "let me read your doc to you".
+
+### A second citation is a second claim
+
+**A finding propped on a supporting citation is only as strong as the weaker one.**
+Reaching for a second reference because the first felt thin is the tell: it doubles the surface a reader can check, and one false line invites them to discount the finding that was correct.
+
+pr-161: a doc-rot finding said `libs/graphics/shaped-viewer/docs/_index.md` still called asset loading "planned", and added that `docs/structure.md` "marks all five phases `[done]`".
+The first half was right.
+The second file has no phase rows at all — the phasing lives in `asset-loading.md`, which marks phase 5 half-landed.
+So the support overstated exactly the thing it was there to prop up.
+The finding needed no second citation, and the one it got was the only checkable claim in the item that was false.
+
+If a finding does not stand on one verified line, that is a finding to re-derive rather than to buttress.
+
+### Praise is addressed to the author
+
+Praise that carries information is worth writing — the existing rule — but **write it to the person reading it.**
+A comment lands on someone's branch, and a reviewer full of three rounds of context slips easily into narrating that person's work to a third party.
+
+pr-161's closing section opened "three decisions here are worth more than they look, and a session working from this list would not know it".
+Every word of the assessment was meant and useful; addressed past the author to a hypothetical later agent, it reads as a pat on the head.
+"This is the right shape, do not churn it" is the same information in the second person, and it is shorter.
+
+The same slip in the other direction is a small jab attached to a correct observation — "which is why nothing caught it", "which suggests it was not meant to".
+Both were true, and both read the same without the closing clause.
+
 ### Commit messages are not evidence
 
 Commit messages are agent-written and unreliable, especially about **provenance**.
