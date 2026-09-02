@@ -8,9 +8,10 @@ using namespace cc::primitive_defines;
 
 // Whether two command lists recorded CONCURRENTLY against one resource end up correctly ordered once both submit.
 //
-// The tracker seeds a list's private state from the between-lists state at its first touch, so a list that opens
-// before another one writes sees no writer in flight and takes the no-barrier freebie.
-// Submission order then puts the write first and the read second, with nothing between them.
+// A list's private state starts empty and never sees another list's declares, so neither body carries a barrier:
+// each records only what its own first op needs, and the freebie is taken on both sides.
+// Submission order then puts the write first and the read second, and what orders them is the reader's ENTRY
+// barrier, computed at its submit against what the writer committed.
 //
 // dx12 is safe by construction: ExecuteCommandLists guarantees the first workload finishes before the second starts,
 // and a buffer additionally decays to COMMON at that point.

@@ -16,7 +16,7 @@
 /// Vulkan has no such decay.
 /// Submission order alone is execution order, not a memory dependency, so a write recorded in one list and a read
 /// recorded in the next are unsynchronized unless something says otherwise.
-/// The last writer therefore has to survive its own command list, which is what `canonical` below is for.
+/// The last writer therefore has to survive its own command list, which is what `current` below is for.
 ///
 /// The model is the one textures use — a current state between lists, a private per-slot state, and an entry
 /// requirement resolved at submit — minus the subresource partition, since a buffer is one undivided state.

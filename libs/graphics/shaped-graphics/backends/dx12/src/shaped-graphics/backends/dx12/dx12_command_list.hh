@@ -53,11 +53,12 @@ public:
 
     /// Record the barriers collected since the last flush in one `Barrier` call, then clear the pending set.
     /// Those are all the buffer and texture hazards an operation's bound/touched resources implied.
-    /// Called just before every GPU op that consumes them, and by the context at submit for the finalize reverts.
+    /// Called just before every GPU op that consumes them, and by nothing else — submit asserts the pending sets are
+    /// empty, since its own entry barriers go into the pre-list rather than through here.
     void flush_barriers();
 
     /// Transition the whole of `texture` to `layout` and record the barrier immediately — declare plus flush.
-    /// The new layout becomes the texture's canonical state when this list submits.
+    /// The new layout becomes the texture's current state when this list submits.
     /// Used by the swapchain to hand a back buffer to Present (sg::texture_layout::present).
     /// The transition is computed from the texture's tracked layout, so it composes with whatever the frame's render pass left it in.
     void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
@@ -101,7 +102,7 @@ public:
 
     // Barriers collected for the *next* GPU op; empty between ops.
     // flush_barriers() flushes the pending-barrier resources above into these, then records the whole batch in one Barrier call just before the op.
-    // Public so the context can stage the finalize reverts here at submit.
+    // Public so the context can assert at submit that every declared access was flushed by its op.
     cc::vector<D3D12_BUFFER_BARRIER> _pending_buffer_barriers;
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
