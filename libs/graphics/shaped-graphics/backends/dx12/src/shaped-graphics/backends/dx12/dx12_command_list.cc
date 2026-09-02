@@ -154,6 +154,7 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
     // Declaring rather than flushing here is what lets a texture bound several times to one op merge its declares into one barrier per subresource box.
     // flush_barriers() does the merge just before the op.
     // mark_pending_barrier enqueues it for that flush exactly once, so it appears in _pending_barrier_textures once.
+
     // A texture with a transfer in flight stays in the layout that transfer needs.
     // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
     // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
@@ -729,8 +730,11 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                 _queue->Wait(w.group->fence.Get(), w.value);
 
             // The pre-list first, so its entry transitions have run before anything the list itself recorded.
-            ID3D12CommandList* lists[] = {cmd->_pre_list.Get(), cmd->_list.Get()};
-            _queue->ExecuteCommandLists(2, lists);
+            // Skipped entirely when it carries no barrier, which is the common case: it is still closed above, since
+            // it goes back to the pool either way, but an empty list is not worth an ExecuteCommandLists slot.
+            ID3D12CommandList* lists[2] = {cmd->_pre_list.Get(), cmd->_list.Get()};
+            UINT const list_count = entry_barriers.empty() ? 1u : 2u;
+            _queue->ExecuteCommandLists(list_count, entry_barriers.empty() ? &lists[1] : &lists[0]);
 
             // Take a monotonic completion token and signal it under this same lock, so token order equals queue submission and signal order.
             // The queue is free-threaded, but out-of-order signals would move the fence's completed value backwards and break is_submission_complete.

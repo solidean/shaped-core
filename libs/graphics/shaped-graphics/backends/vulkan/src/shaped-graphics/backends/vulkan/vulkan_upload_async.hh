@@ -35,7 +35,6 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     sg::texture_region region;         // texture copies
     isize row_bytes = 0;               // texture copies: bytes per row of the region, the chunk granularity
 
-
     /// The whole payload, for a resident transfer; empty for a source-driven one.
     cc::pinned_data<byte const> src;
 

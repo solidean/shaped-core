@@ -6,6 +6,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_upload.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -27,18 +28,6 @@ constexpr int num_staging_windows = 3;
 [[nodiscard]] isize round_window(isize bytes)
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
-}
-
-// Raise `slot` to `value`, never lower it.
-// Every cross-queue stamp is monotonic and never reset, so a racing higher value simply wins and a stale one yields a
-// cheap already-satisfied wait.
-void stamp_max(std::atomic<u64>& slot, u64 value)
-{
-    u64 prev = slot.load(std::memory_order_relaxed);
-    while (prev < value && !slot.compare_exchange_weak(prev, value, std::memory_order_release, std::memory_order_relaxed))
-    {
-        // CAS retries; `prev` is refreshed with the current value each time.
-    }
 }
 
 // Fires on a thread-pool thread once the completion fence reaches a value a queued settle is waiting on.

@@ -66,8 +66,8 @@ public:
     ~vulkan_image_view_cache();
 
     /// The image view for `view`, created on first request.
-    /// Keyed on the view's identity — the resource address plus every field that reaches a descriptor — so this
-    /// never conflates two views that would produce different descriptors.
+    /// Keyed on the view's identity — the texture's identity stamp plus every field that reaches a descriptor — so
+    /// this never conflates two views that would produce different descriptors.
     [[nodiscard]] VkImageView acquire(sg::raw_texture_view const& view);
 
     /// The image view for a rendering-scope attachment, created on first request.
