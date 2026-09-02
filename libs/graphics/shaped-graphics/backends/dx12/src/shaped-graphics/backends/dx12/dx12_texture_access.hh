@@ -90,16 +90,41 @@ namespace sg::backend::dx12
 /// Pure logic, with no D3D12 objects, so it is unit-testable without a device.
 /// dx12_texture holds one under a mutex; the command list drives declare/finalize/discard and emits the returned barriers.
 ///
-/// Each open command list keys its private covering partition by its command_list_slot, seeded on first touch from `canonical`, the between-lists state.
-/// A per-texture `active_slot_count` tracks how many open lists are using it.
-/// The finalize that drops it to zero — the *last* such list — promotes that list's partition into `canonical`, the one case that may leave the texture in a new layout.
-/// Every earlier finalize restores the texture to the canonical layout for the lists still using it.
+/// Each open command list keys its private covering partition by its command_list_slot, and that partition starts **empty**:
+/// a box enters at the layout its first declare asks for, not at whatever the texture happened to be in while the list recorded.
+/// What the list needs on entry is recorded as a requirement per box, and the submit resolves it against `_current`, the between-lists state,
+/// prepending the barrier that gets there — into a small command list executed ahead of this one in the same ExecuteCommandLists call.
+///
+/// That is what makes a recorded barrier independent of when the list was recorded.
+/// The model it replaces seeded a slot from the between-lists state and had every non-last finalize *revert* the texture back to it,
+/// which held only as long as command lists were the sole things moving a layout — an async transfer's fixup moving it between one list's
+/// submit and another's left the second list's barriers naming a layout the image had left.
+///
+/// Every finalize writes `_current`, in submission order.
 class sg::backend::dx12::dx12_texture_access
 {
 public:
-    explicit dx12_texture_access(sg::subresource_extent extent) : _canonical(extent) {}
+    explicit dx12_texture_access(sg::subresource_extent extent) : _current(extent) {}
 
-    /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, seeding from canonical on first touch, without emitting anything.
+    /// The layout `range`'s first subresource is in as of the last submitted list.
+    /// For the async transfer path, which records on the copy queue and so cannot go through declare/flush at all.
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range)
+    {
+        sg::texture_layout layout = sg::texture_layout::undefined;
+        bool first = true;
+        _current.for_each_in(range,
+                             [&](sg::resource_access_state const& state)
+                             {
+                                 if (first)
+                                 {
+                                     layout = state.curr_layout;
+                                     first = false;
+                                 }
+                             });
+        return layout;
+    }
+
+    /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, entering an untouched box at `layout`, without emitting anything.
     /// Call once per binding — a texture bound several times to one op declares several times, and `flush` then merges them per box.
     /// Thread-safe via the owning dx12_texture's mutex.
     ///
@@ -117,6 +142,9 @@ public:
             range,
             [&](sg::subresource_range const&, sg::resource_access_state& state)
             {
+                if (!state.entry_begun)
+                    state.begin_entry(layout);
+
                 sg::texture_layout target = layout;
                 // Already declared for this op with a different layout? One layout must serve both accesses.
                 bool const touched = state.has_pending_declares() || state.has_pending_layout_change();
@@ -167,7 +195,11 @@ public:
         s.partition.for_each_box_in(sg::subresource_range::whole(s.partition.extent()),
                                     [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
                                     {
-                                        if (!state.has_pending_declares() && !state.has_pending_layout_change())
+                                        if (!state.entry_begun)
+                                            return; // this list never named the box
+                                        if (!state.has_entry_requirement)
+                                            state.capture_entry_requirement(); // the submit prepends this one
+                                        else if (!state.has_pending_declares() && !state.has_pending_layout_change())
                                             return;
                                         auto const b = state.flush();
                                         if (b.needed)
@@ -177,11 +209,13 @@ public:
         return out;
     }
 
-    /// Finalize `slot` when its command list is submitted, decrementing this texture's `active_slot_count`.
-    /// If this was the **last** command list using the texture, its slot partition becomes the new canonical (between-lists) state — the only case that may leave the texture in a new layout.
-    /// Otherwise each subresource whose layout diverged is transitioned back to the canonical layout, returning those barriers, so the texture is handed back unchanged for the lists still using it.
+    /// Finalize `slot` when its command list is submitted: its layouts become the current ones, in submission order.
+    ///
+    /// Returns the barriers taking the texture from what it is really in now to what this list's first use of each box needs.
+    /// They belong ahead of the list rather than inside it — the caller executes them from a command list prepended to the same submit —
+    /// because a list that recorded second may submit first, and a barrier recorded against a guess would name the wrong LayoutBefore.
     /// Clears the slot; only valid on a slot this list declared, so it is active.
-    /// Submit runs finalize + execute under one lock, so finalize order equals execute order; the decision itself is per-texture, under this object's mutex.
+    /// Submit runs finalize + execute under one lock, so finalize order equals execute order.
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize(sg::command_list_slot slot)
     {
         // Only ever called for a texture this list actually touched: declare seeded the slot active and grew _slots.
@@ -191,18 +225,31 @@ public:
         auto& s = _slots[i];
         CC_ASSERT(!has_pending_declares(s.partition), "a declared texture access was never flushed by a GPU op");
         CC_ASSERT(_active_slot_count > 0, "finalize of a texture with no active slots");
-        cc::small_vector<dx12_subresource_barrier, 4> out;
-        bool const was_last = --_active_slot_count == 0;
-        if (was_last)
-            _canonical = s.partition; // last one out commits its layout as the new canonical
-        else
-            out = revert_to_canonical(s); // others still using it — hand it back in the canonical layout
+
+        auto const out = entry_barriers(s);
+
+        // Only the boxes this list actually used are committed.
+        // A slot's partition starts empty, so its untouched boxes say nothing about the texture — assigning the whole
+        // partition would reset the layout of every subresource the list never named.
+        for (auto const& sbox : s.partition.boxes())
+        {
+            if (!sbox.state.has_entry_requirement)
+                continue;
+
+            auto committed = sbox.state;
+            committed.clear_entry_requirement();
+            _current.for_each_box_in(
+                sbox.range, [&](sg::subresource_range const&, sg::resource_access_state& state) { state = committed; });
+        }
+        _current.try_merge();
+
+        --_active_slot_count;
         s = slot_state{};
         return out;
     }
 
     /// Discard `slot` when its command list is dropped: the recorded work never runs, so just drop this texture's `active_slot_count` and clear the slot.
-    /// No layout change — `canonical` is unchanged.
+    /// No layout change — the current state is unchanged.
     void discard(sg::command_list_slot slot)
     {
         // Like finalize, only ever called for a texture this list touched (its slot is active).
@@ -249,42 +296,30 @@ private:
         if (!s.active)
         {
             s.active = true;
-            s.partition = _canonical; // seed the private state from the between-lists (canonical) state
-            ++_active_slot_count;     // one more open command list is now using this texture
+            s.partition = sg::subresource_partition(_current.extent()); // empty: a box enters at its own first declare
+            ++_active_slot_count; // one more open command list is now using this texture
         }
         return s;
     }
 
-    // Restore each subresource box to the canonical layout: for every box in the canonical partition, transition the possibly diverged current layout back to it.
-    // While a list uses the texture its active_slot_count is >= 1, so no other list can promote it.
-    // Canonical is therefore stable across that list's lifetime, which makes "the layout it entered with" and "the canonical layout" the same.
-    cc::small_vector<dx12_subresource_barrier, 4> revert_to_canonical(slot_state& s)
+    // The barriers satisfying each box's recorded entry requirement against the state the texture is really in.
+    // Boxes the list never touched carry no requirement and are left where they are.
+    cc::small_vector<dx12_subresource_barrier, 4> entry_barriers(slot_state const& s)
     {
         cc::small_vector<dx12_subresource_barrier, 4> out;
-        bool warned = false;
-        for (auto const& cbox : _canonical.boxes())
+        for (auto const& sbox : s.partition.boxes())
         {
-            sg::texture_layout const canonical_layout = cbox.state.prev_layout;
-            s.partition.for_each_box_in(
-                cbox.range,
-                [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
-                {
-                    if (state.prev_layout == canonical_layout)
-                        return; // already in the canonical layout
-                    state.declare({}, {}, canonical_layout);
-                    auto const b = state.flush();
-                    if (b.needed)
-                    {
-                        out.push_back({box_range, b});
-                        if (!warned)
-                        {
-                            CC_LOG_WARNING("reverting a texture to its canonical layout at submit "
-                                           "because other command lists are still open (a hidden "
-                                           "cost of concurrent recording)");
-                            warned = true;
-                        }
-                    }
-                });
+            if (!sbox.state.has_entry_requirement)
+                continue;
+
+            // Splits _current so its boxes align to this one, which is what makes each emitted range exact.
+            auto const requirement = sbox.state;
+            _current.for_each_box_in(sbox.range,
+                                     [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
+                                     {
+                                         if (auto const b = state.entry_barrier_for(requirement); b.needed)
+                                             out.push_back({box_range, b});
+                                     });
         }
         return out;
     }
@@ -298,6 +333,6 @@ private:
     }
 
     cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
-    sg::subresource_partition _canonical;   // between-lists state (initial layout general)
+    sg::subresource_partition _current;     // between-lists state, as of the last submitted list (initially general)
     int _active_slot_count = 0;             // open command lists currently using this texture (active slots)
 };

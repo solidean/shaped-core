@@ -6,6 +6,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_upload.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -27,18 +28,6 @@ constexpr int num_staging_windows = 3;
 [[nodiscard]] isize round_window(isize bytes)
 {
     return (bytes + texture_placement_alignment - 1) / texture_placement_alignment * texture_placement_alignment;
-}
-
-// Raise `slot` to `value`, never lower it.
-// Every cross-queue stamp is monotonic and never reset, so a racing higher value simply wins and a stale one yields a
-// cheap already-satisfied wait.
-void stamp_max(std::atomic<u64>& slot, u64 value)
-{
-    u64 prev = slot.load(std::memory_order_relaxed);
-    while (prev < value && !slot.compare_exchange_weak(prev, value, std::memory_order_release, std::memory_order_relaxed))
-    {
-        // CAS retries; `prev` is refreshed with the current value each time.
-    }
 }
 
 // Fires on a thread-pool thread once the completion fence reaches a value a queued settle is waiting on.
@@ -860,6 +849,13 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
+
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
     CC_ASSERT(data.size() == fp.tight_size(), "async upload pixel data size does not match the copy region");
 
@@ -895,7 +891,12 @@ template <class ResourceT>
     control->on_promote = [weak = std::weak_ptr<ResourceT const>(cc::move(target)), value]
     {
         if (auto const strong = weak.lock())
+        {
+            // What promotion adds now that every stream is waited on: the wait off the async stamp carries no
+            // warning, because a caller who asked for it does not need telling that it stalls.
+            strong->suppress_stream_wait_warning(value);
             stamp_max(strong->_pending_async_upload_value, value);
+        }
     };
     return control;
 }
@@ -968,6 +969,13 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "stream upload target texture must have "
                                                              "texture_usage::copy_dst");
     CC_ASSERT(_mapped != nullptr, "async upload system used before initialization");
+
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::upload);
 
     dx12_texture_footprint const fp = compute_texture_footprint(dst->description(), subresource, region);
 

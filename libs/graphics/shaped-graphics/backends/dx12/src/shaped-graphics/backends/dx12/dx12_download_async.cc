@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_download.hh>
@@ -678,6 +679,13 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
     // The region is already resolved (whole subresource / bounds-checked / empty→skipped) by the sg layer.
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
     u64 const upload_wait = src->_pending_async_upload_value.load(std::memory_order_acquire);
@@ -731,6 +739,10 @@ template <class ResourceT>
     {
         if (auto const strong = weak.lock())
         {
+            // What promotion adds now that every stream is waited on: the wait off the async stamp carries no
+            // warning, because a caller who asked for it does not need telling that it stalls.
+            strong->suppress_stream_wait_warning(value);
+
             u64 prev = strong->_pending_async_download_value.load(std::memory_order_relaxed);
             while (prev < value
                    && !strong->_pending_async_download_value.compare_exchange_weak(
@@ -755,11 +767,12 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
                                                             "buffer_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
-    // A value is RESERVED but not stamped: nothing waits on a streamed read until promote_to_async says so.
-    // It is still folded into the window when the read finishes, so the fence reaches it — otherwise a promotion
-    // would hand a later writer a value the fence never gets to, and hang it.
+    // Stamped on the STREAM value rather than the async one: a later list that writes this resource waits for the
+    // read either way, and warns that it did, while promote_to_async moves the value onto the async stamp where the
+    // same wait is silent because the caller asked for it.
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_max(src->_pending_stream_download_value, value);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(size);
     cc::span<byte> const dst_span = dst.span();
@@ -798,9 +811,17 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
                                                              "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_max(src->_pending_stream_download_value, value);
 
     auto dst = cc::pinned_data<byte>::create_uninitialized(fp.tight_size());
     cc::span<byte> const dst_span = dst.span();
@@ -840,6 +861,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
 
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_max(src->_pending_stream_download_value, value);
 
     auto typed = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer));
     auto control = make_stream_control(typed, value, size);
@@ -876,10 +898,18 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
                                                              "texture_usage::copy_src");
     CC_ASSERT(_mapped != nullptr, "async download system used before initialization");
 
+    // Settle the layout on the DIRECT queue before anything is stamped for this job: a D3D12 copy queue cannot run
+    // layout barriers at all, so it requires the texture in COMMON, and an inline list that left it in COPY_DEST
+    // makes the copy illegal.
+    // Before the stamps rather than after, because the fixup is an ordinary command list and its submit waits on the
+    // texture's pending-transfer values — a value stamped for a job still being enqueued is one nothing will signal.
+    (void)_ctx.prepare_texture_for_async(texture, sg::subresource_range(subresource), sg::async_direction::download);
+
     dx12_texture_footprint const fp = compute_texture_footprint(src->description(), subresource, region);
 
     CC_ASSERT(src->_download_group != nullptr, "a download source must have been created with copy_src");
     u64 const value = src->_download_group->reserve();
+    stamp_max(src->_pending_stream_download_value, value);
 
     auto typed = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
     auto control = make_stream_control(typed, value, fp.tight_size());

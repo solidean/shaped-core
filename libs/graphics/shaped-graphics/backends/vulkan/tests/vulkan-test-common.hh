@@ -17,10 +17,15 @@ namespace sg::backend::vulkan::test
 /// Any validation message of warning severity or worse fails the running test, which is what makes the layer a gate
 /// rather than log noise.
 /// A test whose subject IS the bad input clears the callback for its duration.
+/// Synchronization validation is forced on here rather than defaulted, so a caller passing its own config still gets
+/// it — it is the only check that sees a hazard between two submissions.
 [[nodiscard]] inline sg::context_handle make_context(sg::backend::vulkan::vulkan_config const& config
                                                      = {.enable_validation_layers = true})
 {
-    auto ctx = sg::create_vulkan_context(config);
+    auto sync_config = config;
+    sync_config.enable_sync_validation = true;
+
+    auto ctx = sg::create_vulkan_context(sync_config);
     if (ctx.has_error())
         return nullptr;
 

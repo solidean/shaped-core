@@ -132,6 +132,10 @@ Add entries as we discover them, and remove them as they land.
   The static tier landed: a literal VALUE is stored as its address (`type_code::cstring`), and only a runtime string is copied.
   What is left is `cc::interned_string`, whose 8-byte handle would give a runtime string the same cost as a literal with no lifetime rule attached.
   It is also what would let `CC_RECORD_NAMED` take a runtime string value, since the handle is fixed-size.
+- **Debounced and rate-limited logging.**
+  There is no `CC_LOG_*_ONCE` and no `log_once` helper, so every "warn once" site hand-rolls its own flag — sg alone has several, and the transfer work is about to add two more.
+  The shapes wanted are once-per-call-site and at-most-once-per-interval, both keyed on the site rather than on a caller-supplied token, since a per-resource key is the caller's business.
+  Until it exists, a caller carries its own flag beside the state the warning is about.
 - **Sampling above the OS timer's ceiling.**
   A high-resolution waitable timer floors near half a millisecond on Windows — about 1.9 kHz — and going faster means sleeping short and spinning the remainder, which burns a core for the privilege.
   Worth it only for a short, deliberate capture, so it wants to be an explicit mode rather than a rate that quietly starts spinning.

@@ -63,6 +63,32 @@ INVOCABLE_TEST("sg - async download round-trips", (sg::context_handle const& ctx
     CHECK(matches);
 }
 
+INVOCABLE_TEST("sg - dropping the source resource does not cancel a download still held", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // Non-negotiable sg semantics: the FUTURE is what keeps a readback's source alive.
+    // A caller who starts a download and then lets go of every handle to the resource still gets their bytes — the
+    // destination is their own memory, so there is always somewhere for the copy to land.
+    //
+    // Only dropping the future is a cancellation, which the test above this one covers.
+    auto future = [&]
+    {
+        auto const buf = make_transfer_buffer(ctx, 256);
+        seed_buffer(ctx, buf, 256, [](isize i) { return int(i); });
+        return ctx->download.bytes_from_buffer(buf, 0, 256);
+    }(); // buf's last handle dies here, while the readback is still in flight
+
+    auto const bytes = ctx->wait_for(future);
+    REQUIRE(bytes.has_value()).context("the download was cancelled by the source handle going away");
+    REQUIRE(bytes.value().size() == 256);
+    bool matches = true;
+    for (int i = 0; i < 256; ++i)
+        if (bytes.value()[i] != pattern(i))
+            matches = false;
+    CHECK(matches);
+}
+
 INVOCABLE_TEST("sg - async typed download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

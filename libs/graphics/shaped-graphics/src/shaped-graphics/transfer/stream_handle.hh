@@ -112,8 +112,13 @@ public:
         return _control != nullptr ? _control->priority.load(std::memory_order_relaxed) : 0;
     }
 
-    /// Upgrades this transfer to the async tier: it additionally gains the automatic command-list synchronization,
-    /// so a list recorded after this call waits on it with no further ceremony.
+    /// Declares that a later list waiting on this transfer is intended, and moves it onto the async tier.
+    ///
+    /// **The wait is not what this adds any more.**
+    /// A list touching a resource a stream is still filling waits for it either way, which is what makes streaming as
+    /// safe as an async transfer rather than a documented data race.
+    /// What that wait costs is a stall until the whole transfer lands, so it warns once per stream — and this call is
+    /// how a caller says the stall is what they want, after which the same wait is silent.
     ///
     /// Additive — the handle keeps working, and progress and completion keep reporting.
     /// This is what makes a low-priority stream a safe prewarm: guessing wrong is recoverable rather than fatal.

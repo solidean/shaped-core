@@ -66,7 +66,7 @@ protected:
     void on_expired() const override;
 
 public:
-    /// Accumulate one declared access for `slot`'s next op, seeding a fresh slot from the canonical state.
+    /// Accumulate one declared access for `slot`'s next op, starting a fresh slot empty.
     /// Call once per binding; several declares for one op merge into a single barrier at flush.
     /// Thread-safe.
     void declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const
@@ -98,11 +98,13 @@ public:
     }
 
     /// `slot`'s list was submitted: what it leaves in flight becomes what the next list synchronizes against.
-    /// Unlike dx12, this is not a no-op — see vulkan_buffer_access.hh for why a buffer needs between-lists state.
-    /// Thread-safe.
-    void finalize_slot(sg::command_list_slot slot) const
+    /// Returns the barrier the caller must prepend to that submit, satisfying the list's first op against the state
+    /// the buffer is really in — see vulkan_buffer_access.hh.
+    /// Unlike dx12, this is not a no-op — a vulkan buffer needs between-lists state.
+    /// Thread-safe, and called in submission order.
+    [[nodiscard]] sg::access_barrier finalize_slot(sg::command_list_slot slot) const
     {
-        _access.lock([&](vulkan_buffer_access& a) { a.finalize(slot); });
+        return _access.lock([&](vulkan_buffer_access& a) { return a.finalize(slot); });
     }
 
     /// `slot`'s list was dropped: its work never runs, so it leaves nothing behind.

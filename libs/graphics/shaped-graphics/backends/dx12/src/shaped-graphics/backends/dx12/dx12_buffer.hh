@@ -96,6 +96,11 @@ public:
     // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
     mutable std::atomic<u64> _pending_stream_copy_value = 0;
 
+    // The same, on the download timeline, for a STREAMING readback.
+    // Command-list access tracking reads it so a list touching a buffer a stream is still reading waits for it,
+    // and warns once per stream that it did.
+    mutable std::atomic<u64> _pending_stream_download_value = 0;
+
     // --- concurrent access-state tracking ------------------------------------------------------------
     // Each open command list keys its private intra-list access state by its command_list_slot.
     // Guarded by a mutex because concurrent command lists may record against the same buffer.

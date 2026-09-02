@@ -2,9 +2,9 @@
 #include <shaped-graphics/barrier/command_list_slot.hh>
 
 // Pure unit tests for the command-list slot allocator.
-// Lowest-clear-bit allocation, the "returns to zero" release signal, and the overflow path past 64 concurrent slots.
+// Lowest-clear-bit allocation, the live count, and the overflow path past 64 concurrent slots.
 
-TEST("sg slot - lowest free slot, returns-to-zero on last release")
+TEST("sg slot - lowest free slot, and the live count follows")
 {
     sg::command_list_slot_allocator alloc;
 
@@ -14,9 +14,9 @@ TEST("sg slot - lowest free slot, returns-to-zero on last release")
     CHECK(int(b) == 1);
     CHECK(alloc.live_count() == 2);
 
-    CHECK(alloc.release(a) == false); // b still live
-    CHECK(alloc.live_count() == 1);
-    CHECK(alloc.release(b) == true); // none left -> the promote signal
+    alloc.release(a);
+    CHECK(alloc.live_count() == 1); // b still live
+    alloc.release(b);
     CHECK(alloc.live_count() == 0);
 }
 
@@ -28,13 +28,14 @@ TEST("sg slot - reuses the lowest freed index")
     auto const s2 = alloc.acquire();
     CHECK(int(s2) == 2);
 
-    (void)alloc.release(s1); // free the middle slot
+    alloc.release(s1); // free the middle slot
     auto const s1b = alloc.acquire();
     CHECK(int(s1b) == 1); // lowest clear bit is reused
 
-    (void)alloc.release(s0);
-    (void)alloc.release(s1b);
-    CHECK(alloc.release(s2) == true);
+    alloc.release(s0);
+    alloc.release(s1b);
+    alloc.release(s2);
+    CHECK(alloc.live_count() == 0);
 }
 
 TEST("sg slot - overflow past 64 concurrent slots")
@@ -51,10 +52,8 @@ TEST("sg slot - overflow past 64 concurrent slots")
     CHECK(int(overflow) == 64);
     CHECK(alloc.live_count() == 65);
 
-    (void)alloc.release(overflow);
+    alloc.release(overflow);
     for (int i = 0; i < 64; ++i)
-    {
-        bool const last = alloc.release(slots[i]);
-        CHECK(last == (i == 63)); // only the final release returns to zero
-    }
+        alloc.release(slots[i]);
+    CHECK(alloc.live_count() == 0);
 }

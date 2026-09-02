@@ -131,7 +131,7 @@ cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_de
 
     D3D12_RESOURCE_DESC const rdesc = texture_resource_desc(desc);
 
-    // Created in COMMON, the layout dx12_texture_access seeds its canonical state with.
+    // Created in COMMON, the layout dx12_texture_access seeds its current state with.
     // A recording list transitions out of it only when its first access needs another layout, so no initial transition is recorded here.
     ComPtr<ID3D12Resource> resource;
     D3D12_HEAP_PROPERTIES heap = {};

@@ -239,6 +239,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/upload-async-test.cc
             tests/transfer/download-async-test.cc
             tests/transfer/texture-async-test.cc
+            tests/transfer/texture-async-interleave-test.cc
             tests/transfer/overlapping-readback-test.cc
             tests/barrier/concurrent-layout-test.cc
             tests/transfer/stream-test.cc

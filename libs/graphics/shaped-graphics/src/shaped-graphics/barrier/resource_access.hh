@@ -85,6 +85,23 @@ enum class sg::texture_layout : sg::u32
     present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
 
+/// Which way an async / streaming transfer of a texture goes, for `cmd.prepare_for_async`.
+/// The layout it resolves to is the backend's, through `context::async_ready_layout`.
+///
+/// **Every backend answers `general` today, whichever way the transfer goes**, so the direction is recorded and then
+/// ignored.
+/// It is kept because a direction-specific layout is postponed rather than ruled out: vulkan would keep more
+/// compression with one, the shape extends to that easily, and it would be hard to add back once dropped.
+/// libs/graphics/shaped-graphics/docs/TODO.md carries what taking it up costs.
+enum class sg::async_direction : sg::u32
+{
+    upload,   ///< host -> texture
+    download, ///< texture -> host
+    /// Both, which forgoes whatever compression a specialized layout would keep once directions are honoured.
+    /// Explicit only, and never a default — the trade is the caller's to make once they know they do both.
+    both,
+};
+
 namespace sg
 {
 /// The accesses that constitute an *unordered write* — one the hardware does not auto-serialize, so a following access, read or write, needs an explicit barrier.

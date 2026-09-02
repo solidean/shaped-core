@@ -34,7 +34,7 @@ TEST("sg vulkan - a read after a write in one list barriers")
     CHECK(barrier.dst_access.has(sg::access_flag::shader_read));
 }
 
-TEST("sg vulkan - a write survives the list that recorded it")
+TEST("sg vulkan - a write survives the list that recorded it, as the next list's entry barrier")
 {
     // The divergence from dx12 in one test.
     // D3D12 decays a buffer to COMMON at ExecuteCommandLists, so a later list needs no barrier and dx12_buffer keeps
@@ -43,13 +43,17 @@ TEST("sg vulkan - a write survives the list that recorded it")
     auto access = vulkan::vulkan_buffer_access();
     access.declare(k_first, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     CHECK(!access.flush(k_first).needed);
-    access.finalize(k_first);
+    CHECK(!access.finalize(k_first).needed); // nothing was submitted before it
 
+    // The second list's body carries nothing: what its first op needs is resolved at ITS finalize, against what the
+    // buffer is really in by then.
     access.declare(k_second, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
-    auto const barrier = access.flush(k_second);
-    REQUIRE(barrier.needed);
-    CHECK(barrier.src_access.has(sg::access_flag::copy_write));
-    CHECK(barrier.dst_access.has(sg::access_flag::shader_read));
+    CHECK(!access.flush(k_second).needed);
+
+    auto const entry = access.finalize(k_second);
+    REQUIRE(entry.needed);
+    CHECK(entry.src_access.has(sg::access_flag::copy_write));
+    CHECK(entry.dst_access.has(sg::access_flag::shader_read));
 }
 
 TEST("sg vulkan - a dropped list leaves nothing for the next one to wait on")
@@ -62,29 +66,29 @@ TEST("sg vulkan - a dropped list leaves nothing for the next one to wait on")
 
     access.declare(k_second, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
     CHECK(!access.flush(k_second).needed);
+    CHECK(!access.finalize(k_second).needed);
 }
 
-TEST("sg vulkan - canonical does not move while another list is still tracking")
+TEST("sg vulkan - a concurrently recorded read is ordered against the write by its entry barrier")
 {
-    // Two lists open at once.
-    // The first to finalize must not promote: the second's slot was seeded from the canonical state, and its already
-    // recorded barriers were computed against it.
+    // The hazard this model exists to remove, and the one synchronization validation reported.
+    // Two lists open at once still see nothing of each other while recording — that is what a private slot is for —
+    // so neither body carries a barrier.
+    // The ordering comes from the second list's entry barrier, computed at its finalize.
     auto access = vulkan::vulkan_buffer_access();
     access.declare(k_first, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
     CHECK(!access.flush(k_first).needed);
-    access.declare(k_second, sg::pipeline_stage_flag::compute, sg::access_flag::shader_write);
+    access.declare(k_second, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
     CHECK(!access.flush(k_second).needed);
 
-    access.finalize(k_first);
+    CHECK(!access.finalize(k_first).needed);
     CHECK(access.active_slot_count == 1);
-    access.finalize(k_second);
-    CHECK(access.active_slot_count == 0);
 
-    // The last one to finalize is what the next list synchronizes against.
-    access.declare(k_first, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read);
-    auto const barrier = access.flush(k_first);
-    REQUIRE(barrier.needed);
-    CHECK(barrier.src_access.has(sg::access_flag::shader_write));
+    auto const entry = access.finalize(k_second);
+    CHECK(access.active_slot_count == 0);
+    REQUIRE(entry.needed);
+    CHECK(entry.src_access.has(sg::access_flag::copy_write));
+    CHECK(entry.dst_access.has(sg::access_flag::shader_read));
 }
 
 TEST("sg vulkan - concurrent lists track the same buffer independently")

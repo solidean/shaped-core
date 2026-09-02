@@ -49,6 +49,7 @@ TEST("sg dx12 - command lists are pooled and reused")
     CHECK(free_lists() == 0);
 
     // A submitted list is closed and returned to the pool immediately (lists are not epoch-gated).
+    // One of them: this list touches no resource, so it never asks for a pre-list.
     auto cmd = c.create_dx12_command_list();
     REQUIRE(cmd.has_value());
     c.submit_dx12_command_list(cc::move(cmd.value()));

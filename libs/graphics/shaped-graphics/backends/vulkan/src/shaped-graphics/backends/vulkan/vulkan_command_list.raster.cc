@@ -69,15 +69,15 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
     //    A layout transition inside a dynamic-rendering instance is not allowed, so this cannot be deferred the way a
     //    dispatch's barriers are.
     for (auto const& ct : info.color_targets)
-        track_texture_access(as_vulkan_texture(ct.view.texture()), ct.view.range(),
-                             sg::pipeline_stage_flag::render_target, sg::access_flag::color_write,
-                             sg::texture_layout::render_target);
+        (void)track_texture_access(as_vulkan_texture(ct.view.texture()), ct.view.range(),
+                                   sg::pipeline_stage_flag::render_target, sg::access_flag::color_write,
+                                   sg::texture_layout::render_target);
     if (info.depth_stencil_target.has_value())
     {
         auto const& dt = info.depth_stencil_target.value();
-        track_texture_access(as_vulkan_texture(dt.view.texture()), dt.view.range(),
-                             sg::pipeline_stage_flag::depth_stencil_target, sg::access_flag::depth_write,
-                             sg::texture_layout::depth_readwrite);
+        (void)track_texture_access(as_vulkan_texture(dt.view.texture()), dt.view.range(),
+                                   sg::pipeline_stage_flag::depth_stencil_target, sg::access_flag::depth_write,
+                                   sg::texture_layout::depth_readwrite);
     }
     flush_barriers();
 
@@ -357,9 +357,9 @@ void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
                 track_buffer_access(*view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
                                     sg::shader_access_of(view.access));
         for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(*tv.texture, tv.range,
-                                 sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+            (void)track_texture_access(*tv.texture, tv.range,
+                                       sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
+                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
     // The input assembler reads the bound vertex buffers; an indexed draw also fetches the index buffer.

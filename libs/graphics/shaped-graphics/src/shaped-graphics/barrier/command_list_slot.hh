@@ -25,9 +25,7 @@ public:
     [[nodiscard]] command_list_slot acquire();
 
     /// Release a previously-acquired slot.
-    /// Returns true iff no slots remain live afterwards.
-    /// That "returns to zero" signal is what lets the releasing command list promote its final layouts to canonical instead of reverting them.
-    bool release(command_list_slot slot);
+    void release(command_list_slot slot);
 
     /// Number of currently-live slots (open command lists).
     [[nodiscard]] int live_count();

@@ -67,6 +67,21 @@ struct sg::backend::dx12::dx12_group_value
     }
 };
 
+namespace sg::backend::dx12
+{
+/// Raise `slot` to `value`, never lower it.
+/// Every cross-queue stamp is monotonic and never reset, so a racing higher value simply wins and a stale one yields a
+/// cheap already-satisfied wait.
+inline void stamp_max(std::atomic<u64>& slot, u64 value)
+{
+    u64 prev = slot.load(std::memory_order_relaxed);
+    while (prev < value && !slot.compare_exchange_weak(prev, value, std::memory_order_release, std::memory_order_relaxed))
+    {
+        // CAS retries; `prev` is refreshed with the current value each time.
+    }
+}
+} // namespace sg::backend::dx12
+
 /// Hands out completion groups and takes them back when their last owner drops them.
 ///
 /// Recycling is what keeps the fence count proportional to the resources that can be copied rather than growing

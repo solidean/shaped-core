@@ -104,12 +104,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
-    // Finalize before closing: what this list leaves in flight is what the next list must synchronize against.
-    // Only the last list tracking a buffer promotes it.
-    // Under the same lock as the submit below, so finalize order matches submit order — the later list's canonical
-    // state has to be the one that actually ran last.
-    // Resolve the recorded queries first: it records copies of its own, so it has to happen before the finalize
-    // barriers below and before the buffer is closed.
+    // Resolve the recorded queries first: it records copies of its own, so it has to happen before the buffer is
+    // closed.
+    // Access tracking is finalized further down, inside the submission lock, because what it produces is the entry
+    // barriers for the *prepended* buffer rather than anything appended to this one.
     cmd->finalize_queries_before_close();
 
     // The forward half of async sync: this list waits for any async upload still pending on a buffer it touches, so
@@ -135,31 +133,43 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
         async_wait_values.push_back(value);
     };
 
+    // A STREAMING transfer's values join the async ones here.
+    // A list that touches a resource a stream is still filling waits for it, which is what makes a stream as safe as
+    // an async transfer rather than a documented data race — and the wait is the caller's cue, so it warns once per
+    // stream unless promote_to_async has already said the wait is intended.
+    auto const add_stream_wait = [&](vulkan_completion_group_handle const& group, u64 value, auto const& resource)
+    {
+        if (group == nullptr || value == 0 || group->has_reached(value))
+            return; // already settled, so nothing waits and nothing is worth saying
+        if (resource->claim_stream_wait_warning(value))
+            CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the "
+                           "whole transfer lands. Wait on the stream handle yourself before using the resource, or "
+                           "call promote_to_async on it if the wait is what you want");
+        add_async_wait(group, value);
+    };
+
     for (auto const& buffer : cmd->_touched_buffers)
     {
         add_async_wait(buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
+        add_stream_wait(buffer->_upload_group, buffer->_pending_stream_copy_value.load(cc::memory_order_acquire), buffer);
+        add_stream_wait(buffer->_download_group, buffer->_pending_stream_download_value.load(cc::memory_order_acquire),
+                        buffer);
     }
 
-    // Textures take the same pair, and must: the async transfer path reads a texture's canonical layout and restores
-    // it, so without these edges that read names a layout the image is only in by luck.
+    // Textures take the same pair, and must: a transfer emits no image barrier of its own, so these edges are the
+    // only thing keeping this list's work off a texture a copy is still reading or writing.
     for (auto const& texture : cmd->_touched_textures)
     {
         add_async_wait(texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(texture->_download_group, texture->_pending_async_download_value.load(cc::memory_order_acquire));
+        add_stream_wait(texture->_upload_group, texture->_pending_stream_copy_value.load(cc::memory_order_acquire),
+                        texture);
+        add_stream_wait(texture->_download_group,
+                        texture->_pending_stream_download_value.load(cc::memory_order_acquire), texture);
     }
 
-    for (auto const& buffer : cmd->_touched_buffers)
-        buffer->finalize_slot(cmd->slot());
-
-    // A texture finalize can return barriers — reverting to the canonical layout when other lists are still open —
-    // so they are recorded onto this list before it closes.
-    for (auto const& texture : cmd->_touched_textures)
-        for (auto const& sub : texture->finalize_slot(cmd->slot()))
-            cmd->_pending_image_barriers.push_back(
-                make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
-    submit_barriers(cmd->_buffer, {}, cmd->_pending_image_barriers);
-    cmd->_pending_image_barriers.clear();
+    CC_ASSERT(cmd->_pending_image_barriers.empty(), "a declared access was never flushed by a GPU op");
 
     VkResult const end = vkEndCommandBuffer(cmd->_buffer);
     CC_ASSERT(end == VK_SUCCESS, "vkEndCommandBuffer failed");
@@ -172,13 +182,13 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             sg::submission_token const t = next;
             next = sg::submission_token(u64(next) + 1);
 
-            // Bring every texture this list is the first to *run* into its resting layout, ahead of this list's own
-            // work.
+            // Everything below runs inside this lock because submission order is what it serializes, and the whole
+            // entry-barrier model rests on that: a resource's current state means "after everything submitted so
+            // far", so it may only be read and written here.
             //
-            // Claimed here rather than while recording, and inside this lock rather than outside it: submission order
-            // is what this lock serializes, so the list that claims is the list that runs first.
-            // Claiming at record time would let a list that recorded second submit first, and its barriers would name
-            // an oldLayout the image is not in yet.
+            // First, bring every texture this list is the first to *run* into its resting layout.
+            // Whole-image, and ahead of the entry barriers, since a list that uses one mip leaves the others in the
+            // UNDEFINED vkCreateImage left them in while the tracker says otherwise.
             cc::vector<VkImageMemoryBarrier2> initial_barriers;
             for (auto const& texture : cmd->_tentative_initial_transitions)
             {
@@ -208,19 +218,38 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 initial_barriers.push_back(vk_barrier);
             }
 
+            // Then the entry barriers: what each resource is really in now, taken to what this list's first use of it
+            // needs.
+            // The list's own body never carries these, which is what makes it independent of when it was recorded.
+            cc::vector<VkBufferMemoryBarrier2> entry_buffer_barriers;
+            cc::vector<VkImageMemoryBarrier2> entry_image_barriers;
+            for (auto const& buffer : cmd->_touched_buffers)
+                if (auto const b = buffer->finalize_slot(cmd->slot()); b.needed)
+                    entry_buffer_barriers.push_back(make_buffer_barrier(buffer->_buffer, b));
+            for (auto const& texture : cmd->_touched_textures)
+                for (auto const& sub : texture->finalize_slot(cmd->slot()))
+                    entry_image_barriers.push_back(
+                        make_image_barrier(texture->_image, sub.range, texture->description().format, sub.barrier));
+
             VkCommandBuffer submitted_buffers[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
             u32 submitted_count = 0;
-            if (!initial_barriers.empty())
+            bool const has_entry_barriers = !entry_buffer_barriers.empty() || !entry_image_barriers.empty();
+            if (!initial_barriers.empty() || has_entry_barriers)
             {
                 auto const pre_begin = VkCommandBufferBeginInfo{
                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                 };
                 VkResult const pre = vkBeginCommandBuffer(cmd->_pre_buffer, &pre_begin);
-                CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (initial transitions) failed");
-                submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                CC_ASSERT(pre == VK_SUCCESS, "vkBeginCommandBuffer (entry transitions) failed");
+                // Two dependencies rather than one: an initial transition and an entry barrier can name the same
+                // subresource, and two barriers on one subresource in a single dependency have no order between them.
+                if (!initial_barriers.empty())
+                    submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                if (has_entry_barriers)
+                    submit_barriers(cmd->_pre_buffer, entry_buffer_barriers, entry_image_barriers);
                 VkResult const pre_end = vkEndCommandBuffer(cmd->_pre_buffer);
-                CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (initial transitions) failed");
+                CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (entry transitions) failed");
                 submitted_buffers[submitted_count++] = cmd->_pre_buffer;
             }
             submitted_buffers[submitted_count++] = cmd->_buffer;
@@ -242,7 +271,12 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             {
                 waits.push_back(cmd->_present_wait);
                 wait_values.push_back(0); // binary, so its value is ignored
-                wait_stages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                // ALL_COMMANDS rather than COLOR_ATTACHMENT_OUTPUT, which is the stage that actually writes the
+                // back buffer.
+                // A wait dst stage creates an execution dependency for that stage and later ones only, and the back
+                // buffer's entry transition runs ahead of every stage in the prepended buffer — so the narrower mask
+                // leaves it unordered against the acquire.
+                wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             }
             u32 const wait_count = u32(waits.size());
 
@@ -294,11 +328,6 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             return t;
         });
 
-    // The submit above may have observed device loss, marked rather than thrown inside the lock.
-    // Surface it now that the lock is released — the context is dead, so the post-submit bookkeeping is moot.
-    if (is_device_lost())
-        throw sg::device_lost_exception(device_loss_reason());
-
     // Cleared only now: the reverse stamp inside the lock above reads these, so they cannot be emptied earlier.
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
@@ -311,9 +340,17 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_pool = VK_NULL_HANDLE;
     cmd->_buffer = VK_NULL_HANDLE;
     cmd->_pre_buffer = VK_NULL_HANDLE;
-    (void)_command_list_slots.release(cmd->slot());
+    _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
+
+    // The submit above may have observed device loss, marked rather than thrown inside the lock.
+    // Surfaced only here, after the bookkeeping above: this list is consumed either way, and throwing over it would
+    // leave its slot claimed and its accesses unfinalized, so the unwind would auto-drop a list whose slot was
+    // already finalized — an assert inside a destructor, which is a terminate rather than a device-lost report.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
+
     return token;
 }
 
@@ -330,8 +367,8 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     CC_ASSERT(!cmd._consumed, "command list already submitted or dropped");
     cmd._consumed = true;
 
-    // The recorded work never runs, so this list's declared accesses leave no hazard behind and canonical is
-    // untouched — including when it was the last list tracking a buffer.
+    // The recorded work never runs, so this list's declared accesses leave no hazard behind and every resource's
+    // current state is untouched.
     cmd.release_queries_on_drop();
 
     for (auto const& buffer : cmd._touched_buffers)
@@ -352,7 +389,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     cmd._pool = VK_NULL_HANDLE;
     cmd._buffer = VK_NULL_HANDLE;
     cmd._pre_buffer = VK_NULL_HANDLE;
-    (void)_command_list_slots.release(cmd.slot());
+    _command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 
@@ -375,14 +412,21 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
         _touched_buffers.push_back(std::static_pointer_cast<vulkan_buffer const>(buffer.shared_from_this()));
 }
 
-void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
-                                               sg::subresource_range range,
-                                               sg::pipeline_stage_flags stages,
-                                               sg::access_flags access,
-                                               sg::texture_layout layout)
+sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture const& texture,
+                                                             sg::subresource_range range,
+                                                             sg::pipeline_stage_flags stages,
+                                                             sg::access_flags access,
+                                                             sg::texture_layout layout)
 {
     if (texture._image == VK_NULL_HANDLE)
-        return;
+        return layout;
+
+    // A texture with a transfer in flight stays in the layout that transfer needs.
+    // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
+    // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
+    // `general` serves this list's access too, at the compression cost combine_layouts already trades away elsewhere.
+    if (texture.has_pending_transfer())
+        layout = sg::texture_layout::general;
 
     texture.declare_access(_slot, range, stages, access, layout);
 
@@ -398,6 +442,23 @@ void vulkan_command_list::track_texture_access(vulkan_texture const& texture,
         if (texture.needs_initial_transition())
             _tentative_initial_transitions.push_back(_touched_textures.back());
     }
+
+    return layout;
+}
+
+void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle texture,
+                                                    sg::texture_layout layout,
+                                                    cc::optional<sg::subresource_range> const& range)
+{
+    auto const t = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+    CC_ASSERT(t != nullptr, "texture is not a vulkan texture");
+    CC_ASSERT(!t->is_expired(), "ensure_layout uses a transient texture past its epoch (expired)");
+
+    // No stages and no access: this asks for a layout and nothing else, so the state machine sees a pure layout
+    // change and the barrier it produces carries the transition alone.
+    auto const whole = sg::subresource_range::whole(subresource_extent_of(t->description()));
+    (void)track_texture_access(*t, range.has_value() ? range.value() : whole, {}, {}, layout);
+    flush_barriers();
 }
 
 void vulkan_command_list::flush_barriers()
@@ -488,8 +549,8 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
     auto const staging = _ctx._upload_inline.reserve(layout.size_in_bytes, layout.alignment);
     cc::memcpy(staging.mapped, pixels.data(), size_t(layout.size_in_bytes));
 
-    track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
-                         sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    auto const dst_layout = track_texture_access(*dst, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_write, sg::texture_layout::copy_dst);
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -501,7 +562,7 @@ void vulkan_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };
-    vkCmdCopyBufferToImage(_buffer, staging.buffer, dst->_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    vkCmdCopyBufferToImage(_buffer, staging.buffer, dst->_image, vk_layout_from(dst_layout), 1, &copy);
 }
 
 sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_texture_handle texture,
@@ -523,8 +584,8 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
 
     auto const staging = _ctx._download_inline.reserve(layout.size_in_bytes, layout.alignment);
 
-    track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
-                         sg::access_flag::copy_read, sg::texture_layout::copy_src);
+    auto const src_layout = track_texture_access(*src, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_read, sg::texture_layout::copy_src);
     flush_barriers();
 
     auto const copy = VkBufferImageCopy{
@@ -535,7 +596,7 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
         .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
         .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
     };
-    vkCmdCopyImageToBuffer(_buffer, src->_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.buffer, 1, &copy);
+    vkCmdCopyImageToBuffer(_buffer, src->_image, vk_layout_from(src_layout), staging.buffer, 1, &copy);
 
     _ctx._download_inline.account_pending_copy(staging.epoch_copies);
 

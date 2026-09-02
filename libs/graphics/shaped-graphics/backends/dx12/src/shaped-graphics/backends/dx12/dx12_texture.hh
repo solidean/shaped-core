@@ -4,6 +4,7 @@
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/dx12_completion_group.hh> // has_pending_transfer reads the fences
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
@@ -80,6 +81,11 @@ public:
     // promote_to_async() is what moves a streaming transfer's value onto the async stamp as well.
     mutable std::atomic<u64> _pending_stream_copy_value = 0;
 
+    // The same, on the download timeline, for a STREAMING readback.
+    // Command-list access tracking reads it so a list touching a texture a stream is still reading waits for it,
+    // and warns once per stream that it did.
+    mutable std::atomic<u64> _pending_stream_download_value = 0;
+
     // Per-command-list subresource access tracking.
     // Mutable: a texture's shape is fixed, but its tracked GPU state changes as lists record against it.
     // Guarded because concurrent lists may record the same texture.
@@ -114,9 +120,33 @@ public:
         return _access.lock([&](dx12_texture_access& t) { return t.flush(slot); });
     }
 
-    /// Finalize `slot` at submit: promote its final layout to the canonical state if this was the last list touching the texture, else revert it to the canonical layout.
-    /// Returns the transitions to emit.
+    /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.
+    ///
+    /// A command list that touches such a texture must not move its layout, even though it waits for the transfer and
+    /// therefore runs after it: the debug layer reads submit-call order, and a list's entry barrier is submitted
+    /// before the copy of a transfer whose actor has not got to it yet.
+    /// Moving the layout there would make that copy name a layout the resource has left.
+    [[nodiscard]] bool has_pending_transfer() const
+    {
+        auto const pending = [](dx12_completion_group_handle const& group, u64 value)
+        { return group != nullptr && value != 0 && !group->has_reached(value); };
+
+        return pending(_upload_group, _pending_async_upload_value.load(std::memory_order_acquire))
+            || pending(_upload_group, _pending_stream_copy_value.load(std::memory_order_acquire))
+            || pending(_download_group, _pending_async_download_value.load(std::memory_order_acquire))
+            || pending(_download_group, _pending_stream_download_value.load(std::memory_order_acquire));
+    }
+
+    /// The layout `range` is in as of the last submitted command list.
     /// Thread-safe.
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range) const
+    {
+        return _access.lock([&](dx12_texture_access& t) { return t.current_layout_of(range); });
+    }
+
+    /// Finalize `slot` at submit: its layouts become the current ones, and the transitions returned are the entry
+    /// barriers the caller executes from a command list prepended to that same submit.
+    /// Thread-safe, and called in submission order.
     [[nodiscard]] cc::small_vector<dx12_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot) const
     {
         return _access.lock([&](dx12_texture_access& t) { return t.finalize(slot); });

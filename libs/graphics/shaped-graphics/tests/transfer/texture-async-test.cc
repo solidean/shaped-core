@@ -16,11 +16,11 @@ using namespace cc::primitive_defines;
 // is ordered against command lists automatically, in both directions, and the caller writes no barrier and polls no
 // future to get it.
 //
-// A texture carries one obligation a buffer does not — a layout — and it is what limits this file's scope.
-// **Interleaving a command list with an async transfer on one texture is not something sg promises yet**: a D3D12
-// copy queue cannot run layout barriers at all, and the pattern is unverifiable on vulkan.
-// So the cases here are the ones both backends really hold to; the interleaved ones wait on the prepare-for-async
-// command, and libs/graphics/shaped-graphics/docs/TODO.md carries them as its gate.
+// A texture carries one obligation a buffer does not — a layout — and it is what splits this file from its neighbour.
+// The cases here need no command list at all, so nothing has to compose with a layout the transfer queue cannot
+// settle for itself.
+// The interleaved ones live in texture-async-interleave-test.cc, and the layout is settled for them by the direct
+// queue before the transfer runs.
 // See libs/graphics/shaped-graphics/docs/concepts/upload.async.md and libs/graphics/shaped-graphics/docs/concepts/barriers.md.
 
 namespace
@@ -42,8 +42,8 @@ cc::pinned_data<byte const> pinned_pattern(isize n, int salt)
     return cc::make_pinned_data(cc::move(out));
 }
 
-// copy_src + copy_dst, plus sampled — so the texture's resting layout is a *specific* one rather than a transfer
-// layout, which is what makes the borrow-and-restore rule observable at all.
+// copy_src + copy_dst, plus sampled — so the layout the texture starts in is a *specific* one rather than a transfer
+// layout, which is what gives the fixup something to do.
 sg::raw_texture_handle make_transfer_texture(sg::context_handle const& ctx)
 {
     sg::texture_description desc;

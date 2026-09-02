@@ -36,7 +36,7 @@ A backend picks this when its underlying API or its own bookkeeping is not safe 
 A command list is still **single-threaded per instance** regardless of the model: one thread records it, then submits or drops it once, in the epoch it was opened in.
 But **several command lists may record concurrently**, even against the same resource.
 Each takes an access-tracking slot that keys its private per-resource state, so their recording shares no mutable state.
-See [barriers](barriers.md) for the slot model and the revert-to-canonical contract on submit.
+See [barriers](barriers.md) for the slot model and the entry barrier each submit prepends.
 
 ## Builds without threads
 

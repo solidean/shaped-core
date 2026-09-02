@@ -16,11 +16,18 @@
 /// A layout is physical: whatever a list leaves a subresource in is what the next list finds, so it has to be tracked
 /// across lists on any backend.
 ///
-/// Each open command list keys its own covering partition by its `command_list_slot`, seeded on first touch from
-/// `canonical`, the between-lists state.
-/// The finalize that drops the active-slot count to zero — the *last* list using the texture — promotes its partition
-/// into canonical, which is the only case that may leave the texture in a new layout.
-/// Every earlier finalize reverts the texture to the canonical layout for the lists still using it.
+/// Each open command list keys its own covering partition by its `command_list_slot`, and that partition starts
+/// **empty**: a box enters at the layout its first declare asks for, not at whatever the texture happened to be in.
+/// What the list needs on entry is recorded as a requirement per box, and the submit resolves it against `_current`,
+/// the between-lists state, prepending the barrier that gets there.
+///
+/// That is what makes a recorded barrier independent of when the list was recorded.
+/// The model it replaces seeded a slot from the between-lists state and had every non-last finalize *revert* the
+/// texture back to it, which held only as long as command lists were the sole things moving a layout — an async
+/// transfer's fixup moving it between one list's submit and another's left the second list's barriers naming a layout
+/// the image had left.
+///
+/// Every finalize writes `_current`, in submission order.
 ///
 /// Pure logic with no Vulkan objects, so it is unit-testable without a device.
 
@@ -90,28 +97,27 @@ class sg::backend::vulkan::vulkan_texture_access
 {
 public:
     vulkan_texture_access(sg::subresource_extent extent, sg::texture_layout resting)
-      : _canonical(extent), _resting_layout(resting)
+      : _current(extent), _resting_layout(resting)
     {
-        // Canonical is the texture's resting layout from the start, and never `undefined`.
+        // The current state is the texture's resting layout from the start, and never `undefined`.
         //
         // vkCreateImage really does leave the image in VK_IMAGE_LAYOUT_UNDEFINED — initialLayout may only be that or
         // PREINITIALIZED — so the image and this tracker disagree until the initial transition runs.
-        // `_needs_initial_transition` is that gap, and claim_initial_transition closes it: whichever submit path gets
-        // there first carries an UNDEFINED -> resting barrier ahead of its own work.
+        // `_needs_initial_transition` is that gap, and claim_initial_transition closes it: the first submit to touch
+        // the texture carries a whole-image UNDEFINED -> resting barrier ahead of its own entry barriers.
         //
-        // Resting somewhere real is what makes revert_to_canonical safe.
-        // A texture handed back to `undefined` is handed back discardable, losing whatever the list just wrote, and
-        // Vulkan rejects the barrier outright: newLayout must never be UNDEFINED.
+        // Whole-image rather than per-entry, because a list that uses one mip leaves the others UNDEFINED while this
+        // tracker would say otherwise.
         //
         // **dx12 needs none of this.**
         // A D3D12 resource is created in COMMON, which is sg's `general`, so its tracker's default state is already
         // true of the resource and there is no gap to close.
-        _canonical.for_each_in(sg::subresource_range::whole(extent),
-                               [resting](sg::resource_access_state& state)
-                               {
-                                   state.curr_layout = resting;
-                                   state.prev_layout = resting;
-                               });
+        _current.for_each_in(sg::subresource_range::whole(extent),
+                             [resting](sg::resource_access_state& state)
+                             {
+                                 state.curr_layout = resting;
+                                 state.prev_layout = resting;
+                             });
     }
 
     /// Claims the one-time UNDEFINED -> resting transition, or reports that someone else already has.
@@ -130,30 +136,35 @@ public:
     /// The layout this texture rests in between lists.
     [[nodiscard]] sg::texture_layout resting_layout() const { return _resting_layout; }
 
-    /// The canonical layout of `range`'s first subresource.
+    /// The current layout of `range`'s first subresource — the state as of the last submitted list.
     ///
     /// For the async transfer path, which records on the *transfer* queue and so cannot go through the per-list
     /// declare/flush rhythm.
-    /// That path **borrows** the layout: it transitions from what it reads here and hands the texture back in exactly
-    /// that layout, so canonical keeps a single writer — a graphics list's finalize.
     /// Whole-subresource transfers are the only ones that reach it, so one layout describes the range.
-    [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range)
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range)
     {
+        // While the initial transition is still owed the image really is UNDEFINED, whatever this tracker says it
+        // rests in — so report that rather than the resting layout.
+        // What reads this is the async fixup, and telling it the truth is what makes it submit the list that claims
+        // the transition instead of copying from an image vkCreateImage has not left yet.
+        if (_needs_initial_transition)
+            return sg::texture_layout::undefined;
+
         sg::texture_layout layout = sg::texture_layout::undefined;
         bool first = true;
-        _canonical.for_each_in(range,
-                               [&](sg::resource_access_state const& state)
-                               {
-                                   if (first)
-                                   {
-                                       layout = state.curr_layout;
-                                       first = false;
-                                   }
-                               });
+        _current.for_each_in(range,
+                             [&](sg::resource_access_state const& state)
+                             {
+                                 if (first)
+                                 {
+                                     layout = state.curr_layout;
+                                     first = false;
+                                 }
+                             });
         return layout;
     }
 
-    /// Accumulate one declared access over `range` for `slot`, seeding from canonical on first touch.
+    /// Accumulate one declared access over `range` for `slot`, entering an untouched box at `layout`.
     /// Call once per binding; several declares of one box merge into a single barrier at flush.
     ///
     /// A box already declared for this op with a different layout is combined via `combine_layouts`, which may fall
@@ -169,6 +180,9 @@ public:
         s.partition.for_each_box_in(range,
                                     [&](sg::subresource_range const&, sg::resource_access_state& state)
                                     {
+                                        if (!state.entry_begun)
+                                            state.begin_entry(layout);
+
                                         sg::texture_layout target = layout;
                                         bool const touched
                                             = state.has_pending_declares() || state.has_pending_layout_change();
@@ -228,7 +242,11 @@ public:
         s.partition.for_each_box_in(sg::subresource_range::whole(s.partition.extent()),
                                     [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
                                     {
-                                        if (!state.has_pending_declares() && !state.has_pending_layout_change())
+                                        if (!state.entry_begun)
+                                            return; // this list never named the box
+                                        if (!state.has_entry_requirement)
+                                            state.capture_entry_requirement(); // the submit prepends this one
+                                        else if (!state.has_pending_declares() && !state.has_pending_layout_change())
                                             return;
                                         auto const b = state.flush();
                                         if (b.needed)
@@ -238,9 +256,11 @@ public:
         return out;
     }
 
-    /// `slot`'s list was submitted.
-    /// The last list using the texture commits its layout as the new canonical; any earlier one hands the texture
-    /// back in the canonical layout, so the lists still open find it as they left it.
+    /// `slot`'s list was submitted, and its final layouts become the current ones.
+    ///
+    /// Returns the barriers taking the texture from what it is really in now to what this list's first use of each
+    /// box needs — the caller prepends them to the same submit, ahead of the list's own work.
+    /// Called in submission order, which is what makes `_current` mean "after everything submitted so far".
     [[nodiscard]] cc::small_vector<vulkan_subresource_barrier, 4> finalize(sg::command_list_slot slot)
     {
         int const i = int(slot);
@@ -249,17 +269,29 @@ public:
         CC_ASSERT(!has_pending_declares(s.partition), "a declared texture access was never flushed by a GPU op");
         CC_ASSERT(_active_slot_count > 0, "finalize of a texture with no active slots");
 
-        cc::small_vector<vulkan_subresource_barrier, 4> out;
-        bool const was_last = --_active_slot_count == 0;
-        if (was_last)
-            _canonical = s.partition;
-        else
-            out = revert_to_canonical(s);
+        auto const out = entry_barriers(s);
+
+        // Only the boxes this list actually used are committed.
+        // A slot's partition starts empty, so its untouched boxes say nothing about the texture — assigning the whole
+        // partition would reset the layout of every subresource the list never named.
+        for (auto const& sbox : s.partition.boxes())
+        {
+            if (!sbox.state.has_entry_requirement)
+                continue;
+
+            auto committed = sbox.state;
+            committed.clear_entry_requirement();
+            _current.for_each_box_in(
+                sbox.range, [&](sg::subresource_range const&, sg::resource_access_state& state) { state = committed; });
+        }
+        _current.try_merge();
+
+        --_active_slot_count;
         s = slot_state{};
         return out;
     }
 
-    /// `slot`'s list was dropped: its work never runs, so the canonical layout is untouched.
+    /// `slot`'s list was dropped: its work never runs, so the current layout is untouched.
     void discard(sg::command_list_slot slot)
     {
         int const i = int(slot);
@@ -292,41 +324,30 @@ private:
         if (!s.active)
         {
             s.active = true;
-            s.partition = _canonical;
+            s.partition = sg::subresource_partition(_current.extent());
             ++_active_slot_count;
         }
         return s;
     }
 
-    // Transition every diverged box back to the canonical layout.
-    // While a list uses the texture the active-slot count is >= 1, so no other list can promote it: canonical is
-    // stable across that list's lifetime, which makes "the layout it entered with" and "the canonical layout" the same.
-    cc::small_vector<vulkan_subresource_barrier, 4> revert_to_canonical(slot_state& s)
+    // The barriers satisfying each box's recorded entry requirement against the state the texture is really in.
+    // Boxes the list never touched carry no requirement and are left where they are.
+    cc::small_vector<vulkan_subresource_barrier, 4> entry_barriers(slot_state const& s)
     {
         cc::small_vector<vulkan_subresource_barrier, 4> out;
-        bool warned = false;
-        for (auto const& cbox : _canonical.boxes())
+        for (auto const& sbox : s.partition.boxes())
         {
-            sg::texture_layout const canonical_layout = cbox.state.prev_layout;
-            s.partition.for_each_box_in(cbox.range,
-                                        [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
-                                        {
-                                            if (state.prev_layout == canonical_layout)
-                                                return;
-                                            state.declare({}, {}, canonical_layout);
-                                            auto const b = state.flush();
-                                            if (b.needed)
-                                            {
-                                                out.push_back({box_range, b});
-                                                if (!warned)
-                                                {
-                                                    CC_LOG_WARNING("reverting a texture to its canonical layout at "
-                                                                   "submit because other command lists are still open "
-                                                                   "(a hidden cost of concurrent recording)");
-                                                    warned = true;
-                                                }
-                                            }
-                                        });
+            if (!sbox.state.has_entry_requirement)
+                continue;
+
+            // Splits _current so its boxes align to this one, which is what makes each emitted range exact.
+            auto const requirement = sbox.state;
+            _current.for_each_box_in(sbox.range,
+                                     [&](sg::subresource_range const& box_range, sg::resource_access_state& state)
+                                     {
+                                         if (auto const b = state.entry_barrier_for(requirement); b.needed)
+                                             out.push_back({box_range, b});
+                                     });
         }
         return out;
     }
@@ -340,8 +361,8 @@ private:
     }
 
     cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
-    sg::subresource_partition _canonical;   // the between-lists state
-    sg::texture_layout _resting_layout;     // what _canonical was seeded to, and what the initial transition targets
+    sg::subresource_partition _current;     // the between-lists state, as of the last submitted list
+    sg::texture_layout _resting_layout;     // what _current was seeded to, and what the initial transition targets
     bool _needs_initial_transition = true;  // the image is still UNDEFINED; whoever claims it fixes that
     int _active_slot_count = 0;             // how many open lists are using this texture
 };

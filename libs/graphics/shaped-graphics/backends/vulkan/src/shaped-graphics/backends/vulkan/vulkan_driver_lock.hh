@@ -2,6 +2,7 @@
 
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 
+#include <mutex> // std::unique_lock, which <shared_mutex> does not itself guarantee
 #include <shared_mutex>
 
 // A process-global reader/writer lock over two Vulkan call families that must not overlap.

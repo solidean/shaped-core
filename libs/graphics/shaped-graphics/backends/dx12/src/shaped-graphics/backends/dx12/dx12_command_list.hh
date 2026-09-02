@@ -51,11 +51,12 @@ public:
 
     /// Record the barriers collected since the last flush in one `Barrier` call, then clear the pending set.
     /// Those are all the buffer and texture hazards an operation's bound/touched resources implied.
-    /// Called just before every GPU op that consumes them, and by the context at submit for the finalize reverts.
+    /// Called just before every GPU op that consumes them, and by nothing else — submit asserts the pending sets are
+    /// empty, since its own entry barriers go into the pre-list rather than through here.
     void flush_barriers();
 
     /// Transition the whole of `texture` to `layout` and record the barrier immediately — declare plus flush.
-    /// The new layout becomes the texture's canonical state when this list submits.
+    /// The new layout becomes the texture's current state when this list submits.
     /// Used by the swapchain to hand a back buffer to Present (sg::texture_layout::present).
     /// The transition is computed from the texture's tracked layout, so it composes with whatever the frame's render pass left it in.
     void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
@@ -71,6 +72,16 @@ public:
     D3D12_COMMAND_LIST_TYPE _queue; // queue the allocator/list belong to — routes them back to the pool
     ComPtr<ID3D12CommandAllocator> _allocator;
     ComPtr<ID3D12GraphicsCommandList> _list;
+
+    // The list executed AHEAD of _list in the same ExecuteCommandLists call, carrying the entry barriers that take
+    // each touched resource from what it is really in to what this list's first use of it needs.
+    //
+    // **Null until something needs it**, since a command list plus its allocator is not free and most submits carry
+    // no entry barrier at all.
+    // dx12_context::acquire_pre_list is the only thing that creates it, and non-null is exactly the condition for
+    // executing it — so emptiness is a property of this list rather than of whatever the caller happened to compute.
+    ComPtr<ID3D12CommandAllocator> _pre_allocator;
+    ComPtr<ID3D12GraphicsCommandList> _pre_list;
 
     // Deferred readback copies recorded into this list, stamped with the submission token and handed to the download system at submit.
     cc::vector<dx12_download_copy_job> _pending_downloads;
@@ -93,7 +104,7 @@ public:
 
     // Barriers collected for the *next* GPU op; empty between ops.
     // flush_barriers() flushes the pending-barrier resources above into these, then records the whole batch in one Barrier call just before the op.
-    // Public so the context can stage the finalize reverts here at submit.
+    // Public so the context can assert at submit that every declared access was flushed by its op.
     cc::vector<D3D12_BUFFER_BARRIER> _pending_buffer_barriers;
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
@@ -151,6 +162,10 @@ public:
 
 protected:
     // Reached through the base's cmd.upload / cmd.download / cmd.copy scopes.
+    void transition_texture_layout(sg::raw_texture_handle texture,
+                                   sg::texture_layout layout,
+                                   cc::optional<sg::subresource_range> const& range) override;
+
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
 
     void upload_bytes_to_texture(sg::raw_texture_handle texture,

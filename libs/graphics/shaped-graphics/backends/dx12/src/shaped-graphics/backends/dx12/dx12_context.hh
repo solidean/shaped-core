@@ -438,6 +438,27 @@ public:
     // Epoch contract — bodies in dx12_epoch.cc.
     // These return sg vocabulary types, so there is no backend-typed twin to forward to; the override is the implementation.
 
+    /// This list's pre-list, created on first request and returned open and recording.
+    ///
+    /// Whatever is recorded into it runs ahead of the list itself, in the same ExecuteCommandLists call.
+    /// A list that never asks for one executes alone, which is the common case and the reason this is lazy.
+    [[nodiscard]] ID3D12GraphicsCommandList* acquire_pre_list(dx12_command_list& cmd);
+
+    /// A D3D12 copy queue cannot run layout barriers at all, so it requires the resource in COMMON whichever way the
+    /// transfer goes — the direction is accepted and ignored.
+    [[nodiscard]] sg::texture_layout async_ready_layout(sg::async_direction) const override
+    {
+        return sg::texture_layout::general;
+    }
+
+    [[nodiscard]] sg::texture_layout current_texture_layout(sg::raw_texture_handle const& texture,
+                                                            sg::subresource_range const& range) const override
+    {
+        auto const t = std::dynamic_pointer_cast<dx12_texture const>(texture);
+        CC_ASSERT(t != nullptr, "texture is not a dx12_texture");
+        return t->current_layout_of(range);
+    }
+
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
     void advance_epoch(cc::optional<int> allowed_in_flight) override;
