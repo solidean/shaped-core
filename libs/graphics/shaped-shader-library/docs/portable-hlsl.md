@@ -2,7 +2,8 @@
 
 The design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
 
-**Nothing here is implemented yet** — the prelude does not exist, and [shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is what authors follow today.
+**The prelude does not exist yet**, so [shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is what authors follow today.
+The compile flags below have landed; the phasing at the end says what is done and what is not.
 What *is* real is the DXC behaviour this rests on: every claim below marked "pinned" is asserted by
 [portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc), so a DXC upgrade that changes one fails a test rather than a shader.
 
@@ -116,8 +117,8 @@ That holds on DXIL as well as SPIR-V, which an annotation-based check could not 
 Today it is a push-constant block on SPIR-V and an auto-assigned `b` register on DXIL.
 On a target without push constants — WebGPU — it has to become an ordinary uniform buffer that the backend feeds, and the shader must not have to know.
 
-It supersedes sv's [`InlineConstantBuffer`](../../shaped-viewer/shaders/inline_constant.hlsli), which is an unguarded `[[vk::push_constant]]` and so does not compile for DXIL.
-Nothing uses that macro today, which is the only reason it has not broken anything.
+It supersedes sv's [`InlineConstantBuffer`](../../shaped-viewer/shaders/inline_constant.hlsli), which does the same job for one library and now carries the same `__spirv__` fork.
+That fork was missing until the spike found it, and nothing used the macro, which is the only reason a DXIL build never hit it.
 
 `SC_SHADER_RECORD`, for DXR local root signatures and Vulkan's `[[vk::shader_record_ext]]`, is a **TODO**: sg has no local root signatures yet, so there is nothing to be portable about.
 
@@ -175,8 +176,9 @@ An unrelated compute shader in the same package legitimately reuses group 0 inde
 
 ## Compile flags
 
-Three silent divergences that no macro can reach.
-All are `-fvk-*`, so they apply to the SPIR-V target only.
+Four silent divergences that no macro can reach, and that a shader cannot annotate away.
+All are `-fvk-*`, so `build_compile_args` adds them to the SPIR-V arm only.
+Each makes SPIR-V behave the way the DXIL arm already does, so one source means one behaviour.
 
 - **`-fvk-use-dx-layout`** — without it, cbuffer member offsets can differ between the targets, so one CPU-side struct cannot serve both.
 - **`-fvk-support-nonzero-base-vertex`** and **`-fvk-support-nonzero-base-instance`** — Vulkan's `VertexIndex`/`InstanceIndex` include the base, D3D's `SV_VertexID`/`SV_InstanceID` do not.
@@ -198,14 +200,14 @@ These change the emitted bytecode, so if any ever becomes a per-compile option r
 
 ## Phasing
 
-1. The compile flags, and sv's unguarded `InlineConstantBuffer` — latent breakage that exists today and is independent of everything else.
-2. The prelude and its macros, mounted at `sc`; port shaped-rendering's shaders, the two examples, then sv's.
-3. The pipeline-creation bijection check.
-4. The all-targets compile and reflection comparison.
-5. The linter rule, and whatever a third backend asks for.
+1. **[done]** The compile flags, and sv's unguarded `InlineConstantBuffer` — latent breakage that existed already and depended on nothing else here.
+2. **[planned]** The prelude and its macros, mounted at `sc`; port shaped-rendering's shaders, the two examples, then sv's.
+3. **[planned]** The pipeline-creation bijection check.
+4. **[planned]** The all-targets compile and reflection comparison.
+5. **[planned]** The linter rule, and whatever a third backend asks for.
 
 Steps 1, 3 and 4 are worth doing even if the prelude never ships.
-Step 1 is also the only one that fixes something already wrong rather than preventing something future.
+Step 1 was also the only one that fixed something already wrong rather than preventing something future.
 
 ## Why slib owns this
 
