@@ -730,11 +730,13 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                 _queue->Wait(w.group->fence.Get(), w.value);
 
             // The pre-list first, so its entry transitions have run before anything the list itself recorded.
-            // Skipped entirely when it carries no barrier, which is the common case: it is still closed above, since
-            // it goes back to the pool either way, but an empty list is not worth an ExecuteCommandLists slot.
-            ID3D12CommandList* lists[2] = {cmd->_pre_list.Get(), cmd->_list.Get()};
-            UINT const list_count = entry_barriers.empty() ? 1u : 2u;
-            _queue->ExecuteCommandLists(list_count, entry_barriers.empty() ? &lists[1] : &lists[0]);
+            //
+            // Always executed, even when `entry_barriers` above is empty.
+            // That vector says what THIS function put in the pre-list, not what the pre-list holds: anything else
+            // that recorded into it — a test driving the declare/emit path by hand, say — would be dropped by an
+            // emptiness check made here.
+            ID3D12CommandList* lists[] = {cmd->_pre_list.Get(), cmd->_list.Get()};
+            _queue->ExecuteCommandLists(2, lists);
 
             // Take a monotonic completion token and signal it under this same lock, so token order equals queue submission and signal order.
             // The queue is free-threaded, but out-of-order signals would move the fence's completed value backwards and break is_submission_complete.
