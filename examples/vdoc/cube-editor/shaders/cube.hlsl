@@ -7,15 +7,17 @@
 // The view-projection rides as inline (root) constants: 64 bytes, rewritten once per frame, which is exactly what
 // they are for. Everything varying per cube is in the instance stream instead.
 
+#include "sc/portable.hlsli"
+
 struct vs_input
 {
-    float3 position : POSITION;
-    float3 normal : NORMAL;
+    SC_VERTEX_INPUT(0) float3 position : POSITION;
+    SC_VERTEX_INPUT(1) float3 normal : NORMAL;
 
-    float3 center : TEXCOORD0;
-    float3 half_extent : TEXCOORD1;
-    float3 color : TEXCOORD2;
-    float highlight : TEXCOORD3;
+    SC_VERTEX_INPUT(2) float3 center : TEXCOORD0;
+    SC_VERTEX_INPUT(3) float3 half_extent : TEXCOORD1;
+    SC_VERTEX_INPUT(4) float3 color : TEXCOORD2;
+    SC_VERTEX_INPUT(5) float highlight : TEXCOORD3;
 };
 
 struct vs_output
@@ -26,17 +28,18 @@ struct vs_output
     float highlight : TEXCOORD0;
 };
 
-cbuffer cube_constants : register(b0)
+struct cube_constants
 {
-    float4x4 gViewProjection;
+    float4x4 view_projection;
 };
+SC_INLINE_CONSTANTS(cube_constants, gConstants);
 
 vs_output main_vs(vs_input input)
 {
     float3 world = input.center + input.position * input.half_extent;
 
     vs_output output;
-    output.position = mul(gViewProjection, float4(world, 1.0f));
+    output.position = mul(gConstants.view_projection, float4(world, 1.0f));
     output.normal = input.normal;
     output.color = input.color;
     output.highlight = input.highlight;

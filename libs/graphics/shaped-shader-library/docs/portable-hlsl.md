@@ -2,8 +2,8 @@
 
 The design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
 
-**The prelude does not exist yet**, so [shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is what authors follow today.
-The compile flags below have landed; the phasing at the end says what is done and what is not.
+[shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is the authoring guide; this is the design behind it.
+The prelude and the compile flags have landed, and the phasing at the end says what has not.
 What *is* real is the DXC behaviour this rests on: every claim below marked "pinned" is asserted by
 [portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc), so a DXC upgrade that changes one fails a test rather than a shader.
 
@@ -201,7 +201,8 @@ These change the emitted bytecode, so if any ever becomes a per-compile option r
 ## Phasing
 
 1. **[done]** The compile flags, and sv's unguarded `InlineConstantBuffer` — latent breakage that existed already and depended on nothing else here.
-2. **[planned]** The prelude and its macros, mounted at `sc`; port shaped-rendering's shaders, the two examples, then sv's.
+2. **[in progress]** The prelude and its macros, mounted at `sc`.
+   shaped-rendering's four shaders and both cube examples are ported; sv's seventeen are not.
 3. **[planned]** The pipeline-creation bijection check.
 4. **[planned]** The all-targets compile and reflection comparison.
 5. **[planned]** The linter rule, and whatever a third backend asks for.

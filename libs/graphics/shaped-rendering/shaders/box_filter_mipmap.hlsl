@@ -11,14 +11,18 @@
 // One dispatch per level, with the source bound as a single-mip view of level N and the target as the UAV of
 // N+1, so no level is ever read and written by the same dispatch.
 
+#include "sc/portable.hlsli"
+
 // A source extent that is odd on some axis means the level is not exactly twice the target there; clamping the
 // second tap keeps it inside the level instead of sampling the border.
 #define HI(base, size) min((base) + 1, (size) - 1)
 
 // -- 1D --------------------------------------------------------------------------------------------------
 
-Texture1D<float4> gSource1D : register(t0);
-RWTexture1D<float4> gTarget1D : register(u0);
+#define SC_GROUP 0
+SC_BINDING Texture1D<float4> gSource1D;
+SC_BINDING RWTexture1D<float4> gTarget1D;
+#undef SC_GROUP
 
 [numthreads(64, 1, 1)] void main_1d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -36,8 +40,10 @@ RWTexture1D<float4> gTarget1D : register(u0);
 
 // -- 1D array --------------------------------------------------------------------------------------------
 
-Texture1DArray<float4> gSource1DArray : register(t0);
-RWTexture1DArray<float4> gTarget1DArray : register(u0);
+#define SC_GROUP 0
+SC_BINDING Texture1DArray<float4> gSource1DArray;
+SC_BINDING RWTexture1DArray<float4> gTarget1DArray;
+#undef SC_GROUP
 
 [numthreads(64, 1, 1)] void main_1d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -57,8 +63,10 @@ RWTexture1DArray<float4> gTarget1DArray : register(u0);
 
 // -- 2D --------------------------------------------------------------------------------------------------
 
-Texture2D<float4> gSource2D : register(t0);
-RWTexture2D<float4> gTarget2D : register(u0);
+#define SC_GROUP 0
+SC_BINDING Texture2D<float4> gSource2D;
+SC_BINDING RWTexture2D<float4> gTarget2D;
+#undef SC_GROUP
 
 [numthreads(8, 8, 1)] void main_2d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -81,8 +89,10 @@ RWTexture2D<float4> gTarget2D : register(u0);
 
 // -- 2D array (also every cube and cube array, whose UAV is a 2D array of faces) ----------------------------
 
-Texture2DArray<float4> gSource2DArray : register(t0);
-RWTexture2DArray<float4> gTarget2DArray : register(u0);
+#define SC_GROUP 0
+SC_BINDING Texture2DArray<float4> gSource2DArray;
+SC_BINDING RWTexture2DArray<float4> gTarget2DArray;
+#undef SC_GROUP
 
 [numthreads(8, 8, 1)] void main_2d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -107,8 +117,10 @@ RWTexture2DArray<float4> gTarget2DArray : register(u0);
 
 // -- 3D --------------------------------------------------------------------------------------------------
 
-Texture3D<float4> gSource3D : register(t0);
-RWTexture3D<float4> gTarget3D : register(u0);
+#define SC_GROUP 0
+SC_BINDING Texture3D<float4> gSource3D;
+SC_BINDING RWTexture3D<float4> gTarget3D;
+#undef SC_GROUP
 
 [numthreads(4, 4, 4)] void main_3d_cs(uint3 id : SV_DispatchThreadID)
 {

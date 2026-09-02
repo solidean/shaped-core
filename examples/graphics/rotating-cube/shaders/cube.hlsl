@@ -1,28 +1,22 @@
 // One cube, six colored faces, two fixed lights.
 //
-// Written for both backends from one source, which is what makes the two annotations below worth reading.
+// Written for both backends from one source, which is what the prelude below is for.
 //
-// `[[vk::location(N)]]` numbers a vertex input. sg identifies an attribute by its HLSL semantic, and SPIR-V has no
+// SC_VERTEX_INPUT(n) numbers a vertex input. sg identifies an attribute by its HLSL semantic, and SPIR-V has no
 // semantics at all — so a Vulkan-targeted shader has to spell out the locations, in the order the sg vertex layout
 // lists its attributes. Getting that order wrong is silent: the pipeline builds and the geometry is wrong.
-// It carries no DXIL meaning, and ssc compiles with -WX, so on that target the attribute is an ignored-attribute
-// error rather than a warning — which is why it forks on `__spirv__` the way the constant block does.
 //
-// `[[vk::push_constant]]` is what makes the constant block sg's inline constants rather than a descriptor.
-// The `__spirv__` fork is DXC's own: the attribute has no DXIL meaning, and a plain `register(b0)` is what a root
-// constant looks like there.
+// SC_INLINE_CONSTANTS is what makes the constant block sg's inline constants rather than a descriptor.
+// A plain ConstantBuffer would be a push-constant block on neither backend: SPIR-V would make it a descriptor in a
+// set, and the pipeline layout binds no such thing.
 
-#ifdef __spirv__
-#define VK_LOCATION(n) [[vk::location(n)]]
-#else
-#define VK_LOCATION(n)
-#endif
+#include "sc/portable.hlsli"
 
 struct vs_input
 {
-    VK_LOCATION(0) float3 position : POSITION;
-    VK_LOCATION(1) float3 normal : NORMAL;
-    VK_LOCATION(2) float3 color : COLOR;
+    SC_VERTEX_INPUT(0) float3 position : POSITION;
+    SC_VERTEX_INPUT(1) float3 normal : NORMAL;
+    SC_VERTEX_INPUT(2) float3 color : COLOR;
 };
 
 struct vs_output
@@ -37,11 +31,7 @@ struct cube_constants
     float4x4 view_projection;
 };
 
-#ifdef __spirv__
-[[vk::push_constant]] ConstantBuffer<cube_constants> gConstants;
-#else
-ConstantBuffer<cube_constants> gConstants : register(b0);
-#endif
+SC_INLINE_CONSTANTS(cube_constants, gConstants);
 
 vs_output main_vs(vs_input input)
 {
