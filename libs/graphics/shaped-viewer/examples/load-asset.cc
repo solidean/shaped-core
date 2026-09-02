@@ -77,10 +77,10 @@ void push_le_f32(cc::vector<byte>& out, f32 value)
     return out;
 }
 
-/// A `.gltf` document: two meshes over ONE box accessor, five nodes placing them, two metallic-roughness materials.
+/// A `.gltf` document: two meshes over ONE box accessor, six nodes placing them, two metallic-roughness materials.
 ///
 /// Both meshes name the same POSITION accessor, so the importer produces two meshes whose geometry hashes identically
-/// — one upload, five instances.
+/// — one upload, six instances.
 /// What differs is the material each names, which is what makes them two meshes rather than one.
 [[nodiscard]] cc::string temple_gltf()
 {

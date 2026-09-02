@@ -406,7 +406,7 @@ babel reads the formats; sv turns a parsed document into things a view can draw.
 The loader holds **no device and opens no file**, which is what buys loading on a worker, loading before a viewer exists, and testing the importer with nothing attached.
 
 ```cpp
-sv::asset_loader(config)         // move-only; the config owns its hooks
+sv::asset_loader(config)         // neither movable nor copyable; the config owns its hooks
 loader.load("car.glb")           // -> result<asset_data>; format from the extension, bytes through the resolver
 loader.load(pinned, fmt, name, base_uri)   // the same from bytes in hand; base_uri is what the document's relative uris join against
 // glTF's normalTexture (with its scale) and occlusionTexture (with its strength) both import as sample transforms
@@ -570,7 +570,6 @@ m.has_table(table) / m.table_capacity(table)
 sv::texture_data::create(pixels, format, w, h, mip_count=1)  // pins + hashes; the SHAPE is part of the key, not just the bytes
 m.acquire_texture(texture_data) -> sv::texture_id   // O(1) if resident; else creates the FULL chain, uploads what was supplied, queues the rest
 m.textures.get_ptr(id) -> texture_record const*     // { texture_2d texture; residency state; i32 uploaded_mips, total_mips; }
-sv::residency                // pending | base_resident | complete — an id never blocks, so what varies is how good it is yet
 m.record_pending_work(cmd) -> i32   // collects whatever transfers landed, then records follow-up work; returns dispatches spent
 m.wait_for_pending_uploads()       // blocks until every transfer lands, then finishes them — for a caller with no frame loop
 m.settling_count()                 // -> isize, payloads still in flight across the managers
@@ -781,8 +780,8 @@ A view whose camera the caller set last frame is skipped, so the two never fight
 ```cpp
 // the whole loop
 auto const mesh = sv::mesh{.geometry = sv::triangle_geometry::create_from_positions(positions),  // once: this pins and hashes
-                                .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors)},
-                                .material = sv::default_material(*sv::acquire_material_library().value())};
+                           .attributes = {sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors)},
+                           .material = sv::default_material(*sv::acquire_material_library().value())};
 
 for (auto f : sv::interactive("main"))
 {
