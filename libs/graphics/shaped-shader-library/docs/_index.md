@@ -10,6 +10,8 @@ It is the front door — sg's vocabulary, this library's packages and reload, an
 
 - [structure](structure.md) — the roadmap with `[done]`/`[in progress]`/`[planned]` status, and the source-tree layout.
   The living design document; update it as the API lands.
+- [portable-hlsl](portable-hlsl.md) — the design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
+  Not implemented yet; the DXC behaviour it rests on is pinned by a test.
 - [coding-guidelines](coding-guidelines.md) — the rules this library rests on that the code cannot enforce itself.
   Short, and worth reading before changing anything here.
 
