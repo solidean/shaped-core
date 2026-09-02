@@ -152,6 +152,18 @@ static const uint sc_group = 1;
 void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = 1u; }
 )";
 
+// An object-like macro whose body looks like a directive.
+// The tokens it expands to are not rescanned as one, so SC_GROUP never becomes defined — the `#` and `define` just
+// land in the token stream where HLSL has to parse them.
+constexpr char const* macro_emitting_define_hlsl = R"(
+#define OPEN_GROUP #define SC_GROUP 0
+OPEN_GROUP
+RWStructuredBuffer<uint> Out;
+
+[numthreads(1, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = SC_GROUP; }
+)";
+
 // --- Q4 ---
 
 // No register() anywhere: DXC assigns them, and reflection is what sg reads back.
@@ -327,6 +339,17 @@ TEST("portable-hlsl spike - Q7 [[vk::binding]] takes a constant expression, and 
     // The carrier has to have one fixed name for the binding macro to read, an END cannot undeclare it, and a second
     // BEGIN in the same file redeclares it — so a macro pair could only ever serve one group per file.
     // That is why the group is an argument on the binding instead.
+}
+
+TEST("portable-hlsl spike - Q7b a macro cannot emit a #define")
+{
+    // The reason a group cannot be opened by a macro call, demonstrated rather than asserted.
+    // A macro's replacement list is rescanned for further macros, never for directives, so this defines nothing.
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    CHECK(!compiles(comp.value(), "a macro expanding to #define", macro_emitting_define_hlsl, sg::shader_stage::compute,
+                    "main", ssc::dxc::compile_target::spirv));
 }
 
 TEST("portable-hlsl spike - Q4 sparse indices within one SPIR-V set")

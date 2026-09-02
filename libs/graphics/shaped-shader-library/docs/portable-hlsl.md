@@ -34,8 +34,9 @@ Neither target needs its numbers spelled out.
 [pinned]
 
 **`[[vk::binding]]` takes a constant expression, not only an integer literal — and it is still not enough for a `BEGIN`/`END` macro pair.**
-A macro cannot emit a preprocessor directive, so a group can only be carried by an HLSL constant that the annotation reads.
-That constant needs one fixed name for the binding macro to find, an `END` cannot undeclare it, and a second `BEGIN` in the same file redeclares it.
+A macro cannot emit a preprocessor directive — a replacement list is rescanned for macros, never for directives — so neither `BEGIN` nor `END` can reach `#define` or `#undef`.
+The only carrier left is an HLSL constant that the annotation reads, and there the asymmetry is real: a declaration cannot be undeclared.
+So `END` has nothing to expand to, and a second `BEGIN` in the same file redeclares the same name.
 A macro pair could therefore only ever serve one group per file, which is why the group is an argument on each binding instead.
 [pinned]
 
