@@ -583,6 +583,28 @@ struct gltf_importer
                 continue;
             }
 
+            // `create_from_indexed_triangles` requires three indices per triangle, each naming a vertex that exists.
+            // babel mirrors the file rather than judging it, and an accessor's declared count is never checked against
+            // that requirement, so a malformed document reaches the contract here.
+            // Refusing it is the difference between a note against one primitive and a CC_ASSERT firing on file
+            // content — which in a release-* preset is not an assert at all, but out-of-range reads inside the BLAS
+            // build.
+            // Both checks cover all four topology branches, since every one of them lands on `indices`.
+            if (indices.size() % 3 != 0)
+            {
+                note(cc::format("gltf: '{}' has {} indices, which is not three per triangle", name, indices.size()));
+                continue;
+            }
+
+            auto out_of_range = false;
+            for (auto const i : indices)
+                out_of_range = out_of_range || i >= u32(vertex_count);
+            if (out_of_range)
+            {
+                note(cc::format("gltf: '{}' names a vertex outside its POSITION accessor of {}", name, vertex_count));
+                continue;
+            }
+
             auto attributes = attributes_of(p, vertex_count, name);
             auto const slot = slot_of(p.material);
 

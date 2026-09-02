@@ -130,6 +130,58 @@ void push_le_f32(cc::vector<byte>& out, f32 value)
     return json;
 }
 
+/// A glTF with TWO primitives over the same three positions: a well-formed one, and one whose index accessor the
+/// test controls.
+///
+/// Two rather than one, because a document nothing survives is a failed import ("nothing to import from"), which
+/// would hide the note the refusal is supposed to leave.
+/// With a good primitive beside it, the refusal is visible as exactly what it should be: one mesh and one issue.
+[[nodiscard]] cc::string two_primitive_gltf(cc::vector<u16> const& bad_indices)
+{
+    auto bin = cc::vector<byte>();
+    for (auto const i : {u16(0), u16(1), u16(2)}) // the well-formed primitive's indices
+        push_le_u16(bin, i);
+    bin.push_back(byte(0));
+    bin.push_back(byte(0));
+
+    auto const bad_offset = bin.size();
+    for (auto const i : bad_indices)
+        push_le_u16(bin, i);
+    while (bin.size() % 4 != 0) // the positions view starts 4-byte aligned
+        bin.push_back(byte(0));
+
+    auto const positions_offset = bin.size();
+    for (auto const v : {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f})
+        push_le_f32(bin, v);
+
+    auto json = cc::string();
+    json += R"({"asset": {"version": "2.0"},
+        "buffers": [{"uri": "data:application/octet-stream;base64,)";
+    json += babel::base64::encode(bin);
+    json += cc::format(R"(", "byteLength": {}}}],)", bin.size());
+    json += cc::format(R"(
+        "bufferViews": [
+            {{"buffer": 0, "byteOffset": 0, "byteLength": 6}},
+            {{"buffer": 0, "byteOffset": {}, "byteLength": {}}},
+            {{"buffer": 0, "byteOffset": {}, "byteLength": 36}}
+        ],
+        "accessors": [
+            {{"bufferView": 0, "componentType": 5123, "count": 3, "type": "SCALAR"}},
+            {{"bufferView": 1, "componentType": 5123, "count": {}, "type": "SCALAR"}},
+            {{"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC3",
+             "min": [0, 0, 0], "max": [1, 1, 0]}}
+        ],
+        "meshes": [{{"name": "tri", "primitives": [
+            {{"attributes": {{"POSITION": 2}}, "indices": 0}},
+            {{"attributes": {{"POSITION": 2}}, "indices": 1}}
+        ]}}],
+        "nodes": [{{"mesh": 0, "name": "root"}}],
+        "scenes": [{{"nodes": [0], "name": "main"}}],
+        "scene": 0}})",
+                       bad_offset, isize(bad_indices.size()) * 2, positions_offset, bad_indices.size());
+    return json;
+}
+
 /// A quad under `red` and a triangle under `blue`, with uvs and one shared normal.
 constexpr cc::string_view two_material_obj = R"obj(
 v 0 0 0
@@ -473,6 +525,46 @@ TEST("sv::asset_loader - a mesh with several primitives becomes several meshes")
         REQUIRE(asset.value().meshes.size() == 1);
         CHECK(asset.value().meshes[0].name == "tri.1");
     }
+}
+
+// `triangle_geometry::create_from_indexed_triangles` requires three indices per triangle, each naming a vertex that
+// exists, and babel checks neither — it mirrors the file.
+// So the importer is where a malformed document has to stop, as a note against the primitive rather than as a
+// CC_ASSERT on file content, which in a release-* preset is no assert at all.
+TEST("sv::asset_loader - an index count that is not three per triangle is refused")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    auto const doc = babel::gltf::read(two_primitive_gltf({0, 1, 2, 0, 1, 2, 0}));
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "broken.gltf");
+    REQUIRE(asset.has_value());
+
+    // One bad primitive is a note against that primitive, not a failed file: its sibling still imports.
+    REQUIRE(asset.value().meshes.size() == 1);
+    CHECK(asset.value().meshes[0].name == "tri.0");
+    REQUIRE(asset.value().issues.size() == 1);
+    CHECK(asset.value().issues[0].contains("not three per triangle"));
+}
+
+TEST("sv::asset_loader - an index naming a vertex the POSITION accessor lacks is refused")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    // Three positions, so 5 is outside them — and a count that IS a multiple of 3, so only the range check can catch it.
+    auto const doc = babel::gltf::read(two_primitive_gltf({0, 1, 5}));
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "broken.gltf");
+    REQUIRE(asset.has_value());
+
+    REQUIRE(asset.value().meshes.size() == 1);
+    CHECK(asset.value().meshes[0].name == "tri.0");
+    REQUIRE(asset.value().issues.size() == 1);
+    CHECK(asset.value().issues[0].contains("outside its POSITION accessor"));
 }
 
 TEST("sv::asset_loader - every mesh crosses, whichever scene names it")
