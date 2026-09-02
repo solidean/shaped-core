@@ -39,6 +39,12 @@ namespace
     return out;
 }
 
+/// What a texture that will never arrive is drawn as.
+///
+/// Opaque magenta, and not the attribute's own placeholder texel: a load that failed must not look like one that
+/// succeeded with the material's defaults, or the only report of it is a log line nobody reads.
+constexpr tg::vec4f k_failed_texel = tg::vec4f(1, 0, 1, 1);
+
 /// The texel a 1x1 placeholder for `a` must hold for the shader to compute the material's own factor from it.
 ///
 /// Both directions are undone here rather than approximated: the swizzle says which CHANNEL each component is read
@@ -299,9 +305,17 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
             // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
             // is for.
             // Pointing the slot elsewhere keeps the permutation stable across the whole load.
-            auto const& texture = record.state == residency::pending
-                                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-                                    : record.texture;
+            //
+            // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
+            // written, so sampling it reads whatever that allocation happened to hold.
+            // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
+            // own factor, `failed` is "never" and wants to be seen.
+            // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
+            auto const& texture
+                = record.state == residency::pending
+                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
+                    : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
+                                                         : record.texture);
 
             auto index = cc::vector<byte>();
             append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_readonly_view())));
