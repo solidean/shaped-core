@@ -16,8 +16,8 @@
 //      indices — so neither target needs the numbers spelled out.
 //   5. across the two targets a binding keeps its name and type but NOT its index, which is why binding groups match
 //      by name and why an equivalence check may not compare indices.
-//   6. a group block is a `#define` / `#undef` pair rather than a macro call, since a macro cannot emit a directive —
-//      and a binding outside one fails on both targets, because the marker's initializer is what rejects it.
+//   6. a macro cannot emit a preprocessor directive, so a group cannot be opened by a macro call — which is why the
+//      group is an argument on each binding rather than a block around a run of them.
 //
 // Every compile runs with default compile_options, so warnings_as_errors is ON — that is the point of (1).
 
@@ -87,9 +87,8 @@ float4 main_vs(vs_input v) : SV_Position { return float4(v.position + v.normal *
 
 // --- The prelude shape Q1 forces, written out in full ---
 //
-// `SC_BINDING` is prefix-only: it emits a marker symbol naming the slot it took, plus the SPIR-V annotation where
-// there is one, and leaves the declaration itself to the author.
-// It takes no group argument — the enclosing block's `SC_GROUP` is where that comes from.
+// `SC_BINDING(group)` is prefix-only: it emits a marker symbol naming the slot it took, plus the SPIR-V annotation
+// where there is one, and leaves the declaration itself to the author.
 // The index comes from __COUNTER__ through two levels of indirection, so it is a plain number by the time it reaches
 // the ## in SC_CAT — and it is expanded exactly once, or the annotation and the marker would disagree.
 //
@@ -105,7 +104,7 @@ constexpr char const* prelude_macros = R"(
 #define SC_ANNOTATE(group, index)
 #endif
 
-#define SC_BINDING SC_BINDING_AT(SC_GROUP, __COUNTER__)
+#define SC_BINDING(group) SC_BINDING_AT(group, __COUNTER__)
 #define SC_BINDING_AT(group, index) SC_BINDING_I(group, index)
 #define SC_BINDING_I(group, index) \
     static const uint SC_CAT(SC_CAT(SC_CAT(sc_slot_taken_, group), _), index) = uint(group); \
@@ -119,37 +118,15 @@ constexpr char const* prelude_macros = R"(
 }
 
 constexpr char const* counter_body = R"(
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> Albedo;
-SC_BINDING SamplerState LinearSampler;
-SC_BINDING RWTexture2D<float4> Output;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> Albedo;
+SC_BINDING(0) SamplerState LinearSampler;
+SC_BINDING(0) RWTexture2D<float4> Output;
 
 [numthreads(8, 8, 1)]
 void main(uint3 tid : SV_DispatchThreadID)
 {
     Output[tid.xy] = Albedo.SampleLevel(LinearSampler, (float2(tid.xy) + 0.5f) / 64.0f, 0);
 }
-)";
-
-// A second block, so the group a binding lands in is the one its block opened rather than a constant baked anywhere.
-constexpr char const* second_group_body = R"(
-#define SC_GROUP 1
-SC_BINDING RWStructuredBuffer<uint> Out;
-#undef SC_GROUP
-
-[numthreads(1, 1, 1)]
-void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = 1u; }
-)";
-
-// A binding outside any block, which is the shape the group blocks exist to forbid.
-// The marker's initializer is what rejects it: with SC_GROUP undefined it reads `uint(SC_GROUP)`, an undeclared
-// identifier — so this fails on BOTH targets, where keying enforcement off the annotation would let DXIL through.
-constexpr char const* outside_block_body = R"(
-SC_BINDING RWStructuredBuffer<uint> Out;
-
-[numthreads(1, 1, 1)]
-void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = 1u; }
 )";
 
 // Two bindings pinned to one slot: the marker symbols collide, which is the compile-time half of the validation story.
@@ -160,6 +137,19 @@ SC_BINDING_AT(0, 3) RWStructuredBuffer<uint> B;
 
 [numthreads(1, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID) { A[tid.x] = B[tid.x]; }
+)";
+
+// --- Q7: could a group be opened by a macro pair rather than a #define? ---
+//
+// A macro cannot emit a preprocessor directive, so SG_BEGIN_BINDING_GROUP(n) cannot #define anything.
+// The only remaining carrier is an HLSL constant the annotation reads, which needs [[vk::binding]] to take a
+// constant expression rather than an integer literal.
+constexpr char const* constant_expression_binding_hlsl = R"(
+static const uint sc_group = 1;
+[[vk::binding(0, sc_group)]] RWStructuredBuffer<uint> Out;
+
+[numthreads(1, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = 1u; }
 )";
 
 // --- Q4 ---
@@ -318,41 +308,25 @@ TEST("portable-hlsl spike - Q3 a duplicate slot marker is a compile error")
     CHECK(result.has_error());
 }
 
-TEST("portable-hlsl spike - Q6 a group block opens and closes the group")
+TEST("portable-hlsl spike - Q7 [[vk::binding]] takes a constant expression, and it still is not enough")
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto result = compile_as(comp.value(), with_prelude(second_group_body), sg::shader_stage::compute, "main",
+    auto result = compile_as(comp.value(), constant_expression_binding_hlsl, sg::shader_stage::compute, "main",
                              ssc::dxc::compile_target::spirv);
     if (result.has_error())
-        CC_LOG_INFO("[spike] group block rejected: {}", result.error().to_string());
+        CC_LOG_INFO("[spike] constant-expression binding rejected: {}", result.error().to_string());
     REQUIRE(result.has_value());
 
-    // The set comes from the block's `#define`, which is the only place the number is written.
-    auto const* out = find_binding(result.value(), "Out");
-    REQUIRE(out != nullptr);
-    REQUIRE(out->group_index.has_value());
-    CHECK(out->group_index.value() == 1u);
-    CHECK(out->index == 0u);
-}
+    // The annotation reads an HLSL constant, so a group *could* be carried by one rather than by a macro.
+    REQUIRE(result.value().bindings[0].group_index.has_value());
+    CHECK(result.value().bindings[0].group_index.value() == 1u);
 
-TEST("portable-hlsl spike - Q6 a binding outside a group block is rejected on both targets")
-{
-    auto comp = ssc::dxc::compiler::create();
-    REQUIRE(comp.has_value());
-    auto& c = comp.value();
-
-    // Both arms matter: on DXIL there is no annotation to go wrong, so only the marker's initializer catches this.
-    // Without it a group-less binding would compile clean on dx12 and fail on vulkan, which is the asymmetry the
-    // whole prelude exists to remove.
-    auto const src = with_prelude(outside_block_body);
-    CHECK(!compiles(c, "a binding outside a block (spirv)", src, sg::shader_stage::compute, "main",
-                    ssc::dxc::compile_target::spirv));
-#ifdef CC_OS_WINDOWS
-    CHECK(!compiles(c, "a binding outside a block (dxil)", src, sg::shader_stage::compute, "main",
-                    ssc::dxc::compile_target::dxil));
-#endif
+    // What this does not buy is a SG_BEGIN_BINDING_GROUP / SG_END_BINDING_GROUP pair.
+    // The carrier has to have one fixed name for the binding macro to read, an END cannot undeclare it, and a second
+    // BEGIN in the same file redeclares it — so a macro pair could only ever serve one group per file.
+    // That is why the group is an argument on the binding instead.
 }
 
 TEST("portable-hlsl spike - Q4 sparse indices within one SPIR-V set")

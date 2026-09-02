@@ -43,10 +43,8 @@ vs_output main_vs(vs_input input)
 
 // Binding group 0 (space0).
 // gSampler is name-matched as a *static* sampler on the group layout, so it costs no per-group descriptor and never varies frame to frame.
-#define SC_GROUP 0
-SC_BINDING Texture2D gTexture;
-SC_BINDING SamplerState gSampler;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D gTexture;
+SC_BINDING(0) SamplerState gSampler;
 
 float4 main_ps(vs_output input) : SV_Target
 {

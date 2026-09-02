@@ -3,10 +3,8 @@
 
 #include "sc/portable.hlsli"
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> source_texture;
-SC_BINDING SamplerState linear_sampler;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> source_texture;
+SC_BINDING(0) SamplerState linear_sampler;
 
 struct vs_output
 {

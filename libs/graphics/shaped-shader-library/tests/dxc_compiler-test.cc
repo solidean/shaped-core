@@ -173,14 +173,9 @@ constexpr char const* k_prelude_shader = R"(
 struct spike_constants { uint scale; };
 SC_INLINE_CONSTANTS(spike_constants, Push);
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> Albedo;
-SC_BINDING SamplerState LinearSampler;
-#undef SC_GROUP
-
-#define SC_GROUP 1
-SC_BINDING RWTexture2D<float4> Output;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> Albedo;
+SC_BINDING(0) SamplerState LinearSampler;
+SC_BINDING(1) RWTexture2D<float4> Output;
 
 [numthreads(8, 8, 1)]
 void main(uint3 tid : SV_DispatchThreadID)

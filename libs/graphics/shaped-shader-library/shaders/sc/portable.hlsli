@@ -10,10 +10,8 @@
 //
 //   #include "sc/portable.hlsli"
 //
-//   #define SC_GROUP 0
-//   SC_BINDING Texture2D<float4> albedo;
-//   SC_BINDING SamplerState linear_sampler;
-//   #undef SC_GROUP
+//   SC_BINDING(0) Texture2D<float4> albedo;
+//   SC_BINDING(0) SamplerState linear_sampler;
 //
 //   SC_INLINE_CONSTANTS(frame_constants, frame);
 
@@ -30,17 +28,15 @@
 #define SC_VERTEX_INPUT(location)
 #endif
 
-// One resource in the group the enclosing block opened.
-// The group comes from SC_GROUP and the index from __COUNTER__, so neither is written per declaration.
+// One resource in `group`, indexed by declaration order.
+// The index is the number that is easy to get wrong and impossible to check by eye, so __COUNTER__ supplies it; the
+// group is one small number that reads where the resource is declared.
 //
 // Every binding also declares a marker constant named for the slot it took, which is what makes two bindings at one
 // slot a redefinition error rather than a collision nobody sees until a pipeline is built.
-// The initializer is load-bearing: outside a group block it reads `uint(SC_GROUP)`, an undeclared identifier, so a
-// binding declared with no group fails on DXIL as well as SPIR-V.
-#define SC_BINDING SC_BINDING_AT(SC_GROUP, __COUNTER__)
+#define SC_BINDING(group) SC_BINDING_AT(group, __COUNTER__)
 
-// A resource at a group and index written out.
-// The one form that works outside a group block, for a slot something outside the shader depends on — a bindless
+// A resource at a group and index both written out, for a slot something outside the shader depends on — a bindless
 // table, or a layout built by hand.
 #define SC_BINDING_AT(group, index) SC_BINDING_I(group, index)
 

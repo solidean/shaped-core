@@ -191,15 +191,13 @@ struct vs_input
 
 SC_INLINE_CONSTANTS(cube_constants, gConstants);
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> albedo;
-SC_BINDING SamplerState linear_sampler;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> albedo;
+SC_BINDING(0) SamplerState linear_sampler;
 ```
 
-- **`SC_BINDING` declares a resource** in the group the enclosing `#define SC_GROUP` block opened.
+- **`SC_BINDING(group)` declares a resource** in that group, indexed by declaration order.
   SPIR-V needs a set and a binding number on every resource; without them an unannotated `b0`/`t0`/`u0` collapse onto the same number and collide.
-  Neither number is written per declaration: the group comes from the block, the index from `__COUNTER__`.
+  The index is never written: `__COUNTER__` supplies it, because it is the number that is easy to get wrong and impossible to check by eye.
   `SC_BINDING_AT(group, index)` writes both out, for a slot something outside the shader depends on.
 - **`SC_VERTEX_INPUT(n)` numbers a vertex input**, in the order the sg vertex layout lists its attributes.
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.

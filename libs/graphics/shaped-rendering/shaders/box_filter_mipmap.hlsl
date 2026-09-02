@@ -19,10 +19,8 @@
 
 // -- 1D --------------------------------------------------------------------------------------------------
 
-#define SC_GROUP 0
-SC_BINDING Texture1D<float4> gSource1D;
-SC_BINDING RWTexture1D<float4> gTarget1D;
-#undef SC_GROUP
+SC_BINDING(0) Texture1D<float4> gSource1D;
+SC_BINDING(0) RWTexture1D<float4> gTarget1D;
 
 [numthreads(64, 1, 1)] void main_1d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -40,10 +38,8 @@ SC_BINDING RWTexture1D<float4> gTarget1D;
 
 // -- 1D array --------------------------------------------------------------------------------------------
 
-#define SC_GROUP 0
-SC_BINDING Texture1DArray<float4> gSource1DArray;
-SC_BINDING RWTexture1DArray<float4> gTarget1DArray;
-#undef SC_GROUP
+SC_BINDING(0) Texture1DArray<float4> gSource1DArray;
+SC_BINDING(0) RWTexture1DArray<float4> gTarget1DArray;
 
 [numthreads(64, 1, 1)] void main_1d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -63,10 +59,8 @@ SC_BINDING RWTexture1DArray<float4> gTarget1DArray;
 
 // -- 2D --------------------------------------------------------------------------------------------------
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> gSource2D;
-SC_BINDING RWTexture2D<float4> gTarget2D;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> gSource2D;
+SC_BINDING(0) RWTexture2D<float4> gTarget2D;
 
 [numthreads(8, 8, 1)] void main_2d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -89,10 +83,8 @@ SC_BINDING RWTexture2D<float4> gTarget2D;
 
 // -- 2D array (also every cube and cube array, whose UAV is a 2D array of faces) ----------------------------
 
-#define SC_GROUP 0
-SC_BINDING Texture2DArray<float4> gSource2DArray;
-SC_BINDING RWTexture2DArray<float4> gTarget2DArray;
-#undef SC_GROUP
+SC_BINDING(0) Texture2DArray<float4> gSource2DArray;
+SC_BINDING(0) RWTexture2DArray<float4> gTarget2DArray;
 
 [numthreads(8, 8, 1)] void main_2d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -117,10 +109,8 @@ SC_BINDING RWTexture2DArray<float4> gTarget2DArray;
 
 // -- 3D --------------------------------------------------------------------------------------------------
 
-#define SC_GROUP 0
-SC_BINDING Texture3D<float4> gSource3D;
-SC_BINDING RWTexture3D<float4> gTarget3D;
-#undef SC_GROUP
+SC_BINDING(0) Texture3D<float4> gSource3D;
+SC_BINDING(0) RWTexture3D<float4> gTarget3D;
 
 [numthreads(4, 4, 4)] void main_3d_cs(uint3 id : SV_DispatchThreadID)
 {

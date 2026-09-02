@@ -4,8 +4,8 @@ The design for a blessed way to write one `.hlsl` that compiles correctly for ev
 
 [shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is the authoring guide; this is the design behind it.
 The prelude and the compile flags have landed, and the phasing at the end says what has not.
-What *is* real is the DXC behaviour this rests on: every claim below marked "pinned" is asserted by
-[portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc), so a DXC upgrade that changes one fails a test rather than a shader.
+Every claim below marked "pinned" is asserted by [portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc).
+A DXC upgrade that changes one of them fails a test rather than a shader.
 
 Today's targets are dx12 (DXIL) and vulkan (SPIR-V), both through DXC.
 Metal and WebGPU are intended, and reuse the same two arms — metal-shaderconverter consumes DXIL, Tint consumes SPIR-V — so a third arm is not automatically a third spelling.
@@ -33,9 +33,10 @@ So a marker symbol whose *name* encodes the slot turns a double-booked slot into
 Neither target needs its numbers spelled out.
 [pinned]
 
-**A binding declared outside a group block is rejected on both targets, as `use of undeclared identifier 'SC_GROUP'`.**
-The marker symbol's initializer is what does it, which is why enforcement does not hang off the annotation.
-DXIL has no annotation, so that version would let a group-less binding through on dx12 alone.
+**`[[vk::binding]]` takes a constant expression, not only an integer literal — and it is still not enough for a `BEGIN`/`END` macro pair.**
+A macro cannot emit a preprocessor directive, so a group can only be carried by an HLSL constant that the annotation reads.
+That constant needs one fixed name for the binding macro to find, an `END` cannot undeclare it, and a second `BEGIN` in the same file redeclares it.
+A macro pair could therefore only ever serve one group per file, which is why the group is an argument on each binding instead.
 [pinned]
 
 One consequence worth stating plainly, because it constrains the validation below: compiled to both targets, the same declaration keeps its **name and type** and changes its **index**.
@@ -65,15 +66,11 @@ One prefix macro replaces the six a register-emitting design would need, and the
 // frame_bindings.hlsli
 #include "sc/portable.hlsli"
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> albedo;
-SC_BINDING SamplerState linear_sampler;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> albedo;
+SC_BINDING(0) SamplerState linear_sampler;
 
-#define SC_GROUP 1
-SC_BINDING RaytracingAccelerationStructure scene;
-SC_BINDING RWTexture2D<float4> output;
-#undef SC_GROUP
+SC_BINDING(1) RaytracingAccelerationStructure scene;
+SC_BINDING(1) RWTexture2D<float4> output;
 
 SC_INLINE_CONSTANTS(frame_constants, frame);
 
@@ -84,34 +81,29 @@ struct vs_input
 };
 ```
 
-**There is no number on a declaration at all.**
-A group is stated once, by the block that opens it, and every binding inside takes its group from there and its index from `__COUNTER__`.
-Neither of the two numbers that used to be easy to get wrong is written per declaration, so neither can drift.
+**The index never appears.**
+It is the number that is easy to get wrong and impossible to check by eye, so `__COUNTER__` supplies it from declaration order.
+The group stays on the line, where it reads with the resource it applies to.
 
-`SC_BINDING_AT(group, index)` pins both where they have to be pinned — a bindless table, or a group whose numbering something outside the shader depends on.
-It is the one form that works outside a block, by design.
+`SC_BINDING_AT(group, index)` pins both, for a slot something outside the shader depends on.
 [bindless_tables.cc](../../shaped-viewer/src/shaped-viewer/resources/bindless_tables.cc) is the case that needs it today.
 
 The vocabulary is sg's, not either API's: **group**, not "set" and not "space"; **binding**, not "register"; **inline constants**, not "push constants" or "root constants".
 The `SC_` prefix is the repo-wide neutral one, already carried by `sc_add_shader_package` and `SC_THREADS`.
 HLSL macros share no namespace with C++ ones, so there is nothing to collide with.
 
-A group block is a `#define` / `#undef` pair rather than a pair of macro calls, because a macro cannot emit a preprocessor directive.
-That is also what makes it enforceable: `SC_BINDING` reads `SC_GROUP`, so outside a block there is no group to read.
+A **group block** — bracketing a run of bindings so the group is stated once — was tried and dropped.
+It cannot be a macro pair, for the reason pinned above, so it can only be a raw `#define SC_GROUP 0` / `#undef SC_GROUP` around the run.
+That reads worse than the number it saves, especially around a single binding.
+It also buys only the structural half of a guarantee the pipeline check below already enforces.
 
 Each binding expands to a marker symbol plus, on SPIR-V only, its annotation:
 
 ```hlsl
-#define SC_BINDING SC_BINDING_AT(SC_GROUP, __COUNTER__)
+#define SC_BINDING(group) SC_BINDING_AT(group, __COUNTER__)
 #define SC_BINDING_AT(group, index) SC_BINDING_I(group, index)
-#define SC_BINDING_I(group, index)                                                          \
-    static const uint SC_CAT(SC_CAT(SC_CAT(sc_slot_taken_, group), _), index) = uint(group); \
-    SC_ANNOTATE(group, index)
+#define SC_BINDING_I(group, index)                                                               static const uint SC_CAT(SC_CAT(SC_CAT(sc_slot_taken_, group), _), index) = uint(group);     SC_ANNOTATE_BINDING(group, index)
 ```
-
-The initializer is load-bearing rather than decoration.
-Outside a block `group` is the unexpanded token `SC_GROUP`, so `uint(group)` is an undeclared identifier and the declaration fails.
-That holds on DXIL as well as SPIR-V, which an annotation-based check could not manage.
 
 `SC_INLINE_CONSTANTS` is the one macro that is a **capability facade** rather than a spelling shortcut.
 Today it is a push-constant block on SPIR-V and an auto-assigned `b` register on DXIL.
@@ -127,9 +119,8 @@ That fork was missing until the spike found it, and nothing used the macro, whic
 Three rules come attached to `__COUNTER__`, and they are consequences rather than preferences.
 
 - The counter is **per file**, so a group shared by shaders in **different files must be declared in one shared `.hlsli`**.
-  Two files that each open group 0 both start from zero, and the two shaders disagree about what lives at each slot.
-  The group block is what makes this hold by construction rather than by discipline.
-  An include guard runs the block once per translation unit, so two shaders that include the header cannot number it differently.
+  Two files that each declare group 0 both start from zero, and the two shaders disagree about what lives at each slot.
+  This is a discipline rather than a guarantee, which is what the pipeline-creation check below is for.
 - Indices come out **unique across groups and sparse within one**.
   Legal in Vulkan, and sg uses a binding's declaration position as its slot index rather than its number, so nothing downstream cares.
 - **Reordering declarations renumbers them.**
@@ -137,12 +128,8 @@ Three rules come attached to `__COUNTER__`, and they are consequences rather tha
 
 ## Validation
 
-Four layers, catching four different failures.
+Three layers, catching three different failures.
 None subsumes another.
-
-**Before anything else, structurally: the group blocks.**
-A binding can only be declared inside one, and an include guard runs a block once per translation unit — so the dangerous shape, one group declared in two places, is not expressible.
-This prevents rather than detects, which is why it comes first even though the pipeline check below would catch what it prevents.
 
 **Within one file, at shader-compile time: the marker symbols.**
 Two bindings claiming one slot is a redefinition error naming the group and index.
@@ -203,7 +190,7 @@ These change the emitted bytecode, so if any ever becomes a per-compile option r
 1. **[done]** The compile flags, and sv's unguarded `InlineConstantBuffer` — latent breakage that existed already and depended on nothing else here.
 2. **[in progress]** The prelude and its macros, mounted at `sc`.
    shaped-rendering's four shaders and both cube examples are ported; sv's seventeen are not.
-3. **[planned]** The pipeline-creation bijection check.
+3. **[done]** The pipeline-creation bijection check, in `try_create_raster_pipeline` and its ray-tracing twin.
 4. **[planned]** The all-targets compile and reflection comparison.
 5. **[planned]** The linter rule, and whatever a third backend asks for.
 

@@ -15,9 +15,7 @@
 
 #include "sc/portable.hlsli"
 
-#define SC_GROUP 0
-SC_BINDING Texture2D<float4> gSource;
-#undef SC_GROUP
+SC_BINDING(0) Texture2D<float4> gSource;
 
 struct vs_output
 {

@@ -21,6 +21,7 @@ add_library(shaped-graphics
     src/shaped-graphics/raytracing/acceleration_structure.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/binding/binding.cc
+    src/shaped-graphics/binding/impl/binding_conflicts.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
     src/shaped-graphics/binding/impl/layout_hash.cc
@@ -206,6 +207,7 @@ if(SC_BUILD_TESTS)
         tests/transfer/stream_handle-test.cc
         tests/transfer/transfer_scheduler-test.cc
         tests/binding/binding-test.cc
+        tests/binding/binding_conflicts-test.cc
         tests/binding/layout_hash-test.cc
         tests/binding/slot-table-test.cc
         tests/binding/shader_codec-test.cc
