@@ -344,10 +344,6 @@ texture_id texture_manager::acquire(texture_data const& texture)
     for (auto mip = i32(0); mip < total_mips; ++mip)
         chain_bytes += impl::mip_byte_size(texture.format, texture.width, texture.height, mip);
 
-    // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
-    // needs no follow-up, one given fewer is waiting on mip generation.
-    auto const state = texture.mip_count == total_mips ? residency::complete : residency::base_resident;
-
     auto const id = insert(texture.hash,
                            {.texture = cc::move(gpu),
                             .state = residency::pending,
@@ -394,6 +390,9 @@ isize texture_manager::collect_settled(cc::vector<texture_id>& newly_resident)
             continue;
         }
 
+        // Whether it is done is the shape's answer, not the upload's: a texture given every level it has room for
+        // needs no follow-up, one given fewer is waiting on mip generation.
+        //
         // A texture whose data carried fewer mips than its shape allows is sampleable but not finished; filling the
         // rest is the owning manager's to schedule, which is why the id is reported rather than just recorded.
         record->state = record->uploaded_mips >= record->total_mips ? residency::complete : residency::base_resident;
