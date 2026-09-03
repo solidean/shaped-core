@@ -57,4 +57,4 @@ asks which it has.
 
 - [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
 - [docs/structure.md](docs/structure.md) — the roadmap and the per-platform support matrix.
-- [todo.md](todo.md) — what is agreed but not built.
+- [docs/todo/](../../../docs/todo/_index.md) — what is agreed but not built, one document per feature.

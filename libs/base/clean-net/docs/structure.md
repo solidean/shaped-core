@@ -49,7 +49,7 @@ clock.
 4. the HTTP/1.1 native backend, the client seam and the convenience calls;
 5. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
 6. the loopback server and WebSocket;
-7. UDP datagrams, in the poll-and-batch shape [todo.md](../todo.md) records.
+7. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
 ## Deliberately out of scope
 
@@ -59,8 +59,9 @@ clock.
   are the difference between a dev server and a product, and this is the former.
 - **Bandwidth shaping and server-side rate limiting.** Client politeness is in; the other two mechanisms that share
   the words "rate limit" are not.
-- **A multiplayer reliability layer.** [todo.md](../todo.md) records the requirements the datagram layer must not
-  foreclose, and the layer itself belongs above this library when something needs it.
+- **A multiplayer reliability layer.**
+  [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records the requirements the datagram layer
+  must not foreclose, and the layer itself belongs above this library when something needs it.
 
 ## The reactor waits with `select` and `poll`, not IOCP and epoll
 

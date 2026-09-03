@@ -45,6 +45,11 @@ Findings we want to keep, but that are not a guide to anything.
 - [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library cheat-sheet format, and where the sheets live.
 - [guides/postmortem.md](guides/postmortem.md) — the session friction review behind `/postmortem`.
 
+## Pending work
+
+- [todo/](todo/_index.md) — what is decided but not yet built, one document per feature.
+  The reasoning travels with the decision, so a session can end anywhere without the argument having to be had again.
+
 ## Per-library docs
 
 - [clean-core](../libs/base/clean-core/readme.md) — the `cc` foundational library.
