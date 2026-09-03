@@ -68,15 +68,6 @@ template <class Op, class T>
     return promise;
 }
 
-/// A promise that is already broken, for a failure discovered before anything reached the reactor.
-template <class T>
-[[nodiscard]] cc::shared_async<T> failed_async(error e)
-{
-    auto promise = cc::make_async_manual<T>();
-    promise->push_error(to_async_error(cc::move(e)));
-    return promise;
-}
-
 /// The socket options that are worth failing a connection over, and the ones that are not.
 void apply_options(impl::native_socket s, ip_family family, tcp_options const& options)
 {
@@ -187,7 +178,7 @@ struct accept_operation final : async_operation<accept_operation, cc::shared_ptr
 cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
 {
     if (!is_open())
-        return failed_async<isize>(
+        return impl::failed_async<isize>(
             {.code = error_code::connection_closed, .native_code = 0, .message = cc::string("the connection is closed")});
 
     auto op = cc::make_unique<receive_operation>();
@@ -206,7 +197,7 @@ cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadli
 cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, deadline d, cancel_token const& token)
 {
     if (!is_open())
-        return failed_async<cc::unit>(
+        return impl::failed_async<cc::unit>(
             {.code = error_code::connection_closed, .native_code = 0, .message = cc::string("the connection is closed")});
 
     auto op = cc::make_unique<send_operation>();
@@ -373,15 +364,15 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpo
     using handle = cc::shared_ptr<tcp_connection>;
 
     if (!impl::sockets_are_supported())
-        return failed_async<handle>(unsupported_here("connecting"));
+        return impl::failed_async<handle>(unsupported_here("connecting"));
     if (!where.address.is_valid())
-        return failed_async<handle>({.code = error_code::invalid_argument,
-                                     .native_code = 0,
-                                     .message = cc::string("connect: the endpoint has no address")});
+        return impl::failed_async<handle>({.code = error_code::invalid_argument,
+                                           .native_code = 0,
+                                           .message = cc::string("connect: the endpoint has no address")});
 
     auto created = impl::create_tcp_socket(where.address.family());
     if (created.has_error())
-        return failed_async<handle>(cc::move(created).error());
+        return impl::failed_async<handle>(cc::move(created).error());
 
     auto const s = created.value();
     apply_options(s, where.address.family(), options);

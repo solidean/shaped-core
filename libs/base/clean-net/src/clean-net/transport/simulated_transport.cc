@@ -27,49 +27,9 @@ namespace cnet
 {
 namespace
 {
-/// Run `fn(source)` once `source` has settled -- at once if it already has.
-///
-/// `fn` is what pushes into whatever promise the caller is holding, so this is the only piece of async plumbing in
-/// this file.
-/// It fires on the thread that completed `source`, which for everything in this library is the reactor thread.
-template <class T, class F>
-void when_ready(cc::shared_async<T> source, F fn)
-{
-    struct waiter
-    {
-        cc::shared_async<T> source;
-        F fn;
-
-        static void fire(void* ctx)
-        {
-            auto* const self = static_cast<waiter*>(ctx);
-            self->fn(self->source);
-            delete self;
-        }
-    };
-
-    auto* const w = new waiter{cc::move(source), cc::move(fn)};
-    if (w->source->install_completion_hook_or_ready(&waiter::fire, w))
-        waiter::fire(w);
-}
-
-/// Hand one settled async's outcome to another promise, whatever it turned out to be.
-template <class T>
-void forward_outcome(cc::shared_async<T> const& from, cc::shared_async<T> const& to)
-{
-    if (from->has_error())
-        to->push_error(from->propagate_error());
-    else
-        to->push_value(from->take_value());
-}
-
-template <class T>
-[[nodiscard]] cc::shared_async<T> failed_async(error e)
-{
-    auto promise = cc::make_async_manual<T>();
-    promise->push_error(to_async_error(cc::move(e)));
-    return promise;
-}
+using impl::failed_async;
+using impl::forward_outcome;
+using impl::when_ready;
 
 [[nodiscard]] error reset_error(cc::string_view what)
 {

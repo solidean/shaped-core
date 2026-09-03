@@ -5,6 +5,7 @@
 
 #include <clean-net/address/endpoint.hh>
 #include <clean-net/address/ip_address.hh>
+#include <clean-net/address/resolver.hh>
 #include <clean-net/common/cancel.hh>
 #include <clean-net/common/clock.hh>
 #include <clean-net/common/deadline.hh>

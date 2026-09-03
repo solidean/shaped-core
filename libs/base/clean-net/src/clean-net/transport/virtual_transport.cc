@@ -178,15 +178,6 @@ struct virtual_accept_op final : impl::io_operation
     }
 };
 
-/// A promise that is already settled, for the common case where nothing has to wait at all.
-template <class T>
-[[nodiscard]] cc::shared_async<T> failed_async(error e)
-{
-    auto promise = cc::make_async_manual<T>();
-    promise->push_error(to_async_error(cc::move(e)));
-    return promise;
-}
-
 /// One end of a virtual connection: it reads from `_inbox` and writes into `_outbox`.
 class virtual_connection final : public connection_backend
 {
@@ -203,13 +194,13 @@ public:
     [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token) override
     {
         if (!_open)
-            return failed_async<isize>({.code = error_code::connection_closed,
-                                        .native_code = 0,
-                                        .message = cc::string("the connection is closed")});
+            return impl::failed_async<isize>({.code = error_code::connection_closed,
+                                              .native_code = 0,
+                                              .message = cc::string("the connection is closed")});
 
         // An already-cancelled token fails here rather than starting work nobody wants.
         if (token.is_cancelled())
-            return failed_async<isize>(
+            return impl::failed_async<isize>(
                 {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
         // The fast path: bytes are already here, so nothing reaches the reactor at all.
@@ -236,9 +227,9 @@ public:
         }
 
         if (_inbox->lock([](pipe_data const& d) { return d.writer_done; }))
-            return failed_async<isize>({.code = error_code::connection_closed,
-                                        .native_code = 0,
-                                        .message = cc::string("the peer closed the connection")});
+            return impl::failed_async<isize>({.code = error_code::connection_closed,
+                                              .native_code = 0,
+                                              .message = cc::string("the peer closed the connection")});
 
         // Nothing to read: park on the reactor, where the deadline is the io_system's own.
         auto op = cc::make_unique<virtual_receive_op>();
@@ -260,19 +251,19 @@ public:
     [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline, cancel_token const& token) override
     {
         if (!_open)
-            return failed_async<cc::unit>({.code = error_code::connection_closed,
-                                           .native_code = 0,
-                                           .message = cc::string("the connection is closed")});
+            return impl::failed_async<cc::unit>({.code = error_code::connection_closed,
+                                                 .native_code = 0,
+                                                 .message = cc::string("the connection is closed")});
 
         // A send never parks here, so this is the only place a cancelled token can stop one.
         if (token.is_cancelled())
-            return failed_async<cc::unit>(
+            return impl::failed_async<cc::unit>(
                 {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
         if (_outbox->lock([](pipe_data const& d) { return d.writer_done; }))
-            return failed_async<cc::unit>({.code = error_code::connection_closed,
-                                           .native_code = 0,
-                                           .message = cc::string("this half of the connection is shut down")});
+            return impl::failed_async<cc::unit>({.code = error_code::connection_closed,
+                                                 .native_code = 0,
+                                                 .message = cc::string("this half of the connection is shut down")});
 
         _outbox->lock(
             [&](pipe_data& d)
@@ -363,7 +354,7 @@ public:
     [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override
     {
         if (token.is_cancelled())
-            return failed_async<cc::shared_ptr<tcp_connection>>(
+            return impl::failed_async<cc::shared_ptr<tcp_connection>>(
                 {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
         auto promise = cc::make_async_manual<cc::shared_ptr<tcp_connection>>();
@@ -477,7 +468,7 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> virtual_network::connect(endpoi
 
     // A virtual connect never waits, so a token can only stop it before it starts.
     if (token.is_cancelled())
-        return failed_async<handle>(
+        return impl::failed_async<handle>(
             {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
     auto server = _state->listeners.lock(
@@ -491,9 +482,9 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> virtual_network::connect(endpoi
 
     // Nobody listening is a refusal rather than a wait, exactly as a real stack answers a closed port.
     if (!server.is_valid())
-        return failed_async<handle>({.code = error_code::connection_refused,
-                                     .native_code = 0,
-                                     .message = cc::format("nothing is listening on {}", where)});
+        return impl::failed_async<handle>({.code = error_code::connection_refused,
+                                           .native_code = 0,
+                                           .message = cc::format("nothing is listening on {}", where)});
 
     auto const client_endpoint = endpoint(where.address, _state->next_port.fetch_add(1));
 

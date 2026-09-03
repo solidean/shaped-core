@@ -74,6 +74,20 @@ struct ip_address;
 
 /// An address and a port -- what a socket connects to or listens on.
 struct endpoint;
+
+/// Which family a caller wants back from a resolve, or both to race.
+enum class address_family_preference : u8;
+
+/// What one resolve is asked for: the family, and how long the caller will wait.
+struct resolve_options;
+
+/// How a resolver is built: its cache lifetime, and the lookup a test substitutes for the OS.
+struct resolver_description;
+
+/// Turns a hostname into addresses, over a blocking `getaddrinfo` on a worker thread.
+///
+/// Absent on wasm, where the browser resolves inside `fetch`.
+class resolver;
 } // namespace cnet
 
 // ---- the reactor ---------------------------------------------------------------------------------------

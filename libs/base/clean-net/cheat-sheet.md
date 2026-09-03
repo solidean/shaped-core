@@ -163,6 +163,27 @@ A handle closed under the reactor can be reissued to the next socket the process
 
 `bytes` passed to `send` must stay alive and unmodified until the operation completes.
 
+## Names
+
+```cpp
+#include <clean-net/address/resolver.hh>
+
+auto r = cnet::resolver::create(io);                     // cc::unique_ptr<resolver>; try_create reports unsupported on wasm
+auto r = cnet::resolver::create(io, {.cache_ttl_ms = 60'000, .lookup = my_table});  // lookup replaces the OS, for a test
+cnet::resolver::is_supported();                          // false on wasm, where the browser resolves inside fetch
+
+r->resolve("example.com");                               // cc::shared_async<cc::vector<ip_address>>
+r->resolve(host, {.family = cnet::address_family_preference::v6_only, .timeout = cnet::deadline::after_secs(5)}, token);
+r->clear_cache(); r->cached_host_count();
+```
+
+Four things worth knowing.
+**A literal address resolves to itself** — no worker, no cache, no failure — so a caller need not know which kind of string it holds.
+**The whole answer is cached whatever the caller asked for**, so a v4-only caller warms the cache for a v6-only one; a failure is never cached.
+**The timeout bounds the wait, not the work**: `getaddrinfo` cannot be aborted, so a resolve that times out still occupies its worker until the OS returns.
+**A resolve is the one operation that can stall a threads-off process**, because the lookup then runs inside `cc::thread_pump_all()`.
+That is accepted rather than mechanised away: such builds are for debugging, and wasm — the configuration that ships single-threaded — never resolves at all.
+
 ## Cancelling
 
 ```cpp

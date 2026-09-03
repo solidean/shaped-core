@@ -20,6 +20,18 @@ rules:
       - src/clean-net/impl/native_socket.cc
 
   - kind: allow-include
+    value: [<netdb.h>, <netinet/in.h>, <sys/socket.h>]
+    reason: getaddrinfo and the sockaddr types its answers arrive in. The Windows half of the same file takes it from ws2tcpip.h, blessed below.
+    files:
+      - src/clean-net/impl/native_resolve.cc
+
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: getaddrinfo on Windows, which ws2tcpip declares in terms of winsock2 -- so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/native_resolve.cc
+
+  - kind: allow-include
     value: [<poll.h>, <sys/socket.h>, <errno.h>]
     reason: the POSIX poller and the error number behind a readiness result. The Windows half of the same file uses select, out of winsock2.h, blessed above.
     files:

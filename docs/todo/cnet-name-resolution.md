@@ -1,6 +1,9 @@
 # cnet: turning a hostname into an address
 
-**Status:** decided, not built.
+**Status:** the resolver is built; happy eyeballs is not.
+`cnet::resolver` — the thread-offloaded `getaddrinfo`, the TTL cache and the lookup seam — landed, and its docs are
+the [cheat sheet](../../libs/base/clean-net/cheat-sheet.md#names) and the header.
+What is left is the racing connect described below.
 
 ## The problem
 

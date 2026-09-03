@@ -9,6 +9,7 @@
 #include <clean-net/common/cancel.hh>
 #include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
+#include <clean-net/impl/async_glue.hh>
 
 /// The seam a transport is reached through, so that "a socket" is not the only thing a connection can be.
 ///
@@ -78,15 +79,6 @@ public:
     listener_backend& operator=(listener_backend const&) = delete;
     virtual ~listener_backend() = default;
 };
-
-namespace cnet
-{
-/// The failure channel value a `cnet::error` becomes.
-///
-/// Every backend goes through this rather than wrapping the error itself, so that one cancelled outcome is spelled
-/// the same way everywhere.
-[[nodiscard]] cc::async_error to_async_error(error e);
-} // namespace cnet
 
 /// Where connections and listeners come from.
 ///

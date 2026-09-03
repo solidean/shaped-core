@@ -26,7 +26,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
 | TLS | browser's | planned (mbedTLS) | planned (mbedTLS) | planned (mbedTLS) | planned |
-| name resolution | — (the browser resolves inside `fetch`) | planned | planned | planned | planned |
+| name resolution | — (the browser resolves inside `fetch`) | **done** | done, unverified | done, unverified | planned |
 
 A dash is `error_code::unsupported`: the platform has no such concept and never will, so a caller decides once at
 startup rather than probing per call.
@@ -42,6 +42,12 @@ Connect, accept, send, receive and half-close as `cc::shared_async`, with deadli
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
 
+**[done]** name resolution.
+`cnet::resolver` runs a blocking `getaddrinfo` on a worker thread, behind a TTL cache, with the lookup itself a seam a
+test replaces.
+Happy eyeballs above it is next, and is what
+[docs/todo/cnet-name-resolution.md](../../../../docs/todo/cnet-name-resolution.md) still records.
+
 **[done]** cancellation.
 `cnet::cancel_token` groups the operations of one request the way a deadline bounds each of them, and a cancelled
 outcome arrives as `cc::async_error::is_cancelled()`.
@@ -54,7 +60,7 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. name resolution — thread-offloaded `getaddrinfo` behind a cache, with happy eyeballs above it;
+1. happy eyeballs — racing the families over the resolver that now exists;
 2. TLS over a vendored mbedTLS, with per-platform trust stores;
 3. the HTTP/1.1 native backend, the client seam and the convenience calls;
 4. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;

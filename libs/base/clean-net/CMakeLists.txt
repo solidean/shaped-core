@@ -15,8 +15,10 @@ add_library(clean-net
     src/clean-net/common/cancel.cc
     src/clean-net/address/ip_address.cc
     src/clean-net/address/endpoint.cc
+    src/clean-net/address/resolver.cc
     src/clean-net/io/io_system.cc
-    src/clean-net/transport/backend.cc
+    src/clean-net/impl/async_glue.cc
+    src/clean-net/impl/native_resolve.cc
     src/clean-net/transport/tcp.cc
     src/clean-net/transport/virtual_transport.cc
     src/clean-net/transport/simulated_transport.cc
@@ -42,6 +44,7 @@ target_sources(clean-net
     src/clean-net/common/clock.hh
     src/clean-net/address/ip_address.hh
     src/clean-net/address/endpoint.hh
+    src/clean-net/address/resolver.hh
     src/clean-net/io/io_system.hh
     src/clean-net/transport/backend.hh
     src/clean-net/transport/tcp.hh
@@ -88,6 +91,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/ip-address-test.cc
         tests/endpoint-test.cc
+        tests/resolver-test.cc
         tests/clock-test.cc
         tests/error-test.cc
         tests/cancel-test.cc
