@@ -160,12 +160,12 @@ struct tls_data
     cc::optional<error> fatal;
 
     // ---- the operations in flight, at most one of each ----
-    cc::shared_async<cc::shared_ptr<tcp_connection>> handshake_promise;
+    cc::shared_async<cc::shared_ptr<stream_connection>> handshake_promise;
 
     /// The wrapper the handshake will hand back, built before the connection exists so that a failure closes it by
     /// dropping this rather than by remembering to.
     /// Cleared the moment it is pushed: the state is reachable from it, and holding both ways is a cycle.
-    cc::shared_ptr<tcp_connection> pending_wrapper;
+    cc::shared_ptr<stream_connection> pending_wrapper;
 
     /// What the underlying reads and writes are given.
     /// Whatever is driving the record layer owns the budget -- the handshake while handshaking, then each read or
@@ -198,7 +198,7 @@ struct tls_data
 
 struct tls_state
 {
-    cc::shared_ptr<tcp_connection> under;
+    cc::shared_ptr<stream_connection> under;
     cancel_token token;
     deadline handshake_deadline;
 
@@ -209,7 +209,7 @@ struct tls_state
     cc::atomic<bool> pumping = false;
     cc::atomic<bool> again = false;
 
-    tls_state(cc::shared_ptr<tcp_connection> u, cancel_token t, deadline d)
+    tls_state(cc::shared_ptr<stream_connection> u, cancel_token t, deadline d)
       : under(cc::move(u)), token(cc::move(t)), handshake_deadline(d)
     {
     }
@@ -262,9 +262,9 @@ struct pump_plan
     bool start_send = false;
     bool start_receive = false;
 
-    cc::optional<cc::shared_async<cc::shared_ptr<tcp_connection>>> finish_handshake;
+    cc::optional<cc::shared_async<cc::shared_ptr<stream_connection>>> finish_handshake;
     cc::optional<error> handshake_failure;
-    cc::shared_ptr<tcp_connection> handshake_value;
+    cc::shared_ptr<stream_connection> handshake_value;
 
     cc::optional<cc::shared_async<isize>> finish_read;
     isize read_bytes = 0;
@@ -831,12 +831,12 @@ void apply_alpn(tls_data& d, cc::vector<cc::string> const& protocols)
 
 /// Build the state, wire the record layer to its buffers, and start the handshake.
 template <class F>
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> start_handshake(cc::shared_ptr<tcp_connection> under,
-                                                                               deadline d,
-                                                                               cancel_token const& token,
-                                                                               F setup)
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> start_handshake(cc::shared_ptr<stream_connection> under,
+                                                                                  deadline d,
+                                                                                  cancel_token const& token,
+                                                                                  F setup)
 {
-    using handle = cc::shared_ptr<tcp_connection>;
+    using handle = cc::shared_ptr<stream_connection>;
 
     if (!under.is_valid() || !under->is_open())
         return impl::failed_async<handle>({.code = error_code::connection_closed,
@@ -869,7 +869,7 @@ template <class F>
     }
 
     // The wrapper exists before the connection does, so a failed handshake closes what it was given by dropping this.
-    auto wrapper = cc::make_shared<tcp_connection>(std::make_unique<tls_connection>(state));
+    auto wrapper = cc::make_shared<stream_connection>(std::make_unique<tls_connection>(state));
     state->data.lock([&](tls_data& data) { data.pending_wrapper = wrapper; });
 
     pump(state);
@@ -882,20 +882,20 @@ bool tls_is_supported()
     return true;
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tls_connect(cc::shared_ptr<tcp_connection> connection,
-                                                             cc::string_view hostname,
-                                                             tls_options const& options,
-                                                             deadline d,
-                                                             cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> tls_connect(cc::shared_ptr<stream_connection> connection,
+                                                                cc::string_view hostname,
+                                                                tls_options const& options,
+                                                                deadline d,
+                                                                cancel_token const& token)
 {
     return start_handshake(cc::move(connection), d, token,
                            [&](tls_data& data) { return setup_client(data, hostname, options); });
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tls_accept(cc::shared_ptr<tcp_connection> connection,
-                                                            tls_server_options const& options,
-                                                            deadline d,
-                                                            cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> tls_accept(cc::shared_ptr<stream_connection> connection,
+                                                               tls_server_options const& options,
+                                                               deadline d,
+                                                               cancel_token const& token)
 {
     return start_handshake(cc::move(connection), d, token, [&](tls_data& data) { return setup_server(data, options); });
 }
@@ -998,7 +998,7 @@ cc::result<tls_identity, error> tls_make_self_signed(cc::string_view hostname)
                         .private_key_pem = cc::string(cc::string_view(key_pem))};
 }
 
-cc::string_view tls_negotiated_alpn(tcp_connection const& connection)
+cc::string_view tls_negotiated_alpn(stream_connection const& connection)
 {
     return connection.negotiated_alpn();
 }
@@ -1013,25 +1013,25 @@ bool tls_is_supported()
     return false;
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tls_connect(cc::shared_ptr<tcp_connection> connection,
-                                                             cc::string_view,
-                                                             tls_options const&,
-                                                             deadline,
-                                                             cancel_token const&)
+cc::shared_async<cc::shared_ptr<stream_connection>> tls_connect(cc::shared_ptr<stream_connection> connection,
+                                                                cc::string_view,
+                                                                tls_options const&,
+                                                                deadline,
+                                                                cancel_token const&)
 {
     if (connection.is_valid())
         connection->close();
-    return impl::failed_async<cc::shared_ptr<tcp_connection>>(unsupported_here("TLS"));
+    return impl::failed_async<cc::shared_ptr<stream_connection>>(unsupported_here("TLS"));
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tls_accept(cc::shared_ptr<tcp_connection> connection,
-                                                            tls_server_options const&,
-                                                            deadline,
-                                                            cancel_token const&)
+cc::shared_async<cc::shared_ptr<stream_connection>> tls_accept(cc::shared_ptr<stream_connection> connection,
+                                                               tls_server_options const&,
+                                                               deadline,
+                                                               cancel_token const&)
 {
     if (connection.is_valid())
         connection->close();
-    return impl::failed_async<cc::shared_ptr<tcp_connection>>(unsupported_here("TLS"));
+    return impl::failed_async<cc::shared_ptr<stream_connection>>(unsupported_here("TLS"));
 }
 
 cc::result<tls_identity, error> tls_make_self_signed(cc::string_view)
@@ -1039,7 +1039,7 @@ cc::result<tls_identity, error> tls_make_self_signed(cc::string_view)
     return cc::error(unsupported_here("generating a certificate"));
 }
 
-cc::string_view tls_negotiated_alpn(tcp_connection const&)
+cc::string_view tls_negotiated_alpn(stream_connection const&)
 {
     return {};
 }

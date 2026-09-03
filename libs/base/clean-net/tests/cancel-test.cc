@@ -2,7 +2,7 @@
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-net/transport/simulated_transport.hh>
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 #include <clean-net/transport/virtual_transport.hh>
 #include <nexus/test.hh>
 
@@ -76,7 +76,7 @@ TEST("cnet - a cancelled token fails an operation before it starts")
     auto const token = cancel_token::create();
     token.cancel();
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto connected = tcp_connect(net, listener->local(), deadline::after_secs(5), {}, token);
 
     // No reactor round trip: a token that is already cancelled means the work was never wanted.
@@ -90,7 +90,7 @@ TEST("cnet - cancelling ends a parked virtual read")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -113,7 +113,7 @@ TEST("cnet - one token cancels every operation it was given to")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -145,7 +145,7 @@ TEST("cnet - cancelling after an operation finished is harmless")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept(deadline::never(), cancel_token());
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -171,7 +171,7 @@ TEST("cnet - cancelling a simulated link does not wait its latency out")
     auto net = virtual_network(*io);
     auto link = simulated_transport(*io, net, {.latency_ms = 5000});
 
-    auto listener = tcp_listener::try_create(link, somewhere()).value();
+    auto listener = stream_listener::try_create(link, somewhere()).value();
 
     auto const token = cancel_token::create();
     auto connected = tcp_connect(link, listener->local(), deadline::never(), {}, token);
@@ -191,7 +191,7 @@ TEST("cnet - cancelling ends a parked read on a real socket")
     if (io.has_error())
         SKIP("this platform has no sockets");
 
-    auto listener = tcp_listener::try_create(*io.value(), somewhere());
+    auto listener = stream_listener::try_create(*io.value(), somewhere());
     if (listener.has_error())
         SKIP("this platform has no sockets");
 

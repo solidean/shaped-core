@@ -9,7 +9,7 @@
 #include <clean-net/common/cancel.hh>
 #include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 
 /// TLS over an established connection.
 ///
@@ -96,18 +96,18 @@ namespace cnet
 /// Fails with `tls_handshake_failed` when the handshake broke down, and with `certificate_rejected` when a chain was
 /// built and refused -- expired, wrong host, unknown issuer.
 /// The two are separate because only the second is a decision.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tls_connect(cc::shared_ptr<tcp_connection> connection,
-                                                                           cc::string_view hostname,
-                                                                           tls_options const& options = {},
-                                                                           deadline d = deadline::after_secs(30),
-                                                                           cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> tls_connect(cc::shared_ptr<stream_connection> connection,
+                                                                              cc::string_view hostname,
+                                                                              tls_options const& options = {},
+                                                                              deadline d = deadline::after_secs(30),
+                                                                              cancel_token const& token = {});
 
 /// Wrap an accepted connection in TLS, as the server.
 /// For the loopback dev server, and for a test that wants both ends of a real handshake.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tls_accept(cc::shared_ptr<tcp_connection> connection,
-                                                                          tls_server_options const& options,
-                                                                          deadline d = deadline::after_secs(30),
-                                                                          cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> tls_accept(cc::shared_ptr<stream_connection> connection,
+                                                                             tls_server_options const& options,
+                                                                             deadline d = deadline::after_secs(30),
+                                                                             cancel_token const& token = {});
 
 /// Make a self-signed identity for `hostname`, generated here and now.
 ///
@@ -123,5 +123,5 @@ namespace cnet
 
 /// The application protocol both ends agreed on, or empty when none was offered or none matched.
 /// Empty for a connection that is not a TLS one at all.
-[[nodiscard]] cc::string_view tls_negotiated_alpn(tcp_connection const& connection);
+[[nodiscard]] cc::string_view tls_negotiated_alpn(stream_connection const& connection);
 } // namespace cnet

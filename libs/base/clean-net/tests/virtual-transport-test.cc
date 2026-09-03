@@ -9,7 +9,7 @@ using namespace cc::primitive_defines;
 
 using namespace cnet;
 
-// The transport with no network under it: the same tcp_listener and tcp_connection a socket would have handed back,
+// The transport with no network under it: the same stream_listener and stream_connection a socket would have handed back,
 // answered in this process.
 // Every test runs unthreaded, and the ones that wait on something use a manual clock -- which is the point of the
 // whole exercise, since nothing here can be slow or machine-dependent.
@@ -60,7 +60,7 @@ TEST("cnet - a virtual connection carries bytes both ways")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
 
     // Port 0 is assigned here too, so the "bind to 0 and ask which port" pattern a test server uses still works.
     CHECK(listener->local().port != 0);
@@ -102,7 +102,7 @@ TEST("cnet - a virtual read parks until the peer writes")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -130,7 +130,7 @@ TEST("cnet - a virtual accept parks until somebody connects")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     CHECK(!accepted->is_ready());
 
@@ -147,7 +147,7 @@ TEST("cnet - a virtual read honours its deadline against the injected clock")
     auto io = io_system::create({.unthreaded = true, .time_source = &clk});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -167,7 +167,7 @@ TEST("cnet - closing a virtual connection ends the peer's read")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -194,7 +194,7 @@ TEST("cnet - a virtual half-close leaves the answer coming")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto listener = tcp_listener::try_create(net, somewhere()).value();
+    auto listener = stream_listener::try_create(net, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -231,10 +231,10 @@ TEST("cnet - two virtual listeners cannot hold the same endpoint")
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
 
-    auto const first = tcp_listener::try_create(net, somewhere(8080));
+    auto const first = stream_listener::try_create(net, somewhere(8080));
     CHECK(first.has_value());
 
-    auto const second = tcp_listener::try_create(net, somewhere(8080));
+    auto const second = stream_listener::try_create(net, somewhere(8080));
     CHECK(second.has_error());
     CHECK(second.error().code == error_code::address_in_use);
 }

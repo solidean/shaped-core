@@ -65,7 +65,7 @@ rules:
     value: [<memory>]
     reason: std::unique_ptr, to OWN a connection_backend through its interface. Neither cc smart pointer has a derived-to-base conversion, and cc::shared_ptr's default traits place the control block at an offset computed from sizeof(T), so an upcast would be unsound rather than merely absent. The same choice slib::impl::watch_backend, sg's backends and cc::threaded_actor's own impl make.
     files:
-      - src/clean-net/transport/tcp.hh
+      - src/clean-net/transport/stream.hh
       - src/clean-net/transport/tcp.cc
       - src/clean-net/transport/virtual_transport.cc
       - src/clean-net/transport/simulated_transport.cc

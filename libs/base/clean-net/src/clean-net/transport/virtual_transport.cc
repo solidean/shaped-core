@@ -66,7 +66,7 @@ using pipe = cc::mutex<pipe_data>;
 struct virtual_listener_state
 {
     endpoint where;
-    cc::mutex<cc::vector<cc::shared_ptr<tcp_connection>>> incoming;
+    cc::mutex<cc::vector<cc::shared_ptr<stream_connection>>> incoming;
     cc::mutex<impl::io_operation*> parked_accept;
 };
 
@@ -131,7 +131,7 @@ struct virtual_receive_op final : impl::io_operation
 /// An accept with nobody knocking yet.
 struct virtual_accept_op final : impl::io_operation
 {
-    cc::shared_async<cc::shared_ptr<tcp_connection>> promise;
+    cc::shared_async<cc::shared_ptr<stream_connection>> promise;
     cc::unique_ptr<virtual_accept_op> self;
     impl::cancel_registration cancellation;
     cc::shared_ptr<virtual_listener_state> listener;
@@ -155,7 +155,7 @@ struct virtual_accept_op final : impl::io_operation
         }
 
         auto taken = listener->incoming.lock(
-            [](cc::vector<cc::shared_ptr<tcp_connection>>& q) -> cc::shared_ptr<tcp_connection>
+            [](cc::vector<cc::shared_ptr<stream_connection>>& q) -> cc::shared_ptr<stream_connection>
             {
                 if (q.empty())
                     return {};
@@ -351,16 +351,16 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> accept(deadline d, cancel_token const& token) override
     {
         if (token.is_cancelled())
-            return impl::failed_async<cc::shared_ptr<tcp_connection>>(
+            return impl::failed_async<cc::shared_ptr<stream_connection>>(
                 {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
-        auto promise = cc::make_async_manual<cc::shared_ptr<tcp_connection>>();
+        auto promise = cc::make_async_manual<cc::shared_ptr<stream_connection>>();
 
         auto taken = _state->incoming.lock(
-            [](cc::vector<cc::shared_ptr<tcp_connection>>& q) -> cc::shared_ptr<tcp_connection>
+            [](cc::vector<cc::shared_ptr<stream_connection>>& q) -> cc::shared_ptr<stream_connection>
             {
                 if (q.empty())
                     return {};
@@ -424,8 +424,8 @@ virtual_network::virtual_network(io_system& io) : _state(cc::make_shared<state>(
 
 virtual_network::~virtual_network() = default;
 
-cc::result<cc::unique_ptr<tcp_listener>, error> virtual_network::listen(endpoint const& where,
-                                                                        tcp_listen_options const& /*options*/)
+cc::result<cc::unique_ptr<stream_listener>, error> virtual_network::listen(endpoint const& where,
+                                                                           tcp_listen_options const& /*options*/)
 {
     if (!where.address.is_valid())
         return cc::error(error{.code = error_code::invalid_argument,
@@ -456,15 +456,15 @@ cc::result<cc::unique_ptr<tcp_listener>, error> virtual_network::listen(endpoint
                            { all.push_back(listener_state); });
 
     CC_LOG_TRACE("virtual listener on {}", bound);
-    return cc::make_unique<tcp_listener>(std::make_unique<virtual_listener>(_state, cc::move(listener_state)));
+    return cc::make_unique<stream_listener>(std::make_unique<virtual_listener>(_state, cc::move(listener_state)));
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> virtual_network::connect(endpoint const& where,
-                                                                          deadline /*d*/,
-                                                                          tcp_options const& /*options*/,
-                                                                          cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> virtual_network::connect(endpoint const& where,
+                                                                             deadline /*d*/,
+                                                                             tcp_options const& /*options*/,
+                                                                             cancel_token const& token)
 {
-    using handle = cc::shared_ptr<tcp_connection>;
+    using handle = cc::shared_ptr<stream_connection>;
 
     // A virtual connect never waits, so a token can only stop it before it starts.
     if (token.is_cancelled())
@@ -491,9 +491,9 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> virtual_network::connect(endpoi
     auto to_server = cc::make_shared<pipe>();
     auto to_client = cc::make_shared<pipe>();
 
-    auto client = cc::make_shared<tcp_connection>(
+    auto client = cc::make_shared<stream_connection>(
         std::make_unique<virtual_connection>(_state->io, to_client, to_server, client_endpoint, where));
-    auto accepted = cc::make_shared<tcp_connection>(
+    auto accepted = cc::make_shared<stream_connection>(
         std::make_unique<virtual_connection>(_state->io, to_server, to_client, where, client_endpoint));
 
     server->incoming.lock([&](cc::vector<handle>& q) { q.push_back(cc::move(accepted)); });

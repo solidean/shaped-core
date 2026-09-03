@@ -2,7 +2,7 @@
 
 #include <clean-core/string/string_view.hh>
 #include <clean-net/address/resolver.hh>
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 
 /// Connecting to a NAME rather than to an address, which is what almost every caller actually has.
 ///
@@ -45,18 +45,18 @@ namespace cnet
 ///
 /// Fails with `name_not_resolved` if the host has no address, and with the FIRST attempt's failure if every attempt
 /// failed -- the first rather than the last, because it is the one about the address the OS thought best.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect_to_host(transport& t,
-                                                                               resolver& r,
-                                                                               cc::string_view host,
-                                                                               i32 port,
-                                                                               connect_options const& options = {},
-                                                                               cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect_to_host(transport& t,
+                                                                                  resolver& r,
+                                                                                  cc::string_view host,
+                                                                                  i32 port,
+                                                                                  connect_options const& options = {},
+                                                                                  cancel_token const& token = {});
 
 /// The same over the platform's own sockets.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect_to_host(io_system& io,
-                                                                               resolver& r,
-                                                                               cc::string_view host,
-                                                                               i32 port,
-                                                                               connect_options const& options = {},
-                                                                               cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect_to_host(io_system& io,
+                                                                                  resolver& r,
+                                                                                  cc::string_view host,
+                                                                                  i32 port,
+                                                                                  connect_options const& options = {},
+                                                                                  cancel_token const& token = {});
 } // namespace cnet

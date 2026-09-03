@@ -2,7 +2,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -49,7 +49,7 @@ template <class T>
 struct server_fixture
 {
     cc::unique_ptr<io_system> io;
-    cc::unique_ptr<tcp_listener> listener;
+    cc::unique_ptr<stream_listener> listener;
 
     [[nodiscard]] bool up() const { return io.is_valid() && listener.is_valid(); }
     [[nodiscard]] endpoint where() const { return listener->local(); }
@@ -64,7 +64,7 @@ struct server_fixture
         return fixture;
     fixture.io = cc::move(io).value();
 
-    auto listener = tcp_listener::try_create(*fixture.io, endpoint(ip_address::loopback(ip_family::v4), 0));
+    auto listener = stream_listener::try_create(*fixture.io, endpoint(ip_address::loopback(ip_family::v4), 0));
     if (listener.has_error())
         return fixture;
     fixture.listener = cc::move(listener).value();
@@ -258,12 +258,12 @@ TEST("cnet - listening needs an address, and reports what it could not do")
     if (io.has_error())
         SKIP("this platform has no sockets");
 
-    auto const nowhere = tcp_listener::try_create(*io.value(), endpoint());
+    auto const nowhere = stream_listener::try_create(*io.value(), endpoint());
     CHECK(nowhere.has_error());
     CHECK(nowhere.error().code == error_code::invalid_argument);
 
     // Port 1 is privileged on every platform we target, so this is either a refusal or a machine running as root.
-    auto const privileged = tcp_listener::try_create(*io.value(), endpoint(ip_address::loopback(ip_family::v4), 1));
+    auto const privileged = stream_listener::try_create(*io.value(), endpoint(ip_address::loopback(ip_family::v4), 1));
     if (privileged.has_error())
     {
         auto const expected = privileged.error().code == error_code::permission_denied

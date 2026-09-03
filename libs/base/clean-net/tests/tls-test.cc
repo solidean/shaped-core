@@ -41,16 +41,16 @@ struct tls_fixture
 {
     cc::unique_ptr<io_system> io;
     cc::unique_ptr<virtual_network> net;
-    cc::unique_ptr<tcp_listener> listener;
+    cc::unique_ptr<stream_listener> listener;
 
-    cc::shared_async<cc::shared_ptr<tcp_connection>> accepted;
-    cc::shared_async<cc::shared_ptr<tcp_connection>> connected;
+    cc::shared_async<cc::shared_ptr<stream_connection>> accepted;
+    cc::shared_async<cc::shared_ptr<stream_connection>> connected;
 
     tls_fixture()
     {
         io = io_system::create({.unthreaded = true});
         net = cc::make_unique<virtual_network>(*io);
-        listener = tcp_listener::try_create(*net, endpoint(ip_address::loopback(ip_family::v4), 0)).value();
+        listener = stream_listener::try_create(*net, endpoint(ip_address::loopback(ip_family::v4), 0)).value();
 
         accepted = listener->accept();
         connected = tcp_connect(*net, listener->local());

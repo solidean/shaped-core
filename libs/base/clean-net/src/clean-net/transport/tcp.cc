@@ -1,4 +1,4 @@
-#include "tcp.hh"
+#include "stream.hh"
 
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -33,7 +33,7 @@ struct async_operation : impl::io_operation
     cc::shared_ptr<impl::socket_holder> socket_owner;
 
     /// What a connect produces, held here until it is pushed.
-    cc::shared_ptr<tcp_connection> pending;
+    cc::shared_ptr<stream_connection> pending;
 
     void on_complete(cc::optional<error> failure) override
     {
@@ -130,7 +130,8 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override;
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> accept(deadline d,
+                                                                             cancel_token const& token) override;
     [[nodiscard]] endpoint local() const override { return _local; }
 
 private:
@@ -150,12 +151,12 @@ struct send_operation final : async_operation<send_operation, cc::unit>
     void deliver() { promise->push_value(cc::unit{}); }
 };
 
-struct connect_operation final : async_operation<connect_operation, cc::shared_ptr<tcp_connection>>
+struct connect_operation final : async_operation<connect_operation, cc::shared_ptr<stream_connection>>
 {
     void deliver() { promise->push_value(cc::move(pending)); }
 };
 
-struct accept_operation final : async_operation<accept_operation, cc::shared_ptr<tcp_connection>>
+struct accept_operation final : async_operation<accept_operation, cc::shared_ptr<stream_connection>>
 {
     io_system* io = nullptr;
     tcp_options options;
@@ -171,7 +172,7 @@ struct accept_operation final : async_operation<accept_operation, cc::shared_ptr
         auto backend = std::make_unique<native_connection>(*io, cc::make_shared<impl::socket_holder>(s),
                                                            local.has_value() ? local.value() : endpoint(),
                                                            peer.has_value() ? peer.value() : endpoint());
-        promise->push_value(cc::make_shared<tcp_connection>(cc::move(backend)));
+        promise->push_value(cc::make_shared<stream_connection>(cc::move(backend)));
     }
 };
 
@@ -211,7 +212,7 @@ cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, d
     return launch<send_operation, cc::unit>(_io, cc::move(op), token);
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadline d, cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> native_listener::accept(deadline d, cancel_token const& token)
 {
     auto op = cc::make_unique<accept_operation>();
     op->kind = impl::io_op_kind::accept;
@@ -221,90 +222,92 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadlin
     op->options = _options;
     op->socket_owner = _socket;
 
-    return launch<accept_operation, cc::shared_ptr<tcp_connection>>(_io, cc::move(op), token);
+    return launch<accept_operation, cc::shared_ptr<stream_connection>>(_io, cc::move(op), token);
 }
 } // namespace
 
 // ---- the handles ---------------------------------------------------------------------------------------
 
-tcp_connection::tcp_connection(std::unique_ptr<connection_backend> backend) : _backend(cc::move(backend))
+stream_connection::stream_connection(std::unique_ptr<connection_backend> backend) : _backend(cc::move(backend))
 {
 }
 
-tcp_connection::~tcp_connection() = default;
+stream_connection::~stream_connection() = default;
 
-cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
+cc::shared_async<isize> stream_connection::receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
 {
     return _backend->receive(buffer, d, token);
 }
 
-cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, deadline d, cancel_token const& token)
+cc::shared_async<cc::unit> stream_connection::send(cc::span<byte const> bytes, deadline d, cancel_token const& token)
 {
     return _backend->send(bytes, d, token);
 }
 
-cc::result<cc::unit, error> tcp_connection::shutdown_send()
+cc::result<cc::unit, error> stream_connection::shutdown_send()
 {
     return _backend->shutdown_send();
 }
 
-endpoint tcp_connection::local() const
+endpoint stream_connection::local() const
 {
     return _backend->local();
 }
 
-endpoint tcp_connection::peer() const
+endpoint stream_connection::peer() const
 {
     return _backend->peer();
 }
 
-cc::string_view tcp_connection::negotiated_alpn() const
+cc::string_view stream_connection::negotiated_alpn() const
 {
     return _backend->negotiated_alpn();
 }
 
-bool tcp_connection::is_open() const
+bool stream_connection::is_open() const
 {
     return _backend->is_open();
 }
 
-void tcp_connection::close()
+void stream_connection::close()
 {
     _backend->close();
 }
 
-tcp_listener::tcp_listener(std::unique_ptr<listener_backend> backend) : _backend(cc::move(backend))
+stream_listener::stream_listener(std::unique_ptr<listener_backend> backend) : _backend(cc::move(backend))
 {
 }
 
-tcp_listener::~tcp_listener() = default;
+stream_listener::~stream_listener() = default;
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_listener::accept(deadline d, cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> stream_listener::accept(deadline d, cancel_token const& token)
 {
     return _backend->accept(d, token);
 }
 
-endpoint tcp_listener::local() const
+endpoint stream_listener::local() const
 {
     return _backend->local();
 }
 
-cc::result<cc::unique_ptr<tcp_listener>, error> tcp_listener::try_create(io_system& io,
-                                                                         endpoint const& where,
-                                                                         tcp_listen_options const& options)
+cc::result<cc::unique_ptr<stream_listener>, error> stream_listener::try_create(io_system& io,
+                                                                               endpoint const& where,
+                                                                               tcp_listen_options const& options)
 {
     auto native = native_transport(io);
     return native.listen(where, options);
 }
 
-cc::result<cc::unique_ptr<tcp_listener>, error> tcp_listener::try_create(transport& t,
-                                                                         endpoint const& where,
-                                                                         tcp_listen_options const& options)
+cc::result<cc::unique_ptr<stream_listener>, error> stream_listener::try_create(transport& t,
+                                                                               endpoint const& where,
+                                                                               tcp_listen_options const& options)
 {
     return t.listen(where, options);
 }
 
-cc::unique_ptr<tcp_listener> tcp_listener::create(io_system& io, endpoint const& where, tcp_listen_options const& options)
+cc::unique_ptr<stream_listener> stream_listener::create(io_system& io,
+                                                        endpoint const& where,
+                                                        tcp_listen_options const& options)
 {
     return try_create(io, where, options).or_throw();
 }
@@ -316,8 +319,8 @@ bool native_transport::is_supported() const
     return impl::sockets_are_supported();
 }
 
-cc::result<cc::unique_ptr<tcp_listener>, error> native_transport::listen(endpoint const& where,
-                                                                         tcp_listen_options const& options)
+cc::result<cc::unique_ptr<stream_listener>, error> native_transport::listen(endpoint const& where,
+                                                                            tcp_listen_options const& options)
 {
     if (!impl::sockets_are_supported())
         return cc::error(unsupported_here("listening"));
@@ -358,15 +361,15 @@ cc::result<cc::unique_ptr<tcp_listener>, error> native_transport::listen(endpoin
         = std::make_unique<native_listener>(_io, cc::make_shared<impl::socket_holder>(s), local.value(), options.socket);
 
     CC_LOG_TRACE("listening on {}", local.value());
-    return cc::make_unique<tcp_listener>(cc::move(backend));
+    return cc::make_unique<stream_listener>(cc::move(backend));
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpoint const& where,
-                                                                           deadline d,
-                                                                           tcp_options const& options,
-                                                                           cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> native_transport::connect(endpoint const& where,
+                                                                              deadline d,
+                                                                              tcp_options const& options,
+                                                                              cancel_token const& token)
 {
-    using handle = cc::shared_ptr<tcp_connection>;
+    using handle = cc::shared_ptr<stream_connection>;
 
     if (!impl::sockets_are_supported())
         return impl::failed_async<handle>(unsupported_here("connecting"));
@@ -393,28 +396,28 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpo
 
     // The connection object exists before the connection does, so a failure closes the socket by dropping this
     // rather than by remembering to.
-    op->pending = cc::make_shared<tcp_connection>(std::make_unique<native_connection>(_io, holder, endpoint(), where));
+    op->pending = cc::make_shared<stream_connection>(std::make_unique<native_connection>(_io, holder, endpoint(), where));
 
     return launch<connect_operation, handle>(_io, cc::move(op), token);
 }
 
 // ---- connect -------------------------------------------------------------------------------------------
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
-                                                             endpoint const& where,
-                                                             deadline d,
-                                                             tcp_options const& options,
-                                                             cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> tcp_connect(io_system& io,
+                                                                endpoint const& where,
+                                                                deadline d,
+                                                                tcp_options const& options,
+                                                                cancel_token const& token)
 {
     auto native = native_transport(io);
     return native.connect(where, d, options, token);
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
-                                                             endpoint const& where,
-                                                             deadline d,
-                                                             tcp_options const& options,
-                                                             cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> tcp_connect(transport& t,
+                                                                endpoint const& where,
+                                                                deadline d,
+                                                                tcp_options const& options,
+                                                                cancel_token const& token)
 {
     return t.connect(where, d, options, token);
 }

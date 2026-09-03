@@ -41,7 +41,7 @@ asks which it has.
 
 ## A connection is not a socket
 
-`cnet::tcp_connection` is a handle over an interface, and three things implement it: the platform's sockets, an
+`cnet::stream_connection` is a handle over an interface, and three things implement it: the platform's sockets, an
 in-process network with no sockets at all, and a wrapper that delays, drops and cuts on the way through to either.
 So "the server died mid-body" and "the response arrives one byte at a time" are unit tests rather than stories, and
 the code under test never learns which transport it got.

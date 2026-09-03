@@ -1,6 +1,6 @@
 #pragma once
 
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 
 /// What a link does to the traffic passing through it.
 ///
@@ -61,13 +61,13 @@ public:
     /// Whatever the transport underneath says: simulating a link cannot conjure one.
     [[nodiscard]] bool is_supported() const override;
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
-                                                                           deadline d,
-                                                                           tcp_options const& options,
-                                                                           cancel_token const& token) override;
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,
+                                                                              deadline d,
+                                                                              tcp_options const& options,
+                                                                              cancel_token const& token) override;
 
-    [[nodiscard]] cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
-                                                                         tcp_listen_options const& options) override;
+    [[nodiscard]] cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
+                                                                            tcp_listen_options const& options) override;
 
     simulated_transport(simulated_transport const&) = delete;
     simulated_transport& operator=(simulated_transport const&) = delete;

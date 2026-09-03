@@ -25,7 +25,7 @@
 /// The cost is that it only exists where our transport does: on wasm the backend is the browser's `fetch`, and
 /// simulation there stays at the HTTP layer.
 ///
-/// `cnet::tcp_connection` and `cnet::tcp_listener` are handles over these interfaces rather than over a socket, so a
+/// `cnet::stream_connection` and `cnet::stream_listener` are handles over these interfaces rather than over a socket, so a
 /// caller writes the same code whatever is underneath.
 
 /// One end of an established connection, whatever is carrying it.
@@ -75,8 +75,8 @@ public:
 class cnet::listener_backend
 {
 public:
-    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token)
-        = 0;
+    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<stream_connection>> accept(deadline d,
+                                                                                     cancel_token const& token) = 0;
 
     /// What the listener actually bound to, port included.
     [[nodiscard]] virtual endpoint local() const = 0;
@@ -92,7 +92,7 @@ public:
 /// One transport is the platform's own sockets; others answer without a network at all, or misbehave on the way
 /// through to another one.
 /// No method here takes a default argument: a default on a virtual binds to the static type of the call, so the
-/// defaults live on `cnet::tcp_connect` and `cnet::tcp_listener::try_create` instead.
+/// defaults live on `cnet::tcp_connect` and `cnet::stream_listener::try_create` instead.
 class cnet::transport
 {
 public:
@@ -100,14 +100,15 @@ public:
     /// False for the native one on wasm, where the browser offers no socket of any kind.
     [[nodiscard]] virtual bool is_supported() const = 0;
 
-    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
-                                                                                   deadline d,
-                                                                                   tcp_options const& options,
-                                                                                   cancel_token const& token) = 0;
+    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,
+                                                                                      deadline d,
+                                                                                      tcp_options const& options,
+                                                                                      cancel_token const& token) = 0;
 
     /// Binding and listening never waits, so there is nothing here for a token to cancel.
-    [[nodiscard]] virtual cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
-                                                                                 tcp_listen_options const& options) = 0;
+    [[nodiscard]] virtual cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
+                                                                                    tcp_listen_options const& options)
+        = 0;
 
     transport() = default;
     transport(transport const&) = delete;

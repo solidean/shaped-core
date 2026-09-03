@@ -31,7 +31,7 @@ namespace cnet
 {
 namespace
 {
-using handle = cc::shared_ptr<tcp_connection>;
+using handle = cc::shared_ptr<stream_connection>;
 
 /// What every callback of one race shares.
 struct race_data

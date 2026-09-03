@@ -59,7 +59,7 @@ TEST("cnet - a simulated link with no conditions set is the transport underneath
 {
     auto fixture = sim_fixture({});
 
-    auto listener = tcp_listener::try_create(*fixture.link, somewhere()).value();
+    auto listener = stream_listener::try_create(*fixture.link, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(*fixture.link, listener->local());
 
@@ -82,7 +82,7 @@ TEST("cnet - latency is paid on the injected clock rather than in wall-clock tim
 {
     auto fixture = sim_fixture({.latency_ms = 200});
 
-    auto listener = tcp_listener::try_create(*fixture.link, somewhere()).value();
+    auto listener = stream_listener::try_create(*fixture.link, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(*fixture.link, listener->local());
 
@@ -115,7 +115,7 @@ TEST("cnet - a link cut after N bytes kills the connection mid-stream")
 {
     auto fixture = sim_fixture({.reset_after_bytes = 8});
 
-    auto listener = tcp_listener::try_create(*fixture.link, somewhere()).value();
+    auto listener = stream_listener::try_create(*fixture.link, somewhere()).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(*fixture.link, listener->local());
     CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
@@ -149,7 +149,7 @@ TEST("cnet - a link that loses everything refuses the connection")
 {
     auto fixture = sim_fixture({.loss_probability = 1.0f});
 
-    auto listener = tcp_listener::try_create(*fixture.link, somewhere()).value();
+    auto listener = stream_listener::try_create(*fixture.link, somewhere()).value();
     auto connected = tcp_connect(*fixture.link, listener->local());
 
     CHECK(connected->is_ready());
@@ -165,7 +165,7 @@ TEST("cnet - the same seed loses the same operations")
     for (i32 run = 0; run < 2; ++run)
     {
         auto fixture = sim_fixture(conditions);
-        auto listener = tcp_listener::try_create(*fixture.link, somewhere()).value();
+        auto listener = stream_listener::try_create(*fixture.link, somewhere()).value();
 
         auto attempts = cc::vector<bool>();
         for (i32 i = 0; i < 12; ++i)

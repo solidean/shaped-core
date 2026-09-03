@@ -140,13 +140,13 @@ A **manual** operation completes when its owner signals it, and times out if nob
 ## TCP
 
 ```cpp
-#include <clean-net/transport/tcp.hh>
+#include <clean-net/transport/stream.hh>
 
-cnet::tcp_connect(io, where);                           // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::tcp_connect(io, where);                           // cc::shared_async<cc::shared_ptr<stream_connection>>
 cnet::tcp_connect(io, where, cnet::deadline::after_secs(10), {.no_delay = true, .v6_only = true});
 
-cnet::tcp_listener::try_create(io, endpoint(addr, 0));  // port 0 = pick one; local() says which
-listener->accept();                                     // cc::shared_async<cc::shared_ptr<tcp_connection>>, no deadline by default
+cnet::stream_listener::try_create(io, endpoint(addr, 0));  // port 0 = pick one; local() says which
+listener->accept();                                     // cc::shared_async<cc::shared_ptr<stream_connection>>, no deadline by default
 listener->local();                                      // endpoint
 
 conn->receive(buffer);                                  // cc::shared_async<isize> — the FIRST bytes, not a full buffer
@@ -189,7 +189,7 @@ That is accepted rather than mechanised away: such builds are for debugging, and
 ```cpp
 #include <clean-net/transport/connect.hh>
 
-cnet::connect_to_host(io, *resolver, "example.com", 443);          // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::connect_to_host(io, *resolver, "example.com", 443);          // cc::shared_async<cc::shared_ptr<stream_connection>>
 cnet::connect_to_host(transport, *resolver, host, port, {.timeout = cnet::deadline::after_secs(10),
                                                          .attempt_delay_ms = 250}, token);
 ```
@@ -206,7 +206,7 @@ If every attempt fails you get the FIRST failure, which is the one about the add
 
 cnet::tls_is_supported();                               // false on wasm, where the browser holds the TLS
 
-cnet::tls_connect(connection, "example.com");           // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::tls_connect(connection, "example.com");           // cc::shared_async<cc::shared_ptr<stream_connection>>
 cnet::tls_connect(connection, host, {.trust = {.additional_roots_pem = {my_ca}}, .alpn = {"http/1.1"}}, d, token);
 cnet::tls_accept(connection, {.identity = id, .alpn = {"http/1.1"}});   // the server side
 cnet::tls_negotiated_alpn(*conn);                       // cc::string_view, empty if none was agreed
@@ -251,7 +251,7 @@ auto const child = token.create_child();   // cancelled by its parent, and cance
 auto net = cnet::virtual_network(io);                   // an in-process network: no socket, no port, no loopback
 auto link = cnet::simulated_transport(io, net, {.latency_ms = 50, .reset_after_bytes = 4096, .seed = 7});
 
-cnet::tcp_listener::try_create(link, where);            // the transport overloads of the same factories
+cnet::stream_listener::try_create(link, where);            // the transport overloads of the same factories
 cnet::tcp_connect(link, where);                         // ...so the code under test never changes
 ```
 

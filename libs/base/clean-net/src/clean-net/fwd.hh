@@ -141,15 +141,16 @@ struct connect_options;
 /// What a listener is opened with: the socket options, the backlog, and address reuse.
 struct tcp_listen_options;
 
-/// An established TCP connection.
+/// An established byte-stream connection, whatever is carrying it.
 ///
-/// Held by `cc::shared_ptr`, because an operation in flight refers to its socket by handle -- and a handle closed
-/// under the reactor can be reissued to the next socket the process opens.
-class tcp_connection;
+/// Named for what it is rather than for TCP: the same type is a socket, an in-process pipe with no network under it,
+/// a link that drops records on purpose, and a TLS session over any of those.
+/// Held by `cc::shared_ptr`, because an operation in flight refers to it.
+class stream_connection;
 
-/// A socket accepting inbound connections.
+/// Something inbound connections arrive on.
 /// Absent on wasm, where a program cannot listen at all.
-class tcp_listener;
+class stream_listener;
 } // namespace cnet
 
 // ---- TLS -----------------------------------------------------------------------------------------------

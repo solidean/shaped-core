@@ -140,14 +140,14 @@ void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, cancel_
 }
 
 /// Wrap a connection that arrived from the transport underneath, so the conditions apply to it too.
-[[nodiscard]] cc::shared_ptr<tcp_connection> wrap_connection(cc::shared_ptr<sim_state> s,
-                                                             cc::shared_ptr<tcp_connection> under);
+[[nodiscard]] cc::shared_ptr<stream_connection> wrap_connection(cc::shared_ptr<sim_state> s,
+                                                                cc::shared_ptr<stream_connection> under);
 
 /// A connection over a simulated link.
 class simulated_connection final : public connection_backend
 {
 public:
-    simulated_connection(cc::shared_ptr<sim_state> s, cc::shared_ptr<tcp_connection> under)
+    simulated_connection(cc::shared_ptr<sim_state> s, cc::shared_ptr<stream_connection> under)
       : _state(cc::move(s)), _under(cc::move(under)), _budget(cc::make_shared<link_budget>())
     {
     }
@@ -236,27 +236,27 @@ private:
     }
 
     cc::shared_ptr<sim_state> _state;
-    cc::shared_ptr<tcp_connection> _under;
+    cc::shared_ptr<stream_connection> _under;
     cc::shared_ptr<link_budget> _budget;
 };
 
-cc::shared_ptr<tcp_connection> wrap_connection(cc::shared_ptr<sim_state> s, cc::shared_ptr<tcp_connection> under)
+cc::shared_ptr<stream_connection> wrap_connection(cc::shared_ptr<sim_state> s, cc::shared_ptr<stream_connection> under)
 {
-    return cc::make_shared<tcp_connection>(std::make_unique<simulated_connection>(cc::move(s), cc::move(under)));
+    return cc::make_shared<stream_connection>(std::make_unique<simulated_connection>(cc::move(s), cc::move(under)));
 }
 
 /// A listener whose accepted connections come back wrapped in the same conditions.
 class simulated_listener final : public listener_backend
 {
 public:
-    simulated_listener(cc::shared_ptr<sim_state> s, cc::unique_ptr<tcp_listener> under)
+    simulated_listener(cc::shared_ptr<sim_state> s, cc::unique_ptr<stream_listener> under)
       : _state(cc::move(s)), _under(cc::move(under))
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> accept(deadline d, cancel_token const& token) override
     {
-        using handle = cc::shared_ptr<tcp_connection>;
+        using handle = cc::shared_ptr<stream_connection>;
 
         auto promise = cc::make_async_manual<handle>();
         auto const target = promise;
@@ -280,7 +280,7 @@ public:
 
 private:
     cc::shared_ptr<sim_state> _state;
-    cc::unique_ptr<tcp_listener> _under;
+    cc::unique_ptr<stream_listener> _under;
 };
 } // namespace
 
@@ -302,22 +302,22 @@ bool simulated_transport::is_supported() const
     return _state->under.is_supported();
 }
 
-cc::result<cc::unique_ptr<tcp_listener>, error> simulated_transport::listen(endpoint const& where,
-                                                                            tcp_listen_options const& options)
+cc::result<cc::unique_ptr<stream_listener>, error> simulated_transport::listen(endpoint const& where,
+                                                                               tcp_listen_options const& options)
 {
     auto under = _state->under.listen(where, options);
     if (under.has_error())
         return cc::error(cc::move(under).error());
 
-    return cc::make_unique<tcp_listener>(std::make_unique<simulated_listener>(_state, cc::move(under).value()));
+    return cc::make_unique<stream_listener>(std::make_unique<simulated_listener>(_state, cc::move(under).value()));
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> simulated_transport::connect(endpoint const& where,
-                                                                              deadline d,
-                                                                              tcp_options const& options,
-                                                                              cancel_token const& token)
+cc::shared_async<cc::shared_ptr<stream_connection>> simulated_transport::connect(endpoint const& where,
+                                                                                 deadline d,
+                                                                                 tcp_options const& options,
+                                                                                 cancel_token const& token)
 {
-    using handle = cc::shared_ptr<tcp_connection>;
+    using handle = cc::shared_ptr<stream_connection>;
 
     // A lost connect is a refusal rather than a reset: nothing was established to reset.
     if (_state->draws_loss())

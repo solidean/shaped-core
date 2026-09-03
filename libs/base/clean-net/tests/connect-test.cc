@@ -51,9 +51,9 @@ struct host_fixture
     }
 
     /// Listen on one of the answers, so exactly that address is the one that can be connected to.
-    [[nodiscard]] cc::unique_ptr<tcp_listener> listen_on(ip_address const& a, i32 port)
+    [[nodiscard]] cc::unique_ptr<stream_listener> listen_on(ip_address const& a, i32 port)
     {
-        return tcp_listener::try_create(*net, endpoint(a, port)).value();
+        return stream_listener::try_create(*net, endpoint(a, port)).value();
     }
 };
 } // namespace
@@ -202,8 +202,8 @@ TEST("cnet - the stagger starts another attempt, and the losers stop when the ra
     auto fixture = host_fixture({addr("2001:db8::1"), addr("10.0.0.1"), addr("2001:db8::2")});
     auto link = simulated_transport(*fixture.io, *fixture.net, {.latency_ms = 10'000});
 
-    auto listener_first = tcp_listener::try_create(*fixture.net, endpoint(addr("2001:db8::1"), 443)).value();
-    auto listener_second = tcp_listener::try_create(*fixture.net, endpoint(addr("10.0.0.1"), 443)).value();
+    auto listener_first = stream_listener::try_create(*fixture.net, endpoint(addr("2001:db8::1"), 443)).value();
+    auto listener_second = stream_listener::try_create(*fixture.net, endpoint(addr("10.0.0.1"), 443)).value();
     auto accepted_first = listener_first->accept();
     auto accepted_second = listener_second->accept();
 

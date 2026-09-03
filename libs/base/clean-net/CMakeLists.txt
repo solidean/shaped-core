@@ -50,7 +50,7 @@ target_sources(clean-net
     src/clean-net/address/resolver.hh
     src/clean-net/io/io_system.hh
     src/clean-net/transport/backend.hh
-    src/clean-net/transport/tcp.hh
+    src/clean-net/transport/stream.hh
     src/clean-net/transport/connect.hh
     src/clean-net/tls/tls.hh
     src/clean-net/transport/virtual_transport.hh

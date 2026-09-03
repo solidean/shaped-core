@@ -24,7 +24,7 @@ All of them are per-platform, need privileges, and cannot run in a unit test.
 - **`cnet::listener_backend`** — accept, and what it bound to.
 - **`cnet::transport`** — where connections and listeners come from.
 
-`cnet::tcp_connection` and `cnet::tcp_listener` are handles over the first two, so **every caller writes the same code
+`cnet::stream_connection` and `cnet::stream_listener` are handles over the first two, so **every caller writes the same code
 whatever is underneath**.
 That is the property the seam exists for: a test swaps the transport, not the code being tested.
 

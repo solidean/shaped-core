@@ -14,19 +14,25 @@
 
 #include <memory> // std::unique_ptr — cc has no polymorphic ownership, so an owned interface uses this repo-wide
 
-/// TCP, as the transport layer a protocol is written over.
+/// A byte-stream connection, and TCP as the transport that usually carries one.
+///
+/// **`stream_connection` is named for what it is rather than for TCP.**
+/// The same type is a socket, an in-process pipe with no network under it, a link that drops records on purpose, and
+/// a TLS session over any of those -- because it is a handle over a `cnet::connection_backend` rather than over a
+/// socket.
+/// That is the whole point of the seam: a test swaps the transport, not the code being tested.
+///
+/// The `tcp_` names in this header are the ones that really are TCP -- the options a socket is set up with, and the
+/// connect that opens one over the platform's own stack.
 ///
 /// Every operation returns a `cc::shared_async`, so it composes with everything else in shaped-core that is async,
 /// and cancellation arrives already modelled on `cc::async_error`.
 /// **Nothing here requires blocking to obtain a result**, which is what keeps a browser main thread and a render
 /// thread first-class callers.
 ///
-/// **Absent on wasm**, where a program cannot open a socket at all.
+/// **The TCP half is absent on wasm**, where a program cannot open a socket at all.
 /// Every factory reports `error_code::unsupported` there rather than the types disappearing.
-///
-/// A connection is a handle over a `cnet::connection_backend` rather than over a socket, which is what lets a test
-/// stand a virtual or a misbehaving transport in the place of the real one.
-/// It is held by `cc::shared_ptr` rather than uniquely, because an operation in flight refers to it.
+/// A connection is held by `cc::shared_ptr` rather than uniquely, because an operation in flight refers to it.
 
 /// What a TCP socket is set up with.
 struct cnet::tcp_options
@@ -62,7 +68,7 @@ struct cnet::tcp_listen_options
 ///
 /// Reads and writes may be in flight at the same time; two reads at once are a caller error, since the second would
 /// take bytes the first was promised.
-class cnet::tcp_connection
+class cnet::stream_connection
 {
 public:
     /// Read into `buffer`.
@@ -108,10 +114,10 @@ public:
     /// cut short here.
     void close();
 
-    explicit tcp_connection(std::unique_ptr<connection_backend> backend);
-    tcp_connection(tcp_connection const&) = delete;
-    tcp_connection& operator=(tcp_connection const&) = delete;
-    ~tcp_connection();
+    explicit stream_connection(std::unique_ptr<connection_backend> backend);
+    stream_connection(stream_connection const&) = delete;
+    stream_connection& operator=(stream_connection const&) = delete;
+    ~stream_connection();
 
 private:
     std::unique_ptr<connection_backend> _backend;
@@ -120,43 +126,43 @@ private:
 /// A socket accepting inbound connections.
 ///
 /// **Absent on wasm**: a program there cannot listen at all, so `try_create` reports `unsupported`.
-class cnet::tcp_listener
+class cnet::stream_listener
 {
 public:
     /// Bind and listen on the platform's own sockets.
     ///
     /// A port of 0 asks the OS to choose one, and `local()` is how you learn which -- the normal thing for a test
     /// server, and what keeps two of them from colliding.
-    [[nodiscard]] static cc::result<cc::unique_ptr<tcp_listener>, error> try_create(io_system& io,
-                                                                                    endpoint const& where,
-                                                                                    tcp_listen_options const& options
-                                                                                    = {});
+    [[nodiscard]] static cc::result<cc::unique_ptr<stream_listener>, error> try_create(io_system& io,
+                                                                                       endpoint const& where,
+                                                                                       tcp_listen_options const& options
+                                                                                       = {});
 
     /// Bind and listen on a given transport, which is how a test listens somewhere that is not the network.
-    [[nodiscard]] static cc::result<cc::unique_ptr<tcp_listener>, error> try_create(transport& t,
-                                                                                    endpoint const& where,
-                                                                                    tcp_listen_options const& options
-                                                                                    = {});
+    [[nodiscard]] static cc::result<cc::unique_ptr<stream_listener>, error> try_create(transport& t,
+                                                                                       endpoint const& where,
+                                                                                       tcp_listen_options const& options
+                                                                                       = {});
 
     /// Throwing counterpart of try_create.
-    [[nodiscard]] static cc::unique_ptr<tcp_listener> create(io_system& io,
-                                                             endpoint const& where,
-                                                             tcp_listen_options const& options = {});
+    [[nodiscard]] static cc::unique_ptr<stream_listener> create(io_system& io,
+                                                                endpoint const& where,
+                                                                tcp_listen_options const& options = {});
 
     /// Take the next inbound connection.
     ///
     /// The default is no deadline, which is what a server wants: a listener waiting for its next client is idle
     /// rather than late.
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d = deadline::never(),
-                                                                          cancel_token const& token = {});
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> accept(deadline d = deadline::never(),
+                                                                             cancel_token const& token = {});
 
     /// What the listener actually bound to, port included.
     [[nodiscard]] endpoint local() const;
 
-    explicit tcp_listener(std::unique_ptr<listener_backend> backend);
-    tcp_listener(tcp_listener const&) = delete;
-    tcp_listener& operator=(tcp_listener const&) = delete;
-    ~tcp_listener();
+    explicit stream_listener(std::unique_ptr<listener_backend> backend);
+    stream_listener(stream_listener const&) = delete;
+    stream_listener& operator=(stream_listener const&) = delete;
+    ~stream_listener();
 
 private:
     std::unique_ptr<listener_backend> _backend;
@@ -173,13 +179,13 @@ public:
 
     [[nodiscard]] bool is_supported() const override;
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
-                                                                           deadline d,
-                                                                           tcp_options const& options,
-                                                                           cancel_token const& token) override;
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,
+                                                                              deadline d,
+                                                                              tcp_options const& options,
+                                                                              cancel_token const& token) override;
 
-    [[nodiscard]] cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
-                                                                         tcp_listen_options const& options) override;
+    [[nodiscard]] cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
+                                                                            tcp_listen_options const& options) override;
 
 private:
     io_system& _io;
@@ -195,16 +201,16 @@ namespace cnet
 ///
 /// This takes an address rather than a name: resolving a name can block and needs the OS, so it is `cnet::resolve`'s
 /// job and never a connect's.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
-                                                                           endpoint const& where,
-                                                                           deadline d = deadline::after_secs(30),
-                                                                           tcp_options const& options = {},
-                                                                           cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> tcp_connect(io_system& io,
+                                                                              endpoint const& where,
+                                                                              deadline d = deadline::after_secs(30),
+                                                                              tcp_options const& options = {},
+                                                                              cancel_token const& token = {});
 
 /// Connect over a given transport, which is how a test connects to something that is not the network.
-[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
-                                                                           endpoint const& where,
-                                                                           deadline d = deadline::after_secs(30),
-                                                                           tcp_options const& options = {},
-                                                                           cancel_token const& token = {});
+[[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> tcp_connect(transport& t,
+                                                                              endpoint const& where,
+                                                                              deadline d = deadline::after_secs(30),
+                                                                              tcp_options const& options = {},
+                                                                              cancel_token const& token = {});
 } // namespace cnet
