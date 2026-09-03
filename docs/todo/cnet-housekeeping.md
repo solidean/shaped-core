@@ -5,6 +5,8 @@ One of them is a real defect in babel, found while building this.
 
 The parser fuzzer is **done** — `tests/http1-fuzz-test.cc`, over nexus's API-sequence engine.
 So are both examples, `clean-net/download` and `clean-net/dev-server`.
+So is the flaky test that used to time out about once in 35 runs: two lost wakeups in `virtual_network`, and a test
+that advanced a manual clock past a deadline nobody had computed yet.
 
 ## A `doctor` line for the networking environment
 
@@ -38,19 +40,6 @@ A bigger tier is not automatically better, and choosing by eye is how a bigger o
 support.
 
 `src/clean-net/all.hh` already exists as the umbrella such a tier would name.
-
-## A flaky test under parallel load
-
-`cnet - a served directory refuses every way out of itself` times out about once in 35 runs of the whole binary, and
-**never** in 300 runs on its own, where it takes 30 ms.
-It is seven sequential loopback round-trips; under load it has been seen to make no progress for 30 seconds, which is
-too long to be scheduling noise and looks like a livelock between `cc::thread_pump_all()` and the actors it drives.
-
-The binary has had flakiness of this shape since before that test existed — one earlier run failed a different test
-with an uncaught exception — so the test is where it shows, not necessarily where it is.
-
-Worth a session of its own: reproduce with `uv run dev.py test clean-net-test --repeat 40`, which stops on the first
-failure and leaves its logs.
 
 ---
 

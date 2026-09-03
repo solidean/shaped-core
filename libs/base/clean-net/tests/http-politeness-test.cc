@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -33,7 +34,12 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
         if (done())
             return true;
         if (clk.now_ns() >= deadline_ns)
+        {
+            // A budget that runs out here is a wait that never finished, and the thread that noticed is never the one
+            // that matters -- so say what every other thread was doing before failing.
+            cc::report_all_thread_stacks("a cnet test waited out its budget");
             return false;
+        }
         if (!cc::thread_pump_all())
             cc::this_thread_yield();
     }
@@ -159,6 +165,24 @@ struct politeness_fixture
         return request;
     }
 
+    /// Wait until `n` requests have been STARTED and the reactor is holding the timer for whatever comes next.
+    ///
+    /// **Waiting on the count alone is a race with the clock this test controls.**
+    /// `calls` is incremented when a request starts, while the backoff timer for the one after it is created by a
+    /// continuation that is RESCHEDULED rather than run inline -- so a clock advanced on the count alone can move
+    /// past a deadline that has not been computed yet, and nothing ever reaches it afterwards.
+    [[nodiscard]] bool started_and_scheduled(i32 n)
+    {
+        if (!pump_for([&] { return under.calls == n; }))
+            return false;
+
+        // Then drain to quiescence with the clock standing still.
+        // Nothing here can move without the clock, so a fixed sweep is enough to let every rescheduled continuation
+        // run -- and one of them is what creates the timer the next advance is meant to land on.
+        (void)pump_briefly([] { return false; });
+        return true;
+    }
+
     [[nodiscard]] cc::shared_async<http_response_head> send(cc::string_view url, http_method method = http_method::get)
     {
         return client->send_streaming(request_for(url, method), [](cc::span<byte const> c) { return c.size(); }, {}, {});
@@ -186,11 +210,11 @@ TEST("cnet - a failed idempotent request is retried after a backoff")
     auto response = fixture.send("http://example.test/");
 
     // Nothing happens until the clock moves: the backoff is a reactor timer, not a sleep.
-    CHECK(pump_for([&] { return fixture.under.calls == 1; }));
+    CHECK(fixture.started_and_scheduled(1));
     CHECK(!response->is_ready());
 
     fixture.clk.advance_ms(250);
-    CHECK(pump_for([&] { return fixture.under.calls == 2; }));
+    CHECK(fixture.started_and_scheduled(2));
     CHECK(!response->is_ready());
 
     // And it doubles, which is what keeps a failing server from being asked at a fixed rate forever.
@@ -242,7 +266,7 @@ TEST("cnet - a 429 is waited out for exactly as long as it asked")
     fixture.under.script = {{.status = 429, .retry_after = "2"}, {.status = 200}};
 
     auto response = fixture.send("http://example.test/");
-    CHECK(pump_for([&] { return fixture.under.calls == 1; }));
+    CHECK(fixture.started_and_scheduled(1));
 
     // The backoff would have been 10 ms; the server said two seconds, and a 429 means wait rather than retry harder.
     fixture.clk.advance_ms(1'000);
@@ -261,7 +285,7 @@ TEST("cnet - a 503 is retried and a 404 is not")
     retried.under.script = {{.status = 503}, {.status = 200}};
 
     auto server_error = retried.send("http://example.test/");
-    CHECK(pump_for([&] { return retried.under.calls == 1; }));
+    CHECK(retried.started_and_scheduled(1));
     retried.clk.advance_ms(50);
     CHECK(pump_for([&] { return server_error->is_ready(); }));
     CHECK(server_error->value().status == 200);
@@ -312,6 +336,10 @@ TEST("cnet - only so many requests to one host are in flight at once")
 
     fixture.under.answer_held();
     fixture.under.hold = false;
+
+    // The third is released by a continuation that is rescheduled rather than run inline, so the clock must not move
+    // until whatever it is waiting on exists -- otherwise it moves past a deadline nobody has computed yet.
+    CHECK(pump_for([&] { return third->is_ready() || fixture.io->pending_count() > 0; }));
     fixture.clk.advance_ms(10);
 
     CHECK(pump_for([&] { return third->is_ready(); }));

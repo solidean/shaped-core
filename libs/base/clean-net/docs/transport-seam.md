@@ -76,8 +76,34 @@ It does not model the parts that would make it slower without making it more hon
 There is no flow control — a send never blocks, because backpressure is `simulated_transport`'s job.
 The addresses are make-believe: nothing is checked against the machine's real interfaces.
 
+## Parking, and the races around it
+
+A virtual connection uses the reactor for exactly one thing: **parking**.
+A receive with nothing to read, and an accept with nobody knocking, become `manual` operations that the writing side
+signals.
+
+That means a submit, a park and a write racing against each other, and getting the order wrong loses a wakeup — which
+does not look like a bug, it looks like an operation that waits until its own deadline while the process sits idle.
+
+**Submit before parking.**
+Publishing the operation to the pipe first would let a writer signal one the reactor has never seen, and such a signal
+is dropped.
+The submit and the signal go through the same actor mailbox, so submitting first is what keeps them in order.
+
+**Check and park in one step.**
+A writer that appends between "nothing to read" and "parked" finds no reader to signal, and the bytes sit in the pipe
+with nobody coming for them.
+A receive closes this by doing both under the pipe's own lock — the same lock the writer takes.
+An accept has two mutexes and cannot, so it reads `incoming` *inside* `parked_accept`, while the connect side takes
+the two one after the other rather than nested.
+
+**Then look again.**
+What is left is the gap between submitting and parking, and the answer there is to wake ourselves: exactly one signal
+reaches the operation either way.
+
 ## Not built yet
 
 A virtual multi-peer network for multiplayer, and the datagram half of all of this.
 Their requirements are in [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md), and building them
 before there is a reliability layer to test would be building against a guess.
+

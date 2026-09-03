@@ -20,6 +20,18 @@ using crash_context_hook = void (*)() noexcept;
 /// It is a developer diagnostic, not a production fault-recovery mechanism.
 void install_crash_handler();
 
+/// Write this thread's stacktrace and every other thread's, now, with nothing having crashed.
+///
+/// **The other threads are the point**, and they are the whole reason this exists separately from `cc::stacktrace`:
+/// in a deadlock or a wait that never finished, the thread that noticed is never the one that matters.
+/// Reaching them means suspending each in turn and walking it with DbgHelp, which `std::stacktrace` cannot do -- so
+/// this is Windows-only for the other threads, and reports the calling one everywhere.
+///
+/// Writes to stderr, runs every registered crash-context hook, and suspends the other threads while it walks them.
+/// A diagnostic for a program that has already gone wrong -- a test whose wait budget expired, a watchdog that
+/// fired -- and not something to call on a path that works.
+void report_all_thread_stacks(char const* reason) noexcept;
+
 /// Registers a hook called from within the crash handler, before the stacktrace, to print extra context — the currently running test, say.
 /// Keep it minimal and allocation-free; it must not throw.
 /// Hooks run in registration order, and excess hooks past a small fixed capacity are ignored.

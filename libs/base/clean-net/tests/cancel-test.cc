@@ -1,3 +1,4 @@
+#include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -43,7 +44,12 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
         if (done())
             return true;
         if (clk.now_ns() >= deadline_ns)
+        {
+            // A budget that runs out here is a wait that never finished, and the thread that noticed is never the one
+            // that matters -- so say what every other thread was doing before failing.
+            cc::report_all_thread_stacks("a cnet test waited out its budget");
             return false;
+        }
         if (!cc::thread_pump_all())
             cc::this_thread_yield();
     }

@@ -242,9 +242,31 @@ public:
 
         auto* const raw = op.get();
         raw->self = cc::move(op);
-        _inbox->lock([raw](pipe_data& d) { d.parked = raw; });
+
+        // SUBMIT FIRST, PARK SECOND, THEN LOOK AGAIN -- and each of those three is one race.
+        //
+        // Publishing to the pipe before submitting would let a writer signal an operation the reactor has never seen,
+        // and such a signal is dropped: the submit goes first, and the actor's mailbox keeps the two in order.
+        // Parking after that closes the other side, where a writer between the empty check above and here finds no
+        // reader to signal and the bytes sit in the pipe with nobody coming for them.
+        // Looking again is what covers the gap that is left: if something arrived while we were submitting, nothing
+        // parked in time to be signalled, so we wake ourselves.
         _io.submit(raw);
         raw->cancellation.attach(token, _io, raw);
+
+        auto const arrived_meanwhile = _inbox->lock(
+            [raw](pipe_data& d)
+            {
+                if (d.available() > 0 || d.writer_done)
+                    return true;
+
+                d.parked = raw;
+                return false;
+            });
+
+        if (arrived_meanwhile)
+            _io.signal(raw);
+
         return promise;
     }
 
@@ -385,9 +407,30 @@ public:
 
         auto* const raw = op.get();
         raw->self = cc::move(op);
-        _state->parked_accept.lock([raw](impl::io_operation*& slot) { slot = raw; });
+
+        // Submitted, then parked, for the same reasons a receive is.
+        //
+        // A receive parks under the pipe's own lock, so its check and its park are one step.
+        // An accept has two mutexes and cannot, so `incoming` is read INSIDE `parked_accept` -- and the connect side
+        // takes them one after the other rather than nested, which is what makes that order safe.
+        // Reading them the other way round would leave the window this is here to close.
         _net->io.submit(raw);
         raw->cancellation.attach(token, _net->io, raw);
+
+        auto const arrived_meanwhile = _state->parked_accept.lock(
+            [raw, this](impl::io_operation*& slot)
+            {
+                if (!_state->incoming.lock([](cc::vector<cc::shared_ptr<stream_connection>> const& q)
+                                           { return q.empty(); }))
+                    return true;
+
+                slot = raw;
+                return false;
+            });
+
+        if (arrived_meanwhile)
+            _net->io.signal(raw);
+
         return promise;
     }
 
