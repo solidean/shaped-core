@@ -37,8 +37,11 @@ Three pieces report their availability separately:
 | | wasm | Windows / Linux / macOS | iOS / Android |
 |---|---|---|---|
 | TCP / UDP sockets | absent | present | present |
-| HTTP and WebSocket clients | present, `fetch` backend | present, native backend | present, either |
+| HTTP and WebSocket clients | the platform's, via `fetch` and `WebSocket` | ours, over our own transport | either |
 | listening server | absent | present | present |
+
+That table is the SHAPE, not the status: today only the native column is built.
+[docs/structure.md](docs/structure.md#support-matrix) is the one that says what runs.
 
 The consequence for the API is that **the shared HTTP surface stays within what a browser `fetch` can express**.
 Anything more reaches for the transport directly and is unavailable on wasm, and `cnet::http_level` is how a caller
