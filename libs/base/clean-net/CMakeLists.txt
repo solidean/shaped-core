@@ -15,6 +15,7 @@ add_library(clean-net
     src/clean-net/address/ip_address.cc
     src/clean-net/address/endpoint.cc
     src/clean-net/impl/native_socket.cc
+    src/clean-net/impl/reactor_poll.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -77,6 +78,7 @@ if(SC_BUILD_TESTS)
         tests/clock-test.cc
         tests/error-test.cc
         tests/native-socket-test.cc
+        tests/reactor-test.cc
     )
 
     target_link_libraries(clean-net-test PRIVATE clean-net nexus)

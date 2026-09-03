@@ -108,7 +108,7 @@ constexpr raw_socket k_raw_invalid = -1;
     return {};
 }
 
-[[nodiscard]] cc::result<cc::unit, error> set_non_blocking(raw_socket s)
+[[nodiscard]] cc::result<cc::unit, error> set_non_blocking_raw(raw_socket s)
 {
 #if defined(_WIN32)
     u_long one = 1;
@@ -142,7 +142,7 @@ constexpr raw_socket k_raw_invalid = -1;
     if (s == k_raw_invalid)
         return cc::error(error_from_native(last_socket_error(), what));
 
-    auto non_blocking = set_non_blocking(s);
+    auto non_blocking = set_non_blocking_raw(s);
     if (non_blocking.has_error())
     {
         close_socket(native_socket(s));
@@ -156,6 +156,11 @@ constexpr raw_socket k_raw_invalid = -1;
 bool sockets_are_supported()
 {
     return true;
+}
+
+cc::result<cc::unit, error> set_socket_non_blocking(native_socket s)
+{
+    return set_non_blocking_raw(raw_of(s));
 }
 
 void ensure_socket_platform()
@@ -303,6 +308,57 @@ cc::result<cc::unit, error> listen_socket(native_socket s, i32 backlog)
     return cc::unit{};
 }
 
+cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where)
+{
+    sockaddr_storage addr = {};
+    socket_length length = 0;
+    if (!to_sockaddr(where, addr, length))
+        return cc::error(error{.code = error_code::invalid_argument,
+                               .native_code = 0,
+                               .message = cc::string("connect: the endpoint has no address")});
+
+    if (::connect(raw_of(s), reinterpret_cast<sockaddr const*>(&addr), length) == 0)
+        return cc::unit{};
+
+    auto const native = last_socket_error();
+#if defined(_WIN32)
+    auto const in_progress = native == WSAEWOULDBLOCK || native == WSAEINPROGRESS || native == WSAEALREADY;
+#else
+    auto const in_progress
+        = native == EINPROGRESS || native == EWOULDBLOCK || native == EAGAIN || native == EALREADY || native == EINTR;
+#endif
+    if (in_progress)
+        return cc::unit{};
+
+    return cc::error(error_from_native(native, cc::format("connecting to {}", where)));
+}
+
+cc::result<native_socket, error> accept_socket(native_socket listener)
+{
+    sockaddr_storage addr = {};
+    socket_length length = socket_length(sizeof(addr));
+    auto const accepted = ::accept(raw_of(listener), reinterpret_cast<sockaddr*>(&addr), &length);
+    if (accepted == k_raw_invalid)
+        return cc::error(error_from_native(last_socket_error(), "accepting"));
+
+    // Linux does not let an accepted socket inherit O_NONBLOCK from its listener, and BSD does.
+    auto non_blocking = set_non_blocking_raw(accepted);
+    if (non_blocking.has_error())
+    {
+        close_socket(native_socket(accepted));
+        return cc::error(cc::move(non_blocking).error());
+    }
+    return native_socket(accepted);
+}
+
+void drain_datagrams(native_socket s)
+{
+    char scratch[64];
+    while (::recv(raw_of(s), scratch, int(sizeof(scratch)), 0) > 0)
+    {
+    }
+}
+
 cc::result<endpoint, error> local_endpoint(native_socket s)
 {
     sockaddr_storage addr = {};
@@ -403,6 +459,17 @@ cc::result<cc::unit, error> bind_socket(native_socket, endpoint const&, bool)
 cc::result<cc::unit, error> listen_socket(native_socket, i32)
 {
     return cc::error(no_sockets("listening"));
+}
+cc::result<cc::unit, error> connect_socket(native_socket, endpoint const&)
+{
+    return cc::error(no_sockets("connecting"));
+}
+cc::result<native_socket, error> accept_socket(native_socket)
+{
+    return cc::error(no_sockets("accepting"));
+}
+void drain_datagrams(native_socket)
+{
 }
 cc::result<endpoint, error> local_endpoint(native_socket)
 {

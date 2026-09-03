@@ -18,3 +18,15 @@ rules:
     reason: the POSIX socket API, plus fcntl for the non-blocking flag and errno for the failure code.
     files:
       - src/clean-net/impl/native_socket.cc
+
+  - kind: allow-include
+    value: [<poll.h>, <sys/socket.h>, <errno.h>]
+    reason: the POSIX poller and the error number behind a readiness result. The Windows half of the same file uses select, out of winsock2.h, blessed above.
+    files:
+      - src/clean-net/impl/reactor_poll.cc
+
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: select and its fd_set, which is the Windows poller. FD_SETSIZE is defined ahead of the include because winsock2.h sizes fd_set from it.
+    files:
+      - src/clean-net/impl/reactor_poll.cc

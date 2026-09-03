@@ -56,6 +56,13 @@ void ensure_socket_platform();
 /// Create a non-blocking UDP socket of `family`.
 [[nodiscard]] cc::result<native_socket, error> create_udp_socket(ip_family family);
 
+/// Put an existing socket into non-blocking mode.
+///
+/// Needed for a socket that arrived rather than one we created: Linux does NOT let an accepted socket inherit
+/// O_NONBLOCK from its listener, while BSD does, so an accepted socket that nobody set is blocking on exactly one
+/// of our platforms.
+[[nodiscard]] cc::result<cc::unit, error> set_socket_non_blocking(native_socket s);
+
 void close_socket(native_socket s);
 
 /// Bind to `where`.
@@ -66,6 +73,24 @@ void close_socket(native_socket s);
 [[nodiscard]] cc::result<cc::unit, error> bind_socket(native_socket s, endpoint const& where, bool reuse_address);
 
 [[nodiscard]] cc::result<cc::unit, error> listen_socket(native_socket s, i32 backlog);
+
+/// Start connecting to `where`.
+///
+/// Succeeds both when the connection completed at once -- which loopback often does -- and when it is merely under
+/// way: on a non-blocking socket "in progress" is the normal answer, and the reactor learns the outcome from
+/// writability plus SO_ERROR rather than from this call.
+/// Only an outright refusal by the local stack is reported here.
+[[nodiscard]] cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where);
+
+/// Take one pending connection off a listening socket; the result is non-blocking.
+///
+/// When nothing is pending this fails with the platform's would-block number in `native_code` rather than blocking,
+/// which is how the reactor tells "not yet" from "no".
+[[nodiscard]] cc::result<native_socket, error> accept_socket(native_socket listener);
+
+/// Read and discard whatever is waiting on a datagram socket.
+/// Used for the reactor's self-wake channel, where the bytes carry no meaning at all.
+void drain_datagrams(native_socket s);
 
 /// The address this socket is actually bound to, which is how a caller learns the port after binding to 0.
 [[nodiscard]] cc::result<endpoint, error> local_endpoint(native_socket s);
