@@ -73,6 +73,20 @@ struct ip_address;
 struct endpoint;
 } // namespace cnet
 
+// ---- the reactor ---------------------------------------------------------------------------------------
+
+namespace cnet
+{
+/// How an io_system is built: threaded or not, against which clock, and how long one wait may park.
+struct io_system_description;
+
+/// The reactor, and the thread it may or may not have.
+///
+/// There is no `poll()` on it: with threads it owns one, and without them it registers with clean-core's pump
+/// registry, so whatever already drives `cc::thread_pump_all()` drives this too.
+class io_system;
+} // namespace cnet
+
 // ---- capability ladder ---------------------------------------------------------------------------------
 
 namespace cnet

@@ -308,6 +308,23 @@ TEST("cnet - a deadline fires without anything having to happen on the socket")
     CHECK(receive_op.code() == error_code::timed_out);
 }
 
+TEST("cnet - an idle reactor reports no progress, which is what the pump registry requires")
+{
+    if (!impl::sockets_are_supported())
+        SKIP("this platform has no sockets");
+
+    auto clk = manual_clock(0);
+    auto reactor = impl::reactor::try_create(clk);
+    CHECK(reactor.has_value());
+    auto& r = *reactor.value();
+
+    // A registration that always claims progress turns every blocking wait in the process into a busy loop, since a
+    // driver treats "no progress anywhere" as its cue to sleep -- the contract in clean-core's thread_pump.hh.
+    CHECK(r.pending_count() == 0);
+    CHECK(r.wait(0) == 0);
+    CHECK(r.wait(0) == 0);
+}
+
 TEST("cnet - a cancelled operation completes as cancelled")
 {
     if (!impl::sockets_are_supported())
