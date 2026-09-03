@@ -189,6 +189,147 @@ constexpr char const* sparse_index_hlsl = R"(
 [numthreads(1, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID) { First[tid.x] = Second[tid.x]; }
 )";
+
+// --- Q8: does a stage that references a subset of the declarations keep the others' numbers? ---
+//
+// This decides whether one shared .hlsli can carry a group for every stage of a pipeline, which is the discipline
+// the per-file __COUNTER__ rule asks for.
+// `PixelOnly` is declared FIRST and read only by the pixel stage, so if a target numbers what a stage actually
+// references, `Both` lands on a different register in the two stages of one pipeline — and neither shader wrote
+// either number.
+constexpr char const* subset_two_stage_hlsl = R"(
+Texture2D<float4> PixelOnly;
+Texture2D<float4> Both;
+SamplerState Samp;
+
+struct vs_out { float4 pos : SV_Position; float2 uv : TEXCOORD; };
+
+vs_out main_vs(uint id : SV_VertexID)
+{
+    vs_out o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.pos = float4(o.uv * 2.0f - 1.0f, Both.SampleLevel(Samp, o.uv, 0).x, 1);
+    return o;
+}
+
+float4 main_ps(vs_out i) : SV_Target
+{
+    return Both.SampleLevel(Samp, i.uv, 0) + PixelOnly.SampleLevel(Samp, i.uv, 0);
+}
+)";
+
+// --- Q9: does an explicit `register()` stabilise the two-stage case Q8 breaks? ---
+//
+// It does, and that is the finding: whatever writes the address, writing it is what makes DXIL agree with itself
+// across stages and with SPIR-V across targets.
+// See libs/graphics/shaped-shader-library/docs/binding-preprocessor.md, which is why the address is written by a
+// rewriting pass rather than by the shader author.
+//
+// The macro below is a rejected alternative kept as the vehicle for the measurement.
+// `register()` is a SUFFIX on the declaration while the Vulkan annotation is a PREFIX, so no prefix-only macro can
+// emit both — only one wrapping the whole declaration can, and then the type is an argument rather than a type.
+// The type goes last and variadic here because `Texture2DMS<float4, 4>` carries a comma of its own.
+constexpr char const* wrapping_macros = R"(
+#define SC_CAT_(a, b) a##b
+#define SC_CAT(a, b) SC_CAT_(a, b)
+
+#ifdef __spirv__
+#define SC_DECL_I(group, index, cls, name, ...) [[vk::binding(index, group)]] __VA_ARGS__ name
+#else
+#define SC_DECL_I(group, index, cls, name, ...) __VA_ARGS__ name : register(SC_CAT(cls, index), SC_CAT(space, group))
+#endif
+
+#define SC_DECL_AT(group, index, cls, name, ...) SC_DECL_I(group, index, cls, name, __VA_ARGS__)
+#define SC_DECL(group, cls, name, ...) SC_DECL_AT(group, __COUNTER__, cls, name, __VA_ARGS__)
+)";
+
+// The same shape as Q8: a pixel-only texture declared first, and a shared one after it.
+constexpr char const* wrapping_two_stage_body = R"(
+SC_DECL(0, t, PixelOnly, Texture2D<float4>);
+SC_DECL(0, t, Both, Texture2D<float4>);
+SC_DECL(0, s, Samp, SamplerState);
+
+struct vs_out { float4 pos : SV_Position; float2 uv : TEXCOORD; };
+
+vs_out main_vs(uint id : SV_VertexID)
+{
+    vs_out o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.pos = float4(o.uv * 2.0f - 1.0f, Both.SampleLevel(Samp, o.uv, 0).x, 1);
+    return o;
+}
+
+float4 main_ps(vs_out i) : SV_Target
+{
+    return Both.SampleLevel(Samp, i.uv, 0) + PixelOnly.SampleLevel(Samp, i.uv, 0);
+}
+)";
+
+// A type carrying a comma, to prove the variadic tail is what makes the form usable.
+constexpr char const* wrapping_comma_type_body = R"(
+SC_DECL(0, t, Multi, Texture2DMS<float4, 4>);
+SC_DECL(0, u, Out, RWTexture2D<float4>);
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) { Out[tid.xy] = Multi.Load(tid.xy, 0); }
+)";
+
+[[nodiscard]] cc::string with_wrapping(cc::string_view body)
+{
+    return cc::format("{}{}", wrapping_macros, body);
+}
+
+// --- Q10: can a resource declaration live in a namespace, and what does reflection call it? ---
+//
+// If it can, a namespace is an alternative to the `#define SC_GROUP` / `#undef` pair: it scopes, it nests, and it
+// cannot be left open by accident the way a missing #undef can.
+// What decides it is the reflected NAME, because sg matches a binding to a bound view by name.
+constexpr char const* namespace_binding_hlsl = R"(
+namespace frame
+{
+    Texture2D<float4> Albedo : register(t0, space0);
+    SamplerState Samp : register(s1, space0);
+}
+
+RWTexture2D<float4> Out : register(u2, space0);
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    float2 uv = (float2(tid.xy) + 0.5f) / 64.0f;
+    Out[tid.xy] = frame::Albedo.SampleLevel(frame::Samp, uv, 0);
+}
+)";
+
+// The same thing with no explicit register, to see whether DXC still auto-assigns inside a namespace.
+constexpr char const* namespace_auto_register_hlsl = R"(
+namespace frame
+{
+    Texture2D<float4> Albedo;
+    SamplerState Samp;
+}
+
+RWTexture2D<float4> Out;
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    float2 uv = (float2(tid.xy) + 0.5f) / 64.0f;
+    Out[tid.xy] = frame::Albedo.SampleLevel(frame::Samp, uv, 0);
+}
+)";
+
+// Two namespaces each declaring the same marker name, which is what a namespaced group would do to the
+// duplicate-slot check.
+constexpr char const* namespace_marker_hlsl = R"(
+namespace a { static const uint sc_slot_taken_0_0 = 0; }
+namespace b { static const uint sc_slot_taken_0_0 = 0; }
+
+RWStructuredBuffer<uint> Out;
+
+[numthreads(1, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) { Out[tid.x] = a::sc_slot_taken_0_0 + b::sc_slot_taken_0_0; }
+)";
 } // namespace
 
 // DXIL reflection reads the container beside the bytecode through the Windows SDK's d3d12shader.h, which the Linux
@@ -275,6 +416,123 @@ TEST("portable-hlsl spike - Q5 one source, two targets, matching names and types
     REQUIRE(dxil_output != nullptr);
     CHECK(spirv_output->index == 2u);
     CHECK(dxil_output->index == 0u);
+}
+
+TEST("portable-hlsl spike - Q8 two stages of one pipeline disagree on a shared register")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    auto& c = comp.value();
+
+    auto vs_dxil
+        = compile_as(c, subset_two_stage_hlsl, sg::shader_stage::vertex, "main_vs", ssc::dxc::compile_target::dxil);
+    auto ps_dxil
+        = compile_as(c, subset_two_stage_hlsl, sg::shader_stage::fragment, "main_ps", ssc::dxc::compile_target::dxil);
+    REQUIRE(vs_dxil.has_value());
+    REQUIRE(ps_dxil.has_value());
+
+    auto const* both_vs = find_binding(vs_dxil.value(), "Both");
+    auto const* both_ps = find_binding(ps_dxil.value(), "Both");
+    REQUIRE(both_vs != nullptr);
+    REQUIRE(both_ps != nullptr);
+
+    // DXC assigns a DXIL register only to what the entry point references, so the vertex stage — which never reads
+    // `PixelOnly` — takes t0 for `Both`, while the pixel stage takes t1.
+    // One resource, one name, two addresses, from one source that named neither.
+    CC_LOG_INFO("[spike] dxil two-stage 'Both': vs={} ps={}", both_vs->index, both_ps->index);
+    CHECK(both_vs->index == 0u);
+    CHECK(both_ps->index == 1u);
+
+    // SPIR-V does not drift, because the number is written into the source by the annotation rather than assigned.
+    // That asymmetry is why a shared binding header is a portable discipline on SPIR-V and not on DXIL.
+    auto vs_spirv
+        = compile_as(c, subset_two_stage_hlsl, sg::shader_stage::vertex, "main_vs", ssc::dxc::compile_target::spirv);
+    auto ps_spirv
+        = compile_as(c, subset_two_stage_hlsl, sg::shader_stage::fragment, "main_ps", ssc::dxc::compile_target::spirv);
+    REQUIRE(vs_spirv.has_value());
+    REQUIRE(ps_spirv.has_value());
+    CC_LOG_INFO("[spike] spirv two-stage 'Both': vs={} ps={}", find_binding(vs_spirv.value(), "Both")->index,
+                find_binding(ps_spirv.value(), "Both")->index);
+}
+
+
+TEST("portable-hlsl spike - Q9 a wrapping macro emits register() and stabilises the two stages")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    auto& c = comp.value();
+
+    auto const src = with_wrapping(wrapping_two_stage_body);
+
+    auto vs = compile_as(c, src, sg::shader_stage::vertex, "main_vs", ssc::dxc::compile_target::dxil);
+    auto ps = compile_as(c, src, sg::shader_stage::fragment, "main_ps", ssc::dxc::compile_target::dxil);
+    if (vs.has_error())
+        CC_LOG_INFO("[spike] wrapping vs rejected: {}", vs.error().to_string());
+    if (ps.has_error())
+        CC_LOG_INFO("[spike] wrapping ps rejected: {}", ps.error().to_string());
+    REQUIRE(vs.has_value());
+    REQUIRE(ps.has_value());
+
+    auto const* both_vs = find_binding(vs.value(), "Both");
+    auto const* both_ps = find_binding(ps.value(), "Both");
+    REQUIRE(both_vs != nullptr);
+    REQUIRE(both_ps != nullptr);
+    CC_LOG_INFO("[spike] Q9 dxil wrapping 'Both': vs={} ps={}", both_vs->index, both_ps->index);
+    CC_LOG_INFO("[spike] Q9 dxil wrapping 'Both' space: vs={} ps={}",
+                both_vs->space.has_value() ? int(both_vs->space.value()) : -1,
+                both_ps->space.has_value() ? int(both_ps->space.value()) : -1);
+
+    auto spv_vs = compile_as(c, src, sg::shader_stage::vertex, "main_vs", ssc::dxc::compile_target::spirv);
+    REQUIRE(spv_vs.has_value());
+    CC_LOG_INFO("[spike] Q9 spirv wrapping 'Both': vs={}", find_binding(spv_vs.value(), "Both")->index);
+}
+
+TEST("portable-hlsl spike - Q9b the variadic tail carries a type with a comma in it")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    auto const src = with_wrapping(wrapping_comma_type_body);
+    auto r = compile_as(comp.value(), src, sg::shader_stage::compute, "main", ssc::dxc::compile_target::dxil);
+    if (r.has_error())
+        CC_LOG_INFO("[spike] Q9b Texture2DMS<float4, 4> rejected: {}", r.error().to_string());
+    CHECK(r.has_value());
+}
+
+
+TEST("portable-hlsl spike - Q10 a resource may live in a namespace, and reflection reports the bare name")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    auto& c = comp.value();
+
+    for (auto const target : {ssc::dxc::compile_target::dxil, ssc::dxc::compile_target::spirv})
+    {
+        auto r = compile_as(c, namespace_binding_hlsl, sg::shader_stage::compute, "main", target);
+        if (r.has_error())
+        {
+            CC_LOG_INFO("[spike] Q10 namespaced binding rejected: {}", r.error().to_string());
+            continue;
+        }
+        REQUIRE(r.has_value());
+        for (auto const& b : r.value().bindings)
+            CC_LOG_INFO("[spike] Q10 {} reflected name '{}' index {}",
+                        target == ssc::dxc::compile_target::dxil ? "dxil" : "spirv", b.name, b.index);
+    }
+
+    auto autoreg
+        = compile_as(c, namespace_auto_register_hlsl, sg::shader_stage::compute, "main", ssc::dxc::compile_target::dxil);
+    if (autoreg.has_error())
+        CC_LOG_INFO("[spike] Q10 namespaced auto-register rejected: {}", autoreg.error().to_string());
+    else
+        for (auto const& b : autoreg.value().bindings)
+            CC_LOG_INFO("[spike] Q10 auto-register name '{}' index {}", b.name, b.index);
+
+    // The cost, if a namespace were to carry the group: two namespaces can hold the same marker name, so the
+    // duplicate-slot redefinition error would no longer fire.
+    auto markers
+        = compile_as(c, namespace_marker_hlsl, sg::shader_stage::compute, "main", ssc::dxc::compile_target::dxil);
+    CC_LOG_INFO("[spike] Q10 duplicate markers in two namespaces compiled: {}", markers.has_value());
 }
 
 #endif
