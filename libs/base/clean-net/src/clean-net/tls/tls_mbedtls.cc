@@ -11,7 +11,6 @@
 #include <clean-net/impl/trust_store.hh>
 
 #include <memory> // std::unique_ptr, to own a backend through its interface -- see .shaped-lint.yml
-#include <mutex>  // std::mutex, as the mutex Mbed TLS is given -- see .shaped-lint.yml
 
 // TLS over whatever connection it was handed, which is the whole reason the transport seam exists.
 //
@@ -40,13 +39,13 @@
 
 #if CNET_HAS_TLS
 
+#include <clean-net/tls/impl/mbedtls_threading.hh>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/ssl.h>
-#include <mbedtls/threading.h>
 #include <mbedtls/x509_crt.h>
 
 namespace cnet
@@ -56,55 +55,6 @@ namespace
 /// How much of the socket is read in one go.
 /// A TLS record is at most 16 KB plus its overhead, so this is one record's worth and the size mbedtls itself uses.
 constexpr isize k_read_chunk = 16 * 1024 + 512;
-
-// ---- making the record layer safe to use from two threads ----------------------------------------------
-
-/// The mutex operations Mbed TLS is configured to call.
-///
-/// Its PSA layer keeps process-wide state that every TLS 1.3 handshake goes through, so a program handshaking on two
-/// threads at once needs these -- without them the damage shows up as an occasional handshake failing for no visible
-/// reason, which is the worst way for a bug like this to present.
-void mbedtls_mutex_init(mbedtls_threading_mutex_t* mutex)
-{
-    mutex->opaque = new std::mutex();
-}
-
-void mbedtls_mutex_free(mbedtls_threading_mutex_t* mutex)
-{
-    delete static_cast<std::mutex*>(mutex->opaque);
-    mutex->opaque = nullptr;
-}
-
-int mbedtls_mutex_lock(mbedtls_threading_mutex_t* mutex)
-{
-    if (mutex->opaque == nullptr)
-        return MBEDTLS_ERR_THREADING_BAD_INPUT_DATA;
-    static_cast<std::mutex*>(mutex->opaque)->lock();
-    return 0;
-}
-
-int mbedtls_mutex_unlock(mbedtls_threading_mutex_t* mutex)
-{
-    if (mutex->opaque == nullptr)
-        return MBEDTLS_ERR_THREADING_BAD_INPUT_DATA;
-    static_cast<std::mutex*>(mutex->opaque)->unlock();
-    return 0;
-}
-
-/// Install them, exactly once and before anything else touches Mbed TLS.
-///
-/// A function-local static is what makes "exactly once" true across threads; `mbedtls_threading_set_alt` itself is
-/// not safe to call twice or concurrently, and it must run before the first context is initialized because it is
-/// what brings upstream's own global mutexes to life.
-void ensure_threading_installed()
-{
-    static auto const installed = []
-    {
-        mbedtls_threading_set_alt(mbedtls_mutex_init, mbedtls_mutex_free, mbedtls_mutex_lock, mbedtls_mutex_unlock);
-        return true;
-    }();
-    (void)installed;
-}
 
 /// What the state machine is being driven towards.
 enum class tls_phase : u8
@@ -726,7 +676,7 @@ void apply_alpn(tls_data& d, cc::vector<cc::string> const& protocols)
 /// The parts every handshake needs, whichever end it is.
 [[nodiscard]] cc::optional<error> setup_common(tls_data& d, bool is_server)
 {
-    ensure_threading_installed();
+    impl::ensure_mbedtls_threading();
 
     mbedtls_ssl_init(&d.ssl);
     mbedtls_ssl_config_init(&d.conf);
@@ -915,7 +865,7 @@ cc::result<tls_identity, error> tls_make_self_signed(cc::string_view hostname)
 {
     // Everything here is torn down on the way out, in reverse order, whichever branch is taken -- which is what the
     // scope guard below is for, since mbedtls is a C API with seven things to free.
-    ensure_threading_installed();
+    impl::ensure_mbedtls_threading();
 
     auto entropy = mbedtls_entropy_context();
     auto drbg = mbedtls_ctr_drbg_context();

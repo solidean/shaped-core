@@ -65,7 +65,7 @@ rules:
     value: [<mutex>]
     reason: std::mutex, as the lock implementation Mbed TLS is handed through MBEDTLS_THREADING_ALT. cc::mutex owns its data and locks through a callback, so it cannot be the separate lock/unlock pair a C API asks for.
     files:
-      - src/clean-net/tls/tls_mbedtls.cc
+      - src/clean-net/tls/impl/mbedtls_threading.cc
 
   - kind: allow-include
     value: [<memory>]

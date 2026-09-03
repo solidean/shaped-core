@@ -20,6 +20,7 @@ add_library(clean-net
     src/clean-net/impl/async_glue.cc
     src/clean-net/impl/native_resolve.cc
     src/clean-net/impl/trust_store.cc
+    src/clean-net/tls/impl/mbedtls_threading.cc
     src/clean-net/tls/tls_mbedtls.cc
     src/clean-net/transport/tcp.cc
     src/clean-net/transport/connect.cc
@@ -30,6 +31,9 @@ add_library(clean-net
     src/clean-net/http/http_client.cc
     src/clean-net/http/polite_client.cc
     src/clean-net/http/http_server.cc
+    src/clean-net/ws/impl/ws_frame.cc
+    src/clean-net/ws/websocket.cc
+    src/clean-net/ws/websocket_connect.cc
     src/clean-net/transport/virtual_transport.cc
     src/clean-net/transport/simulated_transport.cc
     src/clean-net/impl/native_socket.cc
@@ -66,6 +70,7 @@ target_sources(clean-net
     src/clean-net/http/http_client.hh
     src/clean-net/http/polite_client.hh
     src/clean-net/http/http_server.hh
+    src/clean-net/ws/websocket.hh
     src/clean-net/transport/virtual_transport.hh
     src/clean-net/transport/simulated_transport.hh
 )
@@ -106,7 +111,8 @@ if(APPLE)
 endif()
 
 # TLS: Mbed TLS everywhere but wasm, where the browser holds the TLS and a program never sees a handshake.
-# CNET_HAS_TLS stays PRIVATE and never leaves tls_mbedtls.cc; the API stays declared either way and
+# CNET_HAS_TLS stays PRIVATE and is read by tls_mbedtls.cc and by the websocket handshake, which needs the SHA-1 and
+# base64 that arrive with it; the API stays declared either way and
 # cnet::tls_is_supported() reports the answer at runtime.
 if(EMSCRIPTEN)
     target_compile_definitions(clean-net PRIVATE CNET_HAS_TLS=0)
@@ -141,6 +147,7 @@ if(SC_BUILD_TESTS)
         tests/http-client-test.cc
         tests/http-politeness-test.cc
         tests/http-server-test.cc
+        tests/websocket-test.cc
         tests/virtual-transport-test.cc
         tests/simulated-transport-test.cc
     )

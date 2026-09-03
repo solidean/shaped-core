@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-net/http/message.hh>
@@ -62,6 +63,9 @@ struct cnet::http_server_description
 
     /// How long a kept-alive connection may sit idle before it is closed.
     i32 idle_timeout_ms = 30'000;
+
+    /// The largest WebSocket message an upgraded connection will reassemble.
+    isize max_websocket_message_bytes = 8 * 1024 * 1024;
 };
 
 /// A request, as a handler sees it.
@@ -117,6 +121,13 @@ namespace cnet
 /// **It runs on the reactor thread**, like every completion in this library: do no blocking work here, and hand
 /// anything slow to somewhere else.
 using route_handler = cc::unique_function<http_server_response(http_server_request const&)>;
+
+/// What a WebSocket route does with a connection that finished upgrading.
+///
+/// **The handler must keep the WebSocket alive**: the server holds no reference to it, so one that is dropped closes,
+/// which is the right behaviour for a route that decides it does not want the connection after all.
+using websocket_handler
+    = cc::unique_function<void(cc::shared_ptr<websocket> connection, http_server_request const& request)>;
 } // namespace cnet
 
 /// The server itself.
@@ -145,6 +156,17 @@ public:
     /// A path nothing matches is a 404; a path that matches only under another method is a 405, because those are
     /// different facts and a client can act on the difference.
     void route(http_method method, cc::string_view pattern, route_handler handler);
+
+    /// Upgrade `pattern` to a WebSocket instead of answering it.
+    ///
+    /// Matched exactly like `route`, and checked before the ordinary routes -- so a path that is both is a WebSocket
+    /// when the request asks to upgrade and an ordinary response when it does not.
+    /// A request that matches and is not a well-formed upgrade gets a 400 rather than falling through, because a
+    /// client that meant to upgrade learns nothing from a 404.
+    ///
+    /// No subprotocol is ever selected: this server answers without a `Sec-WebSocket-Protocol`, which every client
+    /// must accept.
+    void websocket_route(cc::string_view pattern, websocket_handler handler);
 
     /// Stop accepting and close what is open.
     ///

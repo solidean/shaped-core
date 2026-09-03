@@ -280,6 +280,7 @@ auto server = cnet::http_server::try_create(virtual_net).value(); // for a test
 server->route(cnet::http_method::get, "/hello",
               [](cnet::http_server_request const&) { return cnet::http_server_response::text("hi"); });
 server->route(cnet::http_method::get, "/files/*", handler);       // a trailing * matches everything beneath
+server->websocket_route("/feed", handler);                         // upgrade this path instead of answering it
 server->local();                                                   // endpoint — which port it got
 server->stop();                                                    // and the destructor does too
 ```
@@ -293,6 +294,37 @@ Five things worth knowing.
 **Handlers run on the reactor thread** — do no blocking work in one.
 **Routes are tried in order**, so a specific path added before a wildcard wins; an unmatched path is a 404 and an unmatched method on a matched path is a 405.
 **`stop()` is immediate**, through the server's own cancellation token, and the listener goes with it.
+
+## WebSockets
+
+```cpp
+#include <clean-net/ws/websocket.hh>
+
+auto connecting = cnet::websocket_connect(io, resolver, "wss://example.com/feed");  // also (transport&, ...)
+auto ws = connecting->value();                     // cc::shared_ptr<cnet::websocket>
+
+ws->send_text("hello");                            // shared_async<cc::unit>
+ws->send_binary(bytes);
+auto msg = ws->receive();                          // shared_async<websocket_message> — one WHOLE message
+msg->value().is_text; msg->value().text(); msg->value().data;
+ws->close(1000, "done");                           // 4000-4999 is yours to invent in
+ws->is_open(); ws->protocol(); ws->peer();
+
+// the server half
+server->websocket_route("/feed", [&](cc::shared_ptr<cnet::websocket> ws, cnet::http_server_request const&)
+                        { sockets.push_back(cc::move(ws)); });
+```
+
+`cnet::websocket_options` — `protocols` (offered, in preference order), `max_message_bytes`, `tls`.
+
+Five things worth knowing.
+**A server handler MUST keep its `shared_ptr`** — the server holds none, so a dropped WebSocket closes.
+**Ping, pong and close are answered here**, not by you.
+**One receive at a time**: a second while the first is outstanding would take the message the first was promised.
+A message that arrived while nobody was waiting is held in order, and delivered before the close that followed it.
+**Sends queue** rather than interleaving frames on the wire, so two senders cannot corrupt each other's message.
+**`websocket_route` is checked before the ordinary routes**, and a request that matches one without being a valid upgrade gets a 400 rather than a 404.
+[docs/websockets.md](docs/websockets.md) is the reasoning.
 
 ## Politeness and retries
 

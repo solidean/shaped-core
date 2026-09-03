@@ -9,6 +9,9 @@
 #include <clean-net/fwd.hh>
 #include <clean-net/http/impl/http1.hh>
 #include <clean-net/impl/async_glue.hh>
+#include <clean-net/ws/impl/websocket_internal.hh>
+#include <clean-net/ws/impl/ws_frame.hh>
+#include <clean-net/ws/websocket.hh>
 
 // One accept loop, and one state machine per connection.
 //
@@ -37,6 +40,12 @@ struct route_entry
 
     route_handler handler;
 };
+
+struct websocket_route_entry
+{
+    cc::string pattern;
+    websocket_handler handler;
+};
 } // namespace
 
 /// Everything the server owns, shared with every connection it accepted.
@@ -56,6 +65,7 @@ struct http_server_state
     cancel_token token = cancel_token::create();
 
     cc::mutex<cc::vector<route_entry>> routes;
+    cc::mutex<cc::vector<websocket_route_entry>> websocket_routes;
 
     cc::atomic<i32> open_connections = 0;
     cc::atomic<i64> requests_handled = 0;
@@ -154,6 +164,21 @@ struct route_match
         });
 }
 
+[[nodiscard]] http_server_request make_request(cc::shared_ptr<session> const& s)
+{
+    auto const& head = s->parser.request();
+
+    auto request = http_server_request();
+    request.method = head.method;
+    request.target = head.target;
+    request.path = cc::string(path_of(head.target));
+    request.query = cc::string(query_of(head.target));
+    request.headers = head.headers;
+    request.body = cc::move(s->body);
+    request.peer = s->connection->peer();
+    return request;
+}
+
 [[nodiscard]] http_server_response answer(cc::shared_ptr<session> const& s)
 {
     if (s->body_too_large)
@@ -166,21 +191,136 @@ struct route_match
     if (found.handler == nullptr)
         return http_server_response::empty(found.path_exists ? 405 : 404);
 
-    auto request = http_server_request();
-    request.method = head.method;
-    request.target = head.target;
-    request.path = cc::string(path);
-    request.query = cc::string(query_of(head.target));
-    request.headers = head.headers;
-    request.body = cc::move(s->body);
-    request.peer = s->connection->peer();
+    auto request = make_request(s);
 
     s->server->requests_handled.fetch_add(1);
     return (*found.handler)(request);
 }
 
+/// Whether a comma-separated header list carries `token`.
+///
+/// `Connection` is such a list and a browser routinely sends `keep-alive, Upgrade`, so comparing the whole value
+/// against one word rejects real clients.
+[[nodiscard]] bool header_lists_token(cc::optional<cc::string_view> value, cc::string_view token)
+{
+    if (!value.has_value())
+        return false;
+
+    auto rest = value.value();
+    while (!rest.empty())
+    {
+        auto const comma = rest.find(',');
+        auto const piece = comma < 0 ? rest : rest.subview({.offset = 0, .size = comma});
+        rest = comma < 0 ? cc::string_view() : rest.subview(comma + 1);
+
+        auto trimmed = piece;
+        while (!trimmed.empty() && (trimmed.front() == ' ' || trimmed.front() == '\t'))
+            trimmed = trimmed.subview(1);
+        while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t'))
+            trimmed = trimmed.subview({.offset = 0, .size = trimmed.size() - 1});
+
+        if (header_names_equal(trimmed, token))
+            return true;
+    }
+    return false;
+}
+
+/// Hand this connection to the WebSocket layer, if a route asked for that and the request is one.
+///
+/// Returns whether the session has stopped being the HTTP loop's to drive, which covers both a successful upgrade and
+/// the 400 a malformed one gets.
+[[nodiscard]] bool try_upgrade(cc::shared_ptr<session> const& s)
+{
+    auto const& head = s->parser.request();
+    auto const path = path_of(head.target);
+
+    auto* const handler = s->server->websocket_routes.lock(
+        [&](cc::vector<websocket_route_entry>& all) -> websocket_handler*
+        {
+            for (auto& entry : all)
+                if (path == cc::string_view(entry.pattern))
+                    return &entry.handler;
+            return nullptr;
+        });
+
+    if (handler == nullptr)
+        return false;
+
+    auto const key = head.headers.get("Sec-WebSocket-Key");
+    auto const version = head.headers.get("Sec-WebSocket-Version");
+
+    auto const well_formed = head.method == http_method::get                               //
+                          && header_lists_token(head.headers.get("Upgrade"), "websocket")  //
+                          && header_lists_token(head.headers.get("Connection"), "upgrade") //
+                          && version.has_value() && version.value() == "13"                //
+                          && key.has_value();
+
+    auto accept
+        = well_formed
+            ? impl::websocket_accept_key(key.value())
+            : cc::result<cc::string, error>(cc::error(
+                  error{.code = error_code::protocol_error, .native_code = 0, .message = cc::string("not an upgrade")}));
+
+    if (accept.has_error())
+    {
+        // A client that asked for a path only WebSockets live at, and did not ask correctly, learns that here rather
+        // than from a 404 about a path that does exist.
+        auto bad = impl::write_response_head(400, {}, {}, 0, false);
+        if (bad.has_error())
+        {
+            close_session(s);
+            return true;
+        }
+
+        s->head_bytes = cc::move(bad).value();
+        auto const span = cc::span<byte const>(reinterpret_cast<byte const*>(s->head_bytes.data()), s->head_bytes.size());
+        impl::when_ready(
+            s->connection->send(span, deadline::after_ms(s->server->desc.request_timeout_ms), s->server->token),
+            [s](cc::shared_async<cc::unit> const&) { close_session(s); });
+        return true;
+    }
+
+    // Written by hand rather than through `write_response_head`, which would add a Content-Length: a 101 has no body,
+    // and every byte after its blank line already belongs to the WebSocket.
+    s->head_bytes = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                    "Sec-WebSocket-Accept: ";
+    s->head_bytes += cc::move(accept).value();
+    s->head_bytes += "\r\n\r\n";
+
+    auto request = make_request(s);
+    s->server->requests_handled.fetch_add(1);
+
+    auto const span = cc::span<byte const>(reinterpret_cast<byte const*>(s->head_bytes.data()), s->head_bytes.size());
+    impl::when_ready(s->connection->send(span, deadline::after_ms(s->server->desc.request_timeout_ms), s->server->token),
+                     [s, handler, request = cc::move(request)](cc::shared_async<cc::unit> const& sent) mutable
+                     {
+                         if (sent->has_error())
+                         {
+                             close_session(s);
+                             return;
+                         }
+
+                         // The session hands the connection over rather than closing it, so the count it keeps stops here: what is
+                         // open from now on is a WebSocket rather than an HTTP connection.
+                         s->closed = true;
+                         s->server->open_connections.fetch_sub(1);
+
+                         auto connection = cc::move(s->connection);
+                         s->connection = {};
+
+                         auto ws = impl::adopt_websocket(cc::move(connection), false, cc::string(), cc::move(s->unparsed),
+                                                         s->server->desc.max_websocket_message_bytes, s->server->token);
+                         (*handler)(cc::move(ws), request);
+                     });
+
+    return true;
+}
+
 void write_response(cc::shared_ptr<session> const& s)
 {
+    if (!s->body_too_large && try_upgrade(s))
+        return;
+
     auto response = answer(s);
 
     // A HEAD gets the head and none of the bytes, and its Content-Length still describes what a GET would return.
@@ -504,6 +644,15 @@ void http_server::route(http_method method, cc::string_view pattern, route_handl
     entry.handler = cc::move(handler);
 
     _state->routes.lock([&](cc::vector<route_entry>& all) { all.push_back(cc::move(entry)); });
+}
+
+void http_server::websocket_route(cc::string_view pattern, websocket_handler handler)
+{
+    auto entry = websocket_route_entry();
+    entry.pattern = pattern;
+    entry.handler = cc::move(handler);
+
+    _state->websocket_routes.lock([&](cc::vector<websocket_route_entry>& all) { all.push_back(cc::move(entry)); });
 }
 
 void http_server::stop()

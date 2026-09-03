@@ -231,6 +231,20 @@ class native_http_client;
 class owned_http_client;
 } // namespace cnet
 
+// ---- websockets ----------------------------------------------------------------------------------------
+
+namespace cnet
+{
+/// One whole message, which is what a WebSocket carries instead of a byte stream.
+struct websocket_message;
+
+/// What a WebSocket is opened with.
+struct websocket_options;
+
+/// An open WebSocket, over whatever connection it was handed.
+class websocket;
+} // namespace cnet
+
 // ---- capability ladder ---------------------------------------------------------------------------------
 
 namespace cnet
