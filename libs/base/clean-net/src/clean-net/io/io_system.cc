@@ -6,6 +6,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <clean-net/fwd.hh>
+#include <clean-net/impl/native_socket.hh>
 #include <clean-net/impl/reactor.hh>
 
 namespace cnet::impl
@@ -22,13 +23,18 @@ struct cancel_request
     io_operation* op = nullptr;
 };
 
-using actor_handle = cc::threaded_actor<submit_request, cancel_request>;
+struct signal_request
+{
+    io_operation* op = nullptr;
+};
+
+using actor_handle = cc::threaded_actor<submit_request, cancel_request, signal_request>;
 
 /// The reactor's semantic thread.
 ///
 /// Every reactor call happens here, which is what lets reactor.hh take no lock: the mailbox is the serializer, so
 /// `submit` from another thread is a message rather than a shared write.
-class io_actor_impl final : public cc::threaded_actor_impl<submit_request, cancel_request>
+class io_actor_impl final : public cc::threaded_actor_impl<submit_request, cancel_request, signal_request>
 {
 public:
     io_actor_impl(reactor& r, cc::atomic<isize>& pending, i32 max_wait_ms, bool unthreaded)
@@ -48,6 +54,12 @@ protected:
     void on_message(cancel_request msg) override
     {
         _reactor.cancel(msg.op);
+        _pending.store(_reactor.pending_count());
+    }
+
+    void on_message(signal_request msg) override
+    {
+        _reactor.signal(msg.op);
         _pending.store(_reactor.pending_count());
     }
 
@@ -130,6 +142,12 @@ public:
             _reactor->wake();
     }
 
+    void signal(io_operation* op)
+    {
+        if (_handle->enqueue_message(signal_request{.op = op}))
+            _reactor->wake();
+    }
+
     [[nodiscard]] isize pending_count() const { return _pending.load(); }
     [[nodiscard]] clock& time_source() const { return _clock; }
     [[nodiscard]] bool has_reactor_thread() const { return !_unthreaded; }
@@ -161,7 +179,8 @@ cc::result<cc::unique_ptr<io_system>, error> io_system::try_create(io_system_des
 
     // Decided before start() rather than read back from it, so no thread can run on_process before the answer is in.
     // A build without threads is unthreaded whatever the description says, exactly as cc::threaded_actor decides it.
-    auto const unthreaded = desc.unthreaded || CC_HAS_THREADS == 0;
+    // So is a build without sockets: with nothing to wait on, a reactor thread could only spin.
+    auto const unthreaded = desc.unthreaded || CC_HAS_THREADS == 0 || !impl::sockets_are_supported();
 
     auto system = cc::make_unique<io_system>();
     system->_actor = cc::make_unique<impl::io_actor>(cc::move(reactor).value(), c, unthreaded);
@@ -198,8 +217,20 @@ void io_system::cancel(impl::io_operation* op)
     _actor->cancel(op);
 }
 
+void io_system::signal(impl::io_operation* op)
+{
+    _actor->signal(op);
+}
+
 isize io_system::pending_count() const
 {
     return _actor->pending_count();
+}
+
+i64 deadline_to_absolute(io_system& io, deadline d)
+{
+    if (!d.is_finite())
+        return 0;
+    return io.time_source().now_ns() + d.timeout_ms * 1000 * 1000;
 }
 } // namespace cnet

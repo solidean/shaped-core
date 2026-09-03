@@ -68,7 +68,7 @@ written against the old one.
   Nothing produces a failure for an ordinary lost packet.
 - **Per-socket options are reachable:** don't-fragment, traffic class, buffer sizes.
 - **The socket type is an interface** a simulated or virtual implementation can stand in for
-  ([cnet-transport-seam.md](cnet-transport-seam.md)).
+  ([the transport seam](../../libs/base/clean-net/docs/transport-seam.md), which the stream side already has).
   A multiplayer layer is nearly untestable without one: latency, jitter, loss, duplication and reordering are what
   its logic exists to survive.
 

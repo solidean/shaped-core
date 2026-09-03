@@ -65,6 +65,12 @@ void ensure_socket_platform();
 
 void close_socket(native_socket s);
 
+/// Say that nothing more will be sent, leaving the receive half open.
+///
+/// The peer reads end-of-stream while its own writes still arrive here, which is what a protocol needs to mean "that
+/// was the whole request" without also refusing the answer.
+[[nodiscard]] cc::result<cc::unit, error> shutdown_socket_send(native_socket s);
+
 /// Owns a socket, and closes it when the last reference goes away.
 ///
 /// Shared rather than unique, because an operation the reactor is still watching refers to its socket by handle.

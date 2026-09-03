@@ -3,6 +3,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-net/common/clock.hh>
+#include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
 
 namespace cnet::impl
@@ -47,7 +48,11 @@ struct cnet::io_system_description
 class cnet::io_system
 {
 public:
-    /// Fails with `unsupported` where the platform has no sockets, which today means wasm.
+    /// Build one, with or without sockets under it.
+    ///
+    /// A platform with no sockets -- wasm -- gets a system that runs timers and manual operations and nothing else,
+    /// because a deadline still has to fire where an HTTP request is served by `fetch`.
+    /// It is always unthreaded there, since a reactor with nothing to wait on cannot park.
     [[nodiscard]] static cc::result<cc::unique_ptr<io_system>, error> try_create(io_system_description const& desc = {});
 
     /// Throwing counterpart of try_create.
@@ -75,6 +80,13 @@ public:
     /// **For the transport layer.** Safe from any thread, and harmless if the operation already completed.
     void cancel(impl::io_operation* op);
 
+    /// Say that a `manual` operation is done, so it completes successfully.
+    ///
+    /// **For the transport layer**, and the reason a backend that is not a socket -- a virtual connection, a browser
+    /// `fetch` -- can join the same async machinery.
+    /// Safe from any thread, and harmless if the operation already completed.
+    void signal(impl::io_operation* op);
+
     /// How many operations are outstanding.
     ///
     /// A snapshot rather than a promise: it can change the instant it is read, and it is here for diagnostics and for
@@ -91,3 +103,13 @@ private:
     /// AVX-512 intrinsic surface behind it, which is most of that header's parse time.
     cc::unique_ptr<impl::io_actor> _actor;
 };
+
+namespace cnet
+{
+/// The absolute reading of the io_system's clock a deadline turns into, or 0 for none.
+///
+/// **For the transport layer.** A relative deadline is what a call site can write honestly, and an absolute one is
+/// what the reactor can compare against -- and this is the one place the two meet, so every transport measures the
+/// same budget against the same clock.
+[[nodiscard]] i64 deadline_to_absolute(io_system& io, deadline d);
+} // namespace cnet

@@ -15,7 +15,7 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 **Recording domain:** `cnet`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../clean-core/docs/logging.md).
 
-**Early stage.** The vocabulary, the reactor and TCP exist today; everything in [docs/structure.md](docs/structure.md) marked planned is not here yet.
+**Early stage.** The vocabulary, the reactor, TCP and the transport seam exist today; everything in [docs/structure.md](docs/structure.md) marked planned is not here yet.
 
 ## Everything at once
 
@@ -121,7 +121,7 @@ A name is not an endpoint: `parse("example.com:80")` fails, because resolving ne
 ```cpp
 #include <clean-net/io/io_system.hh>
 
-cnet::io_system::try_create();                          // cc::result<cc::unique_ptr<io_system>, error>
+cnet::io_system::try_create();                          // cc::result<cc::unique_ptr<io_system>, error>; succeeds even with no sockets
 cnet::io_system::try_create({.unthreaded = true, .time_source = &clk, .max_wait_ms = 50});
 cnet::io_system::create(desc);                          // throwing counterpart
 io->has_reactor_thread();                               // false on a threads-off build, whatever the description said
@@ -132,6 +132,10 @@ io->pending_count();                                    // a snapshot, readable 
 **There is no `poll()`.**
 With threads the io_system owns one; without them it registers with clean-core's pump, so `cc::thread_pump_all()` drives it along with everything else.
 A `cnet`-specific pump would be the deadlock that registry exists to prevent.
+
+The reactor runs two things that are not sockets, which is why an io_system exists on wasm too.
+A **timer** completes successfully at its deadline — a backoff, a head start, a simulated link's latency.
+A **manual** operation completes when its owner signals it, and times out if nobody does.
 
 ## TCP
 
@@ -147,6 +151,7 @@ listener->local();                                      // endpoint
 
 conn->receive(buffer);                                  // cc::shared_async<isize> — the FIRST bytes, not a full buffer
 conn->send(bytes);                                      // cc::shared_async<cc::unit> — completes only when all of them are gone
+conn->shutdown_send();                                  // cc::result<cc::unit, error> — half-close: "that was the whole request"
 conn->local(); conn->peer(); conn->is_open(); conn->close();
 ```
 
@@ -158,3 +163,28 @@ A handle closed under the reactor can be reissued to the next socket the process
 
 `bytes` passed to `send` must stay alive and unmodified until the operation completes.
 Per-operation cancellation is not wired up yet — a deadline is how an operation ends early.
+
+## Standing something else in for the network
+
+```cpp
+#include <clean-net/transport/backend.hh>       // the seam: connection_backend, listener_backend, transport
+#include <clean-net/transport/virtual_transport.hh>
+#include <clean-net/transport/simulated_transport.hh>
+
+auto net = cnet::virtual_network(io);                   // an in-process network: no socket, no port, no loopback
+auto link = cnet::simulated_transport(io, net, {.latency_ms = 50, .reset_after_bytes = 4096, .seed = 7});
+
+cnet::tcp_listener::try_create(link, where);            // the transport overloads of the same factories
+cnet::tcp_connect(link, where);                         // ...so the code under test never changes
+```
+
+`cnet::link_conditions` — `latency_ms`, `jitter_ms`, `loss_probability`, `bandwidth_bytes_per_sec`, `reset_after_bytes`, `seed`.
+`duplicate_probability` and `reorder_probability` are datagram-only and ignored on a stream.
+
+Three things worth knowing.
+**Every condition is off by default**, so a simulated link nobody configured is indistinguishable from the one underneath — without that, a passing test proves nothing.
+**Delays are paid on the io_system's clock**, so a `manual_clock` turns a 200 ms link into microseconds.
+**The seed is logged when the link is built**, which is what makes a failing run replay from two numbers.
+
+`native_transport(io)` is the real one, and what `tcp_connect(io, ...)` uses; it is cheap enough to construct at the call site.
+[docs/transport-seam.md](docs/transport-seam.md) is the design.

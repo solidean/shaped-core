@@ -91,6 +91,30 @@ class io_system;
 
 namespace cnet
 {
+/// One end of an established connection, whatever is carrying it.
+///
+/// The seam that lets a test stand a virtual or a misbehaving transport in the place of the real one -- which is the
+/// only way a connection reset mid-body or a body arriving one byte at a time becomes a unit test.
+class connection_backend;
+
+/// What inbound connections arrive on.
+class listener_backend;
+
+/// Where connections and listeners come from: real sockets, or something standing in for them.
+class transport;
+
+/// The transport over the platform's own sockets.
+class native_transport;
+
+/// A transport with no network at all: connections are answered in this process, over no socket.
+class virtual_network;
+
+/// What a link does to traffic passing through it: delay, jitter, loss, a bandwidth ceiling, a cut at a byte offset.
+struct link_conditions;
+
+/// A transport that misbehaves on the way through to another one, so a bad network is a unit test.
+class simulated_transport;
+
 /// What a TCP socket is set up with: Nagle, and whether an IPv6 socket also takes IPv4.
 struct tcp_options;
 

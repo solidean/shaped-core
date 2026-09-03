@@ -271,3 +271,42 @@ TEST("cnet - listening needs an address, and reports what it could not do")
         CHECK(expected);
     }
 }
+
+TEST("cnet - a half-close ends the sending half and leaves the answer coming")
+{
+    auto server = make_server();
+    if (!server.up())
+        SKIP("this platform has no sockets");
+
+    auto accepted = server.listener->accept();
+    auto connected = tcp_connect(*server.io, server.where());
+    CHECK(settled_ok(accepted));
+    CHECK(settled_ok(connected));
+
+    auto const& client = connected->value();
+    auto const& peer = accepted->value();
+
+    auto const request = cc::string_view("that is the whole request");
+    CHECK(settled_ok(client->send(bytes_of(request))));
+    CHECK(client->shutdown_send().has_value());
+
+    // The request still arrives: a half-close ends the stream AFTER what was already written.
+    byte inbox[64] = {};
+    auto received = peer->receive(cc::span<byte>(inbox, isize(sizeof(inbox))));
+    CHECK(settled_ok(received));
+    CHECK(received->value() == request.size());
+
+    // And the next read sees end-of-stream, which is how the peer knows the request is complete.
+    auto ended = peer->receive(cc::span<byte>(inbox, isize(sizeof(inbox))));
+    CHECK(wait_for([&] { return ended->is_ready(); }));
+    CHECK(ended->try_error() != nullptr);
+
+    // The connection is still open the other way, which is the whole point of half-closing rather than closing.
+    auto const answer = cc::string_view("and here is the answer");
+    CHECK(settled_ok(peer->send(bytes_of(answer))));
+
+    byte client_inbox[64] = {};
+    auto client_received = client->receive(cc::span<byte>(client_inbox, isize(sizeof(client_inbox))));
+    CHECK(settled_ok(client_received));
+    CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
+}

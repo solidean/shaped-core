@@ -9,7 +9,7 @@ Three pieces, each reporting its own availability, rather than one tower.
 The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has no sockets and does have HTTP.
 
 - **transport** — sockets, the reactor, datagrams.
-  Absent on wasm.
+  Absent on wasm, though its seam is not: a virtual or simulated transport needs no sockets.
 - **protocol clients** — HTTP and WebSocket, over a backend.
   Present everywhere, at different capability levels.
 - **listeners** — the server side.
@@ -20,6 +20,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | | wasm | Windows | Linux | macOS | iOS / Android |
 |---|---|---|---|---|---|
 | TCP | — | **done** | done, unverified | done, unverified | planned |
+| virtual + simulated transports | done | done | done | done | done |
 | UDP datagrams | — | planned | planned | planned | planned |
 | listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
@@ -37,19 +38,23 @@ counterpart, `cnet::ip_address` and `cnet::endpoint`, and the `cnet::http_level`
 None of it touches the network, so all of it is testable without one.
 
 **[done]** the reactor, `cnet::io_system`, and TCP.
-Connect, accept, send and receive as `cc::shared_async`, with deadlines the reactor enforces against the injected
-clock.
+Connect, accept, send, receive and half-close as `cc::shared_async`, with deadlines the reactor enforces against the
+injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
+
+**[done]** the transport seam and the two transports that stand in for a network:
+`cnet::virtual_network` answers in this process over no socket, and `cnet::simulated_transport` delays, drops and cuts
+on the way through to another one.
+[transport-seam.md](transport-seam.md) is the design.
 
 **[planned]**, roughly in the order it will be built:
 
-1. the transport backend seam, with the simulated and virtual backends over it;
-2. name resolution — thread-offloaded `getaddrinfo` behind a cache, with happy eyeballs above it;
-3. TLS over a vendored mbedTLS, with per-platform trust stores;
-4. the HTTP/1.1 native backend, the client seam and the convenience calls;
-5. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
-6. the loopback server and WebSocket;
-7. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+1. name resolution — thread-offloaded `getaddrinfo` behind a cache, with happy eyeballs above it;
+2. TLS over a vendored mbedTLS, with per-platform trust stores;
+3. the HTTP/1.1 native backend, the client seam and the convenience calls;
+4. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
+5. the loopback server and WebSocket;
+6. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
 ## Deliberately out of scope
 
@@ -86,3 +91,14 @@ slow and flaky.
 `cnet::clock` exists so the reactor reads time from something a test can move, and `cnet::manual_clock` is that
 something.
 It is here now rather than later because retrofitting one means touching every place that reads a clock.
+
+## The reactor runs more than sockets
+
+Two operation kinds wait on nothing the OS knows about.
+A **timer** completes successfully once the clock passes its deadline, which is what a retry backoff, a happy-eyeballs
+head start and a simulated link's latency are all made of.
+A **manual** operation completes when its owner signals it, and times out if nobody does — which is how a virtual
+connection, and later a browser `fetch`, joins the same async machinery instead of growing a second one.
+
+That is also why an `io_system` exists on a platform with no sockets at all: a request served by `fetch` still has a
+deadline, and the deadline is the reactor's.

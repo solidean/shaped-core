@@ -16,7 +16,10 @@ add_library(clean-net
     src/clean-net/address/endpoint.cc
     src/clean-net/io/io_system.cc
     src/clean-net/transport/tcp.cc
+    src/clean-net/transport/virtual_transport.cc
+    src/clean-net/transport/simulated_transport.cc
     src/clean-net/impl/native_socket.cc
+    src/clean-net/impl/reactor.cc
     src/clean-net/impl/reactor_poll.cc
 )
 
@@ -37,7 +40,10 @@ target_sources(clean-net
     src/clean-net/address/ip_address.hh
     src/clean-net/address/endpoint.hh
     src/clean-net/io/io_system.hh
+    src/clean-net/transport/backend.hh
     src/clean-net/transport/tcp.hh
+    src/clean-net/transport/virtual_transport.hh
+    src/clean-net/transport/simulated_transport.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -85,6 +91,8 @@ if(SC_BUILD_TESTS)
         tests/reactor-test.cc
         tests/io-system-test.cc
         tests/tcp-test.cc
+        tests/virtual-transport-test.cc
+        tests/simulated-transport-test.cc
     )
 
     target_link_libraries(clean-net-test PRIVATE clean-net nexus)

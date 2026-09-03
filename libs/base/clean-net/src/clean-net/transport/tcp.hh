@@ -8,8 +8,10 @@
 #include <clean-net/address/endpoint.hh>
 #include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
-#include <clean-net/impl/native_socket.hh>
 #include <clean-net/io/io_system.hh>
+#include <clean-net/transport/backend.hh>
+
+#include <memory> // std::unique_ptr — cc has no polymorphic ownership, so an owned interface uses this repo-wide
 
 /// TCP, as the transport layer a protocol is written over.
 ///
@@ -21,8 +23,9 @@
 /// **Absent on wasm**, where a program cannot open a socket at all.
 /// Every factory reports `error_code::unsupported` there rather than the types disappearing.
 ///
-/// A connection is held by `cc::shared_ptr` rather than uniquely, because an operation in flight refers to its
-/// socket: shared ownership is what makes dropping the last handle mid-read safe instead of a use-after-free.
+/// A connection is a handle over a `cnet::connection_backend` rather than over a socket, which is what lets a test
+/// stand a virtual or a misbehaving transport in the place of the real one.
+/// It is held by `cc::shared_ptr` rather than uniquely, because an operation in flight refers to it.
 
 /// What a TCP socket is set up with.
 struct cnet::tcp_options
@@ -74,10 +77,16 @@ public:
     /// `bytes` must stay alive and unmodified until it completes.
     [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d = deadline::after_secs(30));
 
-    [[nodiscard]] endpoint local() const { return _local; }
-    [[nodiscard]] endpoint peer() const { return _peer; }
+    /// Say that nothing more will be sent, and leave the connection open for the answer.
+    ///
+    /// What a protocol needs to mean "that was the whole request" without also refusing the response -- the peer
+    /// reads end-of-stream while its own writes still arrive here.
+    cc::result<cc::unit, error> shutdown_send();
 
-    /// Whether the socket is still open.
+    [[nodiscard]] endpoint local() const;
+    [[nodiscard]] endpoint peer() const;
+
+    /// Whether the connection is still usable.
     /// False after `close`, and after a failure that took the connection down with it.
     [[nodiscard]] bool is_open() const;
 
@@ -90,16 +99,13 @@ public:
     /// cut short here.
     void close();
 
-    tcp_connection(io_system& io, cc::shared_ptr<impl::socket_holder> s, endpoint local_endpoint, endpoint peer_endpoint);
+    explicit tcp_connection(std::unique_ptr<connection_backend> backend);
     tcp_connection(tcp_connection const&) = delete;
     tcp_connection& operator=(tcp_connection const&) = delete;
     ~tcp_connection();
 
 private:
-    io_system& _io;
-    cc::shared_ptr<impl::socket_holder> _socket;
-    endpoint _local;
-    endpoint _peer;
+    std::unique_ptr<connection_backend> _backend;
 };
 
 /// A socket accepting inbound connections.
@@ -108,11 +114,17 @@ private:
 class cnet::tcp_listener
 {
 public:
-    /// Bind and listen.
+    /// Bind and listen on the platform's own sockets.
     ///
     /// A port of 0 asks the OS to choose one, and `local()` is how you learn which -- the normal thing for a test
     /// server, and what keeps two of them from colliding.
     [[nodiscard]] static cc::result<cc::unique_ptr<tcp_listener>, error> try_create(io_system& io,
+                                                                                    endpoint const& where,
+                                                                                    tcp_listen_options const& options
+                                                                                    = {});
+
+    /// Bind and listen on a given transport, which is how a test listens somewhere that is not the network.
+    [[nodiscard]] static cc::result<cc::unique_ptr<tcp_listener>, error> try_create(transport& t,
                                                                                     endpoint const& where,
                                                                                     tcp_listen_options const& options
                                                                                     = {});
@@ -129,23 +141,42 @@ public:
     [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d = deadline::never());
 
     /// What the listener actually bound to, port included.
-    [[nodiscard]] endpoint local() const { return _local; }
+    [[nodiscard]] endpoint local() const;
 
-    tcp_listener(io_system& io, cc::shared_ptr<impl::socket_holder> s, endpoint local_endpoint);
+    explicit tcp_listener(std::unique_ptr<listener_backend> backend);
     tcp_listener(tcp_listener const&) = delete;
     tcp_listener& operator=(tcp_listener const&) = delete;
     ~tcp_listener();
 
 private:
+    std::unique_ptr<listener_backend> _backend;
+};
+
+/// The transport over the platform's own sockets.
+///
+/// Cheap to make and holding nothing but the io_system it submits to, so a call site constructs one where it needs
+/// one rather than storing it.
+class cnet::native_transport final : public cnet::transport
+{
+public:
+    explicit native_transport(io_system& io) : _io(io) {}
+
+    [[nodiscard]] bool is_supported() const override;
+
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
+                                                                           deadline d,
+                                                                           tcp_options const& options) override;
+
+    [[nodiscard]] cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
+                                                                         tcp_listen_options const& options) override;
+
+private:
     io_system& _io;
-    cc::shared_ptr<impl::socket_holder> _socket;
-    endpoint _local;
-    tcp_options _options;
 };
 
 namespace cnet
 {
-/// Connect to `where`.
+/// Connect to `where` over the platform's own sockets.
 ///
 /// One deadline covers the whole attempt rather than each step of it.
 /// Fails with `unsupported` where the platform has no sockets, and with `connection_refused`, `host_unreachable` or
@@ -154,6 +185,12 @@ namespace cnet
 /// This takes an address rather than a name: resolving a name can block and needs the OS, so it is `cnet::resolve`'s
 /// job and never a connect's.
 [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
+                                                                           endpoint const& where,
+                                                                           deadline d = deadline::after_secs(30),
+                                                                           tcp_options const& options = {});
+
+/// Connect over a given transport, which is how a test connects to something that is not the network.
+[[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
                                                                            endpoint const& where,
                                                                            deadline d = deadline::after_secs(30),
                                                                            tcp_options const& options = {});

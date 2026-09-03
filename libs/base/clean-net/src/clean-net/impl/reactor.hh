@@ -45,6 +45,18 @@ enum class io_op_kind : u8
     /// Completes only when ALL of them are gone, since a partial send is never what a caller meant and the retry
     /// loop is the reactor's to run.
     send,
+
+    /// Nothing at all, until the clock passes `deadline_ns`.
+    /// The one operation whose deadline is a SUCCESS rather than a failure, which is what makes it a delay: a retry
+    /// backoff, a happy-eyeballs head start, the latency a simulated link adds.
+    timer,
+
+    /// Nothing until somebody calls `signal`, and `timed_out` if nobody does.
+    ///
+    /// How work that is not a socket joins the same async machinery: a virtual connection handing bytes to its peer,
+    /// and later a browser `fetch` reporting back.
+    /// Signalling is the only way to complete one, so all of its state stays on the reactor thread and needs no lock.
+    manual,
 };
 
 /// One outstanding operation.
@@ -88,8 +100,10 @@ struct io_operation
 class reactor
 {
 public:
-    /// Fails with `unsupported` where the platform has no sockets.
+    /// Build a reactor, with or without sockets under it.
     ///
+    /// A build with no sockets gets one that runs timers and manual operations and nothing else, which is what keeps
+    /// deadlines working on wasm -- where the transport is absent but an HTTP request still has a budget.
     /// The clock is the seam deadlines are measured against, and it must outlive the reactor.
     /// Taking one here rather than reading the OS is what makes a timeout testable without sleeping through it.
     [[nodiscard]] static cc::result<cc::unique_ptr<reactor>, error> try_create(clock& c);
@@ -101,6 +115,10 @@ public:
     /// Ask for `op` to finish with `cancelled` at the next opportunity.
     /// Harmless if it already completed, which is what makes a cancel racing a completion safe rather than a bug.
     void cancel(io_operation* op);
+
+    /// Say that a `manual` operation is done, so it completes successfully at the next opportunity.
+    /// Harmless if it already completed, and meaningless on any other kind.
+    void signal(io_operation* op);
 
     /// Wait up to `timeout_ms` for something to happen, then finish whatever is ready or overdue.
     ///
@@ -127,6 +145,7 @@ private:
     {
         io_operation* op = nullptr;
         bool cancelled = false;
+        bool signalled = false;
         bool readable = false;
         bool writable = false;
         bool errored = false;
@@ -141,7 +160,8 @@ private:
         cc::optional<error> failure;
     };
 
-    /// The only platform-specific part: ask the OS what is ready, and record it on the entries.
+    /// Ask the OS what is ready, and record it on the entries.
+    /// Platform-specific, along with `drive_socket`, `wake` and `drain_wake`; everything else here is not.
     void poll_once(i32 timeout_ms);
 
     /// Swallow the wake bytes and re-arm.
@@ -153,6 +173,12 @@ private:
     /// Move one operation as far as it can go.
     /// Absent means "still pending"; present means it finished, with or without a failure.
     [[nodiscard]] cc::optional<cc::optional<error>> drive(entry& e);
+
+    /// The half of `drive` that talks to a socket, and the only half a build without sockets does not have.
+    [[nodiscard]] cc::optional<cc::optional<error>> drive_socket(entry& e);
+
+    /// The self-wake channel, or `k_invalid_socket` where the platform has no sockets to build one from.
+    [[nodiscard]] static cc::result<native_socket, error> create_wake_channel();
 
     clock& _clock;
     native_socket _wake_socket = k_invalid_socket;

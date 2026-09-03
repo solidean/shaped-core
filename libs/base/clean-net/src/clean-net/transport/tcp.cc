@@ -3,6 +3,7 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
 #include <clean-net/fwd.hh>
+#include <clean-net/impl/native_socket.hh>
 #include <clean-net/impl/reactor.hh>
 
 namespace cnet
@@ -27,7 +28,7 @@ struct async_operation : impl::io_operation
     /// still watching it.
     cc::shared_ptr<impl::socket_holder> socket_owner;
 
-    /// What a connect or accept produces, held here until it is pushed.
+    /// What a connect produces, held here until it is pushed.
     cc::shared_ptr<tcp_connection> pending;
 
     void on_complete(cc::optional<error> failure) override
@@ -42,48 +43,6 @@ struct async_operation : impl::io_operation
             return;
         }
         static_cast<Self*>(this)->deliver();
-    }
-};
-
-/// The absolute reading a deadline turns into, or 0 for none.
-[[nodiscard]] i64 deadline_to_ns(io_system& io, deadline d)
-{
-    if (!d.is_finite())
-        return 0;
-    return io.time_source().now_ns() + d.timeout_ms * 1000 * 1000;
-}
-
-struct receive_operation final : async_operation<receive_operation, isize>
-{
-    void deliver() { promise->push_value(transferred); }
-};
-
-struct send_operation final : async_operation<send_operation, cc::unit>
-{
-    void deliver() { promise->push_value(cc::unit{}); }
-};
-
-struct connect_operation final : async_operation<connect_operation, cc::shared_ptr<tcp_connection>>
-{
-    void deliver() { promise->push_value(cc::move(pending)); }
-};
-
-struct accept_operation final : async_operation<accept_operation, cc::shared_ptr<tcp_connection>>
-{
-    io_system* io = nullptr;
-    tcp_options options;
-
-    void deliver()
-    {
-        // The socket only exists once the accept succeeded, so the connection is built here rather than up front.
-        auto const s = accepted;
-        (void)impl::set_tcp_no_delay(s, options.no_delay);
-
-        auto local = impl::local_endpoint(s);
-        auto peer = impl::remote_endpoint(s);
-        promise->push_value(cc::make_shared<tcp_connection>(*io, cc::make_shared<impl::socket_holder>(s),
-                                                            local.has_value() ? local.value() : endpoint(),
-                                                            peer.has_value() ? peer.value() : endpoint()));
     }
 };
 
@@ -118,33 +77,103 @@ void apply_options(impl::native_socket s, ip_family family, tcp_options const& o
         (void)impl::set_v6_only(s, options.v6_only);
     (void)impl::set_tcp_no_delay(s, options.no_delay);
 }
-} // namespace
 
-// ---- connection ----------------------------------------------------------------------------------------
+// ---- the native backend --------------------------------------------------------------------------------
 
-tcp_connection::tcp_connection(io_system& io,
-                               cc::shared_ptr<impl::socket_holder> s,
-                               endpoint local_endpoint,
-                               endpoint peer_endpoint)
-  : _io(io), _socket(cc::move(s)), _local(local_endpoint), _peer(peer_endpoint)
+/// A connection over one of the platform's own sockets.
+class native_connection final : public connection_backend
 {
-}
+public:
+    native_connection(io_system& io, cc::shared_ptr<impl::socket_holder> s, endpoint local_endpoint, endpoint peer_endpoint)
+      : _io(io), _socket(cc::move(s)), _local(local_endpoint), _peer(peer_endpoint)
+    {
+    }
 
-tcp_connection::~tcp_connection() = default;
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d) override;
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d) override;
 
-bool tcp_connection::is_open() const
+    cc::result<cc::unit, error> shutdown_send() override
+    {
+        if (!is_open())
+            return cc::error(error{.code = error_code::connection_closed,
+                                   .native_code = 0,
+                                   .message = cc::string("the connection is closed")});
+        return impl::shutdown_socket_send(_socket->handle);
+    }
+
+    [[nodiscard]] endpoint local() const override { return _local; }
+    [[nodiscard]] endpoint peer() const override { return _peer; }
+    [[nodiscard]] bool is_open() const override { return _socket.is_valid(); }
+
+    void close() override
+    {
+        // Dropping the reference rather than closing the handle: an operation the reactor is still watching holds one
+        // too, and the socket goes away once the last of them is done with it.
+        _socket = {};
+    }
+
+private:
+    io_system& _io;
+    cc::shared_ptr<impl::socket_holder> _socket;
+    endpoint _local;
+    endpoint _peer;
+};
+
+/// A listening socket of the platform's own.
+class native_listener final : public listener_backend
 {
-    return _socket.is_valid();
-}
+public:
+    native_listener(io_system& io, cc::shared_ptr<impl::socket_holder> s, endpoint local_endpoint, tcp_options options)
+      : _io(io), _socket(cc::move(s)), _local(local_endpoint), _options(options)
+    {
+    }
 
-void tcp_connection::close()
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d) override;
+    [[nodiscard]] endpoint local() const override { return _local; }
+
+private:
+    io_system& _io;
+    cc::shared_ptr<impl::socket_holder> _socket;
+    endpoint _local;
+    tcp_options _options;
+};
+
+struct receive_operation final : async_operation<receive_operation, isize>
 {
-    // Dropping the reference rather than closing the handle: an operation the reactor is still watching holds one
-    // too, and the socket goes away once the last of them is done with it.
-    _socket = {};
-}
+    void deliver() { promise->push_value(transferred); }
+};
 
-cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline d)
+struct send_operation final : async_operation<send_operation, cc::unit>
+{
+    void deliver() { promise->push_value(cc::unit{}); }
+};
+
+struct connect_operation final : async_operation<connect_operation, cc::shared_ptr<tcp_connection>>
+{
+    void deliver() { promise->push_value(cc::move(pending)); }
+};
+
+struct accept_operation final : async_operation<accept_operation, cc::shared_ptr<tcp_connection>>
+{
+    io_system* io = nullptr;
+    tcp_options options;
+
+    void deliver()
+    {
+        // The socket only exists once the accept succeeded, so the connection is built here rather than up front.
+        auto const s = accepted;
+        (void)impl::set_tcp_no_delay(s, options.no_delay);
+
+        auto local = impl::local_endpoint(s);
+        auto peer = impl::remote_endpoint(s);
+        auto backend = std::make_unique<native_connection>(*io, cc::make_shared<impl::socket_holder>(s),
+                                                           local.has_value() ? local.value() : endpoint(),
+                                                           peer.has_value() ? peer.value() : endpoint());
+        promise->push_value(cc::make_shared<tcp_connection>(cc::move(backend)));
+    }
+};
+
+cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadline d)
 {
     if (!is_open())
         return failed_async<isize>(
@@ -155,7 +184,7 @@ cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline 
     op->socket = _socket->handle;
     op->buffer = buffer.data();
     op->buffer_size = buffer.size();
-    op->deadline_ns = deadline_to_ns(_io, d);
+    op->deadline_ns = deadline_to_absolute(_io, d);
 
     // The reactor watches this socket by handle, so the operation keeps it alive for as long as it runs.
     op->socket_owner = _socket;
@@ -163,7 +192,7 @@ cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline 
     return launch<receive_operation, isize>(_io, cc::move(op));
 }
 
-cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, deadline d)
+cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, deadline d)
 {
     if (!is_open())
         return failed_async<cc::unit>(
@@ -174,23 +203,113 @@ cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, dead
     op->socket = _socket->handle;
     op->buffer = const_cast<byte*>(bytes.data());
     op->buffer_size = bytes.size();
-    op->deadline_ns = deadline_to_ns(_io, d);
+    op->deadline_ns = deadline_to_absolute(_io, d);
     op->socket_owner = _socket;
 
     return launch<send_operation, cc::unit>(_io, cc::move(op));
 }
 
-// ---- listener ------------------------------------------------------------------------------------------
+cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadline d)
+{
+    auto op = cc::make_unique<accept_operation>();
+    op->kind = impl::io_op_kind::accept;
+    op->socket = _socket->handle;
+    op->deadline_ns = deadline_to_absolute(_io, d);
+    op->io = &_io;
+    op->options = _options;
+    op->socket_owner = _socket;
 
-tcp_listener::tcp_listener(io_system& io, cc::shared_ptr<impl::socket_holder> s, endpoint local_endpoint)
-  : _io(io), _socket(cc::move(s)), _local(local_endpoint)
+    return launch<accept_operation, cc::shared_ptr<tcp_connection>>(_io, cc::move(op));
+}
+} // namespace
+
+// ---- the handles ---------------------------------------------------------------------------------------
+
+tcp_connection::tcp_connection(std::unique_ptr<connection_backend> backend) : _backend(cc::move(backend))
+{
+}
+
+tcp_connection::~tcp_connection() = default;
+
+cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline d)
+{
+    return _backend->receive(buffer, d);
+}
+
+cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, deadline d)
+{
+    return _backend->send(bytes, d);
+}
+
+cc::result<cc::unit, error> tcp_connection::shutdown_send()
+{
+    return _backend->shutdown_send();
+}
+
+endpoint tcp_connection::local() const
+{
+    return _backend->local();
+}
+
+endpoint tcp_connection::peer() const
+{
+    return _backend->peer();
+}
+
+bool tcp_connection::is_open() const
+{
+    return _backend->is_open();
+}
+
+void tcp_connection::close()
+{
+    _backend->close();
+}
+
+tcp_listener::tcp_listener(std::unique_ptr<listener_backend> backend) : _backend(cc::move(backend))
 {
 }
 
 tcp_listener::~tcp_listener() = default;
 
+cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_listener::accept(deadline d)
+{
+    return _backend->accept(d);
+}
+
+endpoint tcp_listener::local() const
+{
+    return _backend->local();
+}
+
 cc::result<cc::unique_ptr<tcp_listener>, error> tcp_listener::try_create(io_system& io,
                                                                          endpoint const& where,
+                                                                         tcp_listen_options const& options)
+{
+    auto native = native_transport(io);
+    return native.listen(where, options);
+}
+
+cc::result<cc::unique_ptr<tcp_listener>, error> tcp_listener::try_create(transport& t,
+                                                                         endpoint const& where,
+                                                                         tcp_listen_options const& options)
+{
+    return t.listen(where, options);
+}
+
+cc::unique_ptr<tcp_listener> tcp_listener::create(io_system& io, endpoint const& where, tcp_listen_options const& options)
+{
+    return try_create(io, where, options).or_throw();
+}
+
+// ---- the native transport ------------------------------------------------------------------------------
+
+bool native_transport::is_supported() const
+{
+    return impl::sockets_are_supported();
+}
+
+cc::result<cc::unique_ptr<tcp_listener>, error> native_transport::listen(endpoint const& where,
                                                                          tcp_listen_options const& options)
 {
     if (!impl::sockets_are_supported())
@@ -228,37 +347,16 @@ cc::result<cc::unique_ptr<tcp_listener>, error> tcp_listener::try_create(io_syst
         return cc::error(cc::move(local).error());
     }
 
-    auto listener = cc::make_unique<tcp_listener>(io, cc::make_shared<impl::socket_holder>(s), local.value());
-    listener->_options = options.socket;
+    auto backend
+        = std::make_unique<native_listener>(_io, cc::make_shared<impl::socket_holder>(s), local.value(), options.socket);
 
     CC_LOG_TRACE("listening on {}", local.value());
-    return listener;
+    return cc::make_unique<tcp_listener>(cc::move(backend));
 }
 
-cc::unique_ptr<tcp_listener> tcp_listener::create(io_system& io, endpoint const& where, tcp_listen_options const& options)
-{
-    return try_create(io, where, options).or_throw();
-}
-
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_listener::accept(deadline d)
-{
-    auto op = cc::make_unique<accept_operation>();
-    op->kind = impl::io_op_kind::accept;
-    op->socket = _socket->handle;
-    op->deadline_ns = deadline_to_ns(_io, d);
-    op->io = &_io;
-    op->options = _options;
-    op->socket_owner = _socket;
-
-    return launch<accept_operation, cc::shared_ptr<tcp_connection>>(_io, cc::move(op));
-}
-
-// ---- connect -------------------------------------------------------------------------------------------
-
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
-                                                             endpoint const& where,
-                                                             deadline d,
-                                                             tcp_options const& options)
+cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpoint const& where,
+                                                                           deadline d,
+                                                                           tcp_options const& options)
 {
     using handle = cc::shared_ptr<tcp_connection>;
 
@@ -282,13 +380,32 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
     op->kind = impl::io_op_kind::connect;
     op->socket = s;
     op->peer = where;
-    op->deadline_ns = deadline_to_ns(io, d);
+    op->deadline_ns = deadline_to_absolute(_io, d);
     op->socket_owner = holder;
 
     // The connection object exists before the connection does, so a failure closes the socket by dropping this
     // rather than by remembering to.
-    op->pending = cc::make_shared<tcp_connection>(io, holder, endpoint(), where);
+    op->pending = cc::make_shared<tcp_connection>(std::make_unique<native_connection>(_io, holder, endpoint(), where));
 
-    return launch<connect_operation, handle>(io, cc::move(op));
+    return launch<connect_operation, handle>(_io, cc::move(op));
+}
+
+// ---- connect -------------------------------------------------------------------------------------------
+
+cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
+                                                             endpoint const& where,
+                                                             deadline d,
+                                                             tcp_options const& options)
+{
+    auto native = native_transport(io);
+    return native.connect(where, d, options);
+}
+
+cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
+                                                             endpoint const& where,
+                                                             deadline d,
+                                                             tcp_options const& options)
+{
+    return t.connect(where, d, options);
 }
 } // namespace cnet

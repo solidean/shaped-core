@@ -274,6 +274,19 @@ void close_socket(native_socket s)
 #endif
 }
 
+cc::result<cc::unit, error> shutdown_socket_send(native_socket s)
+{
+    // SD_SEND and SHUT_WR are the same constant under two names, and neither header defines the other's.
+#if defined(_WIN32)
+    auto const how = SD_SEND;
+#else
+    auto const how = SHUT_WR;
+#endif
+    if (::shutdown(raw_of(s), how) != 0)
+        return cc::error(error_from_native(last_socket_error(), "shutting down the sending half"));
+    return cc::unit{};
+}
+
 cc::result<cc::unit, error> bind_socket(native_socket s, endpoint const& where, bool reuse_address)
 {
 #if !defined(_WIN32)
@@ -450,6 +463,10 @@ cc::result<native_socket, error> create_udp_socket(ip_family)
 
 void close_socket(native_socket)
 {
+}
+cc::result<cc::unit, error> shutdown_socket_send(native_socket)
+{
+    return cc::error(no_sockets("shutting down the sending half"));
 }
 
 cc::result<cc::unit, error> bind_socket(native_socket, endpoint const&, bool)

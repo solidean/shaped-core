@@ -39,6 +39,14 @@ The consequence for the API is that **the shared HTTP surface stays within what 
 Anything more reaches for the transport directly and is unavailable on wasm, and `cnet::http_level` is how a caller
 asks which it has.
 
+## A connection is not a socket
+
+`cnet::tcp_connection` is a handle over an interface, and three things implement it: the platform's sockets, an
+in-process network with no sockets at all, and a wrapper that delays, drops and cuts on the way through to either.
+So "the server died mid-body" and "the response arrives one byte at a time" are unit tests rather than stories, and
+the code under test never learns which transport it got.
+[docs/transport-seam.md](docs/transport-seam.md) is the design.
+
 ## What is not here, on purpose
 
 - **The server is not hardened for hostile input.** It is a loopback dev server for an in-browser debug UI.
@@ -57,4 +65,5 @@ asks which it has.
 
 - [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
 - [docs/structure.md](docs/structure.md) — the roadmap and the per-platform support matrix.
+- [docs/transport-seam.md](docs/transport-seam.md) — the virtual and simulated transports, and what they are for.
 - [docs/todo/](../../../docs/todo/_index.md) — what is agreed but not built, one document per feature.

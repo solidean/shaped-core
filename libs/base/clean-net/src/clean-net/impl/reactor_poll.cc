@@ -1,17 +1,17 @@
 #include "reactor.hh"
 
-#include <clean-core/common/asserts.hh>
 #include <clean-core/string/format.hh>
 
-// One reactor, two pollers: `select` on Windows and `poll` everywhere else.
+// The platform half of the reactor: one poller, two spellings -- `select` on Windows and `poll` everywhere else.
+// Everything that is not a socket -- the pending list, deadlines, cancellation, timers -- is in reactor.cc.
 //
 // WHY NOT IOCP AND EPOLL, which is where a serious reactor ends up.
 // Both are strictly better at scale, and both drop in behind this file without touching a line above it -- which is
 // what the completion-shaped interface in reactor.hh is for.
 // What they are not is *shared*: an IOCP path and an epoll path have no code in common, so whichever platform is not
 // in front of you would be carried unverified.
-// One shared path means Linux and macOS run the same logic Windows does, and the platform-specific surface is the one
-// function at the bottom of this file.
+// One shared path means Linux and macOS run the same logic Windows does, and the platform-specific surface is this
+// one file.
 //
 // WHY `select` ON WINDOWS RATHER THAN `WSAPoll`, which looks like the modern choice.
 // WSAPoll does not report a failed connection: a refused connect is reported in neither the readable nor the error
@@ -85,7 +85,7 @@ constexpr isize k_max_watched = 4096;
     return i32(value);
 }
 
-/// Whether an operation is waiting to read, to write, or both.
+/// Whether an operation is waiting to read, to write, or neither -- a timer and a manual operation watch nothing.
 struct watch
 {
     bool read = false;
@@ -102,6 +102,9 @@ struct watch
     case io_op_kind::accept:
     case io_op_kind::receive:
         return {.read = true, .write = false};
+    case io_op_kind::timer:
+    case io_op_kind::manual:
+        return {};
     }
     return {};
 }
@@ -112,20 +115,8 @@ struct watch
 }
 } // namespace
 
-reactor::~reactor()
+cc::result<native_socket, error> reactor::create_wake_channel()
 {
-    // Anything still pending is abandoned rather than completed: its owner is going away with us, and calling back
-    // into a half-destroyed program is worse than not calling back at all.
-    close_socket(_wake_socket);
-}
-
-cc::result<cc::unique_ptr<reactor>, error> reactor::try_create(clock& c)
-{
-    if (!sockets_are_supported())
-        return cc::error(unsupported_here("a reactor"));
-
-    ensure_socket_platform();
-
     // The wake channel is a UDP socket connected to itself: one mechanism on every platform, needing no pipe, no
     // eventfd, and no second handle type for the poller to understand.
     auto wake = create_udp_socket(ip_family::v4);
@@ -154,33 +145,7 @@ cc::result<cc::unique_ptr<reactor>, error> reactor::try_create(clock& c)
         return cc::error(cc::move(connected).error());
     }
 
-    return cc::make_unique<reactor>(c, s);
-}
-
-void reactor::submit(io_operation* op)
-{
-    CC_ASSERT(op != nullptr, "submitting a null operation");
-    op->transferred = 0;
-
-    auto e = entry{.op = op};
-
-    // A connect is started here rather than on the first wait, because until ::connect runs there is nothing to
-    // watch for: an unconnected socket is writable, and would complete instantly and wrongly.
-    if (op->kind == io_op_kind::connect)
-    {
-        auto started = connect_socket(op->socket, op->peer);
-        if (started.has_error())
-            e.immediate_failure = cc::move(started).error();
-    }
-
-    _pending.push_back(cc::move(e));
-}
-
-void reactor::cancel(io_operation* op)
-{
-    for (auto& e : _pending)
-        if (e.op == op)
-            e.cancelled = true;
+    return s;
 }
 
 void reactor::wake()
@@ -202,35 +167,7 @@ void reactor::drain_wake()
     _wake_pending.store(false);
 }
 
-i32 reactor::wait(i32 timeout_ms)
-{
-    poll_once(clamp_timeout(timeout_ms));
-    return complete_ready();
-}
-
-i32 reactor::clamp_timeout(i32 timeout_ms) const
-{
-    // Anything already decided means there is nothing to wait for.
-    for (auto const& e : _pending)
-        if (e.cancelled || e.immediate_failure.has_value())
-            return 0;
-
-    auto const now = _clock.now_ns();
-    auto shortest = timeout_ms;
-    for (auto const& e : _pending)
-    {
-        if (e.op->deadline_ns <= 0)
-            continue;
-
-        auto const remaining_ms = (e.op->deadline_ns - now) / (1000 * 1000);
-        auto const clamped = i32(remaining_ms <= 0 ? 0 : remaining_ms > 0x7FFFFFFF ? 0x7FFFFFFF : remaining_ms);
-        if (shortest < 0 || clamped < shortest)
-            shortest = clamped;
-    }
-    return shortest;
-}
-
-cc::optional<cc::optional<error>> reactor::drive(entry& e)
+cc::optional<cc::optional<error>> reactor::drive_socket(entry& e)
 {
     auto* const op = e.op;
     switch (op->kind)
@@ -309,56 +246,13 @@ cc::optional<cc::optional<error>> reactor::drive(entry& e)
         }
         return cc::optional<error>();
     }
+
+    case io_op_kind::timer:
+    case io_op_kind::manual:
+        return {}; // never routed here -- reactor::drive answers these itself
     }
     return {};
 }
-
-i32 reactor::complete_ready()
-{
-    auto const now = _clock.now_ns();
-    auto completions = cc::vector<completion>();
-
-    for (isize i = 0; i < _pending.size();)
-    {
-        auto& e = _pending[i];
-        auto outcome = cc::optional<cc::optional<error>>();
-
-        if (e.cancelled)
-            outcome = cc::optional<error>(make_error(error_code::cancelled, cc::string("the operation was cancelled")));
-        else if (e.immediate_failure.has_value())
-            outcome = e.immediate_failure;
-        else
-            outcome = drive(e);
-
-        // A deadline is checked after driving, so an operation that finished in the same wait it expired in reports
-        // what actually happened rather than a timeout.
-        if (!outcome.has_value() && e.op->deadline_ns > 0 && now >= e.op->deadline_ns)
-            outcome
-                = cc::optional<error>(make_error(error_code::timed_out, cc::string("the operation ran out of time")));
-
-        if (!outcome.has_value())
-        {
-            e.readable = false;
-            e.writable = false;
-            e.errored = false;
-            ++i;
-            continue;
-        }
-
-        completions.push_back({.op = e.op, .failure = cc::move(outcome.value())});
-        _pending[i] = cc::move(_pending[_pending.size() - 1]);
-        _pending.remove_back();
-    }
-
-    // Callbacks run only once every completed entry is out of _pending, so a handler is free to submit again -- and
-    // free to destroy the operation it was just handed.
-    for (auto& c : completions)
-        c.op->on_complete(cc::move(c.failure));
-
-    return i32(completions.size());
-}
-
-// ---- the platform-specific half ------------------------------------------------------------------------
 
 #if defined(_WIN32)
 void reactor::poll_once(i32 timeout_ms)
@@ -388,6 +282,8 @@ void reactor::poll_once(i32 timeout_ms)
     {
         if (e.cancelled || e.immediate_failure.has_value())
             continue;
+        if (e.op->socket == k_invalid_socket)
+            continue; // a timer or a manual operation has nothing to watch
         if (watched >= k_max_watched)
             break; // the rest wait for the next round rather than overrunning the set
 
@@ -426,6 +322,9 @@ void reactor::poll_once(i32 timeout_ms)
 
     for (auto& e : _pending)
     {
+        if (e.op->socket == k_invalid_socket)
+            continue;
+
         e.readable = FD_ISSET(raw_of(e.op->socket), &read_set) != 0;
         e.writable = FD_ISSET(raw_of(e.op->socket), &write_set) != 0;
         e.errored = FD_ISSET(raw_of(e.op->socket), &except_set) != 0;
@@ -454,6 +353,8 @@ void reactor::poll_once(i32 timeout_ms)
         auto& e = _pending[i];
         if (e.cancelled || e.immediate_failure.has_value())
             continue;
+        if (e.op->socket == k_invalid_socket)
+            continue; // a timer or a manual operation has nothing to watch
         if (fds.size() >= k_max_watched)
             break;
 
@@ -498,51 +399,31 @@ void reactor::poll_once(i32 timeout_ms)
 #endif
 } // namespace cnet::impl
 
-#else // CNET_HAS_SOCKETS -- no sockets, so there is nothing to wait on
+#else // CNET_HAS_SOCKETS -- no sockets, so timers and manual operations are all there is to run
 
 namespace cnet::impl
 {
-reactor::~reactor() = default;
-
-cc::result<cc::unique_ptr<reactor>, error> reactor::try_create(clock&)
+cc::result<native_socket, error> reactor::create_wake_channel()
 {
-    return cc::error(unsupported_here("a reactor"));
+    // No socket to wake with, and none needed: a reactor here never parks, because io_system runs it unthreaded.
+    return k_invalid_socket;
 }
 
-void reactor::submit(io_operation*)
-{
-}
-void reactor::cancel(io_operation*)
-{
-}
 void reactor::wake()
 {
 }
+
 void reactor::drain_wake()
 {
 }
+
 void reactor::poll_once(i32)
 {
 }
 
-i32 reactor::wait(i32)
+cc::optional<cc::optional<error>> reactor::drive_socket(entry&)
 {
-    return 0;
-}
-
-i32 reactor::clamp_timeout(i32 timeout_ms) const
-{
-    return timeout_ms;
-}
-
-i32 reactor::complete_ready()
-{
-    return 0;
-}
-
-cc::optional<cc::optional<error>> reactor::drive(entry&)
-{
-    return {};
+    return cc::optional<error>(unsupported_here("a socket operation"));
 }
 } // namespace cnet::impl
 
