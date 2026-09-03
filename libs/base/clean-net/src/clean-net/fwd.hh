@@ -87,6 +87,27 @@ struct io_system_description;
 class io_system;
 } // namespace cnet
 
+// ---- transport -----------------------------------------------------------------------------------------
+
+namespace cnet
+{
+/// What a TCP socket is set up with: Nagle, and whether an IPv6 socket also takes IPv4.
+struct tcp_options;
+
+/// What a listener is opened with: the socket options, the backlog, and address reuse.
+struct tcp_listen_options;
+
+/// An established TCP connection.
+///
+/// Held by `cc::shared_ptr`, because an operation in flight refers to its socket by handle -- and a handle closed
+/// under the reactor can be reissued to the next socket the process opens.
+class tcp_connection;
+
+/// A socket accepting inbound connections.
+/// Absent on wasm, where a program cannot listen at all.
+class tcp_listener;
+} // namespace cnet
+
 // ---- capability ladder ---------------------------------------------------------------------------------
 
 namespace cnet

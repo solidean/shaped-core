@@ -65,6 +65,22 @@ void ensure_socket_platform();
 
 void close_socket(native_socket s);
 
+/// Owns a socket, and closes it when the last reference goes away.
+///
+/// Shared rather than unique, because an operation the reactor is still watching refers to its socket by handle.
+/// A handle closed under the reactor is not merely closed: the OS is free to hand the same number to the NEXT socket
+/// the process opens, and the reactor would then be watching a stranger.
+/// So the socket outlives every operation on it, and `close` means "drop my reference" rather than "close now".
+struct socket_holder
+{
+    native_socket handle = k_invalid_socket;
+
+    explicit socket_holder(native_socket s) : handle(s) {}
+    socket_holder(socket_holder const&) = delete;
+    socket_holder& operator=(socket_holder const&) = delete;
+    ~socket_holder() { close_socket(handle); }
+};
+
 /// Bind to `where`.
 ///
 /// `reuse_address` sets SO_REUSEADDR on POSIX and nothing on Windows, where that option means something else

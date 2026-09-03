@@ -15,7 +15,7 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 **Recording domain:** `cnet`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../clean-core/docs/logging.md).
 
-**Early stage.** Only the vocabulary below exists today; everything in [docs/structure.md](docs/structure.md) marked planned is not here yet.
+**Early stage.** The vocabulary, the reactor and TCP exist today; everything in [docs/structure.md](docs/structure.md) marked planned is not here yet.
 
 ## Everything at once
 
@@ -115,3 +115,46 @@ e.is_valid(); e.to_string();                // brackets an IPv6 address back
 ```
 
 A name is not an endpoint: `parse("example.com:80")` fails, because resolving needs the OS and can block.
+
+## The reactor
+
+```cpp
+#include <clean-net/io/io_system.hh>
+
+cnet::io_system::try_create();                          // cc::result<cc::unique_ptr<io_system>, error>
+cnet::io_system::try_create({.unthreaded = true, .time_source = &clk, .max_wait_ms = 50});
+cnet::io_system::create(desc);                          // throwing counterpart
+io->has_reactor_thread();                               // false on a threads-off build, whatever the description said
+io->time_source();                                      // cnet::clock& — what deadlines are measured against
+io->pending_count();                                    // a snapshot, readable from any thread
+```
+
+**There is no `poll()`.**
+With threads the io_system owns one; without them it registers with clean-core's pump, so `cc::thread_pump_all()` drives it along with everything else.
+A `cnet`-specific pump would be the deadlock that registry exists to prevent.
+
+## TCP
+
+```cpp
+#include <clean-net/transport/tcp.hh>
+
+cnet::tcp_connect(io, where);                           // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::tcp_connect(io, where, cnet::deadline::after_secs(10), {.no_delay = true, .v6_only = true});
+
+cnet::tcp_listener::try_create(io, endpoint(addr, 0));  // port 0 = pick one; local() says which
+listener->accept();                                     // cc::shared_async<cc::shared_ptr<tcp_connection>>, no deadline by default
+listener->local();                                      // endpoint
+
+conn->receive(buffer);                                  // cc::shared_async<isize> — the FIRST bytes, not a full buffer
+conn->send(bytes);                                      // cc::shared_async<cc::unit> — completes only when all of them are gone
+conn->local(); conn->peer(); conn->is_open(); conn->close();
+```
+
+Three things worth knowing.
+**A receive completes on the first bytes that arrive**, so a four-byte write answers a one-kilobyte read with four bytes — a stream has no message boundaries.
+**A peer that closed fails with `connection_closed`** rather than reporting zero bytes, which would be indistinguishable from a read that has not happened yet.
+**`close()` drops a reference rather than closing the handle**, because an operation the reactor still watches holds one too.
+A handle closed under the reactor can be reissued to the next socket the process opens.
+
+`bytes` passed to `send` must stay alive and unmodified until the operation completes.
+Per-operation cancellation is not wired up yet — a deadline is how an operation ends early.

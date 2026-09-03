@@ -19,9 +19,9 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 
 | | wasm | Windows | Linux | macOS | iOS / Android |
 |---|---|---|---|---|---|
-| TCP | — | planned | planned | planned | planned |
+| TCP | — | **done** | done, unverified | done, unverified | planned |
 | UDP datagrams | — | planned | planned | planned | planned |
-| listeners | — | planned | planned | planned | planned |
+| listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
 | TLS | browser's | planned (mbedTLS) | planned (mbedTLS) | planned (mbedTLS) | planned |
@@ -36,15 +36,20 @@ startup rather than probing per call.
 counterpart, `cnet::ip_address` and `cnet::endpoint`, and the `cnet::http_level` ladder.
 None of it touches the network, so all of it is testable without one.
 
+**[done]** the reactor, `cnet::io_system`, and TCP.
+Connect, accept, send and receive as `cc::shared_async`, with deadlines the reactor enforces against the injected
+clock.
+"Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
+
 **[planned]**, roughly in the order it will be built:
 
-1. the reactor and TCP — IOCP and epoll against one internal seam, kqueue and a wasm null beside them;
-2. the transport backend seam, with the simulated and virtual backends over it;
-3. name resolution — thread-offloaded `getaddrinfo` behind a cache, with happy eyeballs above it;
-4. TLS over a vendored mbedTLS, with per-platform trust stores;
-5. the HTTP/1.1 native backend, the client seam and the convenience calls;
-6. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
-7. the loopback server and WebSocket.
+1. the transport backend seam, with the simulated and virtual backends over it;
+2. name resolution — thread-offloaded `getaddrinfo` behind a cache, with happy eyeballs above it;
+3. TLS over a vendored mbedTLS, with per-platform trust stores;
+4. the HTTP/1.1 native backend, the client seam and the convenience calls;
+5. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
+6. the loopback server and WebSocket;
+7. UDP datagrams, in the poll-and-batch shape [todo.md](../todo.md) records.
 
 ## Deliberately out of scope
 
@@ -56,6 +61,22 @@ None of it touches the network, so all of it is testable without one.
   the words "rate limit" are not.
 - **A multiplayer reliability layer.** [todo.md](../todo.md) records the requirements the datagram layer must not
   foreclose, and the layer itself belongs above this library when something needs it.
+
+## The reactor waits with `select` and `poll`, not IOCP and epoll
+
+One shared readiness poller behind a completion-shaped interface — `select` on Windows, `poll` elsewhere.
+IOCP and epoll are both better at scale and both drop in behind that interface without touching a line above it.
+What they are not is *shared*: they have no code in common, so whichever platform is not in front of you ships
+unverified.
+
+The cost is written down rather than discovered: both pollers are O(n) in pending operations per wait, and `select`
+watches at most `FD_SETSIZE` sockets.
+Fine for a dev server and a pooled HTTP client; wrong for ten thousand connections, which is the point at which
+replacing that one file earns its keep.
+
+`select` rather than `WSAPoll` on Windows is a correctness choice rather than a scale one.
+WSAPoll does not report a failed connection at all, so a refused connect would hang to its deadline instead of
+failing — a known, unfixed defect that curl documents and works around.
 
 ## The clock is a seam from the first version
 
