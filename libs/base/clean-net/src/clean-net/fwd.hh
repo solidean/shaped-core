@@ -195,6 +195,18 @@ struct http_response_head;
 
 /// A response whose body was buffered.
 struct http_response;
+
+/// What a request is allowed to take, and to buffer.
+struct request_options;
+
+/// What every HTTP backend implements: one request in, one response out.
+class http_client;
+
+/// The client over our own transport -- resolve, connect, TLS, HTTP/1.1.
+class native_http_client;
+
+/// The same, owning the transport and resolver it needs.
+class owned_http_client;
 } // namespace cnet
 
 // ---- capability ladder ---------------------------------------------------------------------------------

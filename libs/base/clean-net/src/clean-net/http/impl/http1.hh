@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-net/http/message.hh>
 
 /// HTTP/1.1 on the wire: one serializer, one parser, and no I/O at all.
@@ -56,7 +57,8 @@ public:
     /// Consuming less than it was given means either the head is complete and the caller should look at it, or the
     /// sink pushed back.
     /// Whatever is left over must be offered again.
-    [[nodiscard]] cc::result<isize, error> feed(cc::span<byte const> input, body_sink sink);
+    [[nodiscard]] cc::result<isize, error> feed(cc::span<byte const> input,
+                                                cc::function_ref<isize(cc::span<byte const> chunk)> sink);
 
     /// Tell the parser the peer closed the connection.
     ///

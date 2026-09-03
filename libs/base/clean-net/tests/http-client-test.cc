@@ -1,0 +1,372 @@
+#include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_pump.hh>
+#include <clean-net/http/http_client.hh>
+#include <clean-net/transport/virtual_transport.hh>
+#include <nexus/test.hh>
+
+using namespace cc::primitive_defines;
+
+using namespace cnet;
+
+// The whole client, from a URL to a parsed response, against a server that is a string.
+//
+// Everything runs over cnet::virtual_network with a resolver answering from a table, so a test names a host, gets a
+// connection to something in this process, and exercises the real resolve-connect-write-parse path.
+// No port, no server, and no dependence on anything outside the test.
+
+namespace
+{
+bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
+{
+    for (i32 i = 0; i < rounds; ++i)
+    {
+        if (done())
+            return true;
+        if (!cc::thread_pump_all())
+            cc::this_thread_yield();
+    }
+    return done();
+}
+
+[[nodiscard]] cc::span<byte const> bytes_of(cc::string_view text)
+{
+    return cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size());
+}
+
+/// A server that reads a request and answers with whatever it was told to.
+///
+/// It is deliberately not an HTTP server: it answers with bytes, which is what lets a test hand it a malformed or
+/// hostile response as easily as a well-formed one.
+///
+/// Nothing here waits.
+/// Every step starts what it can and looks at what has already settled, because a server that pumped inside its own
+/// step would be pumping the same loop that drives it.
+struct scripted_server
+{
+    struct session
+    {
+        cc::shared_ptr<stream_connection> connection;
+        cc::shared_async<isize> receiving;
+        cc::shared_async<cc::unit> sending;
+        cc::vector<byte> inbox;
+        cc::string response;
+        bool answered = false;
+    };
+
+    cc::unique_ptr<stream_listener> listener;
+    cc::vector<cc::string> responses;
+    isize next_response = 0;
+
+    /// What the last request looked like on the wire.
+    cc::string last_request;
+
+    cc::shared_async<cc::shared_ptr<stream_connection>> accepting;
+    cc::vector<cc::unique_ptr<session>> sessions;
+
+    void listen_again() { accepting = listener->accept(); }
+
+    void step()
+    {
+        if (accepting->is_ready())
+        {
+            if (accepting->try_error() == nullptr)
+            {
+                auto fresh = cc::make_unique<session>();
+                fresh->connection = accepting->value();
+                fresh->inbox.resize_to_defaulted(8 * 1024);
+                fresh->receiving = fresh->connection->receive(fresh->inbox, deadline::never());
+                sessions.push_back(cc::move(fresh));
+            }
+            listen_again();
+        }
+
+        for (auto& s : sessions)
+        {
+            if (s->answered || !s->receiving.is_valid() || !s->receiving->is_ready())
+                continue;
+
+            if (s->receiving->try_error() != nullptr)
+            {
+                s->answered = true;
+                continue;
+            }
+
+            last_request
+                = cc::string(cc::string_view(reinterpret_cast<char const*>(s->inbox.data()), s->receiving->value()));
+
+            s->response = responses[next_response < responses.size() ? next_response : responses.size() - 1];
+            ++next_response;
+            s->answered = true;
+
+            if (s->response.empty())
+                continue; // a server that never answers, which is what a cancellation test wants
+
+            s->sending = s->connection->send(bytes_of(s->response), deadline::never());
+        }
+
+        for (auto& s : sessions)
+            if (s->sending.is_valid() && s->sending->is_ready() && s->connection.is_valid())
+            {
+                // Every request says Connection: close, so the answer ends with the connection.
+                s->connection->close();
+                s->connection = {};
+            }
+    }
+};
+
+/// A virtual network, a resolver that answers for one name, a server, and the client under test.
+struct client_fixture
+{
+    cc::unique_ptr<io_system> io;
+    cc::unique_ptr<virtual_network> net;
+    cc::unique_ptr<resolver> res;
+    cc::unique_ptr<scripted_server> server;
+    cc::unique_ptr<native_http_client> client;
+
+    ip_address address = ip_address::parse("10.0.0.1").value();
+
+    explicit client_fixture(cc::vector<cc::string> responses, i32 port = 80)
+    {
+        io = io_system::create({.unthreaded = true});
+        net = cc::make_unique<virtual_network>(*io);
+
+        auto const answer = address;
+        res = resolver::create(*io, {.lookup = [answer](cc::string_view) -> cc::result<cc::vector<ip_address>, error>
+                                     { return cc::vector<ip_address>{answer}; }});
+
+        server = cc::make_unique<scripted_server>();
+        server->responses = cc::move(responses);
+        server->listener = stream_listener::try_create(*net, endpoint(address, port)).value();
+        server->listen_again();
+
+        client = cc::make_unique<native_http_client>(*net, *res);
+    }
+
+    /// Drive both ends until the request settles.
+    ///
+    /// One round is one step of the server and one sweep of the pump, which is all either side needs: nothing here
+    /// waits on the world, so a run that does not finish promptly is a bug rather than a slow machine.
+    [[nodiscard]] bool run_until(cc::function_ref<bool()> done, i32 rounds = 2000)
+    {
+        for (i32 i = 0; i < rounds; ++i)
+        {
+            if (done())
+                return true;
+            server->step();
+            (void)cc::thread_pump_all();
+        }
+        return done();
+    }
+};
+} // namespace
+
+TEST("cnet - a GET goes out and a response comes back")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
+                                   "Content-Type: text/plain\r\n"
+                                   "Content-Length: 13\r\n"
+                                   "Connection: close\r\n"
+                                   "\r\n"
+                                   "hello, client"});
+
+    auto response = http_get(*fixture.client, "http://example.test/greeting");
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+
+    CHECK(response->value().status() == 200);
+    CHECK(response->value().is_success());
+    CHECK(response->value().body_text() == "hello, client");
+    CHECK(response->value().head.headers.get("Content-Type").value() == "text/plain");
+
+    // The request line, the Host from the target, and the connection header the client always sends today.
+    CHECK(fixture.server->last_request.contains("GET /greeting HTTP/1.1\r\n"));
+    CHECK(fixture.server->last_request.contains("Host: example.test\r\n"));
+    CHECK(fixture.server->last_request.contains("Connection: close\r\n"));
+}
+
+TEST("cnet - a chunked response is delivered whole")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
+                                   "Transfer-Encoding: chunked\r\n"
+                                   "\r\n"
+                                   "6\r\nchunk1\r\n"
+                                   "6\r\nchunk2\r\n"
+                                   "0\r\n\r\n"});
+
+    auto response = http_get(*fixture.client, "http://example.test/");
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+    CHECK(response->value().body_text() == "chunk1chunk2");
+}
+
+TEST("cnet - a POST carries its body and its headers")
+{
+    auto fixture = client_fixture({"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n"});
+
+    auto const payload = cc::string_view("{\"a\":1}");
+
+    auto request = http_request();
+    request.method = http_method::post;
+    request.target = http_target::parse("http://example.test/items").value();
+    request.headers.add("Content-Type", "application/json");
+    request.headers.add("Content-Length", cc::format("{}", payload.size()));
+    request.body = bytes_of(payload);
+
+    auto response = http_send(*fixture.client, cc::move(request));
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+    CHECK(response->value().status() == 201);
+
+    CHECK(fixture.server->last_request.contains("POST /items HTTP/1.1\r\n"));
+    CHECK(fixture.server->last_request.contains("Content-Type: application/json\r\n"));
+    CHECK(fixture.server->last_request.contains(payload));
+}
+
+TEST("cnet - a redirect is followed, and the second request is a GET")
+{
+    auto fixture = client_fixture({"HTTP/1.1 302 Found\r\n"
+                                   "Location: /elsewhere\r\n"
+                                   "Content-Length: 5\r\n"
+                                   "\r\n"
+                                   "ignore",
+                                   "HTTP/1.1 200 OK\r\n"
+                                   "Content-Length: 5\r\n"
+                                   "\r\n"
+                                   "there"});
+
+    auto const payload = cc::string_view("data");
+
+    auto request = http_request();
+    request.method = http_method::post;
+    request.target = http_target::parse("http://example.test/start").value();
+    request.headers.add("Content-Length", cc::format("{}", payload.size()));
+    request.body = bytes_of(payload);
+
+    auto response = http_send(*fixture.client, cc::move(request));
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+
+    // Only the final response's body reaches the caller: the redirect's is read and thrown away.
+    CHECK(response->value().status() == 200);
+    CHECK(response->value().body_text() == "there");
+
+    // A 302 turns a POST into a GET without a body, which is what every client does and what servers assume.
+    CHECK(fixture.server->last_request.contains("GET /elsewhere HTTP/1.1\r\n"));
+    CHECK(!fixture.server->last_request.contains("data"));
+}
+
+TEST("cnet - a redirect loop stops at the limit")
+{
+    auto fixture = client_fixture({"HTTP/1.1 302 Found\r\nLocation: /again\r\nContent-Length: 0\r\n\r\n"});
+
+    auto response = http_get(*fixture.client, "http://example.test/", {.max_redirects = 2});
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+
+    // The last redirect is handed back rather than followed, so a caller can see where it stopped.
+    CHECK(response->try_error() == nullptr);
+    CHECK(response->value().status() == 302);
+}
+
+TEST("cnet - redirects can be turned off")
+{
+    auto fixture = client_fixture({"HTTP/1.1 301 Moved\r\nLocation: /new\r\nContent-Length: 0\r\n\r\n"});
+
+    auto response = http_get(*fixture.client, "http://example.test/old", {.follow_redirects = false});
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+    CHECK(response->value().status() == 301);
+    CHECK(response->value().head.headers.get("Location").value() == "/new");
+}
+
+TEST("cnet - a body over the cap is refused rather than buffered")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
+                                   "Content-Length: 100\r\n"
+                                   "\r\n"
+                                   "0123456789012345678901234567890123456789"});
+
+    // The declared length is enough to refuse it: nothing is buffered before the decision.
+    auto response = http_get(*fixture.client, "http://example.test/big", {.max_body_bytes = 10});
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() != nullptr);
+}
+
+TEST("cnet - a streaming response reaches the sink as it arrives")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
+                                   "Transfer-Encoding: chunked\r\n"
+                                   "\r\n"
+                                   "5\r\nfirst\r\n"
+                                   "6\r\nsecond\r\n"
+                                   "0\r\n\r\n"});
+
+    auto chunks = cc::make_shared<cc::vector<cc::string>>();
+
+    auto request = http_request();
+    request.target = http_target::parse("http://example.test/stream").value();
+
+    auto head = fixture.client->send_streaming(
+        cc::move(request),
+        [chunks](cc::span<byte const> chunk) -> isize
+        {
+            chunks->push_back(cc::string(cc::string_view(reinterpret_cast<char const*>(chunk.data()), chunk.size())));
+            return chunk.size();
+        },
+        {}, {});
+
+    CHECK(fixture.run_until([&] { return head->is_ready(); }));
+    CHECK(head->try_error() == nullptr);
+    CHECK(head->value().status == 200);
+
+    // One call per chunk, in order: the sink sees the shape the server sent rather than one reassembled blob.
+    CHECK(chunks->size() == 2);
+    CHECK((*chunks)[0] == "first");
+    CHECK((*chunks)[1] == "second");
+}
+
+TEST("cnet - a malformed response fails the request rather than being repaired")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
+                                   "Content-Length: 5\r\n"
+                                   "Transfer-Encoding: chunked\r\n"
+                                   "\r\n"
+                                   "hello"});
+
+    // Framed two ways at once, which is the request smuggling primitive the parser refuses.
+    auto response = http_get(*fixture.client, "http://example.test/");
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() != nullptr);
+}
+
+TEST("cnet - a URL the client cannot fetch fails before anything happens")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"});
+
+    auto const relative = http_get(*fixture.client, "/no/scheme");
+    CHECK(relative->is_ready());
+    CHECK(relative->try_error() != nullptr);
+
+    auto const wrong_scheme = http_get(*fixture.client, "ftp://example.test/x");
+    CHECK(wrong_scheme->is_ready());
+    CHECK(wrong_scheme->try_error() != nullptr);
+}
+
+TEST("cnet - cancelling a request in flight ends it")
+{
+    // A server that never answers: the connection is made and then nothing comes back.
+    auto fixture = client_fixture({""});
+
+    auto const token = cancel_token::create();
+    auto response = http_get(*fixture.client, "http://example.test/slow", {.timeout = deadline::never()}, token);
+
+    CHECK(!response->is_ready());
+    (void)fixture.run_until([&] { return false; }, 20);
+
+    token.cancel();
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() != nullptr);
+    CHECK(response->try_error()->is_cancelled());
+}

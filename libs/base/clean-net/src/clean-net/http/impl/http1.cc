@@ -371,7 +371,8 @@ cc::result<cc::unit, error> http1_response_parser::parse_chunk_size(cc::string_v
     return cc::unit{};
 }
 
-cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input, body_sink sink)
+cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input,
+                                                     cc::function_ref<isize(cc::span<byte const> chunk)> sink)
 {
     auto cursor = isize(0);
 

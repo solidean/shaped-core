@@ -23,7 +23,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | virtual + simulated transports | done | done | done | done | done |
 | UDP datagrams | — | planned | planned | planned | planned |
 | listeners | — | **done** | done, unverified | done, unverified | planned |
-| HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
+| HTTP client | planned (`fetch`) | **done** (native) | done, unverified | done, unverified | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
 | TLS | browser's | **done** | done, unverified | done, unverified | Android: no trust store |
 | name resolution | — (the browser resolves inside `fetch`) | **done** | done, unverified | done, unverified | planned |
@@ -41,6 +41,12 @@ None of it touches the network, so all of it is testable without one.
 Connect, accept, send, receive and half-close as `cc::shared_async`, with deadlines the reactor enforces against the
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
+
+**[done]** the HTTP client, over our own transport.
+`cnet::http_target` over `cc::uri`, the HTTP/1.1 wire format, and a client that resolves, connects, handshakes,
+sends and parses -- with streaming, backpressure, redirects and one budget for all of it.
+Pooling, politeness and retries are what remain of
+[docs/todo/cnet-http-client.md](../../../../docs/todo/cnet-http-client.md).
 
 **[done]** TLS, over a vendored Mbed TLS.
 `cnet::tls_connect` and `cnet::tls_accept` wrap any connection, so a handshake runs over the virtual network with no
@@ -68,7 +74,7 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. the HTTP/1.1 native backend, the client seam and the convenience calls;
+1. connection pooling, politeness and retries above the client that now exists;
 2. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
 3. the loopback server and WebSocket;
 4. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.

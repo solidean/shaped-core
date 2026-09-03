@@ -3,7 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
-#include <clean-core/function/function_ref.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-net/common/deadline.hh>
@@ -110,7 +110,11 @@ namespace cnet
 /// that cannot be added afterwards.
 ///
 /// **It runs on the reactor thread.** Do no work here; hand the bytes on.
-using body_sink = cc::function_ref<isize(cc::span<byte const> chunk)>;
+///
+/// Owning rather than a `cc::function_ref`, because a request outlives the call that started it: a reference to a
+/// lambda the caller wrote at the call site would dangle before the first byte arrived.
+/// The parser underneath takes a reference instead, since it is synchronous and cannot outlive anything.
+using body_sink = cc::unique_function<isize(cc::span<byte const> chunk)>;
 } // namespace cnet
 
 /// What a caller sends.

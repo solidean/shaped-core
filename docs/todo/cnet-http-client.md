@@ -1,7 +1,14 @@
 # cnet: the HTTP client
 
-**Status:** decided, not built.
-The capability ladder already exists in `cnet::http_level`; nothing behind it does.
+**Status:** the client is built; pooling, politeness and retries are not.
+
+What landed: `cnet::http_target` over `cc::uri`, the message types, the HTTP/1.1 serializer and parser, and
+`cnet::native_http_client` -- resolve, connect, TLS, send, parse, with streaming and backpressure through
+`body_sink`, redirects with their method rules, the body cap, and one budget for the whole request.
+Its docs are the [cheat sheet](../../libs/base/clean-net/cheat-sheet.md#the-http-client) and the headers.
+
+What is left is everything below the "Politeness" heading, plus connection pooling and keep-alive -- today every
+request sends `Connection: close` and pays a handshake -- and the parser's fuzzer.
 
 ## The layering, restated because everything here depends on it
 

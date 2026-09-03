@@ -244,7 +244,29 @@ Three things worth knowing.
 **Credentials in a URL are refused, not dropped**: `https://evil.com@good.com/` is a URL most readers get the host of wrong.
 **Headers are validated when the request is serialized**, not when they are set — one check on the way to the wire, which is the only place it cannot be bypassed.
 
-The client that sends these does not exist yet; [docs/structure.md](docs/structure.md) says what is planned.
+## The HTTP client
+
+```cpp
+#include <clean-net/http/http_client.hh>
+
+auto client = cnet::make_http_client(io).value();          // owns a native transport and a resolver
+auto client = cnet::native_http_client(transport, resolver); // or bring your own — a virtual network, in a test
+
+cnet::http_get(*client, "https://example.com/thing");      // cc::shared_async<http_response>
+cnet::http_send(*client, cc::move(request), {.timeout = cnet::deadline::after_secs(10), .max_body_bytes = 1 << 20});
+
+client->send_streaming(cc::move(request), [](cc::span<byte const> chunk) { return consume(chunk); }, {}, token);
+client->level();                                            // cnet::http_level::client for this backend
+```
+
+Five things worth knowing.
+**`send_streaming` is the primitive** and the buffered form is written over it — the sink that keeps the bytes is all `http_send` is.
+**The returned async completes when the whole message is done**; the head is its value, and the body has already gone to the sink by then.
+**A sink that takes fewer bytes than offered pushes back** all the way down to the socket, and it runs on the reactor thread — hand the bytes on, do no work there.
+**One budget covers the whole request** — resolve, connect, handshake and every read — because a per-phase timeout lets a four-address host take four times what the caller asked for.
+**One connection per request today**: every request sends `Connection: close`, so pooling and keep-alive are the next thing rather than a surprise.
+
+Redirects are followed by default, up to `max_redirects`; a 301, 302 or 303 turns anything but HEAD into a bodyless GET, and `Authorization` and `Cookie` are dropped when the origin changes.
 
 ## Cancelling
 
