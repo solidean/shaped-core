@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/thread.hh>
@@ -172,16 +173,40 @@ struct client_fixture
     ///
     /// One round is one step of the server and one sweep of the pump, which is all either side needs: nothing here
     /// waits on the world, so a run that does not finish promptly is a bug rather than a slow machine.
-    [[nodiscard]] bool run_until(cc::function_ref<bool()> done, i32 rounds = 2000)
+    /// Drive both ends until `done`, against the wall clock.
+    ///
+    /// A round count would be a budget in scheduler slices rather than in time, and these tests share the machine
+    /// with every other test in the binary -- so a fixed number of rounds is a different amount of work on every
+    /// host CI runs on.
+    [[nodiscard]] bool run_until(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
     {
-        for (i32 i = 0; i < rounds; ++i)
+        auto& clk = system_clock();
+        auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
+
+        while (true)
         {
             if (done())
                 return true;
+            if (clk.now_ns() >= deadline_ns)
+            {
+                cc::report_all_thread_stacks("a cnet test waited out its budget");
+                return false;
+            }
             server->step();
             (void)cc::thread_pump_all();
         }
-        return done();
+    }
+
+    /// Give both ends a few turns, for a test that wants the request under way rather than finished.
+    ///
+    /// A round count is right here and only here: nothing is being waited FOR, so there is no budget to get wrong.
+    void run_briefly(i32 rounds = 20)
+    {
+        for (i32 i = 0; i < rounds; ++i)
+        {
+            server->step();
+            (void)cc::thread_pump_all();
+        }
     }
 };
 } // namespace
@@ -388,7 +413,7 @@ TEST("cnet - cancelling a request in flight ends it")
     auto response = http_get(*fixture.client, "http://example.test/slow", {.timeout = deadline::never()}, token);
 
     CHECK(!response->is_ready());
-    (void)fixture.run_until([&] { return false; }, 20);
+    fixture.run_briefly();
 
     token.cancel();
     CHECK(fixture.run_until([&] { return response->is_ready(); }));

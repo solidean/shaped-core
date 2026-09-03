@@ -37,6 +37,15 @@ struct cnet::io_system_description
 /// The reactor, and the thread it may or may not have.
 ///
 /// **There is no `poll()` here, on purpose.**
+/// **DESTROY THE IO_SYSTEM BEFORE THE THINGS BUILT ON IT.**
+///
+/// Until it is gone, any thread in the process can drive it through `cc::thread_pump_all()`, and a completion calls
+/// back into whatever started the operation -- so a transport, resolver or server destroyed while an operation is
+/// still in flight is one a completion can still find.
+/// Its own teardown abandons what is pending rather than completing it, which is what makes going first safe.
+///
+/// Nothing enforces this, and it only bites when something is actually outstanding at teardown.
+///
 /// With threads, this owns one and nothing is asked of the caller.
 /// Without them, it registers a pump with `cc::register_thread_pump`, so every blocking wait anywhere in the process
 /// sweeps it -- and a caller that drives `cc::thread_pump_all()` for the rest of shaped-core drives this too.

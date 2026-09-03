@@ -37,8 +37,8 @@ using actor_handle = cc::threaded_actor<submit_request, cancel_request, signal_r
 class io_actor_impl final : public cc::threaded_actor_impl<submit_request, cancel_request, signal_request>
 {
 public:
-    io_actor_impl(reactor& r, cc::atomic<isize>& pending, i32 max_wait_ms, bool unthreaded)
-      : _reactor(r), _pending(pending), _max_wait_ms(max_wait_ms), _unthreaded(unthreaded)
+    io_actor_impl(reactor& r, cc::atomic<isize>& pending, cc::atomic<bool>& stopping, i32 max_wait_ms, bool unthreaded)
+      : _reactor(r), _pending(pending), _stopping(stopping), _max_wait_ms(max_wait_ms), _unthreaded(unthreaded)
     {
     }
 
@@ -65,6 +65,19 @@ protected:
 
     bool on_process() override
     {
+        // NOTHING COMPLETES ONCE THE IO_SYSTEM IS GOING AWAY.
+        //
+        // An unthreaded actor's shutdown drains synchronously on the caller, and that drain used to run one more
+        // round of completions -- on the thread already inside `~io_system`, with the caller's transports and
+        // fixtures partway through their own destructors.
+        // A completion there calls back into user code holding references to objects that are already gone.
+        //
+        // `~reactor` says the same thing for the same reason: what is still pending is abandoned rather than
+        // completed, because calling back into a half-destroyed program is worse than not calling back at all.
+        // This is where that rule has to be enforced, since the actor gets to `on_process` first.
+        if (_stopping.load())
+            return false;
+
         if (_unthreaded)
         {
             // A pump registration must be cheap when it has nothing due: every blocking wait in the process sweeps
@@ -89,6 +102,7 @@ protected:
 private:
     reactor& _reactor;
     cc::atomic<isize>& _pending;
+    cc::atomic<bool>& _stopping;
     i32 _max_wait_ms = 50;
     bool _unthreaded = false;
 };
@@ -111,13 +125,17 @@ public:
         // The reactor is parked in a wait rather than on the actor's condition variable, so the actor's own shutdown
         // notification cannot reach it.
         // Waking it first turns a shutdown that takes one full wait into one that takes no time at all.
+        // Set before waking: the actor's drain runs one more round of `on_process`, and this is what stops that
+        // round from completing operations into a program that is already being torn down.
+        _stopping.store(true);
+
         _reactor->wake();
         _handle->shutdown();
     }
 
     void start(i32 max_wait_ms)
     {
-        _handle = cc::make_threaded_actor<io_actor_impl>(*_reactor, _pending, max_wait_ms, _unthreaded);
+        _handle = cc::make_threaded_actor<io_actor_impl>(*_reactor, _pending, _stopping, max_wait_ms, _unthreaded);
         _handle->start(_unthreaded ? cc::threaded_actor_mode::unthreaded : cc::threaded_actor_mode::threaded_if_possible);
     }
 
@@ -159,6 +177,9 @@ private:
 
     /// Readable from any thread, unlike the reactor's own count.
     cc::atomic<isize> _pending = 0;
+
+    /// Set once teardown has begun, which is what stops the actor's drain from completing anything.
+    cc::atomic<bool> _stopping = false;
 
     clock& _clock;
     bool _unthreaded = false;
