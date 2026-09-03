@@ -1,7 +1,10 @@
 #pragma once
 
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-net/common/error.hh>
+#include <clean-net/impl/reactor.hh>
+#include <clean-net/io/io_system.hh>
 
 /// The two pieces of `cc::async` plumbing every part of this library needs, in one place so they behave the same
 /// everywhere.
@@ -53,6 +56,41 @@ void forward_outcome(cc::shared_async<T> const& from, cc::shared_async<T> const&
         to->push_error(from->propagate_error());
     else
         to->push_value(from->take_value());
+}
+
+/// Run `fn` on the reactor thread, once the io_system's clock has moved on by `delay_ms`.
+///
+/// A reactor `timer` rather than a sleep or a thread: it is measured on the same clock as every deadline, so a test
+/// with a `cnet::manual_clock` moves it by hand instead of waiting for it.
+template <class F>
+void run_after(io_system& io, i64 delay_ms, F fn)
+{
+    struct timer_op final : io_operation
+    {
+        cc::unique_ptr<timer_op> self;
+        F fn;
+
+        explicit timer_op(F f) : fn(cc::move(f)) {}
+
+        void on_complete(cc::optional<error> failure) override
+        {
+            auto const keep_alive_until_return = cc::move(self);
+
+            // A timer fails only when it is cancelled or the io_system is going away, and in both cases the work it
+            // would have started is work nobody wants any more.
+            if (failure.has_value())
+                return;
+            fn();
+        }
+    };
+
+    auto op = cc::make_unique<timer_op>(cc::move(fn));
+    op->kind = io_op_kind::timer;
+    op->deadline_ns = io.time_source().now_ns() + delay_ms * 1000 * 1000;
+
+    auto* const raw = op.get();
+    raw->self = cc::move(op);
+    io.submit(raw);
 }
 
 /// A promise that is already broken, for a failure discovered before anything reached the reactor.

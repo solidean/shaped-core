@@ -20,6 +20,7 @@ add_library(clean-net
     src/clean-net/impl/async_glue.cc
     src/clean-net/impl/native_resolve.cc
     src/clean-net/transport/tcp.cc
+    src/clean-net/transport/connect.cc
     src/clean-net/transport/virtual_transport.cc
     src/clean-net/transport/simulated_transport.cc
     src/clean-net/impl/native_socket.cc
@@ -48,6 +49,7 @@ target_sources(clean-net
     src/clean-net/io/io_system.hh
     src/clean-net/transport/backend.hh
     src/clean-net/transport/tcp.hh
+    src/clean-net/transport/connect.hh
     src/clean-net/transport/virtual_transport.hh
     src/clean-net/transport/simulated_transport.hh
 )
@@ -99,6 +101,7 @@ if(SC_BUILD_TESTS)
         tests/reactor-test.cc
         tests/io-system-test.cc
         tests/tcp-test.cc
+        tests/connect-test.cc
         tests/virtual-transport-test.cc
         tests/simulated-transport-test.cc
     )

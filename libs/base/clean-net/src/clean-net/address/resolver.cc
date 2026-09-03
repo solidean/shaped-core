@@ -274,6 +274,11 @@ cc::unique_ptr<resolver> resolver::create(io_system& io, resolver_description de
     return try_create(io, cc::move(desc)).or_throw();
 }
 
+io_system& resolver::io() const
+{
+    return _worker->state().io;
+}
+
 void resolver::clear_cache()
 {
     _worker->state().cache.lock([](cc::map<cc::string, cache_entry>& c) { c.clear(); });

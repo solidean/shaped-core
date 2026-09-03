@@ -55,7 +55,54 @@ public:
                 for (auto const& e : d.entries)
                     e.io->cancel(e.op);
                 d.entries.clear();
+
+                // Cascading under this lock is what keeps it safe: a child whose last handle just went away is
+                // blocked in detach_from_parent waiting for it, so it is still alive here.
+                // The order is one-way -- a parent takes its own lock and then a child's, never the reverse.
+                for (auto* const child : d.children)
+                    child->cancel();
             });
+    }
+
+    /// Register `child`, or report that this token was already cancelled and the child should be too.
+    [[nodiscard]] bool add_child(cancel_state* child)
+    {
+        return _data.lock(
+            [child](data& d)
+            {
+                if (d.cancelled)
+                    return false;
+                d.children.push_back(child);
+                return true;
+            });
+    }
+
+    void remove_child(cancel_state* child)
+    {
+        _data.lock(
+            [child](data& d)
+            {
+                for (isize i = 0; i < d.children.size(); ++i)
+                    if (d.children[i] == child)
+                    {
+                        d.children[i] = d.children[d.children.size() - 1];
+                        d.children.remove_back();
+                        return;
+                    }
+            });
+    }
+
+    void set_parent(cancel_state* parent) { _parent = parent; }
+
+    /// Leave the parent's list, so nothing cascades into an object that is about to be freed.
+    void detach_from_parent()
+    {
+        if (_parent == nullptr)
+            return;
+
+        _parent->remove_child(this);
+        cancel_state_release(_parent);
+        _parent = nullptr;
     }
 
     [[nodiscard]] bool is_cancelled()
@@ -78,11 +125,18 @@ private:
     struct data
     {
         cc::vector<entry> entries;
+
+        /// Held raw rather than retained: a child deregisters itself before it is freed, under this same lock.
+        cc::vector<cancel_state*> children;
+
         bool cancelled = false;
     };
 
     cc::mutex<data> _data;
     cc::atomic<i32> _references = 1;
+
+    /// Retained, so a child can always reach the parent it has to deregister from.
+    cancel_state* _parent = nullptr;
 };
 
 void cancel_state_retain(cancel_state* s)
@@ -93,8 +147,13 @@ void cancel_state_retain(cancel_state* s)
 
 void cancel_state_release(cancel_state* s)
 {
-    if (s != nullptr && s->release())
-        delete s;
+    if (s == nullptr || !s->release())
+        return;
+
+    // Leaving the parent's list BEFORE the object goes away is the whole ordering: a cascading cancel holds the
+    // parent's lock, so this waits for it and the parent never touches freed memory.
+    s->detach_from_parent();
+    delete s;
 }
 
 // Plain new/delete rather than cc::make_unique: the block outlives every handle to it in an order nobody can name up
@@ -102,6 +161,23 @@ void cancel_state_release(cancel_state* s)
 cancel_state* cancel_state_create()
 {
     return new cancel_state();
+}
+
+cancel_state* cancel_state_create_child(cancel_state* parent)
+{
+    auto* const child = new cancel_state();
+    if (parent == nullptr)
+        return child;
+
+    cancel_state_retain(parent);
+    child->set_parent(parent);
+
+    // A child of a token that has already been cancelled is born cancelled, which is what makes a late caller fail
+    // at once rather than starting work nobody wants.
+    if (!parent->add_child(child))
+        child->cancel();
+
+    return child;
 }
 
 void cancel_registration::attach(cancel_token const& token, io_system& io, io_operation* op)
@@ -164,6 +240,13 @@ cancel_token& cancel_token::operator=(cancel_token&& o) noexcept
     _state = o._state;
     o._state = nullptr;
     return *this;
+}
+
+cancel_token cancel_token::create_child() const
+{
+    auto child = cancel_token();
+    child._state = impl::cancel_state_create_child(_state);
+    return child;
 }
 
 bool cancel_token::is_cancelled() const

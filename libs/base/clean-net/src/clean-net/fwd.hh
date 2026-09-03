@@ -135,6 +135,9 @@ class simulated_transport;
 /// What a TCP socket is set up with: Nagle, and whether an IPv6 socket also takes IPv4.
 struct tcp_options;
 
+/// What connecting to a NAME is allowed to take: one budget, the socket options, and the racing delay.
+struct connect_options;
+
 /// What a listener is opened with: the socket options, the backlog, and address reuse.
 struct tcp_listen_options;
 

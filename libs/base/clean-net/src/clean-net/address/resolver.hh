@@ -103,6 +103,9 @@ public:
                                                                    resolve_options const& options = {},
                                                                    cancel_token const& token = {});
 
+    /// The io_system every resolve is measured against, so a caller composing on top uses the same clock.
+    [[nodiscard]] io_system& io() const;
+
     /// Forget every cached answer.
     /// For a test, and for a program that has just watched the network change under it.
     void clear_cache();

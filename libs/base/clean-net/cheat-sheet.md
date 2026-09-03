@@ -184,6 +184,21 @@ Four things worth knowing.
 **A resolve is the one operation that can stall a threads-off process**, because the lookup then runs inside `cc::thread_pump_all()`.
 That is accepted rather than mechanised away: such builds are for debugging, and wasm — the configuration that ships single-threaded — never resolves at all.
 
+## Connecting to a name
+
+```cpp
+#include <clean-net/transport/connect.hh>
+
+cnet::connect_to_host(io, *resolver, "example.com", 443);          // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::connect_to_host(transport, *resolver, host, port, {.timeout = cnet::deadline::after_secs(10),
+                                                         .attempt_delay_ms = 250}, token);
+```
+
+Resolve and connect as one operation, racing the addresses (RFC 8305) — IPv6 first, then one of each family, staggered by the attempt delay.
+**One budget covers the whole thing**, resolve included, because a per-step timeout lets a four-address host take four times what the caller asked for.
+**Every attempt gets a child of your token**, so cancelling yours cancels the race while the race cancels only its losers.
+If every attempt fails you get the FIRST failure, which is the one about the address the OS thought best.
+
 ## Cancelling
 
 ```cpp
@@ -196,6 +211,8 @@ listener->accept(cnet::deadline::never(), token);
 
 token.cancel();          // every operation it was given to ends as cancelled, now or later
 token.is_cancelled();    // a token stays cancelled: a later call fails at once rather than starting
+
+auto const child = token.create_child();   // cancelled by its parent, and cancellable on its own — how a token composes downward
 ```
 
 **A token groups where a deadline bounds** — one token per request, one deadline per step, which is why they are two parameters.

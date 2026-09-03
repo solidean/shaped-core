@@ -15,6 +15,7 @@ class cancel_state;
 void cancel_state_retain(cancel_state* s);
 void cancel_state_release(cancel_state* s);
 [[nodiscard]] cancel_state* cancel_state_create();
+[[nodiscard]] cancel_state* cancel_state_create_child(cancel_state* parent);
 } // namespace cnet::impl
 
 /// Ask the operations of a whole request to stop.
@@ -46,6 +47,15 @@ public:
 
     /// A token with a control block behind it, which is what makes it able to cancel.
     [[nodiscard]] static cancel_token create();
+
+    /// A token this one cancels, and that can also be cancelled on its own.
+    ///
+    /// **This is how a token composes downward.**
+    /// An operation made of several smaller ones -- a connect that races two addresses, a request that resolves,
+    /// connects and reads -- gives each part a child, so cancelling the request cancels every part while finishing
+    /// the race cancels only its losers.
+    /// A child of an empty token is simply an independent token, since there is nothing above it to answer to.
+    [[nodiscard]] cancel_token create_child() const;
 
     /// Whether there is anything behind this token at all.
     [[nodiscard]] bool is_valid() const { return _state != nullptr; }

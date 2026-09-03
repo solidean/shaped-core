@@ -42,11 +42,11 @@ Connect, accept, send, receive and half-close as `cc::shared_async`, with deadli
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
 
-**[done]** name resolution.
-`cnet::resolver` runs a blocking `getaddrinfo` on a worker thread, behind a TTL cache, with the lookup itself a seam a
-test replaces.
-Happy eyeballs above it is next, and is what
-[docs/todo/cnet-name-resolution.md](../../../../docs/todo/cnet-name-resolution.md) still records.
+**[done]** name resolution, and the race above it.
+`cnet::resolver` runs a blocking `getaddrinfo` on a worker thread behind a TTL cache, and `cnet::connect_to_host`
+resolves and connects as one operation, racing the families so a broken IPv6 route costs milliseconds rather than a
+timeout.
+[name-resolution.md](name-resolution.md) is the design.
 
 **[done]** cancellation.
 `cnet::cancel_token` groups the operations of one request the way a deadline bounds each of them, and a cancelled
@@ -60,12 +60,11 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. happy eyeballs — racing the families over the resolver that now exists;
-2. TLS over a vendored mbedTLS, with per-platform trust stores;
-3. the HTTP/1.1 native backend, the client seam and the convenience calls;
-4. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
-5. the loopback server and WebSocket;
-6. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+1. TLS over a vendored mbedTLS, with per-platform trust stores;
+2. the HTTP/1.1 native backend, the client seam and the convenience calls;
+3. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
+4. the loopback server and WebSocket;
+5. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
 ## Deliberately out of scope
 

@@ -12,3 +12,4 @@
 #include <clean-net/common/error.hh>
 #include <clean-net/common/level.hh>
 #include <clean-net/fwd.hh>
+#include <clean-net/transport/connect.hh>
