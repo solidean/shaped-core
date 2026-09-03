@@ -66,4 +66,5 @@ the code under test never learns which transport it got.
 - [cheat-sheet.md](cheat-sheet.md) — the API at a glance.
 - [docs/structure.md](docs/structure.md) — the roadmap and the per-platform support matrix.
 - [docs/transport-seam.md](docs/transport-seam.md) — the virtual and simulated transports, and what they are for.
+- [docs/cancellation.md](docs/cancellation.md) — `cnet::cancel_token`, and why it is not the deadline.
 - [docs/todo/](../../../docs/todo/_index.md) — what is agreed but not built, one document per feature.

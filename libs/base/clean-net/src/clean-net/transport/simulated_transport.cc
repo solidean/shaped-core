@@ -67,7 +67,7 @@ template <class T>
 [[nodiscard]] cc::shared_async<T> failed_async(error e)
 {
     auto promise = cc::make_async_manual<T>();
-    promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(e))));
+    promise->push_error(to_async_error(cc::move(e)));
     return promise;
 }
 
@@ -138,16 +138,20 @@ struct deferred_start final : impl::io_operation
     cc::shared_async<T> target;
     F begin;
 
+    /// The delay itself is cancellable, so cancelling during a 200 ms latency does not wait it out first.
+    impl::cancel_registration cancellation;
+
     deferred_start(cc::shared_async<T> t, F f) : target(cc::move(t)), begin(cc::move(f)) {}
 
     void on_complete(cc::optional<error> failure) override
     {
         auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
 
         if (failure.has_value())
         {
-            // A timer fails only when the io_system is going away, and then the caller deserves to hear that.
-            target->push_error(cc::async_error::make_error(cc::any_error(cc::move(failure.value()))));
+            // A timer fails when it is cancelled, and when the io_system is going away, and then the caller deserves to hear that.
+            target->push_error(to_async_error(cc::move(failure.value())));
             return;
         }
 
@@ -157,7 +161,7 @@ struct deferred_start final : impl::io_operation
 
 /// Start `begin` after `delay_ms` on the link's clock, and hand its outcome to `target`.
 template <class T, class F>
-void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, F begin)
+void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, cancel_token const& token, F begin)
 {
     if (delay_ms <= 0)
     {
@@ -172,6 +176,7 @@ void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, F begin
     auto* const raw = op.get();
     raw->self = cc::move(op);
     s.io.submit(raw);
+    raw->cancellation.attach(token, s.io, raw);
 }
 
 /// Wrap a connection that arrived from the transport underneath, so the conditions apply to it too.
@@ -187,7 +192,7 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d) override
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token) override
     {
         if (_budget->cut)
             return failed_async<isize>(reset_error("the simulated link already cut this connection"));
@@ -202,11 +207,11 @@ public:
         auto under = _under;
         auto const target = promise;
 
-        run_delayed<isize>(*_state, _state->delay_ms_for(buffer.size()), promise,
-                           [under, buffer, d, budget, limit, target]
+        run_delayed<isize>(*_state, _state->delay_ms_for(buffer.size()), promise, token,
+                           [under, buffer, d, budget, limit, target, token]
                            {
                                auto counted = cc::make_async_manual<isize>();
-                               when_ready(under->receive(buffer, d),
+                               when_ready(under->receive(buffer, d, token),
                                           [counted, budget, limit, under](cc::shared_async<isize> const& inner)
                                           {
                                               if (inner->has_error())
@@ -224,8 +229,9 @@ public:
                                               {
                                                   budget->cut = true;
                                                   under->close();
-                                                  counted->push_error(cc::async_error::make_error(cc::any_error(
-                                                      reset_error("the simulated link cut this connection"))));
+                                                  counted->push_error(to_async_error(reset_error("the simulated link "
+                                                                                                 "cut this "
+                                                                                                 "connection")));
                                                   return;
                                               }
                                               counted->push_value(n);
@@ -236,7 +242,7 @@ public:
         return promise;
     }
 
-    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d) override
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d, cancel_token const& token) override
     {
         if (_budget->cut)
             return failed_async<cc::unit>(reset_error("the simulated link already cut this connection"));
@@ -246,8 +252,8 @@ public:
 
         auto promise = cc::make_async_manual<cc::unit>();
         auto under = _under;
-        run_delayed<cc::unit>(*_state, _state->delay_ms_for(bytes.size()), promise,
-                              [under, bytes, d] { return under->send(bytes, d); });
+        run_delayed<cc::unit>(*_state, _state->delay_ms_for(bytes.size()), promise, token,
+                              [under, bytes, d, token] { return under->send(bytes, d, token); });
         return promise;
     }
 
@@ -287,7 +293,7 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d) override
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override
     {
         using handle = cc::shared_ptr<tcp_connection>;
 
@@ -297,7 +303,7 @@ public:
 
         // An accept itself is not delayed: the wait belongs to whoever has not connected yet, rather than to the
         // link.
-        when_ready(_under->accept(d),
+        when_ready(_under->accept(d, token),
                    [target, s](cc::shared_async<handle> const& inner)
                    {
                        if (inner->has_error())
@@ -347,7 +353,8 @@ cc::result<cc::unique_ptr<tcp_listener>, error> simulated_transport::listen(endp
 
 cc::shared_async<cc::shared_ptr<tcp_connection>> simulated_transport::connect(endpoint const& where,
                                                                               deadline d,
-                                                                              tcp_options const& options)
+                                                                              tcp_options const& options,
+                                                                              cancel_token const& token)
 {
     using handle = cc::shared_ptr<tcp_connection>;
 
@@ -361,11 +368,11 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> simulated_transport::connect(en
     auto s = _state;
     auto const target = endpoint(where);
 
-    run_delayed<handle>(*_state, _state->delay_ms_for(0), promise,
-                        [s, target, d, options]
+    run_delayed<handle>(*_state, _state->delay_ms_for(0), promise, token,
+                        [s, target, d, options, token]
                         {
                             auto wrapped = cc::make_async_manual<handle>();
-                            when_ready(s->under.connect(target, d, options),
+                            when_ready(s->under.connect(target, d, options, token),
                                        [wrapped, s](cc::shared_async<handle> const& inner)
                                        {
                                            if (inner->has_error())

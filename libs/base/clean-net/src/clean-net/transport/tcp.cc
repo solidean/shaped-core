@@ -24,6 +24,10 @@ struct async_operation : impl::io_operation
     cc::shared_async<T> promise;
     cc::unique_ptr<Self> self;
 
+    /// Taken off the token before anything else, so a cancel racing this completion finds a registration that is
+    /// still alive rather than an operation that has already freed itself.
+    impl::cancel_registration cancellation;
+
     /// Kept so the socket cannot be closed -- or its handle reused by a different socket -- while the reactor is
     /// still watching it.
     cc::shared_ptr<impl::socket_holder> socket_owner;
@@ -36,10 +40,11 @@ struct async_operation : impl::io_operation
         // Take ownership of ourselves first: everything below may run arbitrary continuations, and the last thing
         // this function does must be to die.
         auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
 
         if (failure.has_value())
         {
-            promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(failure.value()))));
+            promise->push_error(to_async_error(cc::move(failure.value())));
             return;
         }
         static_cast<Self*>(this)->deliver();
@@ -47,8 +52,11 @@ struct async_operation : impl::io_operation
 };
 
 /// Build the operation, wire its promise, and hand it to the reactor.
+///
+/// The token is attached AFTER the submit: a cancel arriving in between would otherwise be posted ahead of the
+/// operation it means to cancel, and the reactor would have nothing to match it against.
 template <class Op, class T>
-[[nodiscard]] cc::shared_async<T> launch(io_system& io, cc::unique_ptr<Op> op)
+[[nodiscard]] cc::shared_async<T> launch(io_system& io, cc::unique_ptr<Op> op, cancel_token const& token)
 {
     auto promise = cc::make_async_manual<T>();
     op->promise = promise;
@@ -56,6 +64,7 @@ template <class Op, class T>
     auto* const raw = op.get();
     raw->self = cc::move(op);
     io.submit(raw);
+    raw->cancellation.attach(token, io, raw);
     return promise;
 }
 
@@ -64,7 +73,7 @@ template <class T>
 [[nodiscard]] cc::shared_async<T> failed_async(error e)
 {
     auto promise = cc::make_async_manual<T>();
-    promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(e))));
+    promise->push_error(to_async_error(cc::move(e)));
     return promise;
 }
 
@@ -89,8 +98,10 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d) override;
-    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d) override;
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token) override;
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes,
+                                                  deadline d,
+                                                  cancel_token const& token) override;
 
     cc::result<cc::unit, error> shutdown_send() override
     {
@@ -128,7 +139,7 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d) override;
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override;
     [[nodiscard]] endpoint local() const override { return _local; }
 
 private:
@@ -173,7 +184,7 @@ struct accept_operation final : async_operation<accept_operation, cc::shared_ptr
     }
 };
 
-cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadline d)
+cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
 {
     if (!is_open())
         return failed_async<isize>(
@@ -189,10 +200,10 @@ cc::shared_async<isize> native_connection::receive(cc::span<byte> buffer, deadli
     // The reactor watches this socket by handle, so the operation keeps it alive for as long as it runs.
     op->socket_owner = _socket;
 
-    return launch<receive_operation, isize>(_io, cc::move(op));
+    return launch<receive_operation, isize>(_io, cc::move(op), token);
 }
 
-cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, deadline d)
+cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, deadline d, cancel_token const& token)
 {
     if (!is_open())
         return failed_async<cc::unit>(
@@ -206,10 +217,10 @@ cc::shared_async<cc::unit> native_connection::send(cc::span<byte const> bytes, d
     op->deadline_ns = deadline_to_absolute(_io, d);
     op->socket_owner = _socket;
 
-    return launch<send_operation, cc::unit>(_io, cc::move(op));
+    return launch<send_operation, cc::unit>(_io, cc::move(op), token);
 }
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadline d)
+cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadline d, cancel_token const& token)
 {
     auto op = cc::make_unique<accept_operation>();
     op->kind = impl::io_op_kind::accept;
@@ -219,7 +230,7 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_listener::accept(deadlin
     op->options = _options;
     op->socket_owner = _socket;
 
-    return launch<accept_operation, cc::shared_ptr<tcp_connection>>(_io, cc::move(op));
+    return launch<accept_operation, cc::shared_ptr<tcp_connection>>(_io, cc::move(op), token);
 }
 } // namespace
 
@@ -231,14 +242,14 @@ tcp_connection::tcp_connection(std::unique_ptr<connection_backend> backend) : _b
 
 tcp_connection::~tcp_connection() = default;
 
-cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline d)
+cc::shared_async<isize> tcp_connection::receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
 {
-    return _backend->receive(buffer, d);
+    return _backend->receive(buffer, d, token);
 }
 
-cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, deadline d)
+cc::shared_async<cc::unit> tcp_connection::send(cc::span<byte const> bytes, deadline d, cancel_token const& token)
 {
-    return _backend->send(bytes, d);
+    return _backend->send(bytes, d, token);
 }
 
 cc::result<cc::unit, error> tcp_connection::shutdown_send()
@@ -272,9 +283,9 @@ tcp_listener::tcp_listener(std::unique_ptr<listener_backend> backend) : _backend
 
 tcp_listener::~tcp_listener() = default;
 
-cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_listener::accept(deadline d)
+cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_listener::accept(deadline d, cancel_token const& token)
 {
-    return _backend->accept(d);
+    return _backend->accept(d, token);
 }
 
 endpoint tcp_listener::local() const
@@ -356,7 +367,8 @@ cc::result<cc::unique_ptr<tcp_listener>, error> native_transport::listen(endpoin
 
 cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpoint const& where,
                                                                            deadline d,
-                                                                           tcp_options const& options)
+                                                                           tcp_options const& options,
+                                                                           cancel_token const& token)
 {
     using handle = cc::shared_ptr<tcp_connection>;
 
@@ -387,7 +399,7 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpo
     // rather than by remembering to.
     op->pending = cc::make_shared<tcp_connection>(std::make_unique<native_connection>(_io, holder, endpoint(), where));
 
-    return launch<connect_operation, handle>(_io, cc::move(op));
+    return launch<connect_operation, handle>(_io, cc::move(op), token);
 }
 
 // ---- connect -------------------------------------------------------------------------------------------
@@ -395,17 +407,19 @@ cc::shared_async<cc::shared_ptr<tcp_connection>> native_transport::connect(endpo
 cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
                                                              endpoint const& where,
                                                              deadline d,
-                                                             tcp_options const& options)
+                                                             tcp_options const& options,
+                                                             cancel_token const& token)
 {
     auto native = native_transport(io);
-    return native.connect(where, d, options);
+    return native.connect(where, d, options, token);
 }
 
 cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
                                                              endpoint const& where,
                                                              deadline d,
-                                                             tcp_options const& options)
+                                                             tcp_options const& options,
+                                                             cancel_token const& token)
 {
-    return t.connect(where, d, options);
+    return t.connect(where, d, options, token);
 }
 } // namespace cnet

@@ -162,7 +162,25 @@ Three things worth knowing.
 A handle closed under the reactor can be reissued to the next socket the process opens.
 
 `bytes` passed to `send` must stay alive and unmodified until the operation completes.
-Per-operation cancellation is not wired up yet — a deadline is how an operation ends early.
+
+## Cancelling
+
+```cpp
+#include <clean-net/common/cancel.hh>
+
+auto const token = cnet::cancel_token::create();   // the default cancel_token() allocates nothing and never cancels
+cnet::tcp_connect(io, where, cnet::deadline::after_secs(10), {}, token);
+conn->receive(buffer, cnet::deadline::after_secs(30), token);
+listener->accept(cnet::deadline::never(), token);
+
+token.cancel();          // every operation it was given to ends as cancelled, now or later
+token.is_cancelled();    // a token stays cancelled: a later call fails at once rather than starting
+```
+
+**A token groups where a deadline bounds** — one token per request, one deadline per step, which is why they are two parameters.
+**A cancelled outcome is `cc::async_error::is_cancelled()`**, not an error carrying a code, so `handle->try_error()->is_cancelled()` is the branch.
+**Cancelling ends the operation, not the connection**: the socket stays open and usable.
+[docs/cancellation.md](docs/cancellation.md) has the race and why it is not one.
 
 ## Standing something else in for the network
 

@@ -42,6 +42,11 @@ Connect, accept, send, receive and half-close as `cc::shared_async`, with deadli
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
 
+**[done]** cancellation.
+`cnet::cancel_token` groups the operations of one request the way a deadline bounds each of them, and a cancelled
+outcome arrives as `cc::async_error::is_cancelled()`.
+[cancellation.md](cancellation.md) is the design.
+
 **[done]** the transport seam and the two transports that stand in for a network:
 `cnet::virtual_network` answers in this process over no socket, and `cnet::simulated_transport` delays, drops and cuts
 on the way through to another one.

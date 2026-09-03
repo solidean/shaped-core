@@ -6,6 +6,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-net/address/endpoint.hh>
+#include <clean-net/common/cancel.hh>
 #include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
 #include <clean-net/io/io_system.hh>
@@ -69,13 +70,17 @@ public:
     /// Completes on the FIRST bytes that arrive and reports how many, which may be far fewer than the buffer holds:
     /// a stream has no message boundaries, so waiting to fill the buffer would be waiting for a message nobody sent.
     /// A peer that closed cleanly fails with `connection_closed` rather than reporting zero bytes.
-    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d = deadline::after_secs(30));
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer,
+                                                  deadline d = deadline::after_secs(30),
+                                                  cancel_token const& token = {});
 
     /// Write all of `bytes`.
     ///
     /// Completes only once every byte has been handed to the OS, since a partial write is never what a caller meant.
     /// `bytes` must stay alive and unmodified until it completes.
-    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d = deadline::after_secs(30));
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes,
+                                                  deadline d = deadline::after_secs(30),
+                                                  cancel_token const& token = {});
 
     /// Say that nothing more will be sent, and leave the connection open for the answer.
     ///
@@ -138,7 +143,8 @@ public:
     ///
     /// The default is no deadline, which is what a server wants: a listener waiting for its next client is idle
     /// rather than late.
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d = deadline::never());
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d = deadline::never(),
+                                                                          cancel_token const& token = {});
 
     /// What the listener actually bound to, port included.
     [[nodiscard]] endpoint local() const;
@@ -165,7 +171,8 @@ public:
 
     [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
                                                                            deadline d,
-                                                                           tcp_options const& options) override;
+                                                                           tcp_options const& options,
+                                                                           cancel_token const& token) override;
 
     [[nodiscard]] cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
                                                                          tcp_listen_options const& options) override;
@@ -187,11 +194,13 @@ namespace cnet
 [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(io_system& io,
                                                                            endpoint const& where,
                                                                            deadline d = deadline::after_secs(30),
-                                                                           tcp_options const& options = {});
+                                                                           tcp_options const& options = {},
+                                                                           cancel_token const& token = {});
 
 /// Connect over a given transport, which is how a test connects to something that is not the network.
 [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> tcp_connect(transport& t,
                                                                            endpoint const& where,
                                                                            deadline d = deadline::after_secs(30),
-                                                                           tcp_options const& options = {});
+                                                                           tcp_options const& options = {},
+                                                                           cancel_token const& token = {});
 } // namespace cnet

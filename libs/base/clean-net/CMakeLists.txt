@@ -12,9 +12,11 @@ add_library(clean-net
     src/clean-net/common/error.cc
     src/clean-net/common/level.cc
     src/clean-net/common/clock.cc
+    src/clean-net/common/cancel.cc
     src/clean-net/address/ip_address.cc
     src/clean-net/address/endpoint.cc
     src/clean-net/io/io_system.cc
+    src/clean-net/transport/backend.cc
     src/clean-net/transport/tcp.cc
     src/clean-net/transport/virtual_transport.cc
     src/clean-net/transport/simulated_transport.cc
@@ -36,6 +38,7 @@ target_sources(clean-net
     src/clean-net/common/error.hh
     src/clean-net/common/level.hh
     src/clean-net/common/deadline.hh
+    src/clean-net/common/cancel.hh
     src/clean-net/common/clock.hh
     src/clean-net/address/ip_address.hh
     src/clean-net/address/endpoint.hh
@@ -87,6 +90,7 @@ if(SC_BUILD_TESTS)
         tests/endpoint-test.cc
         tests/clock-test.cc
         tests/error-test.cc
+        tests/cancel-test.cc
         tests/native-socket-test.cc
         tests/reactor-test.cc
         tests/io-system-test.cc

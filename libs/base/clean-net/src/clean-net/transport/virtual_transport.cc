@@ -75,6 +75,7 @@ struct virtual_receive_op final : impl::io_operation
 {
     cc::shared_async<isize> promise;
     cc::unique_ptr<virtual_receive_op> self;
+    impl::cancel_registration cancellation;
     cc::shared_ptr<pipe> inbox;
     byte* out = nullptr;
     isize out_size = 0;
@@ -82,6 +83,7 @@ struct virtual_receive_op final : impl::io_operation
     void on_complete(cc::optional<error> failure) override
     {
         auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
 
         // Deregister first: a deadline can fire while the pipe still points here, and the next writer would then
         // signal an operation that has already gone.
@@ -94,7 +96,7 @@ struct virtual_receive_op final : impl::io_operation
 
         if (failure.has_value())
         {
-            promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(failure.value()))));
+            promise->push_error(to_async_error(cc::move(failure.value())));
             return;
         }
 
@@ -120,10 +122,9 @@ struct virtual_receive_op final : impl::io_operation
         }
 
         // Signalled with nothing to take means the writer finished, which is the only other reason to wake a reader.
-        promise->push_error(cc::async_error::make_error(cc::any_error(error{.code = error_code::connection_closed,
-                                                                            .native_code = 0,
-                                                                            .message = cc::string("the peer closed the "
-                                                                                                  "connection")})));
+        promise->push_error(to_async_error({.code = error_code::connection_closed,
+                                            .native_code = 0,
+                                            .message = cc::string("the peer closed the connection")}));
     }
 };
 
@@ -132,11 +133,13 @@ struct virtual_accept_op final : impl::io_operation
 {
     cc::shared_async<cc::shared_ptr<tcp_connection>> promise;
     cc::unique_ptr<virtual_accept_op> self;
+    impl::cancel_registration cancellation;
     cc::shared_ptr<virtual_listener_state> listener;
 
     void on_complete(cc::optional<error> failure) override
     {
         auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
 
         listener->parked_accept.lock(
             [this](impl::io_operation*& slot)
@@ -147,7 +150,7 @@ struct virtual_accept_op final : impl::io_operation
 
         if (failure.has_value())
         {
-            promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(failure.value()))));
+            promise->push_error(to_async_error(cc::move(failure.value())));
             return;
         }
 
@@ -169,10 +172,9 @@ struct virtual_accept_op final : impl::io_operation
             return;
         }
 
-        promise->push_error(cc::async_error::make_error(
-            cc::any_error(error{.code = error_code::cancelled,
-                                .native_code = 0,
-                                .message = cc::string("the listener was woken with nothing to accept")})));
+        promise->push_error(to_async_error({.code = error_code::cancelled,
+                                            .native_code = 0,
+                                            .message = cc::string("the listener was woken with nothing to accept")}));
     }
 };
 
@@ -181,7 +183,7 @@ template <class T>
 [[nodiscard]] cc::shared_async<T> failed_async(error e)
 {
     auto promise = cc::make_async_manual<T>();
-    promise->push_error(cc::async_error::make_error(cc::any_error(cc::move(e))));
+    promise->push_error(to_async_error(cc::move(e)));
     return promise;
 }
 
@@ -198,12 +200,17 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d) override
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token) override
     {
         if (!_open)
             return failed_async<isize>({.code = error_code::connection_closed,
                                         .native_code = 0,
                                         .message = cc::string("the connection is closed")});
+
+        // An already-cancelled token fails here rather than starting work nobody wants.
+        if (token.is_cancelled())
+            return failed_async<isize>(
+                {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
         // The fast path: bytes are already here, so nothing reaches the reactor at all.
         auto promise = cc::make_async_manual<isize>();
@@ -246,15 +253,21 @@ public:
         raw->self = cc::move(op);
         _inbox->lock([raw](pipe_data& d) { d.parked = raw; });
         _io.submit(raw);
+        raw->cancellation.attach(token, _io, raw);
         return promise;
     }
 
-    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline) override
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline, cancel_token const& token) override
     {
         if (!_open)
             return failed_async<cc::unit>({.code = error_code::connection_closed,
                                            .native_code = 0,
                                            .message = cc::string("the connection is closed")});
+
+        // A send never parks here, so this is the only place a cancelled token can stop one.
+        if (token.is_cancelled())
+            return failed_async<cc::unit>(
+                {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
         if (_outbox->lock([](pipe_data const& d) { return d.writer_done; }))
             return failed_async<cc::unit>({.code = error_code::connection_closed,
@@ -347,8 +360,12 @@ public:
     {
     }
 
-    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d) override
+    [[nodiscard]] cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token) override
     {
+        if (token.is_cancelled())
+            return failed_async<cc::shared_ptr<tcp_connection>>(
+                {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
+
         auto promise = cc::make_async_manual<cc::shared_ptr<tcp_connection>>();
 
         auto taken = _state->incoming.lock(
@@ -379,6 +396,7 @@ public:
         raw->self = cc::move(op);
         _state->parked_accept.lock([raw](impl::io_operation*& slot) { slot = raw; });
         _net->io.submit(raw);
+        raw->cancellation.attach(token, _net->io, raw);
         return promise;
     }
 
@@ -452,9 +470,15 @@ cc::result<cc::unique_ptr<tcp_listener>, error> virtual_network::listen(endpoint
 
 cc::shared_async<cc::shared_ptr<tcp_connection>> virtual_network::connect(endpoint const& where,
                                                                           deadline /*d*/,
-                                                                          tcp_options const& /*options*/)
+                                                                          tcp_options const& /*options*/,
+                                                                          cancel_token const& token)
 {
     using handle = cc::shared_ptr<tcp_connection>;
+
+    // A virtual connect never waits, so a token can only stop it before it starts.
+    if (token.is_cancelled())
+        return failed_async<handle>(
+            {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the operation was cancelled")});
 
     auto server = _state->listeners.lock(
         [&](cc::vector<cc::shared_ptr<virtual_listener_state>> const& all) -> cc::shared_ptr<virtual_listener_state>

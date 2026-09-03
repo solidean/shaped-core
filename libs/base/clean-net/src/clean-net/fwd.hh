@@ -57,6 +57,9 @@ class clock;
 
 /// A clock that only moves when a test moves it.
 class manual_clock;
+
+/// Ask the operations of a whole request to stop: a token groups, where a deadline bounds.
+class cancel_token;
 } // namespace cnet
 
 // ---- addresses -----------------------------------------------------------------------------------------

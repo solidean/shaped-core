@@ -6,6 +6,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-net/address/endpoint.hh>
+#include <clean-net/common/cancel.hh>
 #include <clean-net/common/deadline.hh>
 #include <clean-net/common/error.hh>
 
@@ -30,11 +31,14 @@ class cnet::connection_backend
 {
 public:
     /// Completes on the FIRST bytes that arrive, which may be far fewer than the buffer holds.
-    [[nodiscard]] virtual cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d) = 0;
+    [[nodiscard]] virtual cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token)
+        = 0;
 
     /// Completes only once every byte has been handed on.
     /// `bytes` must stay alive and unmodified until it completes.
-    [[nodiscard]] virtual cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d) = 0;
+    [[nodiscard]] virtual cc::shared_async<cc::unit> send(cc::span<byte const> bytes,
+                                                          deadline d,
+                                                          cancel_token const& token) = 0;
 
     /// Say that nothing more will be sent, while staying open for what the peer still has to say.
     ///
@@ -63,7 +67,8 @@ public:
 class cnet::listener_backend
 {
 public:
-    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d) = 0;
+    [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<tcp_connection>> accept(deadline d, cancel_token const& token)
+        = 0;
 
     /// What the listener actually bound to, port included.
     [[nodiscard]] virtual endpoint local() const = 0;
@@ -73,6 +78,15 @@ public:
     listener_backend& operator=(listener_backend const&) = delete;
     virtual ~listener_backend() = default;
 };
+
+namespace cnet
+{
+/// The failure channel value a `cnet::error` becomes.
+///
+/// Every backend goes through this rather than wrapping the error itself, so that one cancelled outcome is spelled
+/// the same way everywhere.
+[[nodiscard]] cc::async_error to_async_error(error e);
+} // namespace cnet
 
 /// Where connections and listeners come from.
 ///
@@ -89,8 +103,10 @@ public:
 
     [[nodiscard]] virtual cc::shared_async<cc::shared_ptr<tcp_connection>> connect(endpoint const& where,
                                                                                    deadline d,
-                                                                                   tcp_options const& options) = 0;
+                                                                                   tcp_options const& options,
+                                                                                   cancel_token const& token) = 0;
 
+    /// Binding and listening never waits, so there is nothing here for a token to cancel.
     [[nodiscard]] virtual cc::result<cc::unique_ptr<tcp_listener>, error> listen(endpoint const& where,
                                                                                  tcp_listen_options const& options) = 0;
 

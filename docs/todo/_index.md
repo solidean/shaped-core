@@ -31,8 +31,6 @@ Its [readme](../../libs/base/clean-net/readme.md) is the front door and its
 
 In the order it is meant to be built:
 
-- [cnet-cancellation.md](cnet-cancellation.md) — a caller cannot cancel an operation it started.
-  Small, and it removes an asterisk from the TCP API.
 - [cnet-name-resolution.md](cnet-name-resolution.md) — turning a hostname into an address without lying about VPNs.
 - [cnet-tls.md](cnet-tls.md) — mbedTLS, and the trust stores that are the actual problem.
 - [cnet-http-client.md](cnet-http-client.md) — the capability ladder, HTTP/1.1, bodies and politeness.

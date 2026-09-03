@@ -44,8 +44,8 @@ Not exotic — it is the difference between "the internet is slow here" and "it 
 It is in the first version because **retrofitting it changes what a connect attempt *is***, from one socket to a
 small race, and every caller of `tcp_connect` inherits that shape.
 
-It also needs [cnet-cancellation.md](cnet-cancellation.md): the losing attempt has to be abandoned, and today a
-deadline is the only way an operation ends early.
+It also needs [cancellation](../../libs/base/clean-net/docs/cancellation.md), which exists now: the losing attempt is
+abandoned through the token both connects were given.
 
 ## The shape
 
