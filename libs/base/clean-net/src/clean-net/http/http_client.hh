@@ -4,6 +4,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-net/address/resolver.hh>
 #include <clean-net/common/level.hh>
+#include <clean-net/http/connection_pool.hh>
 #include <clean-net/http/message.hh>
 #include <clean-net/tls/tls.hh>
 
@@ -43,6 +44,12 @@ struct cnet::request_options
     /// Which family to ask the resolver for, and how long one connection attempt gets before the next starts.
     address_family_preference family = address_family_preference::race;
     i32 attempt_delay_ms = 250;
+
+    /// Take a connection from the pool when one is there, and give it back afterwards.
+    ///
+    /// Off for a request that must not share a connection with anything else -- an upgrade, or one carrying
+    /// credentials a caller would rather not leave on a reusable socket.
+    bool reuse_connections = true;
 };
 
 /// What every HTTP backend implements.
@@ -85,14 +92,18 @@ public:
 /// select a system backend rather than to write one.
 /// The cost is throughput on many-small-requests workloads, which is not what this library is for.
 ///
-/// **One connection per request, for now.**
-/// Every request sends `Connection: close`, so pooling and keep-alive are the next thing rather than something a
-/// caller can be surprised by: a request costs a handshake today.
+/// **Connections are pooled**, keyed on origin, so a second request to the same server pays no handshake.
+/// Reuse is speculative by nature -- a server may have closed an idle connection without anybody noticing -- so a
+/// request that fails on a pooled connection before any response byte arrived is retried once on a fresh one.
+/// That retry is what makes pooling safe, and it is why it is not conditional on anything.
 class cnet::native_http_client final : public cnet::http_client
 {
 public:
     /// Over a given transport and resolver, which is how a test puts a virtual network underneath.
-    native_http_client(transport& t, resolver& r) : _transport(t), _resolver(r) {}
+    native_http_client(transport& t, resolver& r, connection_pool::description const& pool = {})
+      : _transport(t), _resolver(r), _pool(r.io(), pool)
+    {
+    }
 
     /// `client`, not `connection`: the socket underneath is real, and nothing here hands it to a caller yet.
     [[nodiscard]] http_level level() const override { return http_level::client; }
@@ -102,9 +113,13 @@ public:
                                                                       request_options const& options,
                                                                       cancel_token const& token) override;
 
+    /// The connections this client is keeping, for a test and for diagnostics.
+    [[nodiscard]] connection_pool& pool() { return _pool; }
+
 private:
     transport& _transport;
     resolver& _resolver;
+    connection_pool _pool;
 };
 
 /// A client over the platform's own sockets that owns the transport and the resolver it needs.

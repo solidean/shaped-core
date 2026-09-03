@@ -109,6 +109,6 @@ shape as HTTP, and for the same reason.
 
 ## Depends on
 
-- [cnet-http-client.md](cnet-http-client.md) for the HTTP/1.1 parser, which the server side shares.
+- the [HTTP/1.1 parser](../../libs/base/clean-net/src/clean-net/http/impl/http1.hh), which the server side shares -- it reads responses today and wants the mirror of itself for requests.
 - [cancellation](../../libs/base/clean-net/docs/cancellation.md) for shutdown, which exists now: a listener parked on
   an accept stops through its token rather than waiting for a deadline that was deliberately never set.

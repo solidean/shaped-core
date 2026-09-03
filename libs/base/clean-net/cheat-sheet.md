@@ -264,9 +264,25 @@ Five things worth knowing.
 **The returned async completes when the whole message is done**; the head is its value, and the body has already gone to the sink by then.
 **A sink that takes fewer bytes than offered pushes back** all the way down to the socket, and it runs on the reactor thread — hand the bytes on, do no work there.
 **One budget covers the whole request** — resolve, connect, handshake and every read — because a per-phase timeout lets a four-address host take four times what the caller asked for.
-**One connection per request today**: every request sends `Connection: close`, so pooling and keep-alive are the next thing rather than a surprise.
+**Connections are pooled** per origin, and a request that fails on a pooled connection before any byte arrived is retried once on a fresh one — which is what makes reuse safe.
 
 Redirects are followed by default, up to `max_redirects`; a 301, 302 or 303 turns anything but HEAD into a bodyless GET, and `Authorization` and `Cookie` are dropped when the origin changes.
+
+## Politeness and retries
+
+```cpp
+#include <clean-net/http/polite_client.hh>
+
+auto polite = cnet::polite_http_client(*client, io, {.requests_per_second = 5, .max_concurrent_requests = 4});
+cnet::http_get(polite, "https://example.com/a");   // waits its turn, retries what is worth retrying
+```
+
+`cnet::host_policy` — `requests_per_second` + `burst` (a token bucket), `max_concurrent_requests`, `max_retries`, `backoff_base_ms`, `backoff_jitter`, `honor_retry_after`, `retry_non_idempotent`.
+
+**Retries live with the rate limit on purpose**: a retry policy without one is how a transient failure becomes a self-inflicted denial of service.
+**Only idempotent methods are retried**, and only before a byte reached your sink — after that, repeating would deliver the body twice.
+**A 429 or 503 is waited out for as long as it asked** (delta-seconds only), and the deadline covers the queueing, so a request that spends its budget waiting fails rather than being sent late.
+[docs/http.md](docs/http.md) is the reasoning.
 
 ## Cancelling
 

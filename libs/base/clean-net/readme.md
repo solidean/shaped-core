@@ -69,4 +69,5 @@ the code under test never learns which transport it got.
 - [docs/cancellation.md](docs/cancellation.md) — `cnet::cancel_token`, and why it is not the deadline.
 - [docs/name-resolution.md](docs/name-resolution.md) — the blocking lookup on a worker, and happy eyeballs above it.
 - [docs/tls.md](docs/tls.md) — TLS as a wrapper over any connection, and where the roots come from.
+- [docs/http.md](docs/http.md) — the HTTP client: the ladder, backpressure, pooling and politeness.
 - [docs/todo/](../../../docs/todo/_index.md) — what is agreed but not built, one document per feature.

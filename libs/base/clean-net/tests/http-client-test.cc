@@ -53,15 +53,22 @@ struct scripted_server
         cc::shared_async<cc::unit> sending;
         cc::vector<byte> inbox;
         cc::string response;
-        bool answered = false;
     };
 
     cc::unique_ptr<stream_listener> listener;
     cc::vector<cc::string> responses;
     isize next_response = 0;
 
+    /// Hang up after answering, however the response was framed.
+    /// A server is allowed to, and a client that pooled the connection has no way to know until it tries.
+    bool close_after_response = false;
+
+    /// How many connections were accepted, which is what says whether pooling did anything.
+    isize accept_count = 0;
+
     /// What the last request looked like on the wire.
     cc::string last_request;
+    isize request_count = 0;
 
     cc::shared_async<cc::shared_ptr<stream_connection>> accepting;
     cc::vector<cc::unique_ptr<session>> sessions;
@@ -74,6 +81,8 @@ struct scripted_server
         {
             if (accepting->try_error() == nullptr)
             {
+                ++accept_count;
+
                 auto fresh = cc::make_unique<session>();
                 fresh->connection = accepting->value();
                 fresh->inbox.resize_to_defaulted(8 * 1024);
@@ -85,21 +94,23 @@ struct scripted_server
 
         for (auto& s : sessions)
         {
-            if (s->answered || !s->receiving.is_valid() || !s->receiving->is_ready())
+            if (!s->connection.is_valid() || !s->receiving.is_valid() || !s->receiving->is_ready())
                 continue;
 
             if (s->receiving->try_error() != nullptr)
             {
-                s->answered = true;
+                s->connection->close();
+                s->connection = {};
                 continue;
             }
 
             last_request
                 = cc::string(cc::string_view(reinterpret_cast<char const*>(s->inbox.data()), s->receiving->value()));
+            ++request_count;
+            s->receiving = {};
 
             s->response = responses[next_response < responses.size() ? next_response : responses.size() - 1];
             ++next_response;
-            s->answered = true;
 
             if (s->response.empty())
                 continue; // a server that never answers, which is what a cancellation test wants
@@ -108,12 +119,24 @@ struct scripted_server
         }
 
         for (auto& s : sessions)
-            if (s->sending.is_valid() && s->sending->is_ready() && s->connection.is_valid())
+        {
+            if (!s->sending.is_valid() || !s->sending->is_ready() || !s->connection.is_valid())
+                continue;
+
+            s->sending = {};
+
+            // The client says which it wants; the flag is how a test makes the server disagree.
+            auto const client_asked_to_close = last_request.contains("Connection: close");
+            if (close_after_response || client_asked_to_close || s->response.contains("Connection: close"))
             {
-                // Every request says Connection: close, so the answer ends with the connection.
                 s->connection->close();
                 s->connection = {};
+                continue;
             }
+
+            // Keep-alive: wait for the next request on the same connection.
+            s->receiving = s->connection->receive(s->inbox, deadline::never());
+        }
     }
 };
 
@@ -181,10 +204,12 @@ TEST("cnet - a GET goes out and a response comes back")
     CHECK(response->value().body_text() == "hello, client");
     CHECK(response->value().head.headers.get("Content-Type").value() == "text/plain");
 
-    // The request line, the Host from the target, and the connection header the client always sends today.
+    // The request line, and the Host the client took from the target.
     CHECK(fixture.server->last_request.contains("GET /greeting HTTP/1.1\r\n"));
     CHECK(fixture.server->last_request.contains("Host: example.test\r\n"));
-    CHECK(fixture.server->last_request.contains("Connection: close\r\n"));
+
+    // No `Connection: close`: the connection is meant to be kept, which is what pooling needs the server to know.
+    CHECK(!fixture.server->last_request.contains("Connection: close"));
 }
 
 TEST("cnet - a chunked response is delivered whole")
@@ -369,4 +394,81 @@ TEST("cnet - cancelling a request in flight ends it")
     CHECK(fixture.run_until([&] { return response->is_ready(); }));
     CHECK(response->try_error() != nullptr);
     CHECK(response->try_error()->is_cancelled());
+}
+
+TEST("cnet - a second request to the same origin reuses the connection")
+{
+    auto fixture = client_fixture(
+        {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"});
+
+    auto first = http_get(*fixture.client, "http://example.test/one");
+    CHECK(fixture.run_until([&] { return first->is_ready(); }));
+    CHECK(first->try_error() == nullptr);
+    CHECK(first->value().body_text() == "first");
+
+    // The connection went back to the pool rather than being closed, which is the whole point.
+    CHECK(fixture.client->pool().idle_count() == 1);
+
+    auto second = http_get(*fixture.client, "http://example.test/two");
+    CHECK(fixture.run_until([&] { return second->is_ready(); }));
+    CHECK(second->try_error() == nullptr);
+    CHECK(second->value().body_text() == "second");
+
+    // One accept for two requests: the second paid no connect and, over https, would have paid no handshake.
+    CHECK(fixture.server->accept_count == 1);
+    CHECK(fixture.server->request_count == 2);
+    CHECK(!fixture.server->last_request.contains("Connection: close"));
+}
+
+TEST("cnet - a request can refuse to share a connection")
+{
+    auto fixture = client_fixture(
+        {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab", "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\ncd"});
+
+    auto first = http_get(*fixture.client, "http://example.test/one", {.reuse_connections = false});
+    CHECK(fixture.run_until([&] { return first->is_ready(); }));
+    CHECK(first->try_error() == nullptr);
+
+    // Nothing was kept, and the request said so on the wire so the server did not hold one open either.
+    CHECK(fixture.client->pool().idle_count() == 0);
+    CHECK(fixture.server->last_request.contains("Connection: close"));
+
+    auto second = http_get(*fixture.client, "http://example.test/two", {.reuse_connections = false});
+    CHECK(fixture.run_until([&] { return second->is_ready(); }));
+    CHECK(second->try_error() == nullptr);
+    CHECK(fixture.server->accept_count == 2);
+}
+
+TEST("cnet - a pooled connection the server already closed is retried on a fresh one")
+{
+    auto fixture = client_fixture(
+        {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"});
+
+    // The server answers as though the connection will live on, and then hangs up anyway -- which is a server's
+    // right, and invisible to a client holding the other end.
+    fixture.server->close_after_response = true;
+
+    auto first = http_get(*fixture.client, "http://example.test/one");
+    CHECK(fixture.run_until([&] { return first->is_ready(); }));
+    CHECK(first->try_error() == nullptr);
+
+    auto second = http_get(*fixture.client, "http://example.test/two");
+    CHECK(fixture.run_until([&] { return second->is_ready(); }));
+
+    // The retry is what makes pooling safe: the caller sees a successful request, not the dead connection.
+    CHECK(second->try_error() == nullptr);
+    CHECK(second->value().body_text() == "second");
+    CHECK(fixture.server->accept_count == 2);
+}
+
+TEST("cnet - a connection is not kept when the response leaves the stream unclean")
+{
+    auto fixture = client_fixture({"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"});
+
+    auto response = http_get(*fixture.client, "http://example.test/");
+    CHECK(fixture.run_until([&] { return response->is_ready(); }));
+    CHECK(response->try_error() == nullptr);
+
+    // The server said it was closing, so keeping the connection would be keeping a dead one.
+    CHECK(fixture.client->pool().idle_count() == 0);
 }

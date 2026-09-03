@@ -199,6 +199,15 @@ struct http_response;
 /// What a request is allowed to take, and to buffer.
 struct request_options;
 
+/// Connections kept open between requests, keyed on origin.
+class connection_pool;
+
+/// How much traffic one remote host is allowed, and what happens when it says no.
+struct host_policy;
+
+/// Rate limiting and retries over any other client.
+class polite_http_client;
+
 /// What every HTTP backend implements: one request in, one response out.
 class http_client;
 

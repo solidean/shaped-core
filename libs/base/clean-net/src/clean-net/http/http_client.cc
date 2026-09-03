@@ -1,5 +1,6 @@
 #include "http_client.hh"
 
+#include <clean-core/common/asserts.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -56,7 +57,16 @@ struct exchange
     i32 redirects_left = 0;
     i64 max_body_bytes = 0;
 
+    connection_pool* pool = nullptr;
     cc::shared_ptr<stream_connection> connection;
+
+    /// True while this attempt is running on a connection that was already open.
+    ///
+    /// It is the one thing that decides whether a failure is worth retrying: a pooled connection can be dead
+    /// without anybody knowing, and a fresh one that fails failed for a real reason.
+    bool connection_was_pooled = false;
+    bool retried_stale = false;
+
     impl::http1_response_parser parser;
 
     /// The serialized head, which must outlive the send that carries it.
@@ -87,6 +97,8 @@ struct exchange
 };
 
 void start_attempt(cc::shared_ptr<exchange> const& ex);
+void release_connection(cc::shared_ptr<exchange> const& ex, bool reusable);
+void write_head(cc::shared_ptr<exchange> const& ex);
 
 void fail(cc::shared_ptr<exchange> const& ex, error e)
 {
@@ -94,10 +106,29 @@ void fail(cc::shared_ptr<exchange> const& ex, error e)
         return;
     ex->settled = true;
 
-    if (ex->connection.is_valid())
-        ex->connection->close();
-
+    release_connection(ex, false);
     ex->promise->push_error(to_async_error(cc::move(e)));
+}
+
+/// Whether this failure is the one pooling creates, and can be answered by trying again.
+///
+/// Only before a single response byte has arrived: after that the request reached the server, and repeating it would
+/// be a second request rather than a retry.
+[[nodiscard]] bool can_retry_stale(cc::shared_ptr<exchange> const& ex)
+{
+    return ex->connection_was_pooled && !ex->retried_stale && !ex->parser.head_complete() && ex->body_bytes == 0
+        && !ex->token.is_cancelled();
+}
+
+void retry_on_fresh_connection(cc::shared_ptr<exchange> const& ex)
+{
+    CC_LOG_TRACE("the pooled connection to {} was dead; trying a fresh one", ex->request.target.origin());
+
+    ex->retried_stale = true;
+    release_connection(ex, false);
+    ex->unparsed.clear();
+    ex->discarding_body = false;
+    start_attempt(ex);
 }
 
 /// Fail with whatever a step underneath reported, keeping its message and its cancellation.
@@ -106,12 +137,35 @@ void fail_from(cc::shared_ptr<exchange> const& ex, cc::shared_async<T> const& fa
 {
     if (ex->settled)
         return;
+
+    // A pooled connection that failed before the response started is the case pooling itself created, so it is the
+    // one this answers by trying again rather than by failing.
+    if (can_retry_stale(ex))
+    {
+        retry_on_fresh_connection(ex);
+        return;
+    }
+
     ex->settled = true;
-
-    if (ex->connection.is_valid())
-        ex->connection->close();
-
+    release_connection(ex, false);
     ex->promise->push_error(failed->propagate_error());
+}
+
+void release_connection(cc::shared_ptr<exchange> const& ex, bool reusable)
+{
+    if (!ex->connection.is_valid())
+        return;
+
+    auto connection = cc::move(ex->connection);
+    ex->connection = {};
+
+    if (ex->pool == nullptr)
+    {
+        connection->close();
+        return;
+    }
+
+    ex->pool->give_back(ex->request.target.origin(), cc::move(connection), reusable);
 }
 
 void succeed(cc::shared_ptr<exchange> const& ex)
@@ -120,9 +174,10 @@ void succeed(cc::shared_ptr<exchange> const& ex)
         return;
     ex->settled = true;
 
-    // Nothing is pooled yet, so the connection has done its one job.
-    if (ex->connection.is_valid())
-        ex->connection->close();
+    // Leftover bytes mean the server said something this client did not ask for, and a stream nobody understands is
+    // not one to hand to the next request.
+    auto const clean = ex->parser.can_reuse_connection() && ex->unparsed.empty();
+    release_connection(ex, clean);
 
     ex->promise->push_value(cc::move(ex->parser.head()));
 }
@@ -183,11 +238,12 @@ void follow_redirect(cc::shared_ptr<exchange> const& ex, http_target next)
     ex->request.target = cc::move(next);
     --ex->redirects_left;
 
-    if (ex->connection.is_valid())
-        ex->connection->close();
-    ex->connection = {};
+    // The redirect's own response finished cleanly, so its connection is worth keeping -- even though the next
+    // request may well go somewhere else.
+    release_connection(ex, ex->parser.can_reuse_connection() && ex->unparsed.empty());
     ex->unparsed.clear();
     ex->discarding_body = false;
+    ex->retried_stale = false;
 
     start_attempt(ex);
 }
@@ -304,6 +360,14 @@ void read_more(cc::shared_ptr<exchange> const& ex)
                                  on_message_complete(ex);
                                  return;
                              }
+
+                             // A pooled connection the server had already closed looks exactly like this, and is
+                             // the reason a first read is allowed to fail without failing the request.
+                             if (can_retry_stale(ex))
+                             {
+                                 retry_on_fresh_connection(ex);
+                                 return;
+                             }
                              fail_from(ex, received);
                              return;
                          }
@@ -320,7 +384,6 @@ void write_body(cc::shared_ptr<exchange> const& ex)
 {
     if (ex->request.body.empty())
     {
-        ex->parser.start(ex->request.method);
         read_more(ex);
         return;
     }
@@ -333,17 +396,15 @@ void write_body(cc::shared_ptr<exchange> const& ex)
                              fail_from(ex, sent);
                              return;
                          }
-
-                         ex->parser.start(ex->request.method);
                          read_more(ex);
                      });
 }
 
 void write_head(cc::shared_ptr<exchange> const& ex)
 {
-    // Every request closes its connection, because nothing is pooled yet -- and saying so is what keeps a server
-    // from waiting for a second request that is never coming.
-    auto head = impl::write_request_head(ex->request, false);
+    // Keep-alive when the connection may be reused, and `Connection: close` when it may not -- which is what keeps
+    // a server from holding a connection open for a second request that is never coming.
+    auto head = impl::write_request_head(ex->request, ex->pool != nullptr);
     if (head.has_error())
     {
         fail(ex, cc::move(head).error());
@@ -369,6 +430,19 @@ void write_head(cc::shared_ptr<exchange> const& ex)
 void start_attempt(cc::shared_ptr<exchange> const& ex)
 {
     auto const& target = ex->request.target;
+
+    ex->parser.start(ex->request.method);
+    ex->connection_was_pooled = false;
+
+    // A pooled connection is already past the connect and the handshake, which is the whole point of keeping it.
+    if (ex->pool != nullptr)
+        if (auto pooled = ex->pool->try_take(target.origin()); pooled.is_valid())
+        {
+            ex->connection = cc::move(pooled);
+            ex->connection_was_pooled = true;
+            write_head(ex);
+            return;
+        }
 
     impl::when_ready(
         connect_to_host(
@@ -429,6 +503,7 @@ cc::shared_async<http_response_head> native_http_client::send_streaming(http_req
     ex->deadline_ns = deadline_to_absolute(_resolver.io(), options.timeout);
     ex->redirects_left = options.max_redirects;
     ex->max_body_bytes = options.max_body_bytes > 0 ? options.max_body_bytes : default_max_body_bytes();
+    ex->pool = options.reuse_connections ? &_pool : nullptr;
     ex->read_buffer.resize_to_defaulted(k_read_chunk);
 
     start_attempt(ex);

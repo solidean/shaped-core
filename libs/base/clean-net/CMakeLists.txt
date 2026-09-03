@@ -26,7 +26,9 @@ add_library(clean-net
     src/clean-net/http/http_target.cc
     src/clean-net/http/message.cc
     src/clean-net/http/impl/http1.cc
+    src/clean-net/http/connection_pool.cc
     src/clean-net/http/http_client.cc
+    src/clean-net/http/polite_client.cc
     src/clean-net/transport/virtual_transport.cc
     src/clean-net/transport/simulated_transport.cc
     src/clean-net/impl/native_socket.cc
@@ -59,7 +61,9 @@ target_sources(clean-net
     src/clean-net/tls/tls.hh
     src/clean-net/http/http_target.hh
     src/clean-net/http/message.hh
+    src/clean-net/http/connection_pool.hh
     src/clean-net/http/http_client.hh
+    src/clean-net/http/polite_client.hh
     src/clean-net/transport/virtual_transport.hh
     src/clean-net/transport/simulated_transport.hh
 )
@@ -133,6 +137,7 @@ if(SC_BUILD_TESTS)
         tests/http-target-test.cc
         tests/http1-test.cc
         tests/http-client-test.cc
+        tests/http-politeness-test.cc
         tests/virtual-transport-test.cc
         tests/simulated-transport-test.cc
     )
