@@ -125,17 +125,25 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 #include <shaped-shader-library/binding/binding_groups.hh>
 slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<sg::binding> bindings; }
                                    //   bindings are in declaration order -> position IS the layout slot
-slib::parse_binding_groups(hlsl)   // -> cc::result<cc::vector<shader_binding_group>>; the error names the line
+slib::parse_binding_groups(hlsl)   // -> cc::result<cc::vector<shader_binding_group>>; the error names file:line
+                                   //   (recovered from the flatten's #line directives)
+slib::rewrite_binding_groups(hlsl, format)
+                                   // -> cc::result<cc::string>; writes register()/[[vk::binding]] and strips
+                                   //   the pragmas. Runs in _compile_text, between preprocess and compile.
 ```
 
 ```hlsl
-namespace frame_bindings //!> group 0     // the group number is both the SPIR-V set and the HLSL space
+#pragma sc group 0                        // the group number is both the SPIR-V set and the HLSL space
+namespace frame_bindings
 {
     Texture2D<float4> albedo;             // index 0 -> t0/space0 and binding(0, 0)
     SamplerState linear_sampler;          // index 1 -> s1/space0 and binding(1, 0): ONE counter per group
 }
-// an attribute alone on its line attaches to the declaration after it; trailing, to the one it rides with.
-// a `//!>` name the pass does not know is an ERROR naming the line, never a comment walked past.
+// an attribute stands on its own line and applies to the declaration after it.
+// a PRAGMA, not a comment: DXC's include flatten erases comments and keeps pragmas verbatim (spike Q11/Q12),
+//   and the pass reads the FLATTENED source. The rewrite then strips the pragmas, since -Wall would reject them.
+// a `#pragma sc` name the pass does not know is an ERROR naming the line, never a directive nobody reads.
+// a pragma whose first word is not `sc` is passed through untouched.
 // an array consumes `count` indices — DXIL numbers every element, SPIR-V numbers the array once.
 // inside a group only `Type name;` / `Type name[N];` with N a literal; anything else is an error.
 // static / push_constants / payload / vertex_input parse and are reported as not supported yet.

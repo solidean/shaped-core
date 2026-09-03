@@ -16,6 +16,11 @@
 //  10. a resource declaration may live in an HLSL namespace on both targets, and reflection reports the BARE name —
 //      so a namespace can carry the group with no change to sg's name matching.
 //      Two namespaces may declare the same symbol, so a namespace catches no duplicate slot; the pass does.
+//  11. `-P` DROPS every comment, so a comment cannot carry an annotation into the flattened translation unit —
+//      which is why the attribute is a `#pragma sc` and not a `//!>` comment.
+//  12. an unknown `#pragma` survives `-P` verbatim, at file scope and inside a namespace, and compiles clean on
+//      both targets under -WX — but `-Wall` turns it into `-Wunknown-pragmas` and -WX makes that an error.
+//      So the pass strips its own pragmas, and the compile never sees one.
 //
 // What ruled the macro prelude out, and why nothing here should reach for one again:
 //   1. an unguarded `[[vk::...]]` is `-Wignored-attributes` on the DXIL target, which -WX turns into an error, so
@@ -567,6 +572,115 @@ TEST("portable-hlsl spike - Q10 a resource may live in a namespace, and reflecti
 }
 
 #endif
+
+// --- Q11/Q12: can an annotation reach the flattened translation unit at all? ---
+//
+// The binding pass reads its attributes out of the FLATTENED source, because a group's numbering is defined over
+// one translation unit and a header may declare a group.
+// So the only question that matters about the marker is which spelling survives `-P`.
+namespace
+{
+constexpr char const* pragma_annotated_hlsl = R"(
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> Albedo;
+#pragma sc static address=clamp_edge
+    SamplerState Samp;
+}
+
+RWTexture2D<float4> Out;
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    float2 uv = (float2(tid.xy) + 0.5f) / 64.0f;
+    Out[tid.xy] = frame::Albedo.SampleLevel(frame::Samp, uv, 0);
+}
+)";
+
+// The same file annotated the way the macro-era design would have: a comment.
+constexpr char const* comment_annotated_hlsl = R"(
+namespace frame //!> group 0
+{
+    Texture2D<float4> Albedo;
+    SamplerState Samp;
+}
+
+RWTexture2D<float4> Out;
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    float2 uv = (float2(tid.xy) + 0.5f) / 64.0f;
+    Out[tid.xy] = frame::Albedo.SampleLevel(frame::Samp, uv, 0);
+}
+)";
+} // namespace
+
+TEST("portable-hlsl spike - Q11 a comment does not survive the include flatten")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    ssc::dxc::shader_description desc;
+    desc.stage = sg::shader_stage::compute;
+    desc.entry_point = "main";
+    desc.source = comment_annotated_hlsl;
+
+    auto resolver = [](cc::string_view) -> cc::optional<cc::string> { return {}; };
+    auto pp = comp.value().preprocess(desc, resolver);
+    REQUIRE(pp.has_value());
+
+    // `-P` drops comments and DXC has no flag to keep them — /C is accepted and ignored, -C is rejected outright.
+    // This is the finding that decided the marker: an annotation the flatten erases cannot be read after it.
+    CC_LOG_INFO("[spike] Q11 flattened comment-annotated source: {}", pp.value().source);
+    CHECK(!cc::string_view(pp.value().source).contains("//!>"));
+}
+
+TEST("portable-hlsl spike - Q12 an unknown pragma survives the flatten and compiles clean")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    ssc::dxc::shader_description desc;
+    desc.stage = sg::shader_stage::compute;
+    desc.entry_point = "main";
+    desc.source = pragma_annotated_hlsl;
+
+    auto resolver = [](cc::string_view) -> cc::optional<cc::string> { return {}; };
+    auto pp = comp.value().preprocess(desc, resolver);
+    REQUIRE(pp.has_value());
+
+    // Verbatim, both at file scope and inside a namespace body, `key=value` spacing included.
+    CHECK(cc::string_view(pp.value().source).contains("#pragma sc group 0"));
+    CHECK(cc::string_view(pp.value().source).contains("#pragma sc static address=clamp_edge"));
+
+    // And it compiles on both targets under the default options, where warnings_as_errors is ON.
+    for (auto const target : {ssc::dxc::compile_target::dxil, ssc::dxc::compile_target::spirv})
+        CHECK(compiles(comp.value(), "pragma-annotated source", pragma_annotated_hlsl, sg::shader_stage::compute,
+                       "main", target));
+}
+
+TEST("portable-hlsl spike - Q12b -Wall makes an unknown pragma an error, so the pass strips its own")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // -Wunknown-pragmas exists and is off by default; -Wall turns it on and -WX turns it into an error.
+    // Nothing in ssc passes -Wall today, but a caller may, which is why the rewrite removes every pragma it read
+    // rather than leaving them for the compiler to ignore.
+    ssc::dxc::compile_options loud;
+    loud.target = ssc::dxc::compile_target::dxil;
+    loud.extra_args.push_back(cc::string("-Wall"));
+
+    auto r = comp.value().compile({.source = cc::string(pragma_annotated_hlsl),
+                                   .entry_point = cc::string("main"),
+                                   .stage = sg::shader_stage::compute},
+                                  loud);
+    REQUIRE(r.has_error());
+    CHECK(r.error().to_string().contains("unknown pragma"));
+}
 
 TEST("portable-hlsl spike - Q2 __COUNTER__ survives the macro indirection")
 {

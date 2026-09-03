@@ -197,7 +197,7 @@ private:
     /// The package that owns `virtual_path`. Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
 
-    /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, compile.
+    /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.
     /// The two differ only in where the text came from and what its includes are searched against, so everything after that is here.
     /// `package_root` is empty for a source belonging to no package, which simply drops one search root.
     void _compile_text(compile_outcome& outcome,

@@ -10,14 +10,16 @@ That approach is dead and the reason is recorded below, because it is the same r
 A shader declares its binding groups as **annotated namespaces** and writes no register, no space and no Vulkan annotation:
 
 ```hlsl
-namespace frame_bindings //!> group 0
+#pragma sc group 0
+namespace frame_bindings
 {
     Texture2D<float4> albedo;
-    SamplerState linear_sampler; //!> static address=clamp_edge
+#pragma sc static address=clamp_edge
+    SamplerState linear_sampler;
 }
 ```
 
-That is valid HLSL as written.
+That is valid HLSL as written, because a compiler ignores a pragma it does not know.
 It is also useless as written — nothing binds it correctly — and that is an accepted trade: the point of staying valid is that editors, formatters and language servers keep working on our shaders.
 
 A preprocessing pass rewrites the inside of every annotated namespace before the real compiler sees it.
@@ -48,7 +50,7 @@ That is the whole argument for this pass.
 ## What the spikes already settled
 
 `libs/graphics/shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc` is DXC behaviour pinned as tests.
-Three of its findings are load-bearing here and are worth re-reading before changing anything:
+Five of its findings are load-bearing here and are worth re-reading before changing anything:
 
 - **Q8** — without an explicit `register()`, a stage that references a subset of the declarations gets different DXIL registers than one that references more.
   This is why the pass exists.
@@ -56,43 +58,54 @@ Three of its findings are load-bearing here and are worth re-reading before chan
   This is why the pass works, and it means a cross-target check may compare addresses rather than only names.
 - **Q10** — a resource declaration may live in an HLSL namespace, on both targets, and **reflection reports the bare name** (`albedo`, not `frame_bindings::albedo`).
   This is why a namespace can carry the group without sg's name matching changing at all.
+- **Q11** — `-P` **drops every comment**, and DXC has no flag that keeps them: `/C` is accepted and ignored, `-C` is rejected outright.
+  This is why the attribute is a pragma and not a comment.
+  The pass reads the flattened translation unit, and an annotation the flatten erases cannot be read after it.
+- **Q12** — an unknown `#pragma` **survives `-P` verbatim**, at file scope and inside a namespace body, `key=value` spacing included, and compiles clean on both targets under `-WX`.
+  But `-Wall` turns it into `-Wunknown-pragmas`, which `-WX` then makes an error.
+  So the rewrite removes every pragma it read, and the compiler is never handed a directive whose meaning it does not share.
 
 Q10 also carries the warning that shapes one rule below: two namespaces may each declare the same symbol, so a namespace does **not** give the duplicate-slot protection a file-scope symbol would.
 The pass has to detect collisions itself.
 
-**Q8 asserts its finding; Q9 and Q10 only log theirs, and Q10 walks past a rejected compile.**
-Phase 1 fixes that, because a spike kept as the record of why this design is shaped the way it is has to fail when DXC changes under it.
-Q9 wants two checks — that the two stages agree, and that the SPIR-V index matches.
-Q10 wants the reflected name checked against the bare `Albedo`, and a `REQUIRE` where its `continue` is.
+**Every one of them asserts what it found.**
+A spike kept as the record of why this design is shaped the way it is has to fail when DXC changes under it, so Q9 and Q10 stopped merely logging their findings when phase 1 landed.
 
 ## The annotation grammar
 
 One grammar carries every annotation:
 
 ```
-//!> <name> [key=value]...
+#pragma sc <name> [key=value]...
 ```
 
 Three rules, and they are the whole grammar:
 
-- **An attribute attaches to the declaration on its own line**, or — when it is alone on a line — to the next declaration.
-  Long attribute lists get their own line, short ones ride along, and the parser needs one lookahead either way.
+- **An attribute stands on its own line and applies to the declaration after it.**
+  A pragma is a line directive, so there is no trailing form: one attachment rule instead of two, and no lookahead in two directions.
 - **The first word is the attribute name**: `group`, `static`, `push_constants`, `payload`, `vertex_input`.
-  A name the pass does not know is an error naming the line, never a comment it walks past.
+  A name the pass does not know is an error naming the line, never a directive nobody reads — which is exactly what a compiler makes of it.
 - **The rest is `key=value`**, values being a bare token or a parenthesised tuple.
   No quotes, no nesting, no expressions.
+  Whitespace around `=` is tolerated, because the flatten reprints a directive's tokens and promises nothing about the spacing between them.
+
+**A pragma rather than a comment**, and Q11 is the whole reason.
+A comment is the nicer marker: it collides with no directive anyone else defines, and no compiler has an opinion about it.
+But DXC's include flatten erases comments, and the pass reads the flattened translation unit.
+The `sc` prefix keeps our directives apart from `#pragma pack_matrix` and everything else a shader may already carry, so a pragma whose first word is not `sc` is passed through untouched.
 
 **Values are `sg` enumerator names spelled exactly** — `clamp_edge`, `mirror_repeat`, `linear`, `less`.
 A second vocabulary between HLSL and sg would be one more table to keep in step for no benefit, and every one of these names is already the one a C++ caller writes.
 
 **A file is scanned whole.**
 The pass looks for attributes everywhere, not only inside annotated namespaces, because `push_constants`, `payload` and `vertex_input` all attach at file scope.
-Everything carrying no `//!>` attribute is passed through byte for byte, so a shader may keep hand-written `register()` declarations at file scope indefinitely.
+Everything carrying no attribute is passed through byte for byte, so a shader may keep hand-written `register()` declarations at file scope indefinitely.
 
 ### `group`
 
 ```hlsl
-namespace <name> //!> group <n>
+#pragma sc group <n>
+namespace <name>
 ```
 
 The marker carries the group index explicitly rather than assigning one by order of appearance.
@@ -114,8 +127,11 @@ Slot, declaration order and `sg::binding::index` are then one number, which is w
 ### `static`
 
 ```hlsl
-SamplerState linear_sampler; //!> static address=clamp_edge
-SamplerComparisonState shadow; //!> static filter=(linear, linear, nearest) compare=less
+#pragma sc static address=clamp_edge
+SamplerState linear_sampler;
+
+#pragma sc static filter=(linear, linear, nearest) compare=less
+SamplerComparisonState shadow;
 ```
 
 A sampler binding marked `static` is baked into the pipeline layout's root signature rather than given a descriptor.
@@ -129,7 +145,7 @@ The generated struct exposes what the shader declared as a constant, and `acquir
 ### `push_constants`
 
 ```hlsl
-//!> push_constants space=9
+#pragma sc push_constants space=9
 ConstantBuffer<frame_constants> frame;
 ```
 
@@ -144,7 +160,7 @@ Q8 applies here too, which is why the attribute must write a `register()` at all
 ### `payload`
 
 ```hlsl
-//!> payload
+#pragma sc payload
 struct pt_payload { float3 radiance; float3 throughput; uint rng; float bsdf_pdf; };
 ```
 
@@ -159,7 +175,7 @@ Declare a payload whose two layouts differ, and read back what the driver actual
 ### `vertex_input`
 
 ```hlsl
-//!> vertex_input
+#pragma sc vertex_input
 struct vs_input
 {
     float3 position : POSITION;
@@ -167,7 +183,7 @@ struct vs_input
     float3 color : COLOR;
 };
 
-//!> vertex_input slot=1 per_instance
+#pragma sc vertex_input slot=1 per_instance
 struct cube_instance_input
 {
     float3 center : TEXCOORD0;
@@ -200,7 +216,7 @@ Inside an annotated namespace the pass understands:
 
 Not supported, and reported as an error rather than passed through silently:
 
-- `typedef`, `#define`, a nested namespace, a `struct`/`cbuffer` body, or a function definition inside an annotated namespace.
+- `typedef`, a preprocessor directive, a nested namespace, a `struct`/`cbuffer` body, or a function definition inside an annotated namespace.
 - An array length that is not a literal.
 - A declaration whose type is not in the table below.
 
@@ -246,7 +262,9 @@ So the comparison returns its difference rather than asserting internally, and e
 ### The pass
 
 `slib`, under `src/shaped-shader-library/binding/` — a tokenizer plus a rewriter, producing a list of edits `(offset, length, replacement)` applied to the original text.
-Edits rather than a rebuilt string, so everything carrying no `//!>` attribute is provably untouched.
+Edits rather than a rebuilt string, so everything carrying no attribute is provably untouched.
+
+The tokenizer follows `#line`, which is what lets an error name the file and line the author wrote rather than an offset into a flatten.
 
 The parse result is also the generator's input, so it is a value type worth naming:
 
@@ -268,6 +286,9 @@ struct slib::shader_binding_group
 
 **The rewrite runs inside `shader_library::_compile_text`, between `preprocess` and `compile`.**
 Not in a decorating compiler, and not inside a compiler at all.
+
+It also **deletes every pragma it read** — only their own bytes, never the newline, so every later line stays where the compiler's own diagnostics will say it is.
+Q12 is why: an unknown pragma is silently ignored today and an error under `-Wall`, and whether a shader builds should not depend on a caller's warning flags.
 
 `compile` is the right half and `preprocess` is not.
 `_compile_text` calls `preprocess` to flatten includes, then hands the flattened text to `compile`.
@@ -453,14 +474,14 @@ Error messages recover the name from `layout->bindings()[slot].name`, so nothing
 
 ## Phasing
 
-1. **Clean up.**
+1. **[done] Clean up.**
    Delete the macro prelude, its CMake bake, its mount in `shader_library`, and revert the six shaders that were ported onto it.
    Keep the compile flags, the cross-stage bijection check, and the spike — all independent of the macro approach and all still correct.
    Turn Q9's and Q10's findings into assertions while the file is being kept.
    Rewrite `portable-hlsl.md` around this design, and re-point `shaders.md`.
-2. **The tokenizer and `parse_binding_groups`**, with the shared corpus file behind them, covering the supported subset and every rejection with its error text.
+2. **[done] The tokenizer and `parse_binding_groups`**, with the shared corpus file behind them, covering the supported subset and every rejection with its error text.
    No rewriting yet — a parse that reports groups and bindings is independently checkable.
-3. **`rewrite_binding_groups` in `_compile_text`**, with a test that one source compiles to both targets and reflects the same addresses.
+3. **[done] `rewrite_binding_groups` in `_compile_text`**, with a test that one source compiles to both targets and reflects the same addresses.
    This is where Q8's failure becomes a passing test.
 4. **The `path:binding:namespace` entry and the generated group**, the Python generator replacing the CMake one, and the per-package self-check.
 5. **The mirror structs**, and the `push_constants`, `payload` and `vertex_input` attributes, after the spike pins the payload's packing.

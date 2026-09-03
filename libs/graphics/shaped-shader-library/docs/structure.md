@@ -46,10 +46,11 @@ src/shaped-shader-library/
     impl/watch_backend_windows.cc [done]        ReadDirectoryChangesW over one IOCP + one thread
     impl/watch_backend_none.cc    [in progress] the fallback everywhere else — Linux/macOS still to come
   binding/
-    binding_groups.hh/.cc         [in progress] parse_binding_groups: the annotated namespaces a source
-                                                declares, in declaration order; the rewrite is still to come
-    impl/hlsl_tokens.hh/.cc       [done]        the tokenizer, plus the `//!> name key=value` grammar; a
-                                                `//!>` comment is the one comment the parser sees
+    binding_groups.hh/.cc         [in progress] parse_binding_groups + rewrite_binding_groups: the annotated
+                                                namespaces a source declares, and the same source with every
+                                                address written; group only, the other attributes still to come
+    impl/hlsl_tokens.hh/.cc       [done]        the tokenizer, plus the `#pragma sc name key=value` grammar
+                                                and `#line` tracking, so an error names a file the author wrote
     impl/hlsl_binding_types.hh/.cc [done]       HLSL type -> register class + sg::binding_type + dimension;
                                                 the table the rewriter and the generator must share exactly
   compiler/

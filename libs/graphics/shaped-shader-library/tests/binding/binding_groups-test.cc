@@ -7,6 +7,7 @@
 #include <clean-core/string/from_string.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 
 using namespace cc::primitive_defines;
@@ -347,4 +348,86 @@ TEST("slib - an empty source declares no binding group")
     auto const groups = slib::parse_binding_groups("");
     REQUIRE(groups.has_value());
     CHECK(groups.value().empty());
+}
+
+namespace
+{
+constexpr char const* k_two_stage_shader = R"(
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> pixel_only;
+    Texture2D<float4> both;
+    SamplerState samp;
+}
+)";
+} // namespace
+
+TEST("slib - the DXIL arm writes register() after the declared name")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_two_stage_shader, sg::shader_format::dxil);
+    REQUIRE(rewritten.has_value());
+
+    // One counter across register classes, so the sampler takes s2 rather than s0.
+    CHECK(rewritten.value().contains("Texture2D<float4> pixel_only : register(t0, space0);"));
+    CHECK(rewritten.value().contains("Texture2D<float4> both : register(t1, space0);"));
+    CHECK(rewritten.value().contains("SamplerState samp : register(s2, space0);"));
+
+    // And the directive is gone: DXC ignores a pragma it does not know today, but -Wall would make it an error.
+    CHECK(!rewritten.value().contains("#pragma sc"));
+}
+
+TEST("slib - the SPIR-V arm writes the attribute before the declaration")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_two_stage_shader, sg::shader_format::spirv);
+    REQUIRE(rewritten.has_value());
+
+    CHECK(rewritten.value().contains("[[vk::binding(0, 0)]] Texture2D<float4> pixel_only;"));
+    CHECK(rewritten.value().contains("[[vk::binding(1, 0)]] Texture2D<float4> both;"));
+    CHECK(rewritten.value().contains("[[vk::binding(2, 0)]] SamplerState samp;"));
+
+    // Nothing DXIL-only leaks into this arm, and nothing Vulkan-only into the other.
+    CHECK(!rewritten.value().contains("register("));
+}
+
+TEST("slib - a source carrying no attribute comes back byte for byte")
+{
+    constexpr cc::string_view k_hand_written = R"(
+Texture2D<float4> albedo : register(t0, space0);
+SamplerState samp : register(s0, space0);
+
+// an ordinary comment mentioning group 0, register(t1) and [[vk::binding]]
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {}
+)";
+
+    for (auto const target : {sg::shader_format::dxil, sg::shader_format::spirv, sg::shader_format::metal_lib})
+    {
+        auto const rewritten = slib::rewrite_binding_groups(k_hand_written, target);
+        REQUIRE(rewritten.has_value());
+        CHECK(rewritten.value() == k_hand_written);
+    }
+}
+
+TEST("slib - a target with no arm is an error only once a group needs one")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_two_stage_shader, sg::shader_format::metal_lib);
+    CHECK(rewritten.has_error());
+}
+
+namespace
+{
+constexpr char const* k_misspelled_shader = R"(
+#pragma sc gruop 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+)";
+} // namespace
+
+TEST("slib - a rejected source fails the rewrite rather than passing through")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_misspelled_shader, sg::shader_format::dxil);
+    CHECK(rewritten.has_error());
 }

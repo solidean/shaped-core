@@ -8,7 +8,8 @@ Metal and WebGPU are intended, and reuse the same two arms — metal-shaderconve
 Three things diverge between the targets, and each has an answer of its own:
 
 - **Bindings** — SPIR-V has none of HLSL's implicit addressing, and DXIL's implicit addressing is not stable across the stages of one pipeline.
-  Answered by the [binding preprocessor](binding-preprocessor.md): the shader declares groups as annotated namespaces, and a rewriting pass writes every address.
+  Answered by the [binding preprocessor](binding-preprocessor.md), which has landed for groups.
+  The shader declares them as annotated namespaces, and a rewriting pass writes every address for both targets.
 - **Vertex input locations** — sg identifies an attribute by its HLSL semantic and SPIR-V has none.
   Answered by the same pass, through its [`vertex_input` attribute](binding-preprocessor.md#vertex_input); the shader writes a `__spirv__` fork by hand until it lands.
 - **Silent behavioural divergences** — cbuffer layout, base vertex, `SV_Position.w`.
@@ -45,6 +46,12 @@ Its failure mode is a shader that builds on the backend you tested and not on th
 **A macro cannot emit a preprocessor directive, and `register()` is a suffix while the Vulkan annotation is a prefix.**
 Together these rule out the macro prelude this document used to describe.
 [binding-preprocessor.md](binding-preprocessor.md#why-not-macros) carries the argument in full, because it is the same argument a future session would have to re-derive.
+[pinned]
+
+**`-P` drops every comment, and an unknown `#pragma` survives it verbatim.**
+DXC has no flag that keeps comments: `/C` is accepted and ignored, `-C` is rejected outright.
+The pass reads the flattened translation unit, so this is what decided its marker — a `#pragma sc` line rather than the comment a reader would prefer.
+An unknown pragma also compiles clean under `-WX` and becomes an error under `-Wall`, which is why the rewrite strips its own.
 [pinned]
 
 ## Space is not set
@@ -102,7 +109,8 @@ None subsumes another.
 
 **Within one translation unit, in the pass: duplicate declarations and duplicate addresses.**
 A namespace gives no protection of its own, per the pinned finding above, so the pass reports a collision itself and names the line.
-[done once the pass lands]
+One name in two groups, one namespace twice, one group number twice.
+[done]
 
 **Across the stages of a pipeline, at pipeline creation: a name ↔ (group, index) bijection.**
 This is the cross-file check, and the data is already in the description.

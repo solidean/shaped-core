@@ -183,9 +183,19 @@ Two of them are still said by hand today, and the third is what the binding prep
 - **Bindings.**
   SPIR-V needs a set and a binding number on every resource.
   DXIL only looks like it needs neither: DXC numbers what an entry point references, so two stages of one pipeline can disagree about a resource neither of them numbered.
-  A shader writes `register(t0, space0)` by hand today.
-  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) is the design that takes that over.
-  Bindings are declared as an annotated namespace, and a rewriting pass writes every address for both targets.
+  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) takes this over, and the group half of it has landed:
+
+  ```hlsl
+  #pragma sc group 0
+  namespace frame_bindings
+  {
+      Texture2D<float4> albedo;      // t0/space0 on DXIL, binding(0, 0) on SPIR-V
+      SamplerState linear_sampler;   // s1/space0 and binding(1, 0) - one counter per group
+  }
+  ```
+
+  A rewriting pass writes every address before the compiler sees the source, so neither target's spelling appears in a shader.
+  A binding declared outside an annotated namespace keeps whatever `register()` it writes by hand, which is what sv's bindless tables still need.
 - **Vertex input locations.**
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
   A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
