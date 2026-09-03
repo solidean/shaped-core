@@ -8,7 +8,6 @@
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
-#include <shaped-shader-library/impl/portable_prelude.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
@@ -35,10 +34,6 @@ slib::shader_library::shader_library() : _alive(this, [](shader_library*) {}) //
     CC_ASSERT(!g_library_alive, "only one slib::shader_library may exist at a time — the generated package "
                                 "symbols they write into are process-wide globals");
     g_library_alive = true;
-
-    // The portable-HLSL prelude, so `#include "sc/portable.hlsli"` resolves in every package with nothing to wire up.
-    // Mounted first, which means an application may mount its own `sc` over this one.
-    mount("sc", std::make_shared<embedded_filesystem>(impl::portable_prelude_files()));
 }
 
 slib::shader_library::~shader_library()

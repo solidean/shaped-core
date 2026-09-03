@@ -178,42 +178,38 @@ Every path that resolves becomes a reload dependency of the shader that pulled i
 One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
 What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
 
-Say them through the **portable-HLSL prelude**, which every shader_library mounts at `sc`:
+Two of them are still said by hand today, and the third is what the binding preprocessor is being built for.
+
+- **Bindings.**
+  SPIR-V needs a set and a binding number on every resource.
+  DXIL only looks like it needs neither: DXC numbers what an entry point references, so two stages of one pipeline can disagree about a resource neither of them numbered.
+  A shader writes `register(t0, space0)` by hand today.
+  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) is the design that takes that over.
+  Bindings are declared as an annotated namespace, and a rewriting pass writes every address for both targets.
+- **Vertex input locations.**
+  sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
+  A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
+  A mismatch is silent: the pipeline builds and the geometry is wrong.
+  The same design takes this over, numbering an annotated struct's members and generating the `sg::vertex_layout_of` that matches.
+- **Inline constants.**
+  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
+  A shader that does not say so declares a resource the pipeline layout never binds, so the block needs `[[vk::push_constant]]` there and a plain `register(b0)` on DXIL.
+
+**Every `[[vk::…]]` attribute has to be forked on `__spirv__`.**
+DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles with `-WX`, so an unguarded annotation is a compile error on DXIL rather than a no-op:
 
 ```hlsl
-#include "sc/portable.hlsli"
-
-struct vs_input
-{
-    SC_VERTEX_INPUT(0) float3 position : POSITION;
-    SC_VERTEX_INPUT(1) float3 normal : NORMAL;
-};
-
-SC_INLINE_CONSTANTS(cube_constants, gConstants);
-
-SC_BINDING(0) Texture2D<float4> albedo;
-SC_BINDING(0) SamplerState linear_sampler;
+#ifdef __spirv__
+#define VK_LOCATION(n) [[vk::location(n)]]
+#else
+#define VK_LOCATION(n)
+#endif
 ```
 
-- **`SC_BINDING(group)` declares a resource** in that group, indexed by declaration order.
-  SPIR-V needs a set and a binding number on every resource; without them an unannotated `b0`/`t0`/`u0` collapse onto the same number and collide.
-  The index is never written: `__COUNTER__` supplies it, because it is the number that is easy to get wrong and impossible to check by eye.
-  `SC_BINDING_AT(group, index)` writes both out, for a slot something outside the shader depends on.
-- **`SC_VERTEX_INPUT(n)` numbers a vertex input**, in the order the sg vertex layout lists its attributes.
-  sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
-  A mismatch is silent: the pipeline builds and the geometry is wrong.
-- **`SC_INLINE_CONSTANTS(type, name)` declares inline constants.**
-  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
-  A shader that does not say so therefore declares a resource the pipeline layout never binds.
-
-**Do not hand-write the `[[vk::…]]` attributes these expand to.**
-DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles with `-WX`, so an annotation that is not forked on `__spirv__` is a compile error on DXIL rather than a no-op.
-Nothing catches that at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
-The prelude holds that fork once, which is the whole reason it exists.
+Nothing catches a missing fork at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
 
 [examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example for vertex inputs and inline constants.
-[shaped-rendering's imgui.hlsl](../../shaped-rendering/shaders/imgui.hlsl) uses all three.
-[slib's portable-hlsl](../../shaped-shader-library/docs/portable-hlsl.md) is the design, the validation layers, and what is still open.
+[slib's portable-hlsl](../../shaped-shader-library/docs/portable-hlsl.md) is the design across all three, the validation layers, and what is still open.
 
 ## Adding a shader
 

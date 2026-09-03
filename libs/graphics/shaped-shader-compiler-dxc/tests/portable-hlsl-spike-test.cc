@@ -3,21 +3,33 @@
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
-// The DXC behaviours a portable-HLSL prelude rests on, pinned here so a DXC upgrade that changes one of them fails a
-// test rather than a shader.
+// The DXC behaviours the binding preprocessor rests on, pinned here so a DXC upgrade that changes one of them
+// fails a test rather than a shader.
+// libs/graphics/shaped-shader-library/docs/binding-preprocessor.md is the design; this file is the record of the
+// measurements it was chosen from, macro attempts included.
 //
-// What these answer, and what each answer decided:
-//   1. an unguarded `[[vk::...]]` is `-Wignored-attributes` on the DXIL target, which -WX turns into an error — so
-//      every annotation forks on `__spirv__`, inside the prelude, once.
-//   2. `__COUNTER__` works and survives the pasting indirection, so a binding's index need not be written by hand.
-//   3. a duplicate file-scope `static const` is a redefinition error, so a pasted marker symbol makes two bindings
-//      claiming one slot a compile error; an unused marker is quiet under -WX.
+// What decided the design:
+//   8. without an explicit `register()`, a stage referencing a subset of the declarations gets different DXIL
+//      registers than one referencing more — so the address has to be written into the source.
+//   9. with an explicit `register()` the two stages agree, and the DXIL index equals the SPIR-V one — so a
+//      cross-target check may compare addresses rather than only names.
+//  10. a resource declaration may live in an HLSL namespace on both targets, and reflection reports the BARE name —
+//      so a namespace can carry the group with no change to sg's name matching.
+//      Two namespaces may declare the same symbol, so a namespace catches no duplicate slot; the pass does.
+//
+// What ruled the macro prelude out, and why nothing here should reach for one again:
+//   1. an unguarded `[[vk::...]]` is `-Wignored-attributes` on the DXIL target, which -WX turns into an error, so
+//      every annotation has to fork on `__spirv__`.
+//   6. a macro cannot emit a preprocessor directive, so a group cannot be opened by a macro call.
+//   9. `register()` is a suffix and the Vulkan annotation a prefix, so only a macro wrapping the whole declaration
+//      can emit both — and then the type is an argument and the file stops reading as HLSL.
+//
+// The rest is DXC behaviour worth having recorded either way:
+//   2. `__COUNTER__` works and survives the pasting indirection.
+//   3. a duplicate file-scope `static const` is a redefinition error; an unused one is quiet under -WX.
 //   4. DXC assigns DXIL registers per class from zero when the source names none, and a SPIR-V set takes sparse
-//      indices — so neither target needs the numbers spelled out.
-//   5. across the two targets a binding keeps its name and type but NOT its index, which is why binding groups match
-//      by name and why an equivalence check may not compare indices.
-//   6. a macro cannot emit a preprocessor directive, so a group cannot be opened by a macro call — which is why the
-//      group is an argument on each binding rather than a block around a run of them.
+//      indices.
+//   5. across the two targets an unnumbered binding keeps its name and type but not its index.
 //
 // Every compile runs with default compile_options, so warnings_as_errors is ON — that is the point of (1).
 
@@ -478,13 +490,27 @@ TEST("portable-hlsl spike - Q9 a wrapping macro emits register() and stabilises 
     REQUIRE(both_vs != nullptr);
     REQUIRE(both_ps != nullptr);
     CC_LOG_INFO("[spike] Q9 dxil wrapping 'Both': vs={} ps={}", both_vs->index, both_ps->index);
-    CC_LOG_INFO("[spike] Q9 dxil wrapping 'Both' space: vs={} ps={}",
-                both_vs->space.has_value() ? int(both_vs->space.value()) : -1,
-                both_ps->space.has_value() ? int(both_ps->space.value()) : -1);
 
+    // The finding, and the reason the pass writes the address rather than leaving it to DXC: with `register()` in
+    // the source the two stages of one pipeline land on the same register, where Q8 has them drift apart.
+    // `Both` is the second declaration, so the counter gave it 1 on every target.
+    CHECK(both_vs->index == 1u);
+    CHECK(both_ps->index == 1u);
+
+    // The space travels with it, so a group really does own one space rather than borrowing DXC's default.
+    REQUIRE(both_vs->space.has_value());
+    REQUIRE(both_ps->space.has_value());
+    CHECK(both_vs->space.value() == 0u);
+    CHECK(both_ps->space.value() == 0u);
+
+    // The other half: the DXIL index equals the SPIR-V one, which is what lets a cross-target check compare
+    // addresses instead of only names.
     auto spv_vs = compile_as(c, src, sg::shader_stage::vertex, "main_vs", ssc::dxc::compile_target::spirv);
     REQUIRE(spv_vs.has_value());
-    CC_LOG_INFO("[spike] Q9 spirv wrapping 'Both': vs={}", find_binding(spv_vs.value(), "Both")->index);
+    auto const* both_spv = find_binding(spv_vs.value(), "Both");
+    REQUIRE(both_spv != nullptr);
+    CC_LOG_INFO("[spike] Q9 spirv wrapping 'Both': vs={}", both_spv->index);
+    CHECK(both_spv->index == both_vs->index);
 }
 
 TEST("portable-hlsl spike - Q9b the variadic tail carries a type with a comma in it")
@@ -510,14 +536,19 @@ TEST("portable-hlsl spike - Q10 a resource may live in a namespace, and reflecti
     {
         auto r = compile_as(c, namespace_binding_hlsl, sg::shader_stage::compute, "main", target);
         if (r.has_error())
-        {
             CC_LOG_INFO("[spike] Q10 namespaced binding rejected: {}", r.error().to_string());
-            continue;
-        }
         REQUIRE(r.has_value());
+
         for (auto const& b : r.value().bindings)
             CC_LOG_INFO("[spike] Q10 {} reflected name '{}' index {}",
                         target == ssc::dxc::compile_target::dxil ? "dxil" : "spirv", b.name, b.index);
+
+        // The finding a namespaced group rests on: reflection reports the BARE name, so `frame::Albedo` reaches sg
+        // as `Albedo` and nothing in its name matching has to learn about namespaces.
+        auto const* albedo = find_binding(r.value(), "Albedo");
+        REQUIRE(albedo != nullptr);
+        CHECK(find_binding(r.value(), "frame::Albedo") == nullptr);
+        CHECK(albedo->index == 0u);
     }
 
     auto autoreg
@@ -528,11 +559,11 @@ TEST("portable-hlsl spike - Q10 a resource may live in a namespace, and reflecti
         for (auto const& b : autoreg.value().bindings)
             CC_LOG_INFO("[spike] Q10 auto-register name '{}' index {}", b.name, b.index);
 
-    // The cost, if a namespace were to carry the group: two namespaces can hold the same marker name, so the
-    // duplicate-slot redefinition error would no longer fire.
+    // The cost that comes with it: two namespaces may hold the same symbol, so a namespace gives none of the
+    // duplicate-slot protection a file-scope declaration does, and the pass has to detect collisions itself.
     auto markers
         = compile_as(c, namespace_marker_hlsl, sg::shader_stage::compute, "main", ssc::dxc::compile_target::dxil);
-    CC_LOG_INFO("[spike] Q10 duplicate markers in two namespaces compiled: {}", markers.has_value());
+    CHECK(markers.has_value());
 }
 
 #endif

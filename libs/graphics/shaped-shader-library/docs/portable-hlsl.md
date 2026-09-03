@@ -2,47 +2,49 @@
 
 The design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
 
-[shaders.md's "Writing HLSL for both backends"](../../shaped-graphics/docs/shaders.md) is the authoring guide; this is the design behind it.
-The prelude and the compile flags have landed, and the phasing at the end says what has not.
-Every claim below marked "pinned" is asserted by [portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc).
-A DXC upgrade that changes one of them fails a test rather than a shader.
-
 Today's targets are dx12 (DXIL) and vulkan (SPIR-V), both through DXC.
 Metal and WebGPU are intended, and reuse the same two arms — metal-shaderconverter consumes DXIL, Tint consumes SPIR-V — so a third arm is not automatically a third spelling.
 
+Three things diverge between the targets, and each has an answer of its own:
+
+- **Bindings** — SPIR-V has none of HLSL's implicit addressing, and DXIL's implicit addressing is not stable across the stages of one pipeline.
+  Answered by the [binding preprocessor](binding-preprocessor.md): the shader declares groups as annotated namespaces, and a rewriting pass writes every address.
+- **Vertex input locations** — sg identifies an attribute by its HLSL semantic and SPIR-V has none.
+  Answered by the same pass, through its [`vertex_input` attribute](binding-preprocessor.md#vertex_input); the shader writes a `__spirv__` fork by hand until it lands.
+- **Silent behavioural divergences** — cbuffer layout, base vertex, `SV_Position.w`.
+  Answered by the [compile flags](#compile-flags), which have landed.
+
+Every claim below marked "pinned" is asserted by [portable-hlsl-spike-test.cc](../../shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc).
+A DXC upgrade that changes one of them fails a test rather than a shader.
+
 ## What DXC actually does
 
-Five questions decided the shape, and the answers were not all what we expected.
+The findings the design rests on, in the order they constrain it.
+
+**Without an explicit `register()`, DXIL addresses are not stable across a pipeline.**
+DXC assigns a register only to what an entry point actually references, so two stages sharing one declaration disagree about its address when one of them reads a resource the other does not.
+Neither stage wrote either number, and nothing downstream can notice.
+This is the finding that decided everything else: the address has to be written into the source.
+[pinned]
+
+**With an explicit `register()`, the two stages agree and the DXIL index equals the SPIR-V one.**
+So a group's slot, its declaration order and `sg::binding::index` can be one number, and a cross-target check may compare addresses rather than only names.
+[pinned]
+
+**A resource declaration may live in an HLSL namespace on both targets, and reflection reports the bare name.**
+`frame::albedo` reaches sg as `albedo`, so a namespace can carry the group with no change to sg's name matching at all.
+Two namespaces may declare the same symbol, so a namespace catches no duplicate slot — the pass detects collisions itself.
+[pinned]
 
 **An unguarded `[[vk::…]]` attribute is a hard error on the DXIL target.**
 `[[vk::binding]]`, `[[vk::push_constant]]` and `[[vk::location]]` each produce `'<attr>' attribute ignored [-Werror,-Wignored-attributes]`, and ssc compiles with `-WX` by default.
-So there is no "write it once, DXC ignores it where it does not apply" — every annotation forks on `__spirv__`.
-That is the entire justification for a prelude rather than a style guide: the fork is mechanical and easy to forget.
-Its failure mode is a shader that builds on the backend you tested and not on the other.
+So there is no "write it once, DXC ignores it where it does not apply" — every annotation is written for exactly one target.
+Its failure mode is a shader that builds on the backend you tested and not on the other, and nothing catches it at build time, because shader compilation happens at runtime.
 [pinned]
 
-**`__COUNTER__` works, and survives token pasting through the usual two-level indirection.**
-So a binding's index does not have to be written by hand.
-[pinned]
-
-**A duplicate file-scope `static const` is a redefinition error, and an unused one is quiet under `-WX`.**
-So a marker symbol whose *name* encodes the slot turns a double-booked slot into a compile error.
-[pinned]
-
-**DXC assigns DXIL registers per class from zero when the source names none, and a SPIR-V set accepts sparse indices.**
-Neither target needs its numbers spelled out.
-[pinned]
-
-**`[[vk::binding]]` takes a constant expression, not only an integer literal — and it is still not enough for a `BEGIN`/`END` macro pair.**
-A macro cannot emit a preprocessor directive — a replacement list is rescanned for macros, never for directives — so neither `BEGIN` nor `END` can reach `#define` or `#undef`.
-The only carrier left is an HLSL constant that the annotation reads, and there the asymmetry is real: a declaration cannot be undeclared.
-So `END` has nothing to expand to, and a second `BEGIN` in the same file redeclares the same name.
-A macro pair could therefore only ever serve one group per file, which is why the group is an argument on each binding instead.
-[pinned]
-
-One consequence worth stating plainly, because it constrains the validation below: compiled to both targets, the same declaration keeps its **name and type** and changes its **index**.
-SPIR-V takes the counter's number, DXIL takes DXC's per-class assignment.
-That is fine — a binding group resolves a name — but it means an equivalence check compares names and kinds, never addresses.
+**A macro cannot emit a preprocessor directive, and `register()` is a suffix while the Vulkan annotation is a prefix.**
+Together these rule out the macro prelude this document used to describe.
+[binding-preprocessor.md](binding-preprocessor.md#why-not-macros) carries the argument in full, because it is the same argument a future session would have to re-derive.
 [pinned]
 
 ## Space is not set
@@ -54,117 +56,83 @@ sg already models them as two different fields for that reason — see [binding.
 Keeping them separate is a deliberate choice, and it rules one design out.
 DXC's `-fvk-*-shift` family would let a shader carry no annotations at all, by mapping HLSL space onto SPIR-V set automatically.
 But that ties the two together: a space used purely as a namespace would silently mint another descriptor set.
-So the annotation stays, and the prelude carries it.
 
-What follows is the nice part.
-Because the space is free and sg builds group layouts from reflection, the macro does not need to emit `register()` at all.
-It therefore does not need to know SRV from UAV from CBV, since `[[vk::binding]]` is register-class-agnostic.
-One prefix macro replaces the six a register-emitting design would need, and the surface stops being D3D-shaped.
+The binding preprocessor ties them instead, deliberately and one way: a group's number is both its SPIR-V set and its HLSL space, so group `n` occupies `space<n>` and nothing else does.
+That is a rule about what a *group* is, not a global mapping DXC applies to every space — a binding declared outside an annotated namespace keeps whatever space it wrote by hand.
 
-## The authoring surface
+## Vertex input locations
+
+sg identifies a vertex attribute by its HLSL semantic, SPIR-V has no semantics, and the vulkan backend therefore falls back to the attribute's position in the layout.
+So a Vulkan-targeted shader spells its locations out today, in the order sg's vertex layout lists them, and gets them right by hand:
 
 ```hlsl
-// frame_bindings.hlsli
-#include "sc/portable.hlsli"
-
-SC_BINDING(0) Texture2D<float4> albedo;
-SC_BINDING(0) SamplerState linear_sampler;
-
-SC_BINDING(1) RaytracingAccelerationStructure scene;
-SC_BINDING(1) RWTexture2D<float4> output;
-
-SC_INLINE_CONSTANTS(frame_constants, frame);
+#ifdef __spirv__
+#define VK_LOCATION(n) [[vk::location(n)]]
+#else
+#define VK_LOCATION(n)
+#endif
 
 struct vs_input
 {
-    SC_VERTEX_INPUT(0) float3 position : POSITION;
-    SC_VERTEX_INPUT(1) float3 normal : NORMAL;
+    VK_LOCATION(0) float3 position : POSITION;
+    VK_LOCATION(1) float3 normal : NORMAL;
 };
 ```
 
-**The index never appears.**
-It is the number that is easy to get wrong and impossible to check by eye, so `__COUNTER__` supplies it from declaration order.
-The group stays on the line, where it reads with the resource it applies to.
+A mismatch is silent: the pipeline builds and the geometry is wrong.
+It is Q8's class of failure with no assertion anywhere: the two orders are written twice, in two languages, and nothing compares them.
 
-`SC_BINDING_AT(group, index)` pins both, for a slot something outside the shader depends on.
-[bindless_tables.cc](../../shaped-viewer/src/shaped-viewer/resources/bindless_tables.cc) is the case that needs it today.
+The [`vertex_input` attribute](binding-preprocessor.md#vertex_input) takes it over, numbering a struct's members by declaration order the way the pass numbers a group's bindings.
+That numbering is safe here in a way it is not for a group: a vertex input struct is declared once, in one block, where a group has to survive being shared across files.
+The same parse then emits the `sg::vertex_layout_of` specialization, so the C++ side stops restating what the shader already said.
 
-The vocabulary is sg's, not either API's: **group**, not "set" and not "space"; **binding**, not "register"; **inline constants**, not "push constants" or "root constants".
-The `SC_` prefix is the repo-wide neutral one, already carried by `sc_add_shader_package` and `SC_THREADS`.
-HLSL macros share no namespace with C++ ones, so there is nothing to collide with.
+## Inline constants
 
-A **group block** — bracketing a run of bindings so the group is stated once — was tried and dropped.
-It cannot be a macro pair, for the reason pinned above, so it can only be a raw `#define SC_GROUP 0` / `#undef SC_GROUP` around the run.
-That reads worse than the number it saves, especially around a single binding.
-It also buys only the structural half of a guarantee the pipeline check below already enforces.
+`pipeline_layout_description::inline_constants` is a push-constant range on SPIR-V and root constants on DXIL, and a plain `ConstantBuffer` is neither.
+Under SPIR-V it becomes a descriptor in a set that the pipeline layout never binds, so a shader that does not say what it wants declares a resource nothing feeds.
 
-Each binding expands to a marker symbol plus, on SPIR-V only, its annotation:
-
-```hlsl
-#define SC_BINDING(group) SC_BINDING_AT(group, __COUNTER__)
-#define SC_BINDING_AT(group, index) SC_BINDING_I(group, index)
-#define SC_BINDING_I(group, index)                                                               static const uint SC_CAT(SC_CAT(SC_CAT(sc_slot_taken_, group), _), index) = uint(group);     SC_ANNOTATE_BINDING(group, index)
-```
-
-`SC_INLINE_CONSTANTS` is the one macro that is a **capability facade** rather than a spelling shortcut.
-Today it is a push-constant block on SPIR-V and an auto-assigned `b` register on DXIL.
-On a target without push constants — WebGPU — it has to become an ordinary uniform buffer that the backend feeds, and the shader must not have to know.
-
-It supersedes sv's [`InlineConstantBuffer`](../../shaped-viewer/shaders/inline_constant.hlsli), which does the same job for one library and now carries the same `__spirv__` fork.
-That fork was missing until the spike found it, and nothing used the macro, which is the only reason a DXIL build never hit it.
-
-`SC_SHADER_RECORD`, for DXR local root signatures and Vulkan's `[[vk::shader_record_ext]]`, is a **TODO**: sg has no local root signatures yet, so there is nothing to be portable about.
-
-## Numbering, and what it asks of you
-
-Three rules come attached to `__COUNTER__`, and they are consequences rather than preferences.
-
-- The counter is **per file**, so a group shared by shaders in **different files must be declared in one shared `.hlsli`**.
-  Two files that each declare group 0 both start from zero, and the two shaders disagree about what lives at each slot.
-  This is a discipline rather than a guarantee, which is what the pipeline-creation check below is for.
-- Indices come out **unique across groups and sparse within one**.
-  Legal in Vulkan, and sg uses a binding's declaration position as its slot index rather than its number, so nothing downstream cares.
-- **Reordering declarations renumbers them.**
-  Harmless while bindings are reflection-derived; it would matter the day precompiled bytecode ships separately from the layout describing it.
+Today the shader forks by hand, `[[vk::push_constant]]` against `register(b0)`.
+The [`push_constants` attribute](binding-preprocessor.md#push_constants) replaces that fork.
+It also adds the thing a fork cannot give: the space is stated, so an inline-constants block cannot collide with a group's `b` registers.
 
 ## Validation
 
 Three layers, catching three different failures.
 None subsumes another.
 
-**Within one file, at shader-compile time: the marker symbols.**
-Two bindings claiming one slot is a redefinition error naming the group and index.
-This is what makes `SC_BINDING_AT` safe to mix with auto-numbered bindings, which is exactly where a hand-pinned number quietly steps on a counter-assigned one.
-Free, and it fires on both targets.
+**Within one translation unit, in the pass: duplicate declarations and duplicate addresses.**
+A namespace gives no protection of its own, per the pinned finding above, so the pass reports a collision itself and names the line.
+[done once the pass lands]
 
 **Across the stages of a pipeline, at pipeline creation: a name ↔ (group, index) bijection.**
-This is the real cross-file check, and the data is already in the description.
+This is the cross-file check, and the data is already in the description.
 [raster_pipeline.hh](../../shaped-graphics/src/shaped-graphics/raster/raster_pipeline.hh) holds every stage as a `compiled_shader` carrying its reflected bindings.
 [raytracing_pipeline.hh](../../shaped-graphics/src/shaped-graphics/raytracing/raytracing_pipeline.hh) carries the same for ray tracing.
 Both directions matter:
 
-- the same `(group, index)` reached by two stages must carry the same name, type and count — the collision above, across files;
-- the same *name* in two stages must sit at the same `(group, index)` — because binding groups match by name, so one name at two addresses cannot be satisfied by one group.
+- the same `(group, index)` reached by two stages must carry the same name, type and count;
+- the same *name* in two stages must sit at the same `(group, index)`, because binding groups match by name, so one name at two addresses cannot be satisfied by one group.
 
-Worth having regardless of the prelude: it catches hand-written `register()` collisions just as well.
+It catches hand-written `register()` collisions just as well, which is why it was worth having before the pass existed.
 Ray tracing is where it earns its keep, since a pipeline's shaders naturally live in separate files.
 sv is exposed to this today, hand-numbering across files with nothing checking the overlap.
-`scene` sits at `t0` in [pathtrace.hlsl](../../shaped-viewer/shaders/pathtrace.hlsl).
-`Vertices` and `Indices` take `t2` and `t3` in [mesh.hlsli](../../shaped-viewer/shaders/mesh.hlsli).
+`scene` sits at `t0` in [pathtrace.hlsl](../../shaped-viewer/shaders/pathtrace.hlsl), and `Vertices` and `Indices` take `t2` and `t3` in [mesh.hlsli](../../shaped-viewer/shaders/mesh.hlsli).
+[done]
 
 **Across targets, at build time: compile every package to every format the toolchain can produce, and compare the reflections.**
 Not just the format the local context happens to want.
 This is what turns "ships broken on the other backend" into a failing build.
-Compare names and kinds only, per the pinned finding above.
+Because the pass writes the address, this compares addresses and not only names — which is the part that would have caught the DXIL drift above.
 Write it from the start to **tolerate a target-specific extra binding**: an emulated inline-constant block is exactly that.
 Retrofitting that tolerance later costs more than allowing for it now.
+[planned]
 
 A fourth layer — a package-wide "all reflections must agree" check — is deliberately **not** on the list.
 An unrelated compute shader in the same package legitimately reuses group 0 index 0 for something else, so it would fire on correct code, and a check people learn to ignore is worse than no check.
 
 ## Compile flags
 
-Four silent divergences that no macro can reach, and that a shader cannot annotate away.
+Four silent divergences that no annotation can reach.
 All are `-fvk-*`, so `build_compile_args` adds them to the SPIR-V arm only.
 Each makes SPIR-V behave the way the DXIL arm already does, so one source means one behaviour.
 
@@ -181,30 +149,31 @@ These change the emitted bytecode, so if any ever becomes a per-compile option r
 
 ## Open
 
-- **Where an emulated inline-constant block lands.**
+- **Where an emulated inline-constant block lands** on a target with neither push nor root constants.
   Reserving a group index for it now would keep it from renumbering anything an author wrote, but the right answer depends on how the emulation works, so no index is reserved.
-- **A linter rule** banning raw `register(` and `[[vk::` outside the prelude.
-  The equivalence check catches a *wrong* annotation; only a linter catches a correct-looking one that bypasses the facade and happens to work on the backend that was tested.
+- **`SC_SHADER_RECORD`**, for DXR local root signatures and Vulkan's `[[vk::shader_record_ext]]`.
+  sg has no local root signatures yet, so there is nothing to be portable about.
+- **A linter rule** banning raw `register(` and `[[vk::` inside an annotated namespace.
+  The cross-target check catches a *wrong* annotation; only a linter catches a correct-looking one that bypasses the pass and happens to work on the backend that was tested.
 
 ## Phasing
 
 1. **[done]** The compile flags, and sv's unguarded `InlineConstantBuffer` — latent breakage that existed already and depended on nothing else here.
-2. **[in progress]** The prelude and its macros, mounted at `sc`.
-   shaped-rendering's four shaders and both cube examples are ported; sv's seventeen are not.
-3. **[done]** The pipeline-creation bijection check, in `try_create_raster_pipeline` and its ray-tracing twin.
+2. **[done]** The pipeline-creation bijection check, in `try_create_raster_pipeline` and its ray-tracing twin.
+3. **[in progress]** The binding preprocessor — its own [phasing](binding-preprocessor.md#phasing) is the detailed one.
 4. **[planned]** The all-targets compile and reflection comparison.
 5. **[planned]** The linter rule, and whatever a third backend asks for.
 
-Steps 1, 3 and 4 are worth doing even if the prelude never ships.
+Steps 1, 2 and 4 are worth doing even if no pass ever ships.
 Step 1 was also the only one that fixed something already wrong rather than preventing something future.
 
 ## Why slib owns this
 
 sg owns the vocabulary but not the content: what a project does with a binding model is not sg's business.
 
-sr is above slib, so a prelude there could not serve slib's own test shaders, sg's backend test shaders, or a project that takes slib without sr.
+sr is above slib, so a pass there could not serve slib's own test shaders, sg's backend test shaders, or a project that takes slib without sr.
 
-slib is where `shader_language` and `shader_format` meet, and it owns the mount table — the only delivery mechanism available.
-[dxc_compiler.cc](../src/shaped-shader-library/compiler/dxc_compiler.cc) is literally the `hlsl` → `dxil` or `spirv` pair the prelude adapts.
-A package reaches `sc/portable.hlsli` through the mount-root fallback with no per-application wiring.
-The prelude is the source-side half of what registering a compiler means, which makes it a widening of slib's charter rather than a new responsibility.
+slib is where `shader_language` and `shader_format` meet, and it owns the compile path every shader travels — `_compile_text`, between the include flatten and the compile.
+[dxc_compiler.cc](../src/shaped-shader-library/compiler/dxc_compiler.cc) is literally the `hlsl` → `dxil` or `spirv` pair the pass adapts.
+It is also where the build-time generator already lives, since `sc_add_shader_package` is slib's.
+That makes source-side portability a widening of slib's charter rather than a new responsibility.

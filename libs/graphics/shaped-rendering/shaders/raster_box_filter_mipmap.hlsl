@@ -13,9 +13,7 @@
 // One pass per level, with the source bound as a single-mip view of level N and the target as the render-target
 // view of N+1, so no level is ever read and written by the same pass.
 
-#include "sc/portable.hlsli"
-
-SC_BINDING(0) Texture2D<float4> gSource;
+Texture2D<float4> gSource : register(t0);
 
 struct vs_output
 {

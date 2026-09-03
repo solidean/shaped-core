@@ -1,10 +1,8 @@
 // Fullscreen-triangle blit: sample the ray-traced view target onto a window back buffer.
 // No vertex input — the covering triangle is generated from SV_VertexID (draw 3 vertices).
 
-#include "sc/portable.hlsli"
-
-SC_BINDING(0) Texture2D<float4> source_texture;
-SC_BINDING(0) SamplerState linear_sampler;
+Texture2D<float4> source_texture : register(t0);
+SamplerState linear_sampler : register(s0);
 
 struct vs_output
 {
