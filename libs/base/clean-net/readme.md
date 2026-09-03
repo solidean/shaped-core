@@ -5,6 +5,11 @@ Depends on clean-core and nothing else.
 
 Early stage — [docs/structure.md](docs/structure.md) says what exists today and what is planned.
 
+```bash
+uv run dev.py example clean-net/download     # the client: buffered, streamed, redirected, rate-limited
+uv run dev.py example clean-net/dev-server   # the server: routes, static files, a streamed body, a websocket
+```
+
 ```cpp
 #include <clean-net/all.hh>
 

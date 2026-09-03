@@ -4,6 +4,7 @@
 One of them is a real defect in babel, found while building this.
 
 The parser fuzzer is **done** — `tests/http1-fuzz-test.cc`, over nexus's API-sequence engine.
+So are both examples, `clean-net/download` and `clean-net/dev-server`.
 
 ## A `doctor` line for the networking environment
 
@@ -38,13 +39,18 @@ support.
 
 `src/clean-net/all.hh` already exists as the umbrella such a tier would name.
 
-## Examples
+## A flaky test under parallel load
 
-Two are planned: `download` and `dev-server`.
-Neither can be written before the HTTP client exists.
+`cnet - a served directory refuses every way out of itself` times out about once in 35 runs of the whole binary, and
+**never** in 300 runs on its own, where it takes 30 ms.
+It is seven sequential loopback round-trips; under load it has been seen to make no progress for 30 seconds, which is
+too long to be scheduling noise and looks like a livelock between `cc::thread_pump_all()` and the actors it drives.
 
-Examples build everywhere and are executed by nobody automatically — see
-[docs/guides/examples.md](../guides/examples.md).
+The binary has had flakiness of this shape since before that test existed — one earlier run failed a different test
+with an uncaught exception — so the test is where it shows, not necessarily where it is.
+
+Worth a session of its own: reproduce with `uv run dev.py test clean-net-test --repeat 40`, which stops on the first
+failure and leaves its logs.
 
 ---
 

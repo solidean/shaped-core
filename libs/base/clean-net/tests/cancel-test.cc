@@ -1,6 +1,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/common/clock.hh>
 #include <clean-net/transport/simulated_transport.hh>
 #include <clean-net/transport/stream.hh>
 #include <clean-net/transport/virtual_transport.hh>
@@ -26,6 +27,26 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 2000)
             cc::this_thread_yield();
     }
     return done();
+}
+
+/// Pump against the wall clock rather than a round count.
+///
+/// A round budget measures how fast this machine spins, and nexus runs these tests alongside each other -- so a real
+/// socket, which waits on the world, needs a clock and not a counter.
+bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
+{
+    auto& clk = system_clock();
+    auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
+
+    while (true)
+    {
+        if (done())
+            return true;
+        if (clk.now_ns() >= deadline_ns)
+            return false;
+        if (!cc::thread_pump_all())
+            cc::this_thread_yield();
+    }
 }
 
 [[nodiscard]] endpoint somewhere()
@@ -197,7 +218,7 @@ TEST("cnet - cancelling ends a parked read on a real socket")
 
     auto accepted = listener.value()->accept();
     auto connected = tcp_connect(*io.value(), listener.value()->local());
-    CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
+    CHECK(pump_for([&] { return accepted->is_ready() && connected->is_ready(); }));
     CHECK(accepted->try_error() == nullptr);
 
     auto const token = cancel_token::create();
@@ -207,7 +228,7 @@ TEST("cnet - cancelling ends a parked read on a real socket")
     CHECK(!received->is_ready());
 
     token.cancel();
-    CHECK(pump_until([&] { return received->is_ready(); }));
+    CHECK(pump_for([&] { return received->is_ready(); }));
     CHECK(reads_as_cancelled(received));
 
     // The socket outlives the operation, so the connection is still usable afterwards -- a cancel ends an operation

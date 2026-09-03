@@ -1,7 +1,7 @@
 # cnet: what is still missing from the dev server
 
-**Status:** the server, WebSockets, static files and streamed responses are built.
-The browser backend and the first example are not.
+**Status:** the server, WebSockets, static files, streamed responses and the first example are built.
+The browser backend is not.
 
 The server's own design lives in [clean-net/docs/http.md](../../libs/base/clean-net/docs/http.md#the-server), and
 WebSockets in [clean-net/docs/websockets.md](../../libs/base/clean-net/docs/websockets.md).
@@ -18,9 +18,10 @@ and a live view of it in a browser is the obvious front end beside the in-proces
 **The browser backend**, where `WebSocket` is the platform's and not ours to write.
 Same backend shape as HTTP, and for the same reason.
 
-**The first example**: a minimal routes-and-static-files example, with the `cc::rec` live view later.
-That was the maintainer's call over leading with the recording view — the recording view is the use case that
-*justifies* the streaming work, but it is not the example that teaches someone what the server is.
+**The `cc::rec` live view**, over the streaming and WebSocket routes that now exist.
+`uv run dev.py example clean-net/dev-server` is the routes-and-static-files example that comes first — that was the
+maintainer's call over leading with the recording view, which is the use case that *justifies* the streaming work but
+is not the example that teaches someone what the server is.
 
 **A symlink out of a served root**, and streaming a large static file rather than reading it whole.
 Both want a path surface clean-core deliberately does not have; see

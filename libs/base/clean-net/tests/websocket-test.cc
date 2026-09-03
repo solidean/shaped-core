@@ -33,6 +33,23 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
     return done();
 }
 
+/// Pump against the wall clock, which is what a real socket waits on.
+bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
+{
+    auto& clk = system_clock();
+    auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
+
+    while (true)
+    {
+        if (done())
+            return true;
+        if (clk.now_ns() >= deadline_ns)
+            return false;
+        if (!cc::thread_pump_all())
+            cc::this_thread_yield();
+    }
+}
+
 [[nodiscard]] cc::span<byte const> bytes_of(cc::string_view text)
 {
     return cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size());
@@ -340,4 +357,42 @@ TEST("cnet - close codes with holes in them")
     CHECK(!impl::is_valid_close_code(1006));
     CHECK(!impl::is_valid_close_code(999));
     CHECK(!impl::is_valid_close_code(5000));
+}
+
+TEST("cnet - a websocket over a real socket, both ends in one process")
+{
+    auto io = io_system::try_create({.unthreaded = true});
+    if (io.has_error())
+        SKIP("this platform has no sockets");
+
+    auto server = http_server::try_create(*io.value());
+    if (server.has_error())
+        SKIP("this platform cannot listen");
+
+    auto res = resolver::try_create(*io.value());
+    if (res.has_error())
+        SKIP("this platform cannot resolve");
+
+    auto accepted = cc::vector<cc::shared_ptr<websocket>>();
+    server.value()->websocket_route("/socket", [&accepted](cc::shared_ptr<websocket> ws, http_server_request const&)
+                                    { accepted.push_back(cc::move(ws)); });
+
+    // The real socket path is what a virtual network cannot stand in for: it is asynchronous all the way down, so a
+    // handshake buffer that dies with the call that started the send is read after it is freed.
+    auto connecting = websocket_connect(*io.value(), *res.value(),
+                                        cc::format("ws://127.0.0.1:{}/socket", server.value()->local().port));
+    CHECK(pump_for([&] { return connecting->is_ready(); }));
+    REQUIRE(connecting->try_error() == nullptr);
+
+    auto const client = connecting->value();
+    CHECK(pump_for([&] { return !accepted.empty(); }));
+    REQUIRE(accepted.size() == 1);
+
+    auto const sent = client->send_text("over a socket");
+    auto received = accepted[0]->receive();
+    CHECK(pump_for([&] { return sent->is_ready() && received->is_ready(); }));
+    REQUIRE(received->try_error() == nullptr);
+    CHECK(received->value().text() == "over a socket");
+
+    client->close();
 }

@@ -393,3 +393,34 @@ TEST("cnet - a header that would end the head early cannot be sent")
     request.headers.add("X-Fine", "value");
     CHECK(impl::write_request_head(request, true).has_value());
 }
+
+TEST("cnet - a request body is framed, because an unframed one is a smuggled one")
+{
+    auto const target = http_target::parse("http://example.com/submit").value();
+
+    auto const payload = cc::string_view("hello");
+    auto request = http_request{.method = http_method::post, .target = target};
+    request.body = cc::span<byte const>(reinterpret_cast<byte const*>(payload.data()), payload.size());
+
+    auto const head = impl::write_request_head(request, true);
+    REQUIRE(head.has_value());
+
+    // Without this the server answers a bodyless request and leaves "hello" on the connection, where it becomes the
+    // start of whatever is sent next.
+    CHECK(cc::string_view(head.value()).contains("Content-Length: 5\r\n"));
+
+    // A method that carries a body says so even when it is empty, since a server expecting one should not have to
+    // guess.
+    auto empty_post = http_request{.method = http_method::post, .target = target};
+    CHECK(cc::string_view(impl::write_request_head(empty_post, true).value()).contains("Content-Length: 0\r\n"));
+
+    // A GET with nothing to send says nothing.
+    auto const get = http_request{.method = http_method::get, .target = target};
+    CHECK(!cc::string_view(impl::write_request_head(get, true).value()).contains("Content-Length"));
+
+    // A caller who framed it themselves is left alone, because two framing headers is the ambiguity the whole rule
+    // exists to avoid.
+    auto chunked = http_request{.method = http_method::post, .target = target};
+    chunked.headers.set("Transfer-Encoding", "chunked");
+    CHECK(!cc::string_view(impl::write_request_head(chunked, true).value()).contains("Content-Length"));
+}

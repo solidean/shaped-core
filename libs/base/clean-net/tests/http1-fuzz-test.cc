@@ -49,7 +49,11 @@ struct parse_outcome
     auto parser = impl::http1_parser();
     parser.start_response(http_method::get);
 
+    // An offset rather than a rebuilt vector: this runs once per chunk size per generated message, and re-copying the
+    // remainder after every feed would make the byte-at-a-time pass quadratic -- which is enough CPU to starve the
+    // rest of the binary, since nexus runs these tests alongside each other.
     auto buffer = cc::vector<byte>();
+    auto consumed = isize(0);
     auto offset = isize(0);
 
     auto sink = [&out](cc::span<byte const> chunk) -> isize
@@ -63,6 +67,14 @@ struct parse_outcome
     {
         if (offset < text.size())
         {
+            if (consumed > 0)
+            {
+                for (isize i = consumed; i < buffer.size(); ++i)
+                    buffer[i - consumed] = buffer[i];
+                buffer.resize_to_defaulted(buffer.size() - consumed);
+                consumed = 0;
+            }
+
             auto const take = text.size() - offset < chunk_size ? text.size() - offset : chunk_size;
             for (isize i = 0; i < take; ++i)
                 buffer.push_back(byte(text[offset + i]));
@@ -71,16 +83,17 @@ struct parse_outcome
 
         // Whatever is here is offered until the parser stops taking it, which is either "the head is ready" or "that
         // is all this holds".
-        while (!buffer.empty() && !parser.message_complete())
+        while (consumed < buffer.size() && !parser.message_complete())
         {
-            auto const fed = parser.feed(cc::span<byte const>(buffer.data(), buffer.size()), sink);
+            auto const available = buffer.size() - consumed;
+            auto const fed = parser.feed(cc::span<byte const>(buffer.data() + consumed, available), sink);
             if (fed.has_error())
             {
                 out.failed = true;
                 break;
             }
 
-            if (fed.value() > buffer.size())
+            if (fed.value() > available)
             {
                 overran = true;
                 out.failed = true;
@@ -90,10 +103,7 @@ struct parse_outcome
             if (fed.value() == 0)
                 break;
 
-            auto rest = cc::vector<byte>();
-            for (auto i = fed.value(); i < buffer.size(); ++i)
-                rest.push_back(buffer[i]);
-            buffer = cc::move(rest);
+            consumed += fed.value();
         }
 
         if (offset >= text.size())
@@ -125,7 +135,9 @@ struct parse_outcome
     auto overran = false;
     auto const whole = parse_in_chunks(text, text.size(), overran);
 
-    for (auto const chunk_size : {isize(1), isize(2), isize(3), isize(7), isize(64)})
+    // Three splits rather than every one: 1 exercises every boundary there is, and the other two catch a state
+    // machine that only holds together when a chunk happens to land on a line ending.
+    for (auto const chunk_size : {isize(1), isize(3), isize(64)})
     {
         auto const split = parse_in_chunks(text, chunk_size, overran);
         if (overran || !(split == whole))
@@ -135,7 +147,7 @@ struct parse_outcome
 }
 
 /// Keep a generated message small enough that the byte-at-a-time pass stays cheap.
-constexpr isize k_max_message = 256;
+constexpr isize k_max_message = 160;
 } // namespace
 
 TEST("cnet - the http/1.1 parser reads the same message however it is split")

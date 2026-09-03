@@ -158,6 +158,7 @@ cc::result<cc::string, error> write_request_head(http_request const& request, bo
     auto head = cc::format("{} {} HTTP/1.1\r\n", to_string(request.method), target);
 
     auto wrote_host = false;
+    auto wrote_framing = false;
     for (auto const& header : request.headers.entries())
     {
         if (header.name.empty())
@@ -180,6 +181,8 @@ cc::result<cc::string, error> write_request_head(http_request const& request, bo
 
         if (header_names_equal(header.name, "Host"))
             wrote_host = true;
+        if (header_names_equal(header.name, "Content-Length") || header_names_equal(header.name, "Transfer-Encoding"))
+            wrote_framing = true;
 
         head += cc::format("{}: {}\r\n", header.name, header.value);
     }
@@ -187,6 +190,16 @@ cc::result<cc::string, error> write_request_head(http_request const& request, bo
     // A request without Host is not HTTP/1.1, and the target is where it comes from when the caller did not say.
     if (!wrote_host)
         head += cc::format("Host: {}\r\n", request.target.host_header());
+
+    // A REQUEST BODY WITHOUT A LENGTH IS NOT A SHORT REQUEST, IT IS A SMUGGLED ONE.
+    // The server reads a head with no framing, answers a bodyless request, and leaves the body bytes on the
+    // connection -- where they become the start of whatever is sent next.
+    // A method that carries a body says `Content-Length: 0` even when empty, since a server that expects one should
+    // not have to guess.
+    auto const carries_a_body = request.method == http_method::post || request.method == http_method::put
+                             || request.method == http_method::patch;
+    if (!wrote_framing && (!request.body.empty() || carries_a_body))
+        head += cc::format("Content-Length: {}\r\n", request.body.size());
 
     if (!keep_alive)
         head += "Connection: close\r\n";

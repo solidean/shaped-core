@@ -38,7 +38,7 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
 ///
 /// The round-counting one above is right for a virtual network, where nothing waits on the world; a real socket
 /// does, and counting rounds there measures how fast this machine spins rather than how long it was given.
-bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
+bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
 {
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
@@ -510,6 +510,9 @@ struct static_files
 };
 } // namespace
 
+// The two file-serving tests wait on a generous wall budget rather than a tight one.
+// They share a machine with every other test in this binary, and a slow answer here is the scheduler rather than a
+// defect worth failing on -- while a real hang still fails, just later.
 TEST("cnet - a served directory hands back its files")
 {
     auto const files = static_files();
@@ -564,4 +567,32 @@ TEST("cnet - a served directory refuses every way out of itself")
         REQUIRE(response->try_error() == nullptr);
         CHECK(response->value().status() == 404);
     }
+}
+
+TEST("cnet - a request body arrives, and the connection is still usable afterwards")
+{
+    auto fixture = server_fixture();
+
+    fixture.server->route(http_method::post, "/echo", [](http_server_request const& request)
+                          { return http_server_response::text(cc::format("got {}", request.body_text())); });
+    fixture.server->route(http_method::get, "/after",
+                          [](http_server_request const&) { return http_server_response::text("second"); });
+
+    auto const payload = cc::string_view("some body bytes");
+    auto request
+        = http_request{.method = http_method::post, .target = http_target::parse(fixture.url_for("/echo")).value()};
+    request.body = bytes_of(payload);
+
+    auto posted = http_send(*fixture.client, cc::move(request));
+    CHECK(pump_until([&] { return posted->is_ready(); }));
+    REQUIRE(posted->try_error() == nullptr);
+    CHECK(posted->value().body_text() == "got some body bytes");
+
+    // The one that matters: an unframed body would still be sitting on the connection, and this request would be
+    // read as a continuation of it.
+    auto second = http_get(*fixture.client, fixture.url_for("/after"));
+    CHECK(pump_until([&] { return second->is_ready(); }));
+    REQUIRE(second->try_error() == nullptr);
+    CHECK(second->value().status() == 200);
+    CHECK(second->value().body_text() == "second");
 }

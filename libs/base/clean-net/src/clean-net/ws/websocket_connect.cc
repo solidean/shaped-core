@@ -27,6 +27,9 @@ struct handshake
     cc::shared_async<cc::shared_ptr<websocket>> promise;
     cc::shared_ptr<stream_connection> connection;
     cc::string expected_accept;
+
+    /// The request bytes, kept here because `send` is asynchronous and a span into a local would outlive nothing.
+    cc::string request;
     websocket_options options;
     deadline d;
     cancel_token token;
@@ -214,13 +217,11 @@ void read_response(cc::shared_ptr<handshake> const& h)
 void upgrade(cc::shared_ptr<handshake> const& h,
              cc::shared_async<cc::shared_ptr<stream_connection>> connecting,
              cc::string host,
-             bool secure,
-             cc::string request)
+             bool secure)
 {
     impl::when_ready(
         cc::move(connecting),
-        [h, host = cc::move(host), secure,
-         request = cc::move(request)](cc::shared_async<cc::shared_ptr<stream_connection>> const& connected)
+        [h, host = cc::move(host), secure](cc::shared_async<cc::shared_ptr<stream_connection>> const& connected)
         {
             if (connected->has_error())
             {
@@ -228,11 +229,15 @@ void upgrade(cc::shared_ptr<handshake> const& h,
                 return;
             }
 
-            auto const send_upgrade = [h, request](cc::shared_ptr<stream_connection> connection)
+            auto const send_upgrade = [h](cc::shared_ptr<stream_connection> connection)
             {
                 h->connection = cc::move(connection);
 
-                auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(request.data()), request.size());
+                // The span points into the handshake rather than into anything on this stack: `send` returns long
+                // before the bytes have gone anywhere, so a buffer that dies with this call is one the socket reads
+                // after it is freed.
+                auto const bytes
+                    = cc::span<byte const>(reinterpret_cast<byte const*>(h->request.data()), h->request.size());
 
                 impl::when_ready(h->connection->send(bytes, h->d, h->token),
                                  [h](cc::shared_async<cc::unit> const& sent)
@@ -274,8 +279,7 @@ void upgrade(cc::shared_ptr<handshake> const& h,
                                                                    websocket_options const& options,
                                                                    deadline d,
                                                                    cancel_token const& token,
-                                                                   http_target& target,
-                                                                   cc::string& request)
+                                                                   http_target& target)
 {
     auto parsed = parse_ws_url(url);
     if (parsed.has_error())
@@ -299,7 +303,7 @@ void upgrade(cc::shared_ptr<handshake> const& h,
     h->parser.start_response(http_method::get);
     h->buffer.resize_to_defaulted(k_handshake_read_chunk);
 
-    request = build_request(target, key.value(), options);
+    h->request = build_request(target, key.value(), options);
     return h;
 }
 } // namespace
@@ -312,15 +316,13 @@ cc::shared_async<cc::shared_ptr<websocket>> websocket_connect(transport& t,
                                                               cancel_token const& token)
 {
     auto target = http_target();
-    auto request = cc::string();
 
-    auto prepared = prepare(url, options, d, token, target, request);
+    auto prepared = prepare(url, options, d, token, target);
     if (prepared.has_error())
         return impl::failed_async<cc::shared_ptr<websocket>>(cc::move(prepared).error());
 
     auto const h = cc::move(prepared).value();
-    upgrade(h, connect_to_host(t, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure,
-            cc::move(request));
+    upgrade(h, connect_to_host(t, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure);
     return h->promise;
 }
 
@@ -332,15 +334,13 @@ cc::shared_async<cc::shared_ptr<websocket>> websocket_connect(io_system& io,
                                                               cancel_token const& token)
 {
     auto target = http_target();
-    auto request = cc::string();
 
-    auto prepared = prepare(url, options, d, token, target, request);
+    auto prepared = prepare(url, options, d, token, target);
     if (prepared.has_error())
         return impl::failed_async<cc::shared_ptr<websocket>>(cc::move(prepared).error());
 
     auto const h = cc::move(prepared).value();
-    upgrade(h, connect_to_host(io, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure,
-            cc::move(request));
+    upgrade(h, connect_to_host(io, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure);
     return h->promise;
 }
 } // namespace cnet
