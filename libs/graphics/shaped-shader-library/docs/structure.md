@@ -45,12 +45,22 @@ src/shaped-shader-library/
     impl/watch_backend.hh         [done]        the per-OS seam; nullptr where a platform has none
     impl/watch_backend_windows.cc [done]        ReadDirectoryChangesW over one IOCP + one thread
     impl/watch_backend_none.cc    [in progress] the fallback everywhere else — Linux/macOS still to come
+  binding/
+    binding_groups.hh/.cc         [in progress] parse_binding_groups: the annotated namespaces a source
+                                                declares, in declaration order; the rewrite is still to come
+    impl/hlsl_tokens.hh/.cc       [done]        the tokenizer, plus the `//!> name key=value` grammar; a
+                                                `//!>` comment is the one comment the parser sees
+    impl/hlsl_binding_types.hh/.cc [done]       HLSL type -> register class + sg::binding_type + dimension;
+                                                the table the rewriter and the generator must share exactly
   compiler/
     shader_compiler.hh            [done]        the seam: one edge, language -> format
     dxc_compiler.hh/.cc           [done]        hlsl -> dxil via ssc::dxc; only when SLIB_HAS_DXC
   impl/
     reload_watcher.hh/.cc         [done]        cc::threaded_actor; parks on the mailbox and lets the
                                                 filesystem wake it, else polls; stages + drives recompiles
+tests/data/
+  binding-corpus.txt              [done]        HLSL snippets and their expected parse, or the exact error;
+                                                shared with the build-time generator once it exists
 cmake/
   ShaderPackage.cmake             [done]        sc_add_shader_package + sc_finalize_shader_packages
   GenerateShaderPackage.cmake     [done]        build-time codegen: symbols, table, embedded include closure

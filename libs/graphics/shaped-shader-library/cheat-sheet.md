@@ -119,6 +119,29 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
                                    //   content-keyed cache inside: an identical recompile is free
 ```
 
+## binding groups
+
+```cpp
+#include <shaped-shader-library/binding/binding_groups.hh>
+slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<sg::binding> bindings; }
+                                   //   bindings are in declaration order -> position IS the layout slot
+slib::parse_binding_groups(hlsl)   // -> cc::result<cc::vector<shader_binding_group>>; the error names the line
+```
+
+```hlsl
+namespace frame_bindings //!> group 0     // the group number is both the SPIR-V set and the HLSL space
+{
+    Texture2D<float4> albedo;             // index 0 -> t0/space0 and binding(0, 0)
+    SamplerState linear_sampler;          // index 1 -> s1/space0 and binding(1, 0): ONE counter per group
+}
+// an attribute alone on its line attaches to the declaration after it; trailing, to the one it rides with.
+// a `//!>` name the pass does not know is an ERROR naming the line, never a comment walked past.
+// an array consumes `count` indices — DXIL numbers every element, SPIR-V numbers the array once.
+// inside a group only `Type name;` / `Type name[N];` with N a literal; anything else is an error.
+// static / push_constants / payload / vertex_input parse and are reported as not supported yet.
+// text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
+```
+
 ## include resolution
 
 ```
