@@ -14,6 +14,7 @@ add_library(clean-net
     src/clean-net/common/clock.cc
     src/clean-net/address/ip_address.cc
     src/clean-net/address/endpoint.cc
+    src/clean-net/impl/native_socket.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -48,6 +49,20 @@ target_include_directories(clean-net
 
 target_link_libraries(clean-net PUBLIC clean-core)
 
+# Sockets: present everywhere except wasm, which has none of any kind -- not a socket that needs a flag, none at all.
+# CNET_HAS_SOCKETS stays PRIVATE and never leaves impl/native_socket.cc; the API stays declared either way and
+# cnet::impl::sockets_are_supported() reports the answer at runtime.
+if(EMSCRIPTEN)
+    target_compile_definitions(clean-net PRIVATE CNET_HAS_SOCKETS=0)
+else()
+    target_compile_definitions(clean-net PRIVATE CNET_HAS_SOCKETS=1)
+endif()
+
+# Winsock is a separate library on Windows and part of libc everywhere else.
+if(WIN32)
+    target_link_libraries(clean-net PRIVATE ws2_32)
+endif()
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(clean-net
     PUBLIC
@@ -61,6 +76,7 @@ if(SC_BUILD_TESTS)
         tests/endpoint-test.cc
         tests/clock-test.cc
         tests/error-test.cc
+        tests/native-socket-test.cc
     )
 
     target_link_libraries(clean-net-test PRIVATE clean-net nexus)

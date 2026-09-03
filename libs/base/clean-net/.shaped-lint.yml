@@ -1,0 +1,20 @@
+# clean-net's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Every platform header below is scoped to the one file that owns it.
+# That is the shape to keep: a socket header reaching a second file means the platform layer has leaked.
+
+rules:
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: the Windows socket API. winsock2.h must precede ws2tcpip.h, which is declared in terms of it, so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/native_socket.cc
+
+  - kind: allow-include
+    value: [<sys/socket.h>, <netinet/in.h>, <netinet/tcp.h>, <arpa/inet.h>, <unistd.h>, <fcntl.h>, <errno.h>]
+    reason: the POSIX socket API, plus fcntl for the non-blocking flag and errno for the failure code.
+    files:
+      - src/clean-net/impl/native_socket.cc
