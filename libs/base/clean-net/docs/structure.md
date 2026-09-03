@@ -99,6 +99,10 @@ and comparing it to the root.
 That is the stronger check for what it covers, and it does not cover a symlink under the root pointing outside it.
 Streaming a large file rather than reading it whole wants the same surface.
 
+**Settled: it grows in clean-core as its own change, and it is virtualized** -- the same seam the transport already
+has, so a test stands a filesystem in the place of the real one rather than writing into a temp directory and hoping.
+Until then `serve_directory` keeps its lexical refusal, which is honest about what it covers.
+
 ## Deliberately out of scope
 
 - **HTTP/2 and HTTP/3.** HPACK, stream multiplexing and QUIC are each a project.

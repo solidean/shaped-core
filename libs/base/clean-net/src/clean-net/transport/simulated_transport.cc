@@ -302,6 +302,11 @@ bool simulated_transport::is_supported() const
     return _state->under.is_supported();
 }
 
+io_system& simulated_transport::io() const
+{
+    return _state->io;
+}
+
 cc::result<cc::unique_ptr<stream_listener>, error> simulated_transport::listen(endpoint const& where,
                                                                                tcp_listen_options const& options)
 {

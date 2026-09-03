@@ -68,6 +68,11 @@ struct cnet::http_server_description
     /// The largest WebSocket message an upgraded connection will reassemble.
     isize max_websocket_message_bytes = 8 * 1024 * 1024;
 
+    /// How often an idle WebSocket is pinged, and how long its pong may take.
+    /// The same two knobs `cnet::websocket_options` carries, for the connections this server adopts.
+    i32 websocket_ping_interval_ms = 30'000;
+    i32 websocket_pong_timeout_ms = 10'000;
+
     /// The largest file `serve_directory` will read.
     /// A bigger one is a 500 and a warning, because reading it would block the reactor for as long as it takes.
     isize max_static_file_bytes = 16 * 1024 * 1024;

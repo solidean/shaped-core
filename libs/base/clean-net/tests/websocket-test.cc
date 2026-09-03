@@ -4,9 +4,11 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/common/clock.hh>
 #include <clean-net/http/http_client.hh>
 #include <clean-net/http/http_server.hh>
 #include <clean-net/transport/virtual_transport.hh>
+#include <clean-net/ws/impl/websocket_internal.hh>
 #include <clean-net/ws/impl/ws_frame.hh>
 #include <clean-net/ws/websocket.hh>
 #include <nexus/test.hh>
@@ -54,6 +56,22 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
         if (!cc::thread_pump_all())
             cc::this_thread_yield();
     }
+}
+
+/// Give the machinery every opportunity and then assert nothing moved.
+///
+/// A round count is right for that, and only for that: nothing here can make progress without the clock, so a fixed
+/// sweep is a complete answer rather than a guess at how busy the machine is.
+bool pump_briefly(cc::function_ref<bool()> done, i32 rounds = 200)
+{
+    for (i32 i = 0; i < rounds; ++i)
+    {
+        if (done())
+            return true;
+        if (!cc::thread_pump_all())
+            cc::this_thread_yield();
+    }
+    return done();
 }
 
 [[nodiscard]] cc::span<byte const> bytes_of(cc::string_view text)
@@ -401,4 +419,125 @@ TEST("cnet - a websocket over a real socket, both ends in one process")
     CHECK(received->value().text() == "over a socket");
 
     client->close();
+}
+
+// ---- keepalives ----------------------------------------------------------------------------------------
+
+namespace
+{
+/// A virtual network on a clock a test moves by hand, which is the only way to prove a 30-second rule in a
+/// millisecond.
+struct keepalive_fixture
+{
+    manual_clock clk = manual_clock(0);
+    cc::unique_ptr<io_system> io;
+    cc::unique_ptr<virtual_network> net;
+    cc::unique_ptr<resolver> res;
+    cc::unique_ptr<http_server> server;
+
+    cc::vector<cc::shared_ptr<websocket>> accepted;
+
+    explicit keepalive_fixture(http_server_description const& desc)
+    {
+        io = io_system::create({.unthreaded = true, .time_source = &clk});
+        net = cc::make_unique<virtual_network>(*io);
+
+        auto const answer = ip_address::loopback(ip_family::v4);
+        res = resolver::create(*io, {.lookup = [answer](cc::string_view) -> cc::result<cc::vector<ip_address>, error>
+                                     { return cc::vector<ip_address>{answer}; }});
+
+        server = http_server::try_create(*net, desc).value();
+        server->websocket_route("/socket", [this](cc::shared_ptr<websocket> ws, http_server_request const&)
+                                { accepted.push_back(cc::move(ws)); });
+    }
+
+    [[nodiscard]] cc::string url() const { return cc::format("ws://localhost:{}/socket", server->local().port); }
+};
+} // namespace
+
+TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
+{
+    auto fixture = keepalive_fixture({.websocket_ping_interval_ms = 1'000, .websocket_pong_timeout_ms = 500});
+
+    auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url(),
+                                        {.ping_interval_ms = 1'000, .pong_timeout_ms = 500});
+    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(connecting->try_error() == nullptr);
+
+    auto const client = connecting->value();
+    REQUIRE(fixture.accepted.size() == 1);
+
+    // Both ends ping and both answer, so several rounds of it change nothing a caller can see -- which is the whole
+    // property: a keepalive is invisible until the peer stops answering.
+    for (auto round = 0; round < 4; ++round)
+    {
+        fixture.clk.advance_ms(1'000);
+        (void)pump_briefly([] { return false; });
+        fixture.clk.advance_ms(500);
+        (void)pump_briefly([] { return false; });
+    }
+
+    CHECK(client->is_open());
+    CHECK(fixture.accepted[0]->is_open());
+
+    // And messages still work afterwards, so nothing the keepalive sent confused the framing.
+    auto const sent = client->send_text("still here");
+    auto received = fixture.accepted[0]->receive();
+    CHECK(pump_until([&] { return sent->is_ready() && received->is_ready(); }));
+    REQUIRE(received->try_error() == nullptr);
+    CHECK(received->value().text() == "still here");
+}
+
+TEST("cnet - a peer that stops answering fails the receive rather than hanging it")
+{
+    auto io = io_system::create({.unthreaded = true});
+    auto net = virtual_network(*io);
+
+    auto listener = net.listen(endpoint(ip_address::loopback(ip_family::v4), 0), {}).value();
+    auto accepted = listener->accept();
+    auto connected = tcp_connect(net, listener->local());
+    CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
+
+    // Only ONE end becomes a WebSocket.
+    // The other is a plain connection that reads bytes and answers nothing, which is what a peer whose machine
+    // vanished looks like from here: no FIN, no pong, no error.
+    auto const ws = impl::adopt_websocket(
+        *io, {.connection = connected->value(), .is_client = true, .ping_interval_ms = 20, .pong_timeout_ms = 20});
+
+    auto const silent = accepted->value();
+    byte sink[256] = {};
+    auto const swallowing = silent->receive(cc::span<byte>(sink, isize(sizeof(sink))), deadline::never());
+
+    // A receive with no deadline: without a keepalive this waits forever, which is the failure being ruled out.
+    auto waiting = ws->receive(deadline::never());
+    CHECK(pump_for([&] { return waiting->is_ready(); }));
+
+    REQUIRE(waiting->try_error() != nullptr);
+    CHECK(!ws->is_open());
+
+    (void)swallowing;
+}
+
+TEST("cnet - keepalives can be turned off")
+{
+    auto io = io_system::create({.unthreaded = true});
+    auto net = virtual_network(*io);
+
+    auto listener = net.listen(endpoint(ip_address::loopback(ip_family::v4), 0), {}).value();
+    auto accepted = listener->accept();
+    auto connected = tcp_connect(net, listener->local());
+    CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
+
+    auto const ws = impl::adopt_websocket(
+        *io, {.connection = connected->value(), .is_client = true, .ping_interval_ms = 0, .pong_timeout_ms = 0});
+
+    auto const silent = accepted->value();
+    auto waiting = ws->receive(deadline::never());
+
+    // Nothing arms, so nothing fires, and the receive is still waiting -- which is what a caller who said 0 asked
+    // for, and why 0 is a decision rather than an omission.
+    CHECK(pump_briefly([&] { return waiting->is_ready(); }) == false);
+    CHECK(ws->is_open());
+
+    ws->close();
 }

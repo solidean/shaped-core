@@ -326,7 +326,7 @@ server->websocket_route("/feed", [&](cc::shared_ptr<cnet::websocket> ws, cnet::h
                         { sockets.push_back(cc::move(ws)); });
 ```
 
-`cnet::websocket_options` — `protocols` (offered, in preference order), `max_message_bytes`, `tls`.
+`cnet::websocket_options` — `protocols` (offered, in preference order), `max_message_bytes`, `ping_interval_ms` (30 s, 0 = off), `pong_timeout_ms` (10 s), `tls`.
 
 Five things worth knowing.
 **A server handler MUST keep its `shared_ptr`** — the server holds none, so a dropped WebSocket closes.
@@ -335,6 +335,7 @@ Five things worth knowing.
 A message that arrived while nobody was waiting is held in order, and delivered before the close that followed it.
 **Sends queue** rather than interleaving frames on the wire, so two senders cannot corrupt each other's message.
 **`websocket_route` is checked before the ordinary routes**, and a request that matches one without being a valid upgrade gets a 400 rather than a 404.
+**An idle connection is pinged, and an unanswered ping fails it** — which is what turns a peer that vanished into a `timed_out` instead of a `receive` that waits forever.
 [docs/websockets.md](docs/websockets.md) is the reasoning.
 
 ## Politeness and retries

@@ -49,6 +49,21 @@ struct cnet::websocket_options
     /// message that never arrives.
     isize max_message_bytes = 8 * 1024 * 1024;
 
+    /// How often an IDLE connection is pinged, and how long the pong may take.
+    ///
+    /// **This is what turns a dead connection into a failure instead of a wait.**
+    /// A peer whose machine vanished sends no FIN, so a `receive` on that connection is indistinguishable from one on
+    /// a quiet connection -- and `receive` defaults to no deadline at all.
+    /// It is also what keeps a long-lived connection alive through a proxy that drops idle ones.
+    ///
+    /// Idle means idle: a connection carrying messages is never pinged, since the messages already prove it is there.
+    /// 0 turns keepalives off.
+    i32 ping_interval_ms = 30'000;
+
+    /// How long a pong may take before the connection is treated as dead.
+    /// The receive then fails with `timed_out` rather than waiting for a peer that is not coming back.
+    i32 pong_timeout_ms = 10'000;
+
     /// What TLS is set up with, for a `wss` URL.
     tls_options tls;
 };

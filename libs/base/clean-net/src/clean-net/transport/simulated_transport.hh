@@ -61,6 +61,8 @@ public:
     /// Whatever the transport underneath says: simulating a link cannot conjure one.
     [[nodiscard]] bool is_supported() const override;
 
+    [[nodiscard]] io_system& io() const override;
+
     [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,
                                                                               deadline d,
                                                                               tcp_options const& options,

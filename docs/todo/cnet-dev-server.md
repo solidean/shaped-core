@@ -26,6 +26,8 @@ is not the example that teaches someone what the server is.
 **A symlink out of a served root**, and streaming a large static file rather than reading it whole.
 Both want a path surface clean-core deliberately does not have; see
 [structure.md](../../libs/base/clean-net/docs/structure.md#what-clean-core-is-missing-that-this-library-wants).
+That surface is **its own change, and a virtualized one** -- the same seam the transport has, so a test stands a
+filesystem in the place of the real one.
 
 ## The decisions worth keeping
 

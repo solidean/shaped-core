@@ -76,6 +76,15 @@ It does not model the parts that would make it slower without making it more hon
 There is no flow control — a send never blocks, because backpressure is `simulated_transport`'s job.
 The addresses are make-believe: nothing is checked against the machine's real interfaces.
 
+## A transport names its io_system
+
+`cnet::transport::io()` is on the interface rather than only on the concrete types, because a connection is not the
+only thing built on a transport that needs one.
+A WebSocket keepalive is a timer, and a timer belongs to the reactor rather than to the socket it is about.
+
+Every transport already held one — it is where its deadlines are measured — so this states what was true rather than
+adding anything.
+
 ## Parking, and the races around it
 
 A virtual connection uses the reactor for exactly one thing: **parking**.

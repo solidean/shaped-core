@@ -502,6 +502,11 @@ cc::result<cc::unique_ptr<stream_listener>, error> virtual_network::listen(endpo
     return cc::make_unique<stream_listener>(std::make_unique<virtual_listener>(_state, cc::move(listener_state)));
 }
 
+io_system& virtual_network::io() const
+{
+    return _state->io;
+}
+
 cc::shared_async<cc::shared_ptr<stream_connection>> virtual_network::connect(endpoint const& where,
                                                                              deadline /*d*/,
                                                                              tcp_options const& /*options*/,

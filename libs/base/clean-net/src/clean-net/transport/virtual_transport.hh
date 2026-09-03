@@ -27,6 +27,8 @@ public:
     /// Always true: this is the one transport that needs nothing from the platform.
     [[nodiscard]] bool is_supported() const override { return true; }
 
+    [[nodiscard]] io_system& io() const override;
+
     [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,
                                                                               deadline d,
                                                                               tcp_options const& options,

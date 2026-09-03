@@ -49,6 +49,10 @@ struct partial_message
 /// Everything one WebSocket owns.
 struct websocket_state
 {
+    /// Where the keepalive's timers go.
+    /// A pointer rather than a reference so the state stays assignable; it never changes after adoption.
+    io_system* io = nullptr;
+
     cc::shared_ptr<stream_connection> connection;
     cancel_token token;
 
@@ -57,6 +61,9 @@ struct websocket_state
 
     cc::string negotiated_protocol;
     isize max_message_bytes = 8 * 1024 * 1024;
+
+    i32 ping_interval_ms = 30'000;
+    i32 pong_timeout_ms = 10'000;
 
     struct data
     {
@@ -77,6 +84,12 @@ struct websocket_state
         bool close_sent = false;
         cc::optional<error> fatal;
 
+        /// A ping went out and its pong has not come back.
+        bool awaiting_pong = false;
+
+        /// Anything at all arrived since the last keepalive tick, which is what "idle" is measured against.
+        bool heard_from_peer = false;
+
         /// Mask keys come from here, and they only have to differ rather than be unguessable.
         u32 mask_counter = 0x9E3779B9;
     };
@@ -90,6 +103,12 @@ namespace
 {
 void pump_reads(cc::shared_ptr<websocket_state> const& ws);
 void pump_writes(cc::shared_ptr<websocket_state> const& ws);
+void arm_keepalive(cc::shared_ptr<websocket_state> const& ws, i32 delay_ms);
+void deliver(cc::shared_ptr<websocket_state> const& ws);
+[[nodiscard]] cc::shared_async<cc::unit> enqueue_frame(cc::shared_ptr<websocket_state> const& ws,
+                                                       impl::ws_opcode opcode,
+                                                       cc::span<byte const> payload,
+                                                       deadline d);
 
 /// Queue a frame, and start writing if nothing else is.
 [[nodiscard]] cc::shared_async<cc::unit> enqueue_frame(cc::shared_ptr<websocket_state> const& ws,
@@ -184,6 +203,99 @@ void pump_writes(cc::shared_ptr<websocket_state> const& ws)
                      });
 }
 
+/// What the next keepalive tick decided.
+enum class keepalive_step : u8
+{
+    /// The connection is closed or already failed; the chain ends here.
+    stop,
+
+    /// Something arrived since the last tick, so there is nothing to prove.
+    still_busy,
+
+    /// Nothing arrived and nothing is outstanding: send a ping.
+    send_ping,
+
+    /// A ping went out and no pong came back.
+    peer_is_gone,
+};
+
+/// One keepalive tick: ping an idle connection, and fail one whose ping went unanswered.
+///
+/// **The point is not the ping, it is the pong that does not arrive.**
+/// A peer whose machine vanished sends no FIN, so a receive on that connection waits exactly as long as one on a
+/// quiet connection would -- which, with the default deadline, is forever.
+void keepalive_tick(cc::shared_ptr<websocket_state> const& ws)
+{
+    auto const step = ws->state.lock(
+        [](websocket_state::data& d_state)
+        {
+            if (d_state.closed || d_state.fatal.has_value())
+                return keepalive_step::stop;
+
+            if (d_state.awaiting_pong)
+                return keepalive_step::peer_is_gone;
+
+            if (d_state.heard_from_peer)
+            {
+                d_state.heard_from_peer = false;
+                return keepalive_step::still_busy;
+            }
+
+            d_state.awaiting_pong = true;
+            return keepalive_step::send_ping;
+        });
+
+    switch (step)
+    {
+    case keepalive_step::stop:
+        return;
+
+    case keepalive_step::still_busy:
+        arm_keepalive(ws, ws->ping_interval_ms);
+        return;
+
+    case keepalive_step::send_ping:
+        // An empty ping: the payload is echoed by the peer and nothing here reads it, so carrying one would only be
+        // bytes to check.
+        (void)enqueue_frame(ws, impl::ws_opcode::ping, {}, deadline::after_ms(ws->pong_timeout_ms));
+
+        // And start reading if nothing is: a keepalive that only works while the caller happens to be receiving is
+        // one that fails exactly when it is needed.
+        pump_reads(ws);
+
+        // The next tick is the deadline for the pong rather than the next ping, which is what makes one timer do
+        // both jobs.
+        arm_keepalive(ws, ws->pong_timeout_ms);
+        return;
+
+    case keepalive_step::peer_is_gone:
+        ws->state.lock(
+            [](websocket_state::data& d_state)
+            {
+                d_state.fatal = error{.code = error_code::timed_out,
+                                      .native_code = 0,
+                                      .message = cc::string("the peer did not answer a keepalive ping")};
+                d_state.closed = true;
+            });
+
+        if (ws->connection.is_valid())
+            ws->connection->close();
+
+        deliver(ws);
+        return;
+    }
+}
+
+void arm_keepalive(cc::shared_ptr<websocket_state> const& ws, i32 delay_ms)
+{
+    if (ws->io == nullptr || delay_ms <= 0)
+        return;
+
+    // The timer holds the state alive, so a WebSocket nobody references any more is freed one tick late rather than
+    // at once -- its connection is closed immediately either way, which is the part that holds a resource.
+    impl::run_after(*ws->io, delay_ms, [ws] { keepalive_tick(ws); });
+}
+
 /// Answer a control frame, which is this layer's job rather than the caller's.
 void handle_control(cc::shared_ptr<websocket_state> const& ws, impl::ws_opcode opcode, cc::vector<byte> payload)
 {
@@ -194,7 +306,12 @@ void handle_control(cc::shared_ptr<websocket_state> const& ws, impl::ws_opcode o
     }
 
     if (opcode == impl::ws_opcode::pong)
-        return; // nothing here sends pings, so a pong is somebody being polite
+    {
+        // Which ping it answers is not checked: the payload is echoed and any pong at all proves the peer is there,
+        // which is the only thing the keepalive is asking.
+        ws->state.lock([](websocket_state::data& d_state) { d_state.awaiting_pong = false; });
+        return;
+    }
 
     // A close is acknowledged once and then the connection is over.
     auto const already_sent = ws->state.lock(
@@ -416,12 +533,19 @@ void parse_available(cc::shared_ptr<websocket_state> const& ws)
 
     deliver(ws);
 
-    // Keep reading while somebody is waiting and the connection is alive.
     auto const should_read = ws->state.lock(
         [](websocket_state::data& d_state)
         {
-            return d_state.pending_receive.is_valid() && d_state.ready.empty() && !d_state.reading && !d_state.closed
-                && !d_state.fatal.has_value();
+            if (d_state.reading || d_state.closed || d_state.fatal.has_value())
+                return false;
+
+            // Somebody is waiting for a message and nothing is queued for them.
+            if (d_state.pending_receive.is_valid() && d_state.ready.empty())
+                return true;
+
+            // Or a ping is outstanding, and the pong arrives nowhere unless somebody reads.
+            // `ready` staying empty is the bound, so a peer cannot use the pong window to make us buffer.
+            return d_state.awaiting_pong && d_state.ready.empty();
         });
 
     if (should_read)
@@ -462,6 +586,9 @@ void pump_reads(cc::shared_ptr<websocket_state> const& ws)
                                  }
 
                                  auto const n = received->value();
+                                 if (n > 0)
+                                     d_state.heard_from_peer = true;
+
                                  for (isize i = 0; i < n; ++i)
                                      d_state.inbox.push_back(ws->read_buffer[i]);
                              });
@@ -560,26 +687,26 @@ endpoint websocket::peer() const
 
 namespace impl
 {
-cc::shared_ptr<websocket> adopt_websocket(cc::shared_ptr<stream_connection> connection,
-                                          bool is_client,
-                                          cc::string negotiated_protocol,
-                                          cc::vector<byte> leftover,
-                                          isize max_message_bytes,
-                                          cancel_token const& token)
+cc::shared_ptr<websocket> adopt_websocket(io_system& io, websocket_adoption adoption)
 {
     auto state = cc::make_shared<websocket_state>();
-    state->connection = cc::move(connection);
-    state->token = token;
-    state->is_client = is_client;
-    state->negotiated_protocol = cc::move(negotiated_protocol);
-    state->max_message_bytes = max_message_bytes;
+    state->io = &io;
+    state->connection = cc::move(adoption.connection);
+    state->token = adoption.token;
+    state->is_client = adoption.is_client;
+    state->negotiated_protocol = cc::move(adoption.negotiated_protocol);
+    state->max_message_bytes = adoption.max_message_bytes;
+    state->ping_interval_ms = adoption.ping_interval_ms;
+    state->pong_timeout_ms = adoption.pong_timeout_ms;
     state->read_buffer.resize_to_defaulted(k_read_chunk);
 
     // Bytes that arrived with the handshake belong to the stream: the peer is allowed to send its first message in
     // the same packet as its last handshake byte, and a server that drops them loses a message.
-    state->state.lock([&](websocket_state::data& d_state) { d_state.inbox = cc::move(leftover); });
+    state->state.lock([&](websocket_state::data& d_state) { d_state.inbox = cc::move(adoption.leftover); });
 
-    return cc::make_shared<websocket>(cc::move(state));
+    auto socket = cc::make_shared<websocket>(state);
+    arm_keepalive(state, state->ping_interval_ms);
+    return socket;
 }
 } // namespace impl
 } // namespace cnet

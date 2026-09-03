@@ -338,8 +338,14 @@ struct route_match
                          auto connection = cc::move(s->connection);
                          s->connection = {};
 
-                         auto ws = impl::adopt_websocket(cc::move(connection), false, cc::string(), cc::move(s->unparsed),
-                                                         s->server->desc.max_websocket_message_bytes, s->server->token);
+                         auto ws = impl::adopt_websocket(
+                             s->server->t.io(), {.connection = cc::move(connection),
+                                                 .is_client = false,
+                                                 .leftover = cc::move(s->unparsed),
+                                                 .max_message_bytes = s->server->desc.max_websocket_message_bytes,
+                                                 .ping_interval_ms = s->server->desc.websocket_ping_interval_ms,
+                                                 .pong_timeout_ms = s->server->desc.websocket_pong_timeout_ms,
+                                                 .token = s->server->token});
                          (*handler)(cc::move(ws), request);
                      });
 

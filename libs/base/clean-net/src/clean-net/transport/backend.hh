@@ -105,6 +105,12 @@ public:
                                                                                       tcp_options const& options,
                                                                                       cancel_token const& token) = 0;
 
+    /// The io_system this transport submits to, and on whose clock its deadlines are measured.
+    ///
+    /// Named here because a connection is not the only thing built on a transport that needs one: a keepalive is a
+    /// timer, and a timer belongs to the reactor rather than to the socket it is about.
+    [[nodiscard]] virtual io_system& io() const = 0;
+
     /// Binding and listening never waits, so there is nothing here for a token to cancel.
     [[nodiscard]] virtual cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
                                                                                     tcp_listen_options const& options)

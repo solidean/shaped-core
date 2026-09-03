@@ -177,6 +177,8 @@ class cnet::native_transport final : public cnet::transport
 public:
     explicit native_transport(io_system& io) : _io(io) {}
 
+    [[nodiscard]] io_system& io() const override { return _io; }
+
     [[nodiscard]] bool is_supported() const override;
 
     [[nodiscard]] cc::shared_async<cc::shared_ptr<stream_connection>> connect(endpoint const& where,

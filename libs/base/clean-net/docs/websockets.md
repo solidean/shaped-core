@@ -51,6 +51,38 @@ A message that arrives while nobody is waiting is held, in order, and handed ove
 **A message that arrived before the connection ended is delivered before the close is reported.**
 The bytes are here; the close is the next thing the caller hears about rather than instead of them.
 
+## Keepalives, and the failure they exist for
+
+An idle connection is pinged every `ping_interval_ms`, and the pong must come back within `pong_timeout_ms` or the
+connection fails with `timed_out`.
+Both default to on -- 30 seconds and 10 -- and 0 turns them off.
+
+**The point is not the ping, it is the pong that does not arrive.**
+A peer whose machine vanished sends no FIN, so a `receive` on that connection waits exactly as long as one on a quiet
+connection would.
+With `receive`'s default deadline, that is forever.
+Nothing below this layer can tell the two apart, which is why the answer lives here.
+
+The second reason is a proxy: an idle connection is one a proxy will drop, and a debug feed that only speaks when
+something happens is idle most of the time.
+
+**Idle means idle.**
+A connection carrying messages is never pinged -- the messages already prove the peer is there -- so the cost on a
+busy connection is one boolean per read.
+
+**The keepalive drives its own read.**
+Reads are otherwise demand-driven: nothing is read unless somebody is waiting for a message.
+A keepalive that inherited that would only work while the caller happened to be receiving, which is to say it would
+fail exactly when it is needed.
+So a ping starts a read if none is running, bounded by there being no message already queued -- a peer cannot use the
+pong window to make this side buffer.
+
+One timer does both jobs: it is armed for the interval, and once a ping goes out it is re-armed for the pong timeout.
+Which ping a pong answers is not checked, because any pong at all proves what is being asked.
+
+A WebSocket nobody references any more is freed one tick late rather than at once, since the timer holds it.
+Its connection is closed immediately either way, which is the part that holds a resource.
+
 ## What is a protocol error rather than a workaround
 
 The framing is strict, and every rule it enforces exists so two implementations read the same bytes the same way:
@@ -113,6 +145,7 @@ which is the same backend story as HTTP.
 ## Not here yet
 
 - **A browser backend**, where `WebSocket` is the platform's and not ours to write.
+  Keepalives go with it: a browser answers pings itself and gives a page no way to send one.
 - **Fragmented sends.** Everything sent goes out as one frame with `FIN` set; the reader handles fragments because
   peers send them.
 - **Compression** (`permessage-deflate`), and the extension negotiation that goes with it.

@@ -24,6 +24,9 @@ constexpr isize k_handshake_read_chunk = 4 * 1024;
 /// The state one handshake carries while it is in flight.
 struct handshake
 {
+    /// Where the keepalive's timers go once the connection stops being HTTP.
+    io_system* io = nullptr;
+
     cc::shared_async<cc::shared_ptr<websocket>> promise;
     cc::shared_ptr<stream_connection> connection;
     cc::string expected_accept;
@@ -129,8 +132,14 @@ void consume(cc::shared_ptr<handshake> const& h)
         return;
     }
 
-    auto ws = impl::adopt_websocket(cc::move(h->connection), true, cc::move(checked).value(), cc::move(h->pending),
-                                    h->options.max_message_bytes, h->token);
+    auto ws = impl::adopt_websocket(*h->io, {.connection = cc::move(h->connection),
+                                             .is_client = true,
+                                             .negotiated_protocol = cc::move(checked).value(),
+                                             .leftover = cc::move(h->pending),
+                                             .max_message_bytes = h->options.max_message_bytes,
+                                             .ping_interval_ms = h->options.ping_interval_ms,
+                                             .pong_timeout_ms = h->options.pong_timeout_ms,
+                                             .token = h->token});
     h->promise->push_value(cc::move(ws));
 }
 
@@ -322,6 +331,7 @@ cc::shared_async<cc::shared_ptr<websocket>> websocket_connect(transport& t,
         return impl::failed_async<cc::shared_ptr<websocket>>(cc::move(prepared).error());
 
     auto const h = cc::move(prepared).value();
+    h->io = &t.io();
     upgrade(h, connect_to_host(t, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure);
     return h->promise;
 }
@@ -340,6 +350,7 @@ cc::shared_async<cc::shared_ptr<websocket>> websocket_connect(io_system& io,
         return impl::failed_async<cc::shared_ptr<websocket>>(cc::move(prepared).error());
 
     auto const h = cc::move(prepared).value();
+    h->io = &io;
     upgrade(h, connect_to_host(io, r, target.host, target.port, {.timeout = d}, token), target.host, target.secure);
     return h->promise;
 }
