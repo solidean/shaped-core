@@ -144,6 +144,7 @@ if(SC_BUILD_TESTS)
         tests/tls-test.cc
         tests/http-target-test.cc
         tests/http1-test.cc
+        tests/http1-fuzz-test.cc
         tests/http-client-test.cc
         tests/http-politeness-test.cc
         tests/http-server-test.cc

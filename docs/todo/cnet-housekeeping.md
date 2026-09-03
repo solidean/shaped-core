@@ -3,6 +3,8 @@
 **Status:** each is decided and small.
 One of them is a real defect in babel, found while building this.
 
+The parser fuzzer is **done** — `tests/http1-fuzz-test.cc`, over nexus's API-sequence engine.
+
 ## A `doctor` line for the networking environment
 
 `uv run dev.py doctor` should name the TLS backend and which HTTP backends this machine offers — advisory,
@@ -35,14 +37,6 @@ A bigger tier is not automatically better, and choosing by eye is how a bigger o
 support.
 
 `src/clean-net/all.hh` already exists as the umbrella such a tier would name.
-
-## A fuzzer for the HTTP/1.1 parser
-
-Once the parser exists.
-It is the one component in this library that handles bytes from outside the process, which is what makes it the one
-that earns a fuzzer, and nexus already has the API-sequence mechanism.
-
-Agreed as a follow-up rather than a blocker.
 
 ## Examples
 

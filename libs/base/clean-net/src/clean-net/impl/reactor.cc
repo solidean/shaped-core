@@ -35,9 +35,28 @@ cc::result<cc::unique_ptr<reactor>, error> reactor::try_create(clock& c)
     return cc::make_unique<reactor>(c, wake.value());
 }
 
+namespace
+{
+/// The longest a wait may park while some socket is going unwatched.
+constexpr i32 k_overflow_slice_ms = 20;
+} // namespace
+
 void reactor::submit(io_operation* op)
 {
     CC_ASSERT(op != nullptr, "submitting a null operation");
+
+#if CC_ASSERT_ENABLED
+    // Two reads on one socket is the caller error that hurts most: the bytes go to whichever completes first, so the
+    // damage is a stream silently torn in half rather than a failure anybody sees.
+    // Checked here because this is the one place that already knows what is outstanding, and it costs a walk of a list
+    // that is short by construction.
+    if (op->socket != k_invalid_socket)
+        for (auto const& e : _pending)
+            CC_ASSERT(e.cancelled || e.op->socket != op->socket || e.op->kind != op->kind,
+                      "two operations of the same kind are in flight on one socket: the second would take what the "
+                      "first was promised");
+#endif
+
     op->transferred = 0;
 
     auto e = entry{.op = op};
@@ -80,6 +99,18 @@ i32 reactor::clamp_timeout(i32 timeout_ms) const
     for (auto const& e : _pending)
         if (e.cancelled || e.signalled || e.immediate_failure.has_value())
             return 0;
+
+    // A wait that could not watch every socket must be short, because one of the sockets it left out may be ready
+    // right now and nothing will say so.
+    // Short rather than zero: zero is a busy loop, and this is the fallback for a load the poller was never the right
+    // choice for.
+    auto watchable = isize(0);
+    for (auto const& e : _pending)
+        if (!e.cancelled && !e.immediate_failure.has_value() && e.op->socket != k_invalid_socket)
+            ++watchable;
+
+    if (watchable > max_watched() && (timeout_ms < 0 || timeout_ms > k_overflow_slice_ms))
+        timeout_ms = k_overflow_slice_ms;
 
     auto const now = _clock.now_ns();
     auto shortest = timeout_ms;

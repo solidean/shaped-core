@@ -148,6 +148,11 @@ cc::result<native_socket, error> reactor::create_wake_channel()
     return s;
 }
 
+isize reactor::max_watched()
+{
+    return k_max_watched;
+}
+
 void reactor::wake()
 {
     if (_wake_socket == k_invalid_socket)
@@ -163,6 +168,15 @@ void reactor::wake()
 
 void reactor::drain_wake()
 {
+    // THE ORDER HERE IS THE INTERESTING PART, and the other one is a hang.
+    //
+    // A `wake()` landing between these two lines sees the flag still set, sends nothing, and is lost -- so the reactor
+    // parks with work waiting, until the next wake or the caller's own wait cap ends it.
+    // A bounded latency, and self-correcting: the flag is false by then, so the next wake gets through.
+    //
+    // Clearing the flag FIRST instead would trade that for a permanent one: the wake in the window would send its byte
+    // into a drain that is still running, the byte would be swallowed, and the flag would stay set with nothing in
+    // flight -- suppressing every wake from then on.
     drain_datagrams(_wake_socket);
     _wake_pending.store(false);
 }
@@ -278,8 +292,14 @@ void reactor::poll_once(i32 timeout_ms)
         ++watched;
     }
 
-    for (auto& e : _pending)
+    // From the cursor rather than from the front, so that past the cap the tail is watched on a later round instead of
+    // never.
+    auto const count = _pending.size();
+    auto scanned = isize(0);
+    for (; scanned < count; ++scanned)
     {
+        auto& e = _pending[(_watch_cursor + scanned) % count];
+
         if (e.cancelled || e.immediate_failure.has_value())
             continue;
         if (e.op->socket == k_invalid_socket)
@@ -300,6 +320,9 @@ void reactor::poll_once(i32 timeout_ms)
         }
         ++watched;
     }
+
+    if (count > 0)
+        _watch_cursor = (_watch_cursor + scanned) % count;
 
     if (watched == 0)
         return;
@@ -348,9 +371,15 @@ void reactor::poll_once(i32 timeout_ms)
     if (_wake_socket != k_invalid_socket)
         fds.push_back({.fd = raw_of(_wake_socket), .events = POLLIN, .revents = 0});
 
-    for (isize i = 0; i < _pending.size(); ++i)
+    // From the cursor rather than from the front, so that past the cap the tail is watched on a later round instead of
+    // never.
+    auto const count = _pending.size();
+    auto scanned = isize(0);
+    for (; scanned < count; ++scanned)
     {
+        auto const i = (_watch_cursor + scanned) % count;
         auto& e = _pending[i];
+
         if (e.cancelled || e.immediate_failure.has_value())
             continue;
         if (e.op->socket == k_invalid_socket)
@@ -368,6 +397,9 @@ void reactor::poll_once(i32 timeout_ms)
         fds.push_back({.fd = raw_of(e.op->socket), .events = events, .revents = 0});
         indices.push_back(i);
     }
+
+    if (count > 0)
+        _watch_cursor = (_watch_cursor + scanned) % count;
 
     if (fds.empty())
         return;
@@ -407,6 +439,12 @@ cc::result<native_socket, error> reactor::create_wake_channel()
 {
     // No socket to wake with, and none needed: a reactor here never parks, because io_system runs it unthreaded.
     return k_invalid_socket;
+}
+
+isize reactor::max_watched()
+{
+    // Nothing is ever watched, so the cap never binds.
+    return 0;
 }
 
 void reactor::wake()

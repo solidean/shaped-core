@@ -229,8 +229,12 @@ afterwards is refused rather than accepted by a server that will never read from
 
 ## Still to come
 
-Request bodies that stream rather than arriving as one span, response trailers reaching the caller, and the parser's
-fuzzer — it is the one component here that handles bytes from outside the process, so it is the one that earns one.
+Request bodies that stream rather than arriving as one span, and response trailers reaching the caller.
+
+The parser has its fuzzer now, in `tests/http1-fuzz-test.cc`.
+What it checks is not "does it crash": a parser that merely does not crash can still be a request smuggling primitive,
+so the invariant is that **the same bytes parse the same way however they are split**.
+A chunk boundary is exactly what a parser sees differently from anybody reasoning about the message as a whole.
 
 Static files could stream through the same writer instead of being read whole, which is what a large asset wants.
 It needs the same path surface in clean-core that the symlink gap does.

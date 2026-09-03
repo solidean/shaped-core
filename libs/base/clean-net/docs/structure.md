@@ -120,6 +120,11 @@ unverified.
 
 The cost is written down rather than discovered: both pollers are O(n) in pending operations per wait, and `select`
 watches at most `FD_SETSIZE` sockets.
+
+**Past that cap a wait starts from where the last one stopped**, rather than from the front — otherwise the tail of the
+list is never watched at all, which is a connection starved rather than slow.
+A wait that had to leave sockets out also parks only briefly, since one of the sockets it left out may be ready and
+nothing will say so.
 Fine for a dev server and a pooled HTTP client; wrong for ten thousand connections, which is the point at which
 replacing that one file earns its keep.
 

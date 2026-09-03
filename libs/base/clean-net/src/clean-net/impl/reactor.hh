@@ -160,6 +160,10 @@ private:
         cc::optional<error> failure;
     };
 
+    /// The most sockets one wait can watch, which `select`'s `FD_SETSIZE` fixes on Windows.
+    /// Platform-specific, like `poll_once` itself.
+    [[nodiscard]] static isize max_watched();
+
     /// Ask the OS what is ready, and record it on the entries.
     /// Platform-specific, along with `drive_socket`, `wake` and `drain_wake`; everything else here is not.
     void poll_once(i32 timeout_ms);
@@ -184,5 +188,14 @@ private:
     native_socket _wake_socket = k_invalid_socket;
     cc::atomic<bool> _wake_pending = false;
     cc::vector<entry> _pending;
+
+    /// Where the next wait starts watching from.
+    ///
+    /// Past `max_watched()` operations a wait cannot watch them all, and always starting at the front would mean the
+    /// tail is never watched at all -- a connection that is starved rather than slow.
+    /// So each wait resumes where the last one stopped.
+    /// It is an index into a vector that changes between waits, which makes this approximate: the property it buys is
+    /// that no operation is systematically skipped, not that turns are exactly fair.
+    isize _watch_cursor = 0;
 };
 } // namespace cnet::impl
