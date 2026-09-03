@@ -114,10 +114,14 @@ struct listener_fixture
 };
 
 /// One connect and one accept against a fresh listener, driven through `io`.
-void check_connect_and_accept(io_system& io)
+///
+/// False when this platform has no sockets to make one from, which the caller turns into a skip: an io_system exists
+/// there anyway, because a request served by `fetch` still has a deadline.
+[[nodiscard]] bool check_connect_and_accept(io_system& io)
 {
     auto listener = listener_fixture::make();
-    CHECK(listener.has_value());
+    if (!listener.has_value())
+        return false;
 
     auto accept_op = signal_op();
     accept_op.kind = impl::io_op_kind::accept;
@@ -142,6 +146,7 @@ void check_connect_and_accept(io_system& io)
 
     // Nothing is left outstanding, which is the property a leaked operation would break.
     CHECK(wait_for([&] { return io.pending_count() == 0; }));
+    return true;
 }
 } // namespace
 
@@ -167,7 +172,8 @@ TEST("cnet - the io_system carries a connect and an accept to completion")
     if (io.has_error())
         SKIP("this platform has no sockets");
 
-    check_connect_and_accept(*io.value());
+    if (!check_connect_and_accept(*io.value()))
+        SKIP("this platform has no sockets");
 }
 
 TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
@@ -182,7 +188,8 @@ TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
     // Nothing below calls into cnet to make progress: cc::thread_pump_all() is the only driver, and the actor
     // registered itself with it.
     // A cnet-specific pump would be the deadlock that registry exists to prevent.
-    check_connect_and_accept(*io.value());
+    if (!check_connect_and_accept(*io.value()))
+        SKIP("this platform has no sockets");
 }
 
 TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted")
@@ -212,7 +219,8 @@ TEST("cnet - a deadline is measured against the clock the io_system was given")
     CHECK(&io.value()->time_source() == &clk);
 
     auto created = impl::create_udp_socket(ip_family::v4);
-    CHECK(created.has_value());
+    if (created.has_error())
+        SKIP("this platform has no sockets");
     auto const s = socket_guard(created.value());
     CHECK(impl::bind_socket(s.handle, endpoint(ip_address::loopback(ip_family::v4), 0), true).has_value());
 
@@ -242,7 +250,8 @@ TEST("cnet - cancelling through the io_system completes the operation as cancell
         SKIP("this platform has no sockets");
 
     auto created = impl::create_udp_socket(ip_family::v4);
-    CHECK(created.has_value());
+    if (created.has_error())
+        SKIP("this platform has no sockets");
     auto const s = socket_guard(created.value());
     CHECK(impl::bind_socket(s.handle, endpoint(ip_address::loopback(ip_family::v4), 0), true).has_value());
 

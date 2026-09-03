@@ -322,8 +322,12 @@ TEST("cnet - stopping the server ends everything in flight")
     CHECK(pump_until([&] { return fixture.server->open_connections() == 0; }));
 
     // And nothing new is accepted afterwards.
+    //
+    // Waited out on a clock rather than a round count: what is being asserted is that the request FAILS, and a round
+    // budget would make that a claim about how fast this machine spins -- which it is not, and which is a different
+    // number on every one CI runs.
     auto late = http_get(*fixture.client, fixture.url_for("/"));
-    CHECK(pump_until([&] { return late->is_ready(); }, 200));
+    CHECK(pump_for([&] { return late->is_ready(); }));
     CHECK(late->try_error() != nullptr);
 }
 

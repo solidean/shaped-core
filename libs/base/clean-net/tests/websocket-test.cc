@@ -111,6 +111,9 @@ struct ws_fixture
 
 TEST("cnet - a websocket carries a message each way")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = ws_fixture();
 
     fixture.server->websocket_route("/socket", [&fixture](cc::shared_ptr<websocket> ws, http_server_request const&)
@@ -145,6 +148,9 @@ TEST("cnet - a websocket carries a message each way")
 
 TEST("cnet - a websocket carries binary and large messages")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = ws_fixture();
 
     fixture.server->websocket_route("/socket", [&fixture](cc::shared_ptr<websocket> ws, http_server_request const&)
@@ -177,6 +183,9 @@ TEST("cnet - a websocket carries binary and large messages")
 
 TEST("cnet - a websocket message that arrived before anybody asked is not lost")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = ws_fixture();
 
     fixture.server->websocket_route("/socket", [&fixture](cc::shared_ptr<websocket> ws, http_server_request const&)
@@ -207,6 +216,9 @@ TEST("cnet - a websocket message that arrived before anybody asked is not lost")
 
 TEST("cnet - closing a websocket ends the other end's receive")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = ws_fixture();
 
     fixture.server->websocket_route("/socket", [&fixture](cc::shared_ptr<websocket> ws, http_server_request const&)
@@ -247,6 +259,9 @@ TEST("cnet - a request that is not an upgrade gets a 400 from a websocket route"
 
 TEST("cnet - a websocket route and an ordinary route can share a path")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = ws_fixture();
 
     fixture.server->route(http_method::get, "/thing",
@@ -353,6 +368,9 @@ TEST("cnet - unmasking undoes masking, chunk by chunk")
 
 TEST("cnet - the accept key is the one RFC 6455 gives as an example")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto const accept = impl::websocket_accept_key("dGhlIHNhbXBsZSBub25jZQ==");
     REQUIRE(accept.has_value());
     CHECK(accept.value() == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
@@ -360,6 +378,9 @@ TEST("cnet - the accept key is the one RFC 6455 gives as an example")
 
 TEST("cnet - a generated key is 16 bytes of base64 and never the same twice")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto const a = impl::generate_websocket_key();
     auto const b = impl::generate_websocket_key();
     REQUIRE(a.has_value());
@@ -385,6 +406,9 @@ TEST("cnet - close codes with holes in them")
 
 TEST("cnet - a websocket over a real socket, both ends in one process")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
         SKIP("this platform has no sockets");
@@ -457,6 +481,9 @@ struct keepalive_fixture
 
 TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
 {
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
     auto fixture = keepalive_fixture({.websocket_ping_interval_ms = 1'000, .websocket_pong_timeout_ms = 500});
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url(),

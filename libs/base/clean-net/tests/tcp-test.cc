@@ -243,6 +243,11 @@ TEST("cnet - a connect deadline is measured against the io_system's clock")
     if (io.has_error())
         SKIP("this platform has no sockets");
 
+    // The io_system exists without sockets -- a `fetch` still has a deadline -- so it is the TRANSPORT that answers
+    // whether there is anything to connect with.
+    if (!native_transport(*io.value()).is_supported())
+        SKIP("this platform has no sockets");
+
     // 203.0.113.0/24 is TEST-NET-3, reserved by RFC 5737 for documentation.
     // Nothing routes there, so the connect hangs rather than being refused -- which is the case a deadline is for,
     // and the reason this needs no server at all.
@@ -263,6 +268,11 @@ TEST("cnet - listening needs an address, and reports what it could not do")
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
         SKIP("this platform has no sockets");
+
+    // A platform that cannot listen at all reports `unsupported` for every address, which is a different answer from
+    // the one about the address and not the one being checked here.
+    if (!native_transport(*io.value()).is_supported())
+        SKIP("this platform cannot listen");
 
     auto const nowhere = stream_listener::try_create(*io.value(), endpoint());
     CHECK(nowhere.has_error());

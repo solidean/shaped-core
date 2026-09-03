@@ -66,8 +66,22 @@ struct tls_fixture
 
 TEST("cnet - TLS reports whether this build has it")
 {
-    // Everything below needs a backend; the wasm build has none and says so rather than pretending.
-    CHECK(tls_is_supported());
+    // NOT an assertion that it is supported.
+    // The wasm build has no backend and says so rather than pretending, which is the whole reason this is a runtime
+    // question -- so what must hold is that the answer and the behaviour agree.
+    auto const identity = tls_make_self_signed("localhost");
+
+    if (tls_is_supported())
+    {
+        CHECK(identity.has_value());
+        return;
+    }
+
+    REQUIRE(identity.has_error());
+
+    auto const says_so
+        = identity.error().code == error_code::unsupported || identity.error().code == error_code::backend_missing;
+    CHECK(says_so);
 }
 
 TEST("cnet - a handshake over a virtual network carries bytes both ways")
