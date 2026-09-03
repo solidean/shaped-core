@@ -156,9 +156,15 @@ Checks, in order:
 - the **coverage** tools, `llvm-cov` and `llvm-profdata`, which coverage and PGO both need
 - the **emscripten** toolchain
 - the **graphics environment** — Vulkan headers and runtime, windowed-surface support, `sr::window`'s SDL3 backend, and DXC
+- the **networking environment** — the vendored TLS backend and its version, whether this platform can enumerate its own trust anchors, a system libcurl, and which HTTP backends this build compiled in
 - **clangd** — found, a published `compile_commands.json` present, and a real file parsed cleanly
 
 A red line names the fix.
+
+The networking checks are advisory for the same reason the graphics ones are, and they answer a question no build output does.
+`cnet::tls_is_supported()` and `cnet::http_client::level()` are runtime answers, so a build with no TLS still declares `cnet::tls_connect`.
+The gap then shows up as an HTTPS request failing for a reason nobody expected.
+The `system libcurl` line reports the machine rather than the build, since the backend that would use it is not written yet: it says whether that backend would have anything to bind to.
 
 The graphics checks are advisory too, and for a stronger reason: nothing there can fail a build.
 Every graphics library degrades instead of disappearing, so a checkout missing all of it still configures, builds and passes the whole suite.

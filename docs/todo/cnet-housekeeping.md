@@ -7,27 +7,7 @@ The parser fuzzer is **done** — `tests/http1-fuzz-test.cc`, over nexus's API-s
 So are both examples, `clean-net/download` and `clean-net/dev-server`.
 So is the flaky test that used to time out about once in 35 runs: two lost wakeups in `virtual_network`, and a test
 that advanced a manual clock past a deadline nobody had computed yet.
-
-## A `doctor` line for the networking environment
-
-`uv run dev.py doctor` should name the TLS backend and which HTTP backends this machine offers — advisory,
-tri-state, never a failure.
-
-Model it on [graphics.py](../../tools/dev/lib/toolchain/graphics.py), whose module docstring is the design statement
-for exactly this situation: the library degrades rather than disappearing, so a gap is invisible until something does
-not work.
-A new `network.py` beside it, spliced into `doctor()` the same way.
-
-The checks worth having, and the shapes to copy:
-
-- **The TLS backend**, once mbedTLS is vendored — a fetch-marker style check, though vendored means it is always
-  there, so this reports the version rather than presence.
-- **A system libcurl**, via `ctypes.util.find_library` — the same shape `_vulkan_runtime_check` uses for the Vulkan
-  loader, and the closest existing analogue to "is there a system libcurl".
-- **Which HTTP backends this build compiled in**, so the automatic order in
-  [cnet-http-backends.md](cnet-http-backends.md) is inspectable rather than inferred.
-
-CI runs doctor purely informationally with `continue-on-error`, so nothing here can break a build.
+So is the `doctor` line, in [network.py](../../tools/dev/lib/toolchain/network.py).
 
 ## A precompiled-header tier
 
