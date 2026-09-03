@@ -1,0 +1,22 @@
+# Pin and license for the upstream vendored here.
+# vendor-mbedtls.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: mbedtls
+    homepage: https://www.trustedfirmware.org/projects/mbed-tls
+    source: git
+    repo: https://github.com/Mbed-TLS/mbedtls
+    track: tags
+    tag: v3.6.7
+    digest_algo: git-commit
+    pin_hash: 068ff080b369adfac81509f9b57b2afabaf82dc5
+    license: Apache-2.0
+    license_files: [LICENSE]
+    used_by: clean-net — the TLS handshake and record layer behind cnet's TLS connections
+    notes: |
+      Upstream is dual-licensed `Apache-2.0 OR GPL-2.0-or-later`, at the user's choice, and every source file carries that SPDX expression.
+      We take the Apache-2.0 branch, which is what this declares: the license policy requires every branch of an expression to be allowed, and `GPL-2.0-only` is on the denied list, so the literal dual expression would fail the gate for a branch we do not rely on.
+      The 3.6 LTS line rather than 4.x: 4.0 splits the crypto half into a separate tf-psa-crypto repository, which is a second pin and a submodule for no benefit we need.
+      Vendored rather than fetched because a build that cannot do HTTPS is not a working build of clean-net — the same argument zstd and zlib already make.
+      The vendored subset is include/ and library/ and nothing else. Upstream's programs/, tests/, docs/ and build machinery are dropped, and so is 3rdparty/ (the Everest X25519 and p256-m accelerators), which the default configuration does not enable.
