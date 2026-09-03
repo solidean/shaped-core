@@ -128,6 +128,64 @@ The serializer is the matching boundary on the way out, and the only one: a newl
 end the head and start something the caller did not write, so every byte is checked there rather than wherever the
 header was set.
 
+## The server
+
+A **loopback dev server**, for a debug UI this process serves to a browser.
+The natural consumer is `cc::rec` — the recording stream logging, profiling, stats and tracing all write into — and a
+live view of it in a browser is the obvious front end beside the in-process ImGui one.
+
+**It is not hardened for hostile input, and that is a decision rather than an omission.**
+What separates a web server from this is almost entirely work about hostility: slow-read attacks, request smuggling
+between a proxy and a backend, connection exhaustion, path traversal, compression bombs, and a threat model where
+every byte is attacker-controlled.
+A server bound to `127.0.0.1` faces none of it, because the only thing that can reach it is a process already running
+as the same user.
+
+A server bound to `0.0.0.0` faces all of it — **and the difference between the two is one line of configuration that
+somebody will change**.
+So binding beyond loopback is a named boolean that logs a warning, rather than a bind address that happens to say
+`0.0.0.0`.
+
+**No server-side TLS.**
+Browsers treat `http://localhost` as a secure context, so a local debug UI needs no certificate, no self-signed trust
+prompt, and none of the code that would go with them — which removes the single largest chunk of server work.
+
+**What it refuses to grow into:** virtual hosts, TLS termination, HTTP/2, proxying, authentication frameworks, a
+plugin architecture.
+Each arrives as a small reasonable request, and together they are a web server — which would be a different library
+rather than a bigger version of this one.
+
+### The limits, which are not a safety claim
+
+A dev server eventually gets exposed by somebody with an SSH tunnel or a container port mapping.
+These cost almost nothing and are the difference between "unsuitable for hostile input" and "trivially crashable":
+
+- a maximum start line and header block size, and a maximum header count;
+- a read timeout on every read, which is what makes slow-read attacks uninteresting, and a longer idle timeout for a
+  kept-alive connection that is simply between requests;
+- a maximum concurrent connection count — one that arrives past it is closed rather than queued, so a client learns
+  at once instead of waiting on a server that will never read from it;
+- a maximum request body size, finite by default, answered with `413` after the body is read and discarded so the
+  connection is still in a state anybody can reason about.
+
+They are not a claim that the server is safe to expose.
+
+### Routing
+
+Exact paths, or a pattern ending in `*` for everything beneath it, tried in the order they were added — so a specific
+route added before a wildcard wins.
+
+A path nothing matches is a `404`; a path that matches only under another method is a `405`.
+Those are different facts and a client can act on the difference.
+
+**Handlers run on the reactor thread**, like every completion here: do no blocking work in one.
+
+### Shutdown
+
+`stop()` cancels the server's own token, which every accept, read and write is registered with — so shutdown is
+immediate rather than a wait for deadlines nobody set — and lets the listener go, so a connection that arrives
+afterwards is refused rather than accepted by a server that will never read from it.
+
 ## Still to come
 
 Request bodies that stream rather than arriving as one span, response trailers reaching the caller, and the parser's

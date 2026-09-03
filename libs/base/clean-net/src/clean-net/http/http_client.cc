@@ -67,7 +67,7 @@ struct exchange
     bool connection_was_pooled = false;
     bool retried_stale = false;
 
-    impl::http1_response_parser parser;
+    impl::http1_parser parser;
 
     /// The serialized head, which must outlive the send that carries it.
     cc::string head_bytes;
@@ -179,7 +179,7 @@ void succeed(cc::shared_ptr<exchange> const& ex)
     auto const clean = ex->parser.can_reuse_connection() && ex->unparsed.empty();
     release_connection(ex, clean);
 
-    ex->promise->push_value(cc::move(ex->parser.head()));
+    ex->promise->push_value(cc::move(ex->parser.response()));
 }
 
 /// What a redirect turns this request into, or nothing if it is not one to follow.
@@ -188,7 +188,7 @@ void succeed(cc::shared_ptr<exchange> const& ex)
     if (!ex->options.follow_redirects || ex->redirects_left <= 0)
         return {};
 
-    auto const& head = ex->parser.head();
+    auto const& head = ex->parser.response();
     if (!head.is_redirect() || head.status == 304)
         return {};
 
@@ -211,7 +211,7 @@ void succeed(cc::shared_ptr<exchange> const& ex)
 
 void follow_redirect(cc::shared_ptr<exchange> const& ex, http_target next)
 {
-    auto const status = ex->parser.head().status;
+    auto const status = ex->parser.response().status;
     auto const same_origin = next.origin() == ex->request.target.origin();
 
     // 301, 302 and 303 turn everything but HEAD into a GET without a body, which is what every client does and what
@@ -298,7 +298,7 @@ void parse_available(cc::shared_ptr<exchange> const& ex)
         {
             ex->discarding_body = redirect_target(ex).has_value();
 
-            if (auto const declared = ex->parser.head().content_length();
+            if (auto const declared = ex->parser.response().content_length();
                 declared.has_value() && !ex->discarding_body && declared.value() > ex->max_body_bytes)
             {
                 fail(ex, {.code = error_code::body_too_large,
@@ -431,7 +431,7 @@ void start_attempt(cc::shared_ptr<exchange> const& ex)
 {
     auto const& target = ex->request.target;
 
-    ex->parser.start(ex->request.method);
+    ex->parser.start_response(ex->request.method);
     ex->connection_was_pooled = false;
 
     // A pooled connection is already past the connect and the handshake, which is the whole point of keeping it.

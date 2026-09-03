@@ -45,7 +45,7 @@ struct parse_outcome
     cc::string body;
 };
 
-[[nodiscard]] parse_outcome parse_all(impl::http1_response_parser& parser, cc::string_view wire)
+[[nodiscard]] parse_outcome parse_all(impl::http1_parser& parser, cc::string_view wire)
 {
     auto sink = collecting_sink();
     auto outcome = parse_outcome();
@@ -74,8 +74,8 @@ struct parse_outcome
 
 TEST("cnet - a response with a content length parses")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const outcome = parse_all(parser, "HTTP/1.1 200 OK\r\n"
                                            "Content-Type: text/plain\r\n"
@@ -84,17 +84,17 @@ TEST("cnet - a response with a content length parses")
                                            "hello");
     CHECK(outcome.ok);
     CHECK(parser.message_complete());
-    CHECK(parser.head().status == 200);
-    CHECK(parser.head().reason == "OK");
-    CHECK(parser.head().headers.get("content-type").value() == "text/plain");
+    CHECK(parser.response().status == 200);
+    CHECK(parser.response().reason == "OK");
+    CHECK(parser.response().headers.get("content-type").value() == "text/plain");
     CHECK(outcome.body == "hello");
     CHECK(parser.can_reuse_connection());
 }
 
 TEST("cnet - a chunked response is reassembled")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const outcome = parse_all(parser, "HTTP/1.1 200 OK\r\n"
                                            "Transfer-Encoding: chunked\r\n"
@@ -114,8 +114,8 @@ TEST("cnet - a chunked response is reassembled")
 
 TEST("cnet - trailers are read and the message ends after them")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const outcome = parse_all(parser, "HTTP/1.1 200 OK\r\n"
                                            "Transfer-Encoding: chunked\r\n"
@@ -136,8 +136,8 @@ TEST("cnet - a response arriving one byte at a time parses the same")
                                       "\r\n"
                                       "abc");
 
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto sink = collecting_sink();
     auto const input = bytes_of(wire);
@@ -151,15 +151,15 @@ TEST("cnet - a response arriving one byte at a time parses the same")
     }
 
     CHECK(parser.message_complete());
-    CHECK(parser.head().status == 404);
-    CHECK(parser.head().reason == "Not Found");
+    CHECK(parser.response().status == 404);
+    CHECK(parser.response().reason == "Not Found");
     CHECK(sink.text() == "abc");
 }
 
 TEST("cnet - a sink that takes less stops the parser there")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const wire = cc::string_view("HTTP/1.1 200 OK\r\n"
                                       "Content-Length: 10\r\n"
@@ -199,8 +199,8 @@ TEST("cnet - a sink that takes less stops the parser there")
 TEST("cnet - the responses that have no body are known without one")
 {
     // A HEAD response carries a Content-Length describing the body it is NOT sending.
-    auto head_parser = impl::http1_response_parser();
-    head_parser.start(http_method::head);
+    auto head_parser = impl::http1_parser();
+    head_parser.start_response(http_method::head);
     auto const head_outcome = parse_all(head_parser, "HTTP/1.1 200 OK\r\nContent-Length: 1234\r\n\r\n");
     CHECK(head_outcome.ok);
     CHECK(head_parser.message_complete());
@@ -208,8 +208,8 @@ TEST("cnet - the responses that have no body are known without one")
 
     for (auto const status : {"204 No Content", "304 Not Modified"})
     {
-        auto parser = impl::http1_response_parser();
-        parser.start(http_method::get);
+        auto parser = impl::http1_parser();
+        parser.start_response(http_method::get);
         auto const outcome = parse_all(parser, cc::format("HTTP/1.1 {}\r\nContent-Length: 5\r\n\r\n", status));
         CHECK(outcome.ok);
         CHECK(parser.message_complete());
@@ -219,8 +219,8 @@ TEST("cnet - the responses that have no body are known without one")
 
 TEST("cnet - a body delimited by the close ends there, and the connection cannot be reused")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const outcome = parse_all(parser, "HTTP/1.0 200 OK\r\n"
                                            "\r\n"
@@ -237,8 +237,8 @@ TEST("cnet - a body delimited by the close ends there, and the connection cannot
 
 TEST("cnet - a close in the middle of a counted body is a truncation")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const outcome = parse_all(parser, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nonly this much");
     CHECK(outcome.ok);
@@ -253,8 +253,8 @@ TEST("cnet - a close in the middle of a counted body is a truncation")
 TEST("cnet - a message framed two ways at once is refused")
 {
     // The classic request smuggling primitive: one party reads the length and the other reads the chunks.
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const wire = cc::string_view("HTTP/1.1 200 OK\r\n"
                                       "Content-Length: 5\r\n"
@@ -264,8 +264,8 @@ TEST("cnet - a message framed two ways at once is refused")
     CHECK(fed.has_error());
     CHECK(fed.error().code == error_code::protocol_error);
 
-    auto twice = impl::http1_response_parser();
-    twice.start(http_method::get);
+    auto twice = impl::http1_parser();
+    twice.start_response(http_method::get);
     auto const two_lengths = twice.feed(bytes_of("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n"),
                                         [](cc::span<byte const> c) { return c.size(); });
     CHECK(two_lengths.has_error());
@@ -286,8 +286,8 @@ TEST("cnet - malformed heads are refused rather than repaired")
 
     for (auto const wire : bad)
     {
-        auto parser = impl::http1_response_parser();
-        parser.start(http_method::get);
+        auto parser = impl::http1_parser();
+        parser.start_response(http_method::get);
 
         auto const fed = parser.feed(bytes_of(wire), [](cc::span<byte const> c) { return c.size(); });
         CHECK(fed.has_error());
@@ -296,8 +296,8 @@ TEST("cnet - malformed heads are refused rather than repaired")
 
 TEST("cnet - a chunk size that is not a number is refused")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get);
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get);
 
     auto const wire = cc::string_view("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n");
     auto const input = bytes_of(wire);
@@ -309,34 +309,34 @@ TEST("cnet - a chunk size that is not a number is refused")
 
 TEST("cnet - Connection close is honoured, and keep-alive revives an HTTP/1.0 connection")
 {
-    auto closing = impl::http1_response_parser();
-    closing.start(http_method::get);
+    auto closing = impl::http1_parser();
+    closing.start_response(http_method::get);
     CHECK(parse_all(closing, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").ok);
     CHECK(closing.message_complete());
     CHECK(!closing.can_reuse_connection());
 
     // A list rather than a single token, which is how Connection is actually written.
-    auto listed = impl::http1_response_parser();
-    listed.start(http_method::get);
+    auto listed = impl::http1_parser();
+    listed.start_response(http_method::get);
     CHECK(parse_all(listed, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive, close\r\n\r\n").ok);
     CHECK(!listed.can_reuse_connection());
 
     // HTTP/1.0 closes by default, and says so when it does not.
-    auto old_default = impl::http1_response_parser();
-    old_default.start(http_method::get);
+    auto old_default = impl::http1_parser();
+    old_default.start_response(http_method::get);
     CHECK(parse_all(old_default, "HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n").ok);
     CHECK(!old_default.can_reuse_connection());
 
-    auto old_keep_alive = impl::http1_response_parser();
-    old_keep_alive.start(http_method::get);
+    auto old_keep_alive = impl::http1_parser();
+    old_keep_alive.start_response(http_method::get);
     CHECK(parse_all(old_keep_alive, "HTTP/1.0 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n").ok);
     CHECK(old_keep_alive.can_reuse_connection());
 }
 
 TEST("cnet - a head bigger than the limit is refused rather than buffered")
 {
-    auto parser = impl::http1_response_parser();
-    parser.start(http_method::get, {.max_status_line_bytes = 64, .max_header_bytes = 128, .max_header_count = 4});
+    auto parser = impl::http1_parser();
+    parser.start_response(http_method::get, {.max_start_line_bytes = 64, .max_header_bytes = 128, .max_header_count = 4});
 
     auto wire = cc::string("HTTP/1.1 200 OK\r\n");
     for (auto i = 0; i < 10; ++i)

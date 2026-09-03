@@ -13,6 +13,7 @@
 #include <clean-net/common/level.hh>
 #include <clean-net/fwd.hh>
 #include <clean-net/http/http_client.hh>
+#include <clean-net/http/http_server.hh>
 #include <clean-net/http/polite_client.hh>
 #include <clean-net/tls/tls.hh>
 #include <clean-net/transport/connect.hh>

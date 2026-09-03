@@ -268,6 +268,32 @@ Five things worth knowing.
 
 Redirects are followed by default, up to `max_redirects`; a 301, 302 or 303 turns anything but HEAD into a bodyless GET, and `Authorization` and `Cookie` are dropped when the origin changes.
 
+## The dev server
+
+```cpp
+#include <clean-net/http/http_server.hh>
+
+auto server = cnet::http_server::try_create(io).value();          // loopback, a port the OS picked
+auto server = cnet::http_server::try_create(io, {.port = 8080, .max_body_bytes = 1 << 20}).value();
+auto server = cnet::http_server::try_create(virtual_net).value(); // for a test
+
+server->route(cnet::http_method::get, "/hello",
+              [](cnet::http_server_request const&) { return cnet::http_server_response::text("hi"); });
+server->route(cnet::http_method::get, "/files/*", handler);       // a trailing * matches everything beneath
+server->local();                                                   // endpoint — which port it got
+server->stop();                                                    // and the destructor does too
+```
+
+`http_server_response::text(...)` / `::bytes(body, content_type)` / `::empty(status)`.
+
+Five things worth knowing.
+**It is a loopback dev server and is NOT hardened for hostile input**, which is a decision rather than an omission.
+`bind_all_interfaces` is a named boolean that logs a warning, rather than a bind address somebody can quietly change.
+**No server-side TLS**: browsers treat `http://localhost` as a secure context, so a local debug UI needs none.
+**Handlers run on the reactor thread** — do no blocking work in one.
+**Routes are tried in order**, so a specific path added before a wildcard wins; an unmatched path is a 404 and an unmatched method on a matched path is a 405.
+**`stop()` is immediate**, through the server's own cancellation token, and the listener goes with it.
+
 ## Politeness and retries
 
 ```cpp

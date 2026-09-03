@@ -23,6 +23,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | virtual + simulated transports | done | done | done | done | done |
 | UDP datagrams | — | planned | planned | planned | planned |
 | listeners | — | **done** | done, unverified | done, unverified | planned |
+| HTTP server (loopback) | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | **done** (native) | done, unverified | done, unverified | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
 | TLS | browser's | **done** | done, unverified | done, unverified | Android: no trust store |
@@ -41,6 +42,11 @@ None of it touches the network, so all of it is testable without one.
 Connect, accept, send, receive and half-close as `cc::shared_async`, with deadlines the reactor enforces against the
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
+
+**[done]** the loopback dev server.
+Routes, keep-alive, the limits that keep it from being trivially crashable, and shutdown through its own token.
+Not hardened for hostile input, on purpose; [http.md](http.md#the-server) says what that means and what it refuses to
+grow into.
 
 **[done]** the HTTP client, over our own transport.
 `cnet::http_target` over `cc::uri`, the HTTP/1.1 wire format, and a client that resolves, connects, handshakes,
@@ -75,7 +81,7 @@ on the way through to another one.
 **[planned]**, roughly in the order it will be built:
 
 1. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
-2. the loopback server and WebSocket;
+2. WebSocket, over the server that now exists;
 3. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
 ## Deliberately out of scope

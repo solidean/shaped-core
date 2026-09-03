@@ -208,6 +208,19 @@ struct host_policy;
 /// Rate limiting and retries over any other client.
 class polite_http_client;
 
+/// How a loopback HTTP server is built.
+struct http_server_description;
+
+/// A request, as a route handler sees it.
+struct http_server_request;
+
+/// What a route handler answers with.
+struct http_server_response;
+
+/// A loopback HTTP server, for a debug UI this process serves to a browser.
+/// Not hardened for hostile input, on purpose.
+class http_server;
+
 /// What every HTTP backend implements: one request in, one response out.
 class http_client;
 

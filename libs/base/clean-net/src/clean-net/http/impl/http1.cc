@@ -109,6 +109,33 @@ namespace
     return false;
 }
 
+/// The declared body length, or nothing when it is absent or not a number.
+[[nodiscard]] cc::optional<i64> content_length_of(http_headers const& headers)
+{
+    auto const value = headers.get("Content-Length");
+    if (!value.has_value())
+        return {};
+
+    auto length = i64(0);
+    auto digits = 0;
+    for (auto const c : value.value())
+    {
+        if (c < '0' || c > '9')
+            return {};
+
+        length = length * 10 + (c - '0');
+        ++digits;
+
+        // A length longer than any body anybody can hold is a malformed header rather than a big file.
+        if (digits > 18)
+            return {};
+    }
+
+    if (digits == 0)
+        return {};
+    return length;
+}
+
 [[nodiscard]] cc::string_view as_text(cc::vector<byte> const& bytes)
 {
     return cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size());
@@ -168,15 +195,120 @@ cc::result<cc::string, error> write_request_head(http_request const& request, bo
     return head;
 }
 
+cc::string_view default_reason_phrase(i32 status)
+{
+    switch (status)
+    {
+    case 200:
+        return "OK";
+    case 201:
+        return "Created";
+    case 204:
+        return "No Content";
+    case 301:
+        return "Moved Permanently";
+    case 302:
+        return "Found";
+    case 304:
+        return "Not Modified";
+    case 400:
+        return "Bad Request";
+    case 401:
+        return "Unauthorized";
+    case 403:
+        return "Forbidden";
+    case 404:
+        return "Not Found";
+    case 405:
+        return "Method Not Allowed";
+    case 408:
+        return "Request Timeout";
+    case 413:
+        return "Content Too Large";
+    case 426:
+        return "Upgrade Required";
+    case 429:
+        return "Too Many Requests";
+    case 431:
+        return "Request Header Fields Too Large";
+    case 500:
+        return "Internal Server Error";
+    case 501:
+        return "Not Implemented";
+    case 503:
+        return "Service Unavailable";
+    default:
+        // Servers are free to make one up, and nothing may branch on it -- so a status this list does not name gets
+        // a phrase that is honest about being a placeholder rather than a guess at what it means.
+        return "Status";
+    }
+}
+
+cc::result<cc::string, error> write_response_head(i32 status,
+                                                  cc::string_view reason,
+                                                  http_headers const& headers,
+                                                  i64 body_bytes,
+                                                  bool keep_alive)
+{
+    if (status < 100 || status > 599)
+        return cc::error(malformed("a status code outside 100-599 cannot be sent"));
+
+    auto const phrase = reason.empty() ? default_reason_phrase(status) : reason;
+    for (auto const c : phrase)
+        if (!is_field_value_char(c))
+            return cc::error(malformed("the reason phrase contains a character that cannot be sent"));
+
+    auto head = cc::format("HTTP/1.1 {} {}\r\n", status, phrase);
+
+    auto wrote_framing = false;
+    for (auto const& header : headers.entries())
+    {
+        if (header.name.empty())
+            return cc::error(malformed("a header with no name cannot be sent"));
+
+        for (auto const c : cc::string_view(header.name))
+            if (!is_token_char(c))
+                return cc::error(error{.code = error_code::invalid_argument,
+                                       .native_code = 0,
+                                       .message = cc::format("the header name {} contains a character that cannot be "
+                                                             "sent",
+                                                             header.name)});
+
+        for (auto const c : cc::string_view(header.value))
+            if (!is_field_value_char(c))
+                return cc::error(error{
+                    .code = error_code::invalid_argument,
+                    .native_code = 0,
+                    .message = cc::format("the value of {} contains a character that cannot be sent", header.name)});
+
+        if (header_names_equal(header.name, "Content-Length") || header_names_equal(header.name, "Transfer-Encoding"))
+            wrote_framing = true;
+
+        head += cc::format("{}: {}\r\n", header.name, header.value);
+    }
+
+    // A response whose length nobody stated is one the connection has to be closed to end, which is a keep-alive
+    // connection wasted and a client left guessing.
+    if (!wrote_framing)
+        head += cc::format("Content-Length: {}\r\n", body_bytes);
+
+    if (!keep_alive)
+        head += "Connection: close\r\n";
+
+    head += "\r\n";
+    return head;
+}
+
 // ---- the parser ----------------------------------------------------------------------------------------
 
-void http1_response_parser::start(http_method request_method, http1_limits const& limits)
+void http1_parser::reset(direction d, http1_limits const& limits)
 {
-    _state = state::status_line;
+    _direction = d;
+    _state = state::start_line;
     _framing = framing::none;
     _limits = limits;
-    _request_method = request_method;
-    _head = {};
+    _response = {};
+    _request = {};
     _head_complete = false;
     _line.clear();
     _header_bytes = 0;
@@ -186,9 +318,20 @@ void http1_response_parser::start(http_method request_method, http1_limits const
     _connection_close = false;
 }
 
-cc::result<bool, error> http1_response_parser::take_line(cc::span<byte const> input, isize& cursor)
+void http1_parser::start_response(http_method request_method, http1_limits const& limits)
 {
-    auto const cap = _state == state::status_line ? _limits.max_status_line_bytes : _limits.max_header_bytes;
+    reset(direction::response, limits);
+    _request_method = request_method;
+}
+
+void http1_parser::start_request(http1_limits const& limits)
+{
+    reset(direction::request, limits);
+}
+
+cc::result<bool, error> http1_parser::take_line(cc::span<byte const> input, isize& cursor)
+{
+    auto const cap = _state == state::start_line ? _limits.max_start_line_bytes : _limits.max_header_bytes;
 
     while (cursor < input.size())
     {
@@ -212,7 +355,7 @@ cc::result<bool, error> http1_response_parser::take_line(cc::span<byte const> in
     return false;
 }
 
-cc::result<cc::unit, error> http1_response_parser::parse_status_line(cc::string_view line)
+cc::result<cc::unit, error> http1_parser::parse_status_line(cc::string_view line)
 {
     // HTTP-version SP status-code [ SP reason ]
     if (line.size() < 12 || line.subview({.offset = 0, .size = 7}) != "HTTP/1.")
@@ -238,17 +381,76 @@ cc::result<cc::unit, error> http1_response_parser::parse_status_line(cc::string_
     if (status < 100 || status > 599)
         return cc::error(malformed("the status code is outside 100-599"));
 
-    _head.status = status;
+    _response.status = status;
 
     if (line.size() > 13)
-        _head.reason = cc::string(line.subview(13));
+        _response.reason = cc::string(line.subview(13));
     else if (line.size() == 13)
         return cc::error(malformed("a trailing space with no reason phrase"));
 
     return cc::unit{};
 }
 
-cc::result<cc::unit, error> http1_response_parser::parse_header_line(cc::string_view line)
+/// The method as it appears on a request line, or nothing for one this server does not implement.
+[[nodiscard]] cc::optional<http_method> method_from_text(cc::string_view text)
+{
+    if (text == "GET")
+        return http_method::get;
+    if (text == "HEAD")
+        return http_method::head;
+    if (text == "POST")
+        return http_method::post;
+    if (text == "PUT")
+        return http_method::put;
+    if (text == "DELETE")
+        return http_method::del;
+    if (text == "PATCH")
+        return http_method::patch;
+    if (text == "OPTIONS")
+        return http_method::options;
+    return {};
+}
+
+cc::result<cc::unit, error> http1_parser::parse_request_line(cc::string_view line)
+{
+    // method SP request-target SP HTTP-version
+    auto const first_space = line.find(' ');
+    if (first_space <= 0)
+        return cc::error(malformed("a request line without a method"));
+
+    auto const method = method_from_text(line.subview({.offset = 0, .size = first_space}));
+    if (!method.has_value())
+        return cc::error(malformed("a request method this server does not implement"));
+
+    auto const rest = line.subview(first_space + 1);
+    auto const second_space = rest.find(' ');
+    if (second_space <= 0)
+        return cc::error(malformed("a request line without a target"));
+
+    auto const target = rest.subview({.offset = 0, .size = second_space});
+    auto const version = rest.subview(second_space + 1);
+
+    // The target is checked here rather than by whoever routes on it: a control character in one is how a request
+    // line becomes two, and this is where the bytes stop being a stream.
+    for (auto const c : target)
+        if (static_cast<unsigned char>(c) <= 0x20 || static_cast<unsigned char>(c) == 0x7F)
+            return cc::error(malformed("a request target with a character that cannot appear in one"));
+
+    if (version.size() != 8 || version.subview({.offset = 0, .size = 7}) != "HTTP/1.")
+        return cc::error(malformed("a request that is not HTTP/1"));
+
+    if (version[7] == '0')
+        _http_1_0 = true;
+    else if (version[7] != '1')
+        return cc::error(malformed("an HTTP minor version this parser does not speak"));
+
+    _request.method = method.value();
+    _request.target = cc::string(target);
+    _request.http_1_0 = _http_1_0;
+    return cc::unit{};
+}
+
+cc::result<cc::unit, error> http1_parser::parse_header_line(cc::string_view line)
 {
     // An obs-fold continuation: deprecated by RFC 9112, and the classic way two parsers disagree about where a
     // header ends.
@@ -269,18 +471,18 @@ cc::result<cc::unit, error> http1_response_parser::parse_header_line(cc::string_
         if (!is_field_value_char(c))
             return cc::error(malformed("a header value with a character that is not allowed in one"));
 
-    if (_head.headers.size() >= _limits.max_header_count)
-        return cc::error(malformed("more headers than this client will read"));
+    if (headers().size() >= _limits.max_header_count)
+        return cc::error(malformed("more headers than this parser will read"));
 
-    _head.headers.add(name, value);
+    headers().add(name, value);
     return cc::unit{};
 }
 
-cc::result<cc::unit, error> http1_response_parser::finish_head()
+cc::result<cc::unit, error> http1_parser::finish_head()
 {
     _head_complete = true;
 
-    auto const connection = _head.headers.get("Connection");
+    auto const connection = headers().get("Connection");
     if (connection.has_value())
         _connection_close = list_contains_token(connection.value(), "close");
     else
@@ -291,19 +493,20 @@ cc::result<cc::unit, error> http1_response_parser::finish_head()
 
     // Framing, in the order RFC 9112 gives -- and the order matters, because a message that satisfies two of these
     // rules at once is the one an attacker sends.
-    auto const has_length = _head.headers.contains("Content-Length");
-    auto const transfer_encoding = _head.headers.get("Transfer-Encoding");
+    auto const has_length = headers().contains("Content-Length");
+    auto const transfer_encoding = headers().get("Transfer-Encoding");
     auto const chunked = transfer_encoding.has_value() && list_contains_token(transfer_encoding.value(), "chunked");
 
     if (transfer_encoding.has_value() && has_length)
-        return cc::error(malformed("a response with both Content-Length and Transfer-Encoding"));
+        return cc::error(malformed("a message with both Content-Length and Transfer-Encoding"));
 
-    if (_head.headers.get_all("Content-Length").size() > 1)
-        return cc::error(malformed("a response with more than one Content-Length"));
+    if (headers().get_all("Content-Length").size() > 1)
+        return cc::error(malformed("a message with more than one Content-Length"));
 
     // A 1xx, a 204 and a 304 have no body whatever they say, and neither does the answer to a HEAD.
-    auto const bodyless = _head.is_informational() || _head.status == 204 || _head.status == 304
-                       || _request_method == http_method::head;
+    auto const bodyless = _direction == direction::response
+                       && (_response.is_informational() || _response.status == 204 || _response.status == 304
+                           || _request_method == http_method::head);
 
     if (bodyless)
     {
@@ -324,7 +527,7 @@ cc::result<cc::unit, error> http1_response_parser::finish_head()
 
     if (has_length)
     {
-        auto const length = _head.content_length();
+        auto const length = content_length_of(headers());
         if (!length.has_value())
             return cc::error(malformed("a Content-Length that is not a number"));
 
@@ -334,14 +537,23 @@ cc::result<cc::unit, error> http1_response_parser::finish_head()
         return cc::unit{};
     }
 
-    // Nothing said how long it is, so the close says: HTTP/1.0's only framing, and a connection that cannot be
-    // reused by definition.
+    // A request with no framing header has no body at all -- there is no "until close" on the way in, because a
+    // server that waited for one would wait for a client that is waiting for it.
+    if (_direction == direction::request)
+    {
+        _framing = framing::none;
+        _state = state::complete;
+        return cc::unit{};
+    }
+
+    // For a response, nothing saying how long it is means the close says: HTTP/1.0's only framing, and a connection
+    // that cannot be reused by definition.
     _framing = framing::until_close;
     _state = state::body_to_close;
     return cc::unit{};
 }
 
-cc::result<cc::unit, error> http1_response_parser::parse_chunk_size(cc::string_view line)
+cc::result<cc::unit, error> http1_parser::parse_chunk_size(cc::string_view line)
 {
     // A chunk extension after `;` is legal and carries nothing anybody uses.
     auto const semicolon = line.find(';');
@@ -371,8 +583,8 @@ cc::result<cc::unit, error> http1_response_parser::parse_chunk_size(cc::string_v
     return cc::unit{};
 }
 
-cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input,
-                                                     cc::function_ref<isize(cc::span<byte const> chunk)> sink)
+cc::result<isize, error> http1_parser::feed(cc::span<byte const> input,
+                                            cc::function_ref<isize(cc::span<byte const> chunk)> sink)
 {
     auto cursor = isize(0);
 
@@ -380,7 +592,7 @@ cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input,
     {
         switch (_state)
         {
-        case state::status_line:
+        case state::start_line:
         {
             auto complete = take_line(input, cursor);
             if (complete.has_error())
@@ -388,7 +600,8 @@ cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input,
             if (!complete.value())
                 return cursor;
 
-            auto parsed = parse_status_line(as_text(_line));
+            auto parsed = _direction == direction::response ? parse_status_line(as_text(_line))
+                                                            : parse_request_line(as_text(_line));
             _line.clear();
             if (parsed.has_error())
                 return cc::error(cc::move(parsed).error());
@@ -532,7 +745,7 @@ cc::result<isize, error> http1_response_parser::feed(cc::span<byte const> input,
     return cursor;
 }
 
-cc::result<cc::unit, error> http1_response_parser::notify_end_of_stream()
+cc::result<cc::unit, error> http1_parser::notify_end_of_stream()
 {
     if (_state == state::complete)
         return cc::unit{};
@@ -550,7 +763,7 @@ cc::result<cc::unit, error> http1_response_parser::notify_end_of_stream()
     return cc::error(malformed("the connection closed in the middle of the response body"));
 }
 
-bool http1_response_parser::can_reuse_connection() const
+bool http1_parser::can_reuse_connection() const
 {
     if (_connection_close || _framing == framing::until_close)
         return false;
