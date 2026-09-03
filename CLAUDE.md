@@ -37,6 +37,13 @@ One-liner per library:
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
+* **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
+  Namespace `cnet`. Depends on clean-core.
+  **The transport and the protocol clients are peers, not layers.**
+  A browser has no sockets and does have `fetch`, and wasm is tier 1 — so HTTP is an interface with backends, and our transport is one of them.
+  `cnet::http_level` is the capability ladder a caller checks once; the transport answers `is_supported()` instead.
+  Nothing here requires blocking to obtain a result, and the reactor is driven through `cc::thread_pump_all()` like every other unthreaded system in the repo.
+  Early stage — see its [docs/structure.md](libs/base/clean-net/docs/structure.md) roadmap and support matrix.
 * **`libs/data/babel-serializer`** — serialization / deserialization of various formats.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.

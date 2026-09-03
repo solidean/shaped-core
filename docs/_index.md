@@ -53,6 +53,8 @@ Findings we want to keep, but that are not a guide to anything.
   [cheat-sheet](../libs/base/nexus/cheat-sheet.md) for the API at a glance, deeper notes in its [docs hub](../libs/base/nexus/docs/_index.md).
 - [typed-geometry](../libs/base/typed-geometry/readme.md) — the `tg` math & geometry library.
   [cheat-sheet](../libs/base/typed-geometry/cheat-sheet.md) and [docs hub](../libs/base/typed-geometry/docs/_index.md).
+- [clean-net](../libs/base/clean-net/readme.md) — the `cnet` networking library.
+  [cheat-sheet](../libs/base/clean-net/cheat-sheet.md) and [docs hub](../libs/base/clean-net/docs/_index.md).
 - [babel-serializer](../libs/data/babel-serializer/readme.md) — the `babel` format readers and writers.
   [cheat-sheet](../libs/data/babel-serializer/cheat-sheet.md) and [docs hub](../libs/data/babel-serializer/docs/_index.md).
 - **data family** — versioned-document

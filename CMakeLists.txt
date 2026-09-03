@@ -146,6 +146,12 @@ include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
 add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/typed-geometry)
 
+# clean-net (cnet): sockets, HTTP and a loopback dev server, over clean-core alone.
+# Above clean-core rather than inside it: a TLS stack and its system libraries are a tax every binary in the repo
+# would otherwise pay, and a library that can be left out expresses "absent on this platform" with a target instead
+# of a maze of stubs.
+add_subdirectory(libs/base/clean-net)
+
 # data stack: babel-serializer (babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
 # plus blob-cache (bcache) beside them.
 # Added in dependency order, babel-serializer first because both persisting libraries store through babel::sqlite.

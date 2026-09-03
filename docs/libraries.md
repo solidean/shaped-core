@@ -73,6 +73,31 @@ The planned scope:
 
 [structure.md](../libs/base/typed-geometry/docs/structure.md) carries both what exists today — the scalar seam, the linalg core, the first geometry primitives — and the full roadmap.
 
+### clean-net — namespace `cnet` — depends on clean-core
+
+[readme](../libs/base/clean-net/readme.md) ·
+[cheat-sheet](../libs/base/clean-net/cheat-sheet.md) ·
+[docs](../libs/base/clean-net/docs/_index.md)
+
+Networking, from sockets up: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev
+server for an in-browser debug UI.
+It sits beside clean-core rather than inside it because a TLS stack and its system libraries are a tax every binary in
+the repo would otherwise pay, and because a library that can be left out expresses "absent on this platform" with a
+target rather than a maze of stubs.
+
+**The transport and the protocol clients are peers rather than layers**, which is the decision everything else follows
+from.
+A browser cannot open a socket, cannot listen and cannot send a datagram — and it does have `fetch` and `WebSocket`.
+Since wasm is tier 1 ([platforms.md](platforms.md)), an HTTP client written over our own TCP could not exist on a
+platform we support, so HTTP is an interface with backends and the transport is one of them.
+`cnet::http_level` is the ladder a caller checks once instead of querying capabilities one at a time.
+
+Nothing here requires blocking to obtain a result, because a browser main thread cannot block and a render thread
+should not.
+The reactor is a semantic thread in clean-core's sense, so a `SC_THREADS=OFF` build drives it through the same
+`cc::thread_pump_all()` every other unthreaded system here goes through.
+[structure.md](../libs/base/clean-net/docs/structure.md) carries the support matrix and the roadmap.
+
 ## data
 
 Understanding data: the formats it arrives in, and the structures that outlive a session — documents, their history, and the files they live in.
