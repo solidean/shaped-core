@@ -280,10 +280,12 @@ TEST("cnet - the platform trust store answers, or says it cannot")
         SKIP("no trust store adapter for this platform yet");
     }
 
-    // A machine with a working store has hundreds of roots, and every one of them is a parseable certificate.
+    // A machine with a working store has hundreds of roots, in whichever form that platform keeps them.
     CHECK(!roots.value().empty());
-    for (auto const& der : roots.value())
+    for (auto const& der : roots.value().der)
         CHECK(!der.empty());
+    for (auto const& bundle : roots.value().pem)
+        CHECK(!bundle.empty());
 }
 
 TEST("cnet - a self-signed certificate is refused by the machine's own roots")

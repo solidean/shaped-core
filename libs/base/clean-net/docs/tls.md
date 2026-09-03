@@ -99,12 +99,26 @@ believe a connection was verified.
 
 | platform | trust store |
 |---|---|
-| Windows | **done** — `CertOpenSystemStore("ROOT")`, which is the union group policy resolves |
-| macOS / iOS | planned — `SecTrustEvaluateWithError` |
-| Linux | planned — the distro PEM paths, which vary and must be probed rather than assumed |
-| Android | planned — JNI, once that tier is real |
+| Windows | `CertOpenSystemStore("ROOT")`, which is the union group policy resolves |
+| macOS | `SecTrustSettingsCopyCertificates` over all three domains — system, admin and user |
+| Linux | the distro CA bundle, probed rather than assumed: the path varies and there is no standard |
+| iOS | none — see below |
+| Android | none — the roots live behind JNI |
 
-Until an adapter exists, a caller there supplies its own roots through `tls_trust::additional_roots_pem`.
+The three macOS domains are a union rather than a fallback: Apple ships one, an administrator adds to another, and a
+user trusts things in the third — and a corporate proxy's certificate lives in one of the latter two.
+
+**iOS and Android need a different seam, not a missing adapter.**
+Neither can enumerate its anchors at all; the supported path on both is to hand the OS a built chain and let *it*
+decide — `SecTrustEvaluateWithError`, or the Java trust manager.
+That is a verify callback rather than a set of roots, and it is what those two will need when their turn comes.
+
+Until then a caller there supplies its own roots through `tls_trust::additional_roots_pem`.
+
+Roots arrive in two forms, because that is how the platforms keep them: Windows and Apple hand over parsed
+certificates as DER, while a Linux trust store is a file of concatenated PEM.
+The parser takes both, a distro bundle is parsed as one blob, and one bad certificate in it does not disqualify the
+rest.
 
 **`allow_any_certificate` is settable from code only** — never from a URL, an environment variable or a config file,
 so it cannot be turned on in the field by anything but a recompile.

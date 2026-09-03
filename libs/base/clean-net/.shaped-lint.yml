@@ -50,6 +50,12 @@ rules:
       - src/clean-net/tls/tls_mbedtls.cc
 
   - kind: allow-include
+    value: [<CoreFoundation/CoreFoundation.h>, <Security/Security.h>, <TargetConditionals.h>]
+    reason: the Apple trust store. TargetConditionals is what separates macOS, which can enumerate its anchors, from iOS, which has no public API for it.
+    files:
+      - src/clean-net/impl/trust_store.cc
+
+  - kind: allow-include
     value: [<windows.h>, <wincrypt.h>]
     reason: the Windows trust store -- CertOpenSystemStore and its neighbours. windows.h must precede wincrypt.h, which is declared in terms of it, so the include block is clang-format-off.
     files:

@@ -773,11 +773,22 @@ void apply_alpn(tls_data& d, cc::vector<cc::string> const& protocols)
         }
 
         if (system_roots.has_value())
-            for (auto const& der : system_roots.value())
+        {
+            for (auto const& der : system_roots.value().der)
                 if (mbedtls_x509_crt_parse_der(&d.roots, reinterpret_cast<unsigned char const*>(der.data()),
                                                size_t(der.size()))
                     == 0)
                     ++roots_loaded;
+
+            // A whole PEM bundle parses as one blob, and one bad certificate in it does not disqualify the rest:
+            // mbedtls returns how many it skipped rather than failing, which is what a distro bundle needs.
+            for (auto const& bundle : system_roots.value().pem)
+                if (auto pem = cc::string(bundle);
+                    mbedtls_x509_crt_parse(&d.roots, reinterpret_cast<unsigned char const*>(pem.c_str_materialize()),
+                                           pem.size() + 1)
+                    >= 0)
+                    ++roots_loaded;
+        }
     }
 
     for (auto const& pem : options.trust.additional_roots_pem)

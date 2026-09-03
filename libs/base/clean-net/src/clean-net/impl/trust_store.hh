@@ -2,6 +2,7 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/string/string.hh>
 #include <clean-net/common/error.hh>
 
 /// The machine's own root certificates, and the only place a platform trust API is named.
@@ -17,13 +18,25 @@
 
 namespace cnet::impl
 {
-/// Every root this machine trusts, DER-encoded.
+/// The roots, in whichever form the platform keeps them.
 ///
-/// DER rather than PEM because that is what the platform APIs hand over, and re-encoding to text only to parse it
-/// back would be two conversions in service of nothing.
+/// Two forms rather than one because that is how they arrive: Windows and Apple hand over parsed certificates as
+/// DER, while a Linux trust store is a file of concatenated PEM.
+/// Converting either way would be an encode and a decode in service of nothing -- the parser takes both.
+struct system_roots
+{
+    cc::vector<cc::vector<byte>> der;
+
+    /// Whole bundles, verbatim: a PEM file holding many certificates parses as one blob.
+    cc::vector<cc::string> pem;
+
+    [[nodiscard]] bool empty() const { return der.empty() && pem.empty(); }
+};
+
+/// Every root this machine trusts.
 ///
 /// Fails with `unsupported` where the adapter for this platform is not written yet, which is a real answer rather
-/// than an empty list: no roots and "I could not ask" are the same set and very different facts, and only the first
+/// than an empty set: no roots and "I could not ask" are the same list and very different facts, and only the first
 /// should let a caller believe a connection was verified.
-[[nodiscard]] cc::result<cc::vector<cc::vector<byte>>, error> system_root_certificates();
+[[nodiscard]] cc::result<system_roots, error> system_root_certificates();
 } // namespace cnet::impl

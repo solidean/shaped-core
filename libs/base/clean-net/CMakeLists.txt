@@ -86,6 +86,12 @@ if(WIN32)
     target_link_libraries(clean-net PRIVATE ws2_32 crypt32)
 endif()
 
+# The Apple trust store lives in Security.framework, and its data types in CoreFoundation.
+# Only the trust store reaches them: the handshake itself is Mbed TLS on every platform.
+if(APPLE)
+    target_link_libraries(clean-net PRIVATE "-framework CoreFoundation" "-framework Security")
+endif()
+
 # TLS: Mbed TLS everywhere but wasm, where the browser holds the TLS and a program never sees a handshake.
 # CNET_HAS_TLS stays PRIVATE and never leaves tls_mbedtls.cc; the API stays declared either way and
 # cnet::tls_is_supported() reports the answer at runtime.

@@ -216,7 +216,7 @@ cnet::tls_make_self_signed("localhost");                // cc::result<tls_identi
 
 **TLS is a wrapper, not a transport**: it takes a connection and hands back a connection, so it composes over the real network, the virtual one, and a simulated bad link alike.
 **`hostname` is the NAME, not the address** — it is what the certificate must match and what goes out as SNI, so passing an address is how verification gets accidentally disabled.
-**The trust default is this machine's store**, and a platform whose adapter is not written yet reports `unsupported` rather than pretending to have no roots.
+**The trust default is this machine's store** — Windows, macOS and Linux read it; iOS and Android cannot enumerate anchors at all and report `unsupported` rather than pretending to have none.
 **`allow_any_certificate` is settable from code only**, never from configuration.
 [docs/tls.md](docs/tls.md) has the trust story, which is the harder half.
 

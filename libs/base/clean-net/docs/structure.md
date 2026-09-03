@@ -25,7 +25,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
-| TLS | browser's | **done** | done, no trust store yet | done, no trust store yet | planned |
+| TLS | browser's | **done** | done, unverified | done, unverified | Android: no trust store |
 | name resolution | — (the browser resolves inside `fetch`) | **done** | done, unverified | done, unverified | planned |
 
 A dash is `error_code::unsupported`: the platform has no such concept and never will, so a caller decides once at
@@ -45,8 +45,9 @@ injected clock.
 **[done]** TLS, over a vendored Mbed TLS.
 `cnet::tls_connect` and `cnet::tls_accept` wrap any connection, so a handshake runs over the virtual network with no
 socket in sight -- which is where every TLS test here runs.
-The Windows trust store is read; the Apple, Linux and Android adapters are not written yet and report `unsupported`
-rather than an empty set of roots.
+Windows, macOS and Linux read the machine's own roots; iOS and Android report `unsupported` rather than an empty
+set, because neither can enumerate anchors at all -- both want the OS to evaluate a chain instead, which is a
+different seam.
 [tls.md](tls.md) is the design.
 
 **[done]** name resolution, and the race above it.
@@ -67,11 +68,10 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. the remaining trust stores -- Apple, Linux and Android;
-2. the HTTP/1.1 native backend, the client seam and the convenience calls;
-3. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
-4. the loopback server and WebSocket;
-5. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+1. the HTTP/1.1 native backend, the client seam and the convenience calls;
+2. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
+3. the loopback server and WebSocket;
+4. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
 ## Deliberately out of scope
 
