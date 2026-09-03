@@ -32,7 +32,7 @@ Its [readme](../../libs/base/clean-net/readme.md) is the front door and its
 In the order it is meant to be built:
 
 - [cnet-http-backends.md](cnet-http-backends.md) — the browser, a system libcurl, and the order they are chosen in.
-- [cnet-dev-server.md](cnet-dev-server.md) — what the loopback server still lacks: static files, chunked responses, the browser backend.
+- [cnet-dev-server.md](cnet-dev-server.md) — what the loopback server still lacks: the browser backend, and the first example.
 - [cnet-datagrams.md](cnet-datagrams.md) — UDP, and the requirements a future multiplayer layer must not have lost.
 - [cnet-reactor-scaling.md](cnet-reactor-scaling.md) — IOCP and epoll, and what would make them worth it.
 - [cnet-housekeeping.md](cnet-housekeeping.md) — the small things, including one real defect in babel's glTF reader.

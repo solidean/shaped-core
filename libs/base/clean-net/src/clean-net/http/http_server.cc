@@ -3,7 +3,9 @@
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/uri.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-net/fwd.hh>
@@ -77,8 +79,6 @@ struct http_server_state
     }
 };
 
-namespace
-{
 /// One connection, and the request it is in the middle of.
 struct session
 {
@@ -101,8 +101,38 @@ struct session
     bool idle = true;
 };
 
+/// One chunk waiting its turn on the wire.
+struct outgoing_chunk
+{
+    cc::string bytes;
+    cc::shared_async<cc::unit> promise;
+
+    /// The last one, after which the session goes back to reading or closes.
+    bool ends_the_body = false;
+};
+
+/// What a streaming response owns while it is being written.
+struct response_stream_state
+{
+    cc::shared_ptr<session> owner;
+
+    /// False for an HTTP/1.0 client, which has no chunked encoding and gets a body delimited by the close.
+    bool chunked = true;
+
+    /// Whether the connection survives the response, which only a chunked body allows.
+    bool keep_alive = true;
+
+    cc::vector<outgoing_chunk> outbox;
+    bool writing = false;
+    bool finished = false;
+    bool failed = false;
+};
+
+namespace
+{
 void accept_one(http_server_state* server);
 void read_request(cc::shared_ptr<session> const& s);
+void pump_stream(cc::shared_ptr<response_stream_state> const& body);
 
 void close_session(cc::shared_ptr<session> const& s)
 {
@@ -316,12 +346,79 @@ struct route_match
     return true;
 }
 
+/// Send the head of a streaming response, then hand the body to the handler.
+void start_stream(cc::shared_ptr<session> const& s, http_server_response response)
+{
+    // HTTP/1.0 has no chunked encoding, so its body is whatever arrives before the close -- which is exactly the
+    // problem chunked was added to solve, and the reason a streamed response cannot keep such a connection alive.
+    auto const chunked = !s->parser.request().http_1_0;
+    auto const keep_alive
+        = chunked && !s->server->stopped.load() && s->parser.can_reuse_connection() && s->unparsed.empty();
+
+    if (chunked)
+        response.headers.set("Transfer-Encoding", "chunked");
+
+    // A HEAD gets the head and nothing else, so there is no body for the handler to write and no call to make.
+    auto const method = s->parser.request().method;
+    auto const wants_body = method != http_method::head;
+
+    auto head = impl::write_response_head(response.status, {}, response.headers, 0, keep_alive);
+    if (head.has_error())
+    {
+        CC_LOG_WARNING("a streaming route produced a response that cannot be sent: {}", head.error().message);
+        close_session(s);
+        return;
+    }
+
+    s->head_bytes = cc::move(head).value();
+
+    auto body = cc::make_shared<response_stream_state>();
+    body->owner = s;
+    body->chunked = chunked;
+    body->keep_alive = keep_alive;
+
+    auto const head_span
+        = cc::span<byte const>(reinterpret_cast<byte const*>(s->head_bytes.data()), s->head_bytes.size());
+
+    impl::when_ready(
+        s->connection->send(head_span, deadline::after_ms(s->server->desc.request_timeout_ms), s->server->token),
+        [s, body, wants_body, on_open = cc::move(response.on_open)](cc::shared_async<cc::unit> const& sent) mutable
+        {
+            if (sent->has_error())
+            {
+                body->failed = true;
+                close_session(s);
+                return;
+            }
+
+            if (!wants_body)
+            {
+                body->finished = true;
+                if (body->keep_alive)
+                    read_request(s);
+                else
+                    close_session(s);
+                return;
+            }
+
+            // The handler owns the stream from here; dropping it finishes the body rather than stranding the
+            // connection, which is what makes an abandoned stream an ordinary end.
+            on_open(cc::make_shared<http_response_stream>(cc::move(body)));
+        });
+}
+
 void write_response(cc::shared_ptr<session> const& s)
 {
     if (!s->body_too_large && try_upgrade(s))
         return;
 
     auto response = answer(s);
+
+    if (response.on_open)
+    {
+        start_stream(s, cc::move(response));
+        return;
+    }
 
     // A HEAD gets the head and none of the bytes, and its Content-Length still describes what a GET would return.
     auto const method = s->parser.request().method;
@@ -379,6 +476,52 @@ void write_response(cc::shared_ptr<session> const& s)
                                  read_request(s);
                              });
         });
+}
+
+/// Write queued chunks, one at a time, and end the response when the last one has gone out.
+void pump_stream(cc::shared_ptr<response_stream_state> const& body)
+{
+    if (body->writing || body->outbox.empty() || body->failed)
+        return;
+
+    auto const& front = body->outbox[0];
+    auto const ends = front.ends_the_body;
+    auto const span = cc::span<byte const>(reinterpret_cast<byte const*>(front.bytes.data()), front.bytes.size());
+
+    body->writing = true;
+
+    auto const& s = body->owner;
+    impl::when_ready(s->connection->send(span, deadline::after_ms(s->server->desc.request_timeout_ms), s->server->token),
+                     [body, ends](cc::shared_async<cc::unit> const& sent)
+                     {
+                         body->writing = false;
+
+                         auto promise = body->outbox[0].promise;
+                         for (isize i = 1; i < body->outbox.size(); ++i)
+                             body->outbox[i - 1] = cc::move(body->outbox[i]);
+                         body->outbox.remove_back();
+
+                         if (sent->has_error())
+                         {
+                             body->failed = true;
+                             promise->push_error(sent->propagate_error());
+                             close_session(body->owner);
+                             return;
+                         }
+
+                         promise->push_value(cc::unit{});
+
+                         if (!ends)
+                         {
+                             pump_stream(body);
+                             return;
+                         }
+
+                         if (body->keep_alive)
+                             read_request(body->owner);
+                         else
+                             close_session(body->owner);
+                     });
 }
 
 /// Feed what has arrived, and answer once a whole request is in.
@@ -538,6 +681,129 @@ void accept_one(http_server_state* server)
                      });
 }
 
+// ---- static files --------------------------------------------------------------------------------------
+
+/// Turn a request path into a path under `root`, or refuse it.
+///
+/// Every escape is refused rather than resolved: `..` never gets a chance to mean anything, so there is no canonical
+/// form here for two implementations to disagree about.
+[[nodiscard]] cc::optional<cc::string> resolve_under_root(cc::string_view root,
+                                                          cc::string_view url_prefix,
+                                                          cc::string_view path)
+{
+    if (!path.starts_with(url_prefix))
+        return {};
+
+    auto relative = path.subview(url_prefix.size());
+    while (!relative.empty() && relative.front() == '/')
+        relative = relative.subview(1);
+
+    auto const decoded = cc::percent_decode(relative);
+    if (!decoded.has_value())
+        return {};
+
+    auto const text = cc::string_view(decoded.value());
+
+    for (auto const c : text)
+        if (c == '\0' || c == '\\' || c == ':')
+            return {};
+
+    auto rest = cc::string_view(text);
+    while (!rest.empty())
+    {
+        auto const slash = rest.find('/');
+        auto const segment = slash < 0 ? rest : rest.subview({.offset = 0, .size = slash});
+        rest = slash < 0 ? cc::string_view() : rest.subview(slash + 1);
+
+        // An empty segment is a `//`, which some path handlers collapse and others do not -- and a disagreement about
+        // where a path starts is the whole traversal problem.
+        if (segment.empty() || segment == "." || segment == "..")
+            return {};
+    }
+
+    auto full = cc::string(root);
+    if (!full.empty() && full.back() != '/' && full.back() != '\\')
+        full += "/";
+
+    // A bare directory is its index page, which is what a browser asking for `/` means.
+    full += text.empty() ? cc::string_view("index.html") : cc::string_view(text);
+    return full;
+}
+
+/// What a browser should treat a file as, from its extension and nothing else.
+///
+/// Sniffing content is what `X-Content-Type-Options: nosniff` exists to stop, so this never guesses from bytes.
+[[nodiscard]] cc::string_view content_type_of(cc::string_view path)
+{
+    auto const dot = path.rfind('.');
+    if (dot < 0)
+        return "application/octet-stream";
+
+    auto const ext = path.subview(dot + 1);
+
+    if (ext == "html" || ext == "htm")
+        return "text/html; charset=utf-8";
+    if (ext == "css")
+        return "text/css; charset=utf-8";
+    if (ext == "js" || ext == "mjs")
+        return "text/javascript; charset=utf-8";
+    if (ext == "json")
+        return "application/json";
+    if (ext == "svg")
+        return "image/svg+xml";
+    if (ext == "png")
+        return "image/png";
+    if (ext == "jpg" || ext == "jpeg")
+        return "image/jpeg";
+    if (ext == "gif")
+        return "image/gif";
+    if (ext == "webp")
+        return "image/webp";
+    if (ext == "ico")
+        return "image/x-icon";
+    if (ext == "wasm")
+        return "application/wasm";
+    if (ext == "woff2")
+        return "font/woff2";
+    if (ext == "txt" || ext == "md")
+        return "text/plain; charset=utf-8";
+
+    return "application/octet-stream";
+}
+
+[[nodiscard]] http_server_response serve_file(cc::string_view root,
+                                              cc::string_view url_prefix,
+                                              cc::string_view path,
+                                              isize max_bytes)
+{
+    auto const resolved = resolve_under_root(root, url_prefix, path);
+    if (!resolved.has_value())
+        return http_server_response::empty(404);
+
+    auto adapter = cc::file_read_stream_adapter::open(resolved.value());
+    if (adapter.has_error())
+        return http_server_response::empty(404);
+
+    auto stream = adapter.value().stream();
+
+    auto const size = stream.size();
+    if (size.has_value() && size.value() > i64(max_bytes))
+    {
+        CC_LOG_WARNING("refusing to serve {}: {} bytes is over the {} this server allows", resolved.value(),
+                       size.value(), max_bytes);
+        return http_server_response::empty(500);
+    }
+
+    auto content = stream.read_all();
+    if (content.has_error())
+        return http_server_response::empty(404);
+
+    // Nothing here sniffs content, so the browser must not either.
+    auto response = http_server_response::bytes(cc::move(content).value(), content_type_of(resolved.value()));
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    return response;
+}
+
 [[nodiscard]] cc::result<cc::unique_ptr<http_server>, error> create_on(cc::unique_ptr<native_transport> owned,
                                                                        transport& t,
                                                                        http_server_description const& desc)
@@ -586,11 +852,99 @@ http_server_response http_server_response::bytes(cc::vector<byte> body, cc::stri
     return response;
 }
 
+http_server_response http_server_response::stream(cc::string_view content_type, response_stream_handler on_open, i32 status)
+{
+    auto response = http_server_response();
+    response.status = status;
+    response.headers.set("Content-Type", content_type);
+    response.on_open = cc::move(on_open);
+    return response;
+}
+
 http_server_response http_server_response::empty(i32 status)
 {
     auto response = http_server_response();
     response.status = status;
     return response;
+}
+
+// ---- a streaming body ----------------------------------------------------------------------------------
+
+http_response_stream::http_response_stream(cc::shared_ptr<response_stream_state> state) : _state(cc::move(state))
+{
+}
+
+http_response_stream::~http_response_stream()
+{
+    finish();
+}
+
+cc::shared_async<cc::unit> http_response_stream::write(cc::span<byte const> chunk)
+{
+    // A zero-length chunk is what ENDS a chunked body, so writing one would truncate the response rather than send
+    // nothing.
+    if (chunk.empty())
+    {
+        auto done = cc::make_async_manual<cc::unit>();
+        done->push_value(cc::unit{});
+        return done;
+    }
+
+    if (!is_open())
+        return impl::failed_async<cc::unit>({.code = error_code::connection_closed,
+                                             .native_code = 0,
+                                             .message = cc::string("the response body is already finished")});
+
+    auto entry = outgoing_chunk();
+    entry.promise = cc::make_async_manual<cc::unit>();
+
+    if (_state->chunked)
+    {
+        entry.bytes = cc::format("{:x}\r\n", chunk.size());
+        entry.bytes += cc::string_view(reinterpret_cast<char const*>(chunk.data()), chunk.size());
+        entry.bytes += "\r\n";
+    }
+    else
+    {
+        entry.bytes = cc::string_view(reinterpret_cast<char const*>(chunk.data()), chunk.size());
+    }
+
+    auto const promise = entry.promise;
+    _state->outbox.push_back(cc::move(entry));
+    pump_stream(_state);
+    return promise;
+}
+
+cc::shared_async<cc::unit> http_response_stream::write_text(cc::string_view chunk)
+{
+    return write(cc::span<byte const>(reinterpret_cast<byte const*>(chunk.data()), chunk.size()));
+}
+
+void http_response_stream::finish()
+{
+    if (!_state.is_valid() || _state->finished)
+        return;
+    _state->finished = true;
+
+    if (_state->failed)
+        return;
+
+    auto entry = outgoing_chunk();
+    entry.promise = cc::make_async_manual<cc::unit>();
+    entry.ends_the_body = true;
+
+    // An HTTP/1.0 body ends with the connection rather than with a terminator, so there is nothing to write -- but
+    // the empty entry still runs the queue down to the close in order.
+    if (_state->chunked)
+        entry.bytes = "0\r\n\r\n";
+
+    _state->outbox.push_back(cc::move(entry));
+    pump_stream(_state);
+}
+
+bool http_response_stream::is_open() const
+{
+    return _state.is_valid() && !_state->finished && !_state->failed;
 }
 
 // ---- the server ----------------------------------------------------------------------------------------
@@ -644,6 +998,22 @@ void http_server::route(http_method method, cc::string_view pattern, route_handl
     entry.handler = cc::move(handler);
 
     _state->routes.lock([&](cc::vector<route_entry>& all) { all.push_back(cc::move(entry)); });
+}
+
+void http_server::serve_directory(cc::string_view url_prefix, cc::string_view root)
+{
+    auto pattern = cc::string(url_prefix);
+    if (pattern.empty() || pattern.back() != '/')
+        pattern += "/";
+    auto const prefix = pattern;
+    pattern += "*";
+
+    auto const root_copy = cc::string(root);
+    auto const max_bytes = _state->desc.max_static_file_bytes;
+
+    for (auto const method : {http_method::get, http_method::head})
+        route(method, pattern, [root_copy, prefix, max_bytes](http_server_request const& request)
+              { return serve_file(root_copy, prefix, request.path, max_bytes); });
 }
 
 void http_server::websocket_route(cc::string_view pattern, websocket_handler handler)

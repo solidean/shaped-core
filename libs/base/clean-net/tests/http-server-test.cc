@@ -1,5 +1,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -346,4 +348,220 @@ TEST("cnet - a server on a real socket answers a real client")
     CHECK(response->try_error() == nullptr);
     CHECK(response->value().status() == 200);
     CHECK(response->value().body_text() == "pong");
+}
+
+// ---- streaming responses -------------------------------------------------------------------------------
+
+TEST("cnet - a streamed response arrives as chunks and keeps the connection")
+{
+    auto fixture = server_fixture();
+
+    auto opened = cc::vector<cc::shared_ptr<http_response_stream>>();
+    fixture.server->route(http_method::get, "/stream",
+                          [&opened](http_server_request const&)
+                          {
+                              return http_server_response::stream("text/plain; charset=utf-8",
+                                                                  [&opened](cc::shared_ptr<http_response_stream> body)
+                                                                  { opened.push_back(cc::move(body)); });
+                          });
+
+    auto response = http_get(*fixture.client, fixture.url_for("/stream"));
+    CHECK(pump_until([&] { return !opened.empty(); }));
+    REQUIRE(opened.size() == 1);
+
+    auto const body = opened[0];
+    auto const a = body->write_text("one ");
+    auto const b = body->write_text("two ");
+    auto const c = body->write_text("three");
+    CHECK(pump_until([&] { return a->is_ready() && b->is_ready() && c->is_ready(); }));
+
+    // Nothing has ended the body yet, so the client is still waiting on it.
+    CHECK(!response->is_ready());
+
+    body->finish();
+    CHECK(pump_for([&] { return response->is_ready(); }));
+    REQUIRE(response->try_error() == nullptr);
+
+    CHECK(response->value().status() == 200);
+    CHECK(response->value().body_text() == "one two three");
+    CHECK(response->value().head.headers.get("Transfer-Encoding").value() == "chunked");
+
+    // No Content-Length, because nobody knew one -- which is the whole reason chunked exists.
+    CHECK(!response->value().head.headers.contains("Content-Length"));
+
+    // And the connection survives it, which close-delimiting would not allow.
+    opened.clear();
+    fixture.server->route(http_method::get, "/after",
+                          [](http_server_request const&) { return http_server_response::text("still here"); });
+
+    auto second = http_get(*fixture.client, fixture.url_for("/after"));
+    CHECK(pump_for([&] { return second->is_ready(); }));
+    REQUIRE(second->try_error() == nullptr);
+    CHECK(second->value().body_text() == "still here");
+}
+
+TEST("cnet - an abandoned stream ends the response rather than hanging it")
+{
+    auto fixture = server_fixture();
+
+    auto opened = cc::vector<cc::shared_ptr<http_response_stream>>();
+    fixture.server->route(http_method::get, "/stream",
+                          [&opened](http_server_request const&)
+                          {
+                              return http_server_response::stream("text/plain",
+                                                                  [&opened](cc::shared_ptr<http_response_stream> body)
+                                                                  { opened.push_back(cc::move(body)); });
+                          });
+
+    auto response = http_get(*fixture.client, fixture.url_for("/stream"));
+    CHECK(pump_until([&] { return !opened.empty(); }));
+
+    auto const wrote = opened[0]->write_text("partial");
+    CHECK(pump_until([&] { return wrote->is_ready(); }));
+
+    // Dropping the last reference is what a handler that decided it has nothing more to say looks like.
+    opened.clear();
+
+    CHECK(pump_for([&] { return response->is_ready(); }));
+    REQUIRE(response->try_error() == nullptr);
+    CHECK(response->value().body_text() == "partial");
+}
+
+TEST("cnet - an empty chunk is dropped rather than ending the body")
+{
+    auto fixture = server_fixture();
+
+    auto opened = cc::vector<cc::shared_ptr<http_response_stream>>();
+    fixture.server->route(http_method::get, "/stream",
+                          [&opened](http_server_request const&)
+                          {
+                              return http_server_response::stream("text/plain",
+                                                                  [&opened](cc::shared_ptr<http_response_stream> body)
+                                                                  { opened.push_back(cc::move(body)); });
+                          });
+
+    auto response = http_get(*fixture.client, fixture.url_for("/stream"));
+    CHECK(pump_until([&] { return !opened.empty(); }));
+
+    auto const body = opened[0];
+    auto const empty = body->write({});
+    auto const after = body->write_text("still arrives");
+    CHECK(pump_until([&] { return empty->is_ready() && after->is_ready(); }));
+    CHECK(body->is_open());
+
+    body->finish();
+    CHECK(pump_for([&] { return response->is_ready(); }));
+    REQUIRE(response->try_error() == nullptr);
+    CHECK(response->value().body_text() == "still arrives");
+}
+
+// ---- static files --------------------------------------------------------------------------------------
+
+namespace
+{
+/// Two files in the process's temp directory, and the names to reach them by.
+///
+/// The temp directory itself is the served root: clean-core has no `mkdir`, so a test cannot make a directory of its
+/// own -- which is the library gap this works around rather than hides.
+struct static_files
+{
+    cc::string root;
+    cc::string css_name;
+    cc::string html_name;
+
+    bool written = false;
+
+    static_files()
+    {
+        root = cc::temp_directory_path();
+
+        auto const css_path = cc::temp_file_path("cnet-static", ".css");
+        auto const html_path = cc::temp_file_path("cnet-static", ".html");
+        css_name = basename_of(css_path);
+        html_name = basename_of(html_path);
+
+        written = write(css_path, "body { color: red }") && write(html_path, "<h1>home</h1>");
+    }
+
+    ~static_files()
+    {
+        cc::remove_file(cc::format("{}/{}", root, css_name));
+        cc::remove_file(cc::format("{}/{}", root, html_name));
+    }
+
+    [[nodiscard]] static cc::string basename_of(cc::string_view path)
+    {
+        auto const slash = path.rfind('/');
+        auto const backslash = path.rfind('\\');
+        auto const cut = slash > backslash ? slash : backslash;
+        return cc::string(cut < 0 ? path : path.subview(cut + 1));
+    }
+
+    [[nodiscard]] static bool write(cc::string_view path, cc::string_view content)
+    {
+        auto adapter = cc::file_write_stream_adapter::create(path);
+        if (adapter.has_error())
+            return false;
+
+        auto stream = adapter.value().stream();
+        auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(content.data()), content.size());
+        return stream.write(bytes).has_value() && stream.flush().has_value();
+    }
+};
+} // namespace
+
+TEST("cnet - a served directory hands back its files")
+{
+    auto const files = static_files();
+    if (!files.written)
+        SKIP("this platform did not let the test write into its temp directory");
+
+    auto fixture = server_fixture();
+    fixture.server->serve_directory("/app", files.root);
+
+    auto css = http_get(*fixture.client, fixture.url_for(cc::format("/app/{}", files.css_name)));
+    CHECK(pump_for([&] { return css->is_ready(); }));
+    REQUIRE(css->try_error() == nullptr);
+
+    CHECK(css->value().status() == 200);
+    CHECK(css->value().body_text() == "body { color: red }");
+
+    // The extension decides the type, and nothing sniffs the bytes -- which is what nosniff tells the browser too.
+    CHECK(css->value().head.headers.get("Content-Type").value() == "text/css; charset=utf-8");
+    CHECK(css->value().head.headers.get("X-Content-Type-Options").value() == "nosniff");
+
+    auto html = http_get(*fixture.client, fixture.url_for(cc::format("/app/{}", files.html_name)));
+    CHECK(pump_for([&] { return html->is_ready(); }));
+    CHECK(html->value().body_text() == "<h1>home</h1>");
+    CHECK(html->value().head.headers.get("Content-Type").value() == "text/html; charset=utf-8");
+
+    auto missing = http_get(*fixture.client, fixture.url_for("/app/nope.txt"));
+    CHECK(pump_for([&] { return missing->is_ready(); }));
+    CHECK(missing->value().status() == 404);
+}
+
+TEST("cnet - a served directory refuses every way out of itself")
+{
+    auto const files = static_files();
+    auto fixture = server_fixture();
+    fixture.server->serve_directory("/app", files.root);
+
+    // Every one of these is refused outright rather than resolved and then checked.
+    auto const escapes = cc::vector<cc::string>{
+        "/app/../secret.txt",     //
+        "/app/%2e%2e/secret.txt", // the same, hidden from anything that looks before decoding
+        "/app/deep/../../secret.txt",
+        "/app//style.css",  // an empty segment, which path handlers disagree about
+        "/app/./style.css", // a segment that means nothing, and is therefore a second spelling of one that does
+        "/app/C%3A/windows/win.ini",
+        "/app/..%5csecret.txt", // a backslash, which is a separator on one platform and not the other
+    };
+
+    for (auto const& path : escapes)
+    {
+        auto response = http_get(*fixture.client, fixture.url_for(path));
+        CHECK(pump_for([&] { return response->is_ready(); }));
+        REQUIRE(response->try_error() == nullptr);
+        CHECK(response->value().status() == 404);
+    }
 }

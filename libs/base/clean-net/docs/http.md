@@ -180,6 +180,47 @@ Those are different facts and a client can act on the difference.
 
 **Handlers run on the reactor thread**, like every completion here: do no blocking work in one.
 
+### Streaming a response
+
+`http_server_response::stream(content_type, on_open)` answers with a body written over time.
+`on_open` is called once the head is out, with a `cnet::http_response_stream` to write into.
+
+The bytes go out as HTTP/1.1 chunks, which buys two things: the connection stays usable afterwards, and a client can
+tell a finished body from a truncated one.
+An HTTP/1.0 client gets the same bytes without the chunk framing, delimited by the close — that is all HTTP/1.0 has,
+and it is why chunked was added.
+
+Chunks queue rather than interleaving on the wire, and **an empty chunk is dropped rather than written**: a
+zero-length chunk is what *ends* a chunked body, so writing one would truncate the response.
+
+**Dropping the last `shared_ptr` finishes the body**, which is the right end for a handler that decides it has nothing
+more to say — an abandoned stream ends rather than strands the connection.
+
+A `HEAD` request gets the head and no call to `on_open`, since there is nothing for the body to be.
+
+### Static files
+
+`serve_directory(url_prefix, root)` serves the files under `root` for `GET` and `HEAD`.
+
+**The confinement is the feature, and it refuses rather than resolves.**
+A request path is percent-decoded and then rejected outright if it carries `..`, `.`, an empty segment, a backslash, a
+colon or a NUL.
+Refusing the escape token is stronger than resolving it and comparing: there is then no canonical form for two
+implementations to disagree about, which is the shape every traversal bug has.
+Decoding first is what stops `%2e%2e` from slipping past a check that ran too early.
+
+The content type comes from the extension and nothing else, and `X-Content-Type-Options: nosniff` says so — sniffing
+content is what that header exists to stop.
+
+**A symlink under `root` pointing outside it is not caught.**
+clean-core has no path resolution to catch it with — no `mkdir`, no metadata, no canonicalization, by its own
+statement.
+On a loopback dev server that link is one the same user made; anywhere else it is a hole, and closing it means growing
+clean-core a real path surface first.
+
+A file over `max_static_file_bytes` is a `500` and a warning rather than a read, because reading it would block the
+reactor for as long as it takes.
+
 ### Shutdown
 
 `stop()` cancels the server's own token, which every accept, read and write is registered with — so shutdown is
@@ -190,3 +231,6 @@ afterwards is refused rather than accepted by a server that will never read from
 
 Request bodies that stream rather than arriving as one span, response trailers reaching the caller, and the parser's
 fuzzer — it is the one component here that handles bytes from outside the process, so it is the one that earns one.
+
+Static files could stream through the same writer instead of being read whole, which is what a large asset wants.
+It needs the same path surface in clean-core that the symlink gap does.

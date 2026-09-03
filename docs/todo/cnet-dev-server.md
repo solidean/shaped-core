@@ -1,7 +1,7 @@
 # cnet: what is still missing from the dev server
 
-**Status:** the server and WebSockets are built.
-Static file serving, chunked responses and the browser backend are not.
+**Status:** the server, WebSockets, static files and streamed responses are built.
+The browser backend and the first example are not.
 
 The server's own design lives in [clean-net/docs/http.md](../../libs/base/clean-net/docs/http.md#the-server), and
 WebSockets in [clean-net/docs/websockets.md](../../libs/base/clean-net/docs/websockets.md).
@@ -13,24 +13,7 @@ An in-browser debug UI: our process serves a small page and streams live data to
 The natural consumer is `cc::rec` — the recording stream that logging, profiling, stats and tracing all write into —
 and a live view of it in a browser is the obvious front end beside the in-process ImGui one.
 
-That use case is also why the chunked-response work is worth doing at all: a debug view of a recording stream is
-unbounded in length.
-
 ## Still to build
-
-**Static file serving**, as `serve_directory(url_prefix, root)`.
-
-```cpp
-/// Serves files under `root`, confined to it: a resolved path outside `root` is a 404, never a read.
-void serve_directory(cc::string_view url_prefix, cc::string_view root);
-```
-
-The confinement is the whole feature: paths are **resolved and then checked against the root**, never concatenated.
-Path traversal is the one hostile-input class a loopback server still has to get right, because the attacker is a URL
-rather than a peer.
-
-**Chunked responses**, so a handler can stream something whose length it does not know.
-Today a `http_server_response` carries its whole body, which is what makes the recording view impossible.
 
 **The browser backend**, where `WebSocket` is the platform's and not ours to write.
 Same backend shape as HTTP, and for the same reason.
@@ -38,6 +21,10 @@ Same backend shape as HTTP, and for the same reason.
 **The first example**: a minimal routes-and-static-files example, with the `cc::rec` live view later.
 That was the maintainer's call over leading with the recording view — the recording view is the use case that
 *justifies* the streaming work, but it is not the example that teaches someone what the server is.
+
+**A symlink out of a served root**, and streaming a large static file rather than reading it whole.
+Both want a path surface clean-core deliberately does not have; see
+[structure.md](../../libs/base/clean-net/docs/structure.md#what-clean-core-is-missing-that-this-library-wants).
 
 ## The decisions worth keeping
 

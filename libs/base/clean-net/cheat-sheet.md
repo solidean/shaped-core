@@ -281,11 +281,20 @@ server->route(cnet::http_method::get, "/hello",
               [](cnet::http_server_request const&) { return cnet::http_server_response::text("hi"); });
 server->route(cnet::http_method::get, "/files/*", handler);       // a trailing * matches everything beneath
 server->websocket_route("/feed", handler);                         // upgrade this path instead of answering it
+server->serve_directory("/app", "./web");                          // GET + HEAD, confined under the root
 server->local();                                                   // endpoint — which port it got
 server->stop();                                                    // and the destructor does too
 ```
 
-`http_server_response::text(...)` / `::bytes(body, content_type)` / `::empty(status)`.
+`http_server_response::text(...)` / `::bytes(body, content_type)` / `::empty(status)` / `::stream(content_type, on_open)`.
+
+```cpp
+// a body whose length nobody knows when the handler returns
+return cnet::http_server_response::stream("text/event-stream",
+                                          [&](cc::shared_ptr<cnet::http_response_stream> body) { keep(body); });
+body->write_text("chunk");   // shared_async<cc::unit>; an EMPTY chunk is dropped, since one ends the body
+body->finish();              // and so does dropping the last shared_ptr
+```
 
 Five things worth knowing.
 **It is a loopback dev server and is NOT hardened for hostile input**, which is a decision rather than an omission.
@@ -294,6 +303,8 @@ Five things worth knowing.
 **Handlers run on the reactor thread** — do no blocking work in one.
 **Routes are tried in order**, so a specific path added before a wildcard wins; an unmatched path is a 404 and an unmatched method on a matched path is a 405.
 **`stop()` is immediate**, through the server's own cancellation token, and the listener goes with it.
+**`serve_directory` refuses `..`, `.`, an empty segment, `\`, `:` and NUL outright** rather than resolving them.
+It does NOT catch a symlink out of the root, because clean-core has no path resolution to catch one with.
 
 ## WebSockets
 

@@ -217,6 +217,9 @@ struct http_server_request;
 /// What a route handler answers with.
 struct http_server_response;
 
+/// A response body written over time, when its length is not known when the handler returns.
+class http_response_stream;
+
 /// A loopback HTTP server, for a debug UI this process serves to a browser.
 /// Not hardened for hostile input, on purpose.
 class http_server;

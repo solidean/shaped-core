@@ -50,7 +50,8 @@ Framing is strict, control frames are answered here, and both ends run over the 
 [websockets.md](websockets.md) is the design.
 
 **[done]** the loopback dev server.
-Routes, keep-alive, the limits that keep it from being trivially crashable, and shutdown through its own token.
+Routes, static files confined under their root, streamed responses over chunked encoding, keep-alive, the limits that
+keep it from being trivially crashable, and shutdown through its own token.
 Not hardened for hostile input, on purpose; [http.md](http.md#the-server) says what that means and what it refuses to
 grow into.
 
@@ -87,8 +88,16 @@ on the way through to another one.
 **[planned]**, roughly in the order it will be built:
 
 1. the `fetch` and browser-`WebSocket` backends for wasm, and a `dlopen`ed system libcurl where one is present;
-2. static file serving on the dev server, confined under its root;
-3. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+2. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+
+## What clean-core is missing that this library wants
+
+**Path resolution and directory metadata.**
+clean-core says plainly that it is not a filesystem layer — no `mkdir`, no iteration, no metadata, no path arithmetic
+— and `serve_directory` is written around that: it refuses every escape token lexically rather than resolving a path
+and comparing it to the root.
+That is the stronger check for what it covers, and it does not cover a symlink under the root pointing outside it.
+Streaming a large file rather than reading it whole wants the same surface.
 
 ## Deliberately out of scope
 

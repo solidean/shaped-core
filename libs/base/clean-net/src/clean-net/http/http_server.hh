@@ -5,6 +5,7 @@
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/async.hh>
 #include <clean-net/http/message.hh>
 #include <clean-net/transport/stream.hh>
 
@@ -66,6 +67,10 @@ struct cnet::http_server_description
 
     /// The largest WebSocket message an upgraded connection will reassemble.
     isize max_websocket_message_bytes = 8 * 1024 * 1024;
+
+    /// The largest file `serve_directory` will read.
+    /// A bigger one is a 500 and a warning, because reading it would block the reactor for as long as it takes.
+    isize max_static_file_bytes = 16 * 1024 * 1024;
 };
 
 /// A request, as a handler sees it.
@@ -95,6 +100,48 @@ struct cnet::http_server_request
     }
 };
 
+/// A response body written over time, for something whose length nobody knows when the handler returns.
+///
+/// The bytes go out as HTTP/1.1 chunks, which is what lets the connection stay alive afterwards and what lets a
+/// client tell a finished stream from a truncated one.
+/// An HTTP/1.0 client gets the same bytes without the chunk framing, delimited by the close -- that is all HTTP/1.0
+/// has, and it is why chunked exists.
+///
+/// **Keep the `shared_ptr` for as long as you are writing.**
+/// Dropping the last one finishes the stream cleanly, which is the right end for a handler that decides it has
+/// nothing more to say.
+class cnet::http_response_stream
+{
+public:
+    /// Append one chunk.
+    ///
+    /// Chunks queue rather than interleaving on the wire, and an empty one is dropped: a zero-length chunk is what
+    /// ENDS a chunked body, so writing one would truncate the response.
+    [[nodiscard]] cc::shared_async<cc::unit> write(cc::span<byte const> chunk);
+
+    [[nodiscard]] cc::shared_async<cc::unit> write_text(cc::string_view chunk);
+
+    /// End the body, after everything already queued has gone out.
+    /// The destructor does this too, so an abandoned stream ends rather than hangs.
+    void finish();
+
+    [[nodiscard]] bool is_open() const;
+
+    explicit http_response_stream(cc::shared_ptr<struct response_stream_state> state);
+    http_response_stream(http_response_stream const&) = delete;
+    http_response_stream& operator=(http_response_stream const&) = delete;
+    ~http_response_stream();
+
+private:
+    cc::shared_ptr<struct response_stream_state> _state;
+};
+
+namespace cnet
+{
+/// What a streaming route does once the response head is out.
+using response_stream_handler = cc::unique_function<void(cc::shared_ptr<http_response_stream> body)>;
+} // namespace cnet
+
 /// What a handler answers with.
 struct cnet::http_server_response
 {
@@ -112,6 +159,17 @@ struct cnet::http_server_response
 
     /// A status and nothing else.
     [[nodiscard]] static http_server_response empty(i32 status);
+
+    /// A body written over time instead of carried here.
+    ///
+    /// `on_open` is called once the head has gone out, with the stream to write into.
+    /// A `HEAD` request gets the head and no call at all, since there is nothing for the body to be.
+    [[nodiscard]] static http_server_response stream(cc::string_view content_type,
+                                                     response_stream_handler on_open,
+                                                     i32 status = 200);
+
+    /// Set by `stream`, and what makes this response a streaming one.
+    response_stream_handler on_open;
 };
 
 namespace cnet
@@ -167,6 +225,22 @@ public:
     /// No subprotocol is ever selected: this server answers without a `Sec-WebSocket-Protocol`, which every client
     /// must accept.
     void websocket_route(cc::string_view pattern, websocket_handler handler);
+
+    /// Serve the files under `root` beneath `url_prefix`, for `GET` and `HEAD`.
+    ///
+    /// **The confinement is the feature.**
+    /// A request path is percent-decoded and then refused outright if it carries `..`, `.`, an empty segment, a
+    /// backslash, a colon or a NUL -- rather than being resolved and checked afterwards.
+    /// Refusing the escape token is stronger than resolving it, because there is then no canonical form for two
+    /// implementations to disagree about.
+    ///
+    /// **A symlink under `root` pointing outside it is NOT caught**, because clean-core has no path resolution to
+    /// catch it with.
+    /// On a loopback dev server that is a link the same user made; anywhere else it is a hole.
+    ///
+    /// A directory resolves to its `index.html`, a missing file is a 404, and a file over
+    /// `max_static_file_bytes` is a 500.
+    void serve_directory(cc::string_view url_prefix, cc::string_view root);
 
     /// Stop accepting and close what is open.
     ///
