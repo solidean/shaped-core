@@ -220,6 +220,32 @@ cnet::tls_make_self_signed("localhost");                // cc::result<tls_identi
 **`allow_any_certificate` is settable from code only**, never from configuration.
 [docs/tls.md](docs/tls.md) has the trust story, which is the harder half.
 
+## HTTP messages
+
+```cpp
+#include <clean-net/http/http_target.hh>
+#include <clean-net/http/message.hh>
+
+auto t = cnet::http_target::parse("https://example.com/a?q=1").value();   // cc::result<http_target, error>
+t.host; t.port; t.secure;              // "example.com", 443, true — the http-specific half cc::uri leaves out
+t.request_target();                    // "/a?q=1" — never the fragment
+t.origin();                            // "https://example.com" — what a pool and a rate limit are keyed on
+t.host_header();                       // "example.com", with the port when it is not the default
+cnet::http_target::from_uri(t.url.resolve("../b").value());   // how a redirect is followed
+
+cnet::http_request{.method = cnet::http_method::get, .target = t};
+req.headers.add("Accept", "text/plain");   // add keeps duplicates; set replaces; set_if_absent defers to the caller
+res.head.status; res.head.is_success(); res.head.headers.get("content-type");   // lookup is case-insensitive
+res.body_text();                       // cc::string_view over the bytes
+```
+
+Three things worth knowing.
+**The parsing is `cc::uri`'s** — RFC 3986, including `resolve`, which is what a redirect needs; `http_target` is only the scheme-specific knowledge `cc::uri` deliberately omits.
+**Credentials in a URL are refused, not dropped**: `https://evil.com@good.com/` is a URL most readers get the host of wrong.
+**Headers are validated when the request is serialized**, not when they are set — one check on the way to the wire, which is the only place it cannot be bypassed.
+
+The client that sends these does not exist yet; [docs/structure.md](docs/structure.md) says what is planned.
+
 ## Cancelling
 
 ```cpp

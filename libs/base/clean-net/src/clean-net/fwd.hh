@@ -170,6 +170,33 @@ struct tls_options;
 struct tls_server_options;
 } // namespace cnet
 
+// ---- HTTP ----------------------------------------------------------------------------------------------
+
+namespace cnet
+{
+/// A URL, checked for what an HTTP request needs to be true of it -- the port, the scheme, and no credentials.
+/// The parsing itself is `cc::uri`'s; this is the http-specific half it deliberately leaves out.
+struct http_target;
+
+/// The methods this client can send, as a closed set rather than a string.
+enum class http_method : u8;
+
+/// One header, as written.
+struct http_header;
+
+/// The headers of a request or a response, in order, with case-insensitive lookup.
+class http_headers;
+
+/// What a caller sends.
+struct http_request;
+
+/// The head of a response: everything but the bytes.
+struct http_response_head;
+
+/// A response whose body was buffered.
+struct http_response;
+} // namespace cnet
+
 // ---- capability ladder ---------------------------------------------------------------------------------
 
 namespace cnet

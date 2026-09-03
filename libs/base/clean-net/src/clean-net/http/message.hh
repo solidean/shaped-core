@@ -1,0 +1,168 @@
+#pragma once
+
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/function/function_ref.hh>
+#include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
+#include <clean-net/common/deadline.hh>
+#include <clean-net/common/error.hh>
+#include <clean-net/http/http_target.hh>
+
+/// What an HTTP request and response are made of.
+///
+/// Nothing here touches a connection: these are the values a backend takes and returns, and they are the same values
+/// whether the request goes out over our own transport or over a browser's `fetch`.
+
+/// The methods this client can send.
+///
+/// A closed set rather than a string, because a method with a space or a newline in it is a request smuggling
+/// primitive and an enum cannot carry one.
+enum class cnet::http_method : cnet::u8
+{
+    get,
+    head,
+    post,
+    put,
+
+    /// `DELETE` on the wire; the C++ spelling avoids the keyword.
+    del,
+
+    patch,
+    options,
+};
+
+namespace cnet
+{
+/// The method as it goes on the request line.
+[[nodiscard]] cc::string_view to_string(http_method method);
+
+/// Whether a method may be retried on its own.
+///
+/// Idempotence is the property that decides it: sending GET twice is what the caller asked for, and sending POST
+/// twice is a second order.
+[[nodiscard]] bool is_idempotent(http_method method);
+} // namespace cnet
+
+/// One header, as written.
+struct cnet::http_header
+{
+    cc::string name;
+    cc::string value;
+};
+
+/// The headers of a request or a response, in order.
+///
+/// Ordered rather than a map, because HTTP allows a header to appear more than once and the order of those
+/// repetitions is meaningful -- `Set-Cookie` above all.
+/// Lookup is case-insensitive, because the wire is.
+///
+/// **Nothing is validated here.**
+/// A name or value carrying a newline is refused where it would do damage -- when the request is serialized -- so
+/// that there is exactly one check and no way around it.
+class cnet::http_headers
+{
+public:
+    /// Append, keeping any header of the same name that is already there.
+    void add(cc::string_view name, cc::string_view value);
+
+    /// Replace every header of this name with one.
+    void set(cc::string_view name, cc::string_view value);
+
+    /// Add only if no header of this name is present, which is how a default is applied over a caller's choice.
+    void set_if_absent(cc::string_view name, cc::string_view value);
+
+    void remove(cc::string_view name);
+
+    [[nodiscard]] bool contains(cc::string_view name) const;
+
+    /// The first value of this name, or nothing.
+    [[nodiscard]] cc::optional<cc::string_view> get(cc::string_view name) const;
+
+    /// Every value of this name, in order.
+    [[nodiscard]] cc::vector<cc::string_view> get_all(cc::string_view name) const;
+
+    [[nodiscard]] cc::span<http_header const> entries() const { return _entries; }
+    [[nodiscard]] isize size() const { return _entries.size(); }
+    [[nodiscard]] bool empty() const { return _entries.empty(); }
+
+    void clear() { _entries.clear(); }
+
+private:
+    cc::vector<http_header> _entries;
+};
+
+namespace cnet
+{
+/// Whether two header names are the same, which is a case-insensitive question.
+[[nodiscard]] bool header_names_equal(cc::string_view a, cc::string_view b);
+} // namespace cnet
+
+namespace cnet
+{
+/// Where a response body is handed to, chunk by chunk.
+///
+/// **The return value is the backpressure**: a sink that consumes less than it was offered stops the transport from
+/// reading more, and TCP's own window does the rest.
+/// That is why this is the primitive and the buffered response is written over it -- an unbounded buffer on a
+/// download of unknown size is a real failure rather than a theoretical one, and backpressure is the one part of this
+/// that cannot be added afterwards.
+///
+/// **It runs on the reactor thread.** Do no work here; hand the bytes on.
+using body_sink = cc::function_ref<isize(cc::span<byte const> chunk)>;
+} // namespace cnet
+
+/// What a caller sends.
+struct cnet::http_request
+{
+    http_method method = http_method::get;
+
+    /// Where it goes.
+    http_target target;
+
+    http_headers headers;
+
+    /// The bytes to send, which must stay alive until the request completes.
+    /// Empty for a method that carries no body.
+    cc::span<byte const> body;
+};
+
+/// The head of a response: everything but the bytes.
+struct cnet::http_response_head
+{
+    /// 100-599 as it arrived; 0 only on a response that never parsed.
+    i32 status = 0;
+
+    /// The reason phrase, which servers are free to make up and HTTP/2 does not have at all.
+    /// Never branch on it.
+    cc::string reason;
+
+    http_headers headers;
+
+    [[nodiscard]] bool is_informational() const { return status >= 100 && status < 200; }
+    [[nodiscard]] bool is_success() const { return status >= 200 && status < 300; }
+    [[nodiscard]] bool is_redirect() const { return status >= 300 && status < 400; }
+    [[nodiscard]] bool is_client_error() const { return status >= 400 && status < 500; }
+    [[nodiscard]] bool is_server_error() const { return status >= 500 && status < 600; }
+
+    /// The body length the head declares, or nothing when it is delimited some other way.
+    [[nodiscard]] cc::optional<i64> content_length() const;
+};
+
+/// A response whose body was buffered.
+struct cnet::http_response
+{
+    http_response_head head;
+    cc::vector<byte> body;
+
+    [[nodiscard]] i32 status() const { return head.status; }
+    [[nodiscard]] bool is_success() const { return head.is_success(); }
+
+    /// The body as text, without copying it.
+    /// Meaningless for a body that is not text, and this does not check.
+    [[nodiscard]] cc::string_view body_text() const
+    {
+        return cc::string_view(reinterpret_cast<char const*>(body.data()), body.size());
+    }
+};
