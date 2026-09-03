@@ -45,7 +45,7 @@ Configured per platform via presets.
 | Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.51); `*-msvc-*` presets. |
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
-| macOS    | Homebrew LLVM       | Expects `/opt/homebrew/opt/llvm/bin/clang++` (arm64).        |
+| macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. |
 | Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
