@@ -31,7 +31,6 @@ Its [readme](../../libs/base/clean-net/readme.md) is the front door and its
 
 In the order it is meant to be built:
 
-- [cnet-tls.md](cnet-tls.md) — mbedTLS, and the trust stores that are the actual problem.
 - [cnet-http-client.md](cnet-http-client.md) — the capability ladder, HTTP/1.1, bodies and politeness.
 - [cnet-http-backends.md](cnet-http-backends.md) — the browser, a system libcurl, and the order they are chosen in.
 - [cnet-dev-server.md](cnet-dev-server.md) — a loopback server and WebSocket, and what they refuse to become.

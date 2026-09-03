@@ -39,6 +39,18 @@
 #undef MBEDTLS_PSA_CRYPTO_STORAGE_C
 #undef MBEDTLS_PSA_ITS_FILE_C
 
+// Make Mbed TLS thread-safe, which it is NOT by default.
+//
+// Its PSA crypto layer keeps process-wide state that TLS 1.3 goes through on every handshake, and without this two
+// handshakes running at once corrupt it -- which shows up as one handshake in a few dozen failing for no reason,
+// rather than as a crash.
+// A library nobody may use from two threads is not a library this repo can ship.
+//
+// ALT rather than upstream's MBEDTLS_THREADING_PTHREAD: pthreads is one of the several platforms built here and
+// Windows has none, so clean-net supplies one implementation for all of them (see threading_alt.h).
+#define MBEDTLS_THREADING_C
+#define MBEDTLS_THREADING_ALT
+
 // Upstream's self-test entry points, which nothing here calls.
 // They are a meaningful amount of code and constant data per module, all of it reachable only from mbedtls_*_self_test.
 #undef MBEDTLS_SELF_TEST

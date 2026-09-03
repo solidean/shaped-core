@@ -44,6 +44,24 @@ rules:
       - src/clean-net/impl/reactor_poll.cc
 
   - kind: allow-include
+    value: [<mbedtls/ctr_drbg.h>, <mbedtls/ecp.h>, <mbedtls/entropy.h>, <mbedtls/error.h>, <mbedtls/pk.h>, <mbedtls/ssl.h>, <mbedtls/threading.h>, <mbedtls/x509_crt.h>]
+    reason: the vendored Mbed TLS, which is the handshake and record layer. It reaches exactly one file, and no mbedtls type appears in a public clean-net header.
+    files:
+      - src/clean-net/tls/tls_mbedtls.cc
+
+  - kind: allow-include
+    value: [<windows.h>, <wincrypt.h>]
+    reason: the Windows trust store -- CertOpenSystemStore and its neighbours. windows.h must precede wincrypt.h, which is declared in terms of it, so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/trust_store.cc
+
+  - kind: allow-include
+    value: [<mutex>]
+    reason: std::mutex, as the lock implementation Mbed TLS is handed through MBEDTLS_THREADING_ALT. cc::mutex owns its data and locks through a callback, so it cannot be the separate lock/unlock pair a C API asks for.
+    files:
+      - src/clean-net/tls/tls_mbedtls.cc
+
+  - kind: allow-include
     value: [<memory>]
     reason: std::unique_ptr, to OWN a connection_backend through its interface. Neither cc smart pointer has a derived-to-base conversion, and cc::shared_ptr's default traits place the control block at an offset computed from sizeof(T), so an upcast would be unsound rather than merely absent. The same choice slib::impl::watch_backend, sg's backends and cc::threaded_actor's own impl make.
     files:
@@ -51,3 +69,4 @@ rules:
       - src/clean-net/transport/tcp.cc
       - src/clean-net/transport/virtual_transport.cc
       - src/clean-net/transport/simulated_transport.cc
+      - src/clean-net/tls/tls_mbedtls.cc

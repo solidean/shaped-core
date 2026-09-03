@@ -91,6 +91,10 @@ public:
     [[nodiscard]] endpoint local() const;
     [[nodiscard]] endpoint peer() const;
 
+    /// The application protocol a TLS handshake settled on, empty for a connection that never had one.
+    /// `cnet::tls_negotiated_alpn` is the spelling a caller reaches for.
+    [[nodiscard]] cc::string_view negotiated_alpn() const;
+
     /// Whether the connection is still usable.
     /// False after `close`, and after a failure that took the connection down with it.
     [[nodiscard]] bool is_open() const;

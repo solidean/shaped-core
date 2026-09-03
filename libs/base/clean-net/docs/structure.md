@@ -25,7 +25,7 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | planned (native) | planned (native, system curl) | planned (native) | planned |
 | WebSocket client | planned (browser) | planned (native) | planned (native) | planned (native) | planned |
-| TLS | browser's | planned (mbedTLS) | planned (mbedTLS) | planned (mbedTLS) | planned |
+| TLS | browser's | **done** | done, no trust store yet | done, no trust store yet | planned |
 | name resolution | — (the browser resolves inside `fetch`) | **done** | done, unverified | done, unverified | planned |
 
 A dash is `error_code::unsupported`: the platform has no such concept and never will, so a caller decides once at
@@ -41,6 +41,13 @@ None of it touches the network, so all of it is testable without one.
 Connect, accept, send, receive and half-close as `cc::shared_async`, with deadlines the reactor enforces against the
 injected clock.
 "Done, unverified" above means the same code path Windows runs, on a platform nobody has run it on yet.
+
+**[done]** TLS, over a vendored Mbed TLS.
+`cnet::tls_connect` and `cnet::tls_accept` wrap any connection, so a handshake runs over the virtual network with no
+socket in sight -- which is where every TLS test here runs.
+The Windows trust store is read; the Apple, Linux and Android adapters are not written yet and report `unsupported`
+rather than an empty set of roots.
+[tls.md](tls.md) is the design.
 
 **[done]** name resolution, and the race above it.
 `cnet::resolver` runs a blocking `getaddrinfo` on a worker thread behind a TTL cache, and `cnet::connect_to_host`
@@ -60,7 +67,7 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. TLS over a vendored mbedTLS, with per-platform trust stores;
+1. the remaining trust stores -- Apple, Linux and Android;
 2. the HTTP/1.1 native backend, the client seam and the convenience calls;
 3. the `fetch` backend for wasm, and a `dlopen`ed system libcurl where one is present;
 4. the loopback server and WebSocket;

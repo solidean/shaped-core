@@ -152,6 +152,23 @@ class tcp_connection;
 class tcp_listener;
 } // namespace cnet
 
+// ---- TLS -----------------------------------------------------------------------------------------------
+
+namespace cnet
+{
+/// What a connection is willing to trust: this machine's roots, plus whatever else a caller adds.
+struct tls_trust;
+
+/// A certificate chain and the private key that goes with it.
+struct tls_identity;
+
+/// What a client hands to a handshake: the trust, the protocols to offer, and an optional client certificate.
+struct tls_options;
+
+/// What a server hands to a handshake: what it presents, and the protocols it will speak.
+struct tls_server_options;
+} // namespace cnet
+
 // ---- capability ladder ---------------------------------------------------------------------------------
 
 namespace cnet

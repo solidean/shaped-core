@@ -199,6 +199,27 @@ Resolve and connect as one operation, racing the addresses (RFC 8305) — IPv6 f
 **Every attempt gets a child of your token**, so cancelling yours cancels the race while the race cancels only its losers.
 If every attempt fails you get the FIRST failure, which is the one about the address the OS thought best.
 
+## TLS
+
+```cpp
+#include <clean-net/tls/tls.hh>
+
+cnet::tls_is_supported();                               // false on wasm, where the browser holds the TLS
+
+cnet::tls_connect(connection, "example.com");           // cc::shared_async<cc::shared_ptr<tcp_connection>>
+cnet::tls_connect(connection, host, {.trust = {.additional_roots_pem = {my_ca}}, .alpn = {"http/1.1"}}, d, token);
+cnet::tls_accept(connection, {.identity = id, .alpn = {"http/1.1"}});   // the server side
+cnet::tls_negotiated_alpn(*conn);                       // cc::string_view, empty if none was agreed
+
+cnet::tls_make_self_signed("localhost");                // cc::result<tls_identity, error> — a dev server's certificate
+```
+
+**TLS is a wrapper, not a transport**: it takes a connection and hands back a connection, so it composes over the real network, the virtual one, and a simulated bad link alike.
+**`hostname` is the NAME, not the address** — it is what the certificate must match and what goes out as SNI, so passing an address is how verification gets accidentally disabled.
+**The trust default is this machine's store**, and a platform whose adapter is not written yet reports `unsupported` rather than pretending to have no roots.
+**`allow_any_certificate` is settable from code only**, never from configuration.
+[docs/tls.md](docs/tls.md) has the trust story, which is the harder half.
+
 ## Cancelling
 
 ```cpp

@@ -258,6 +258,11 @@ endpoint tcp_connection::peer() const
     return _backend->peer();
 }
 
+cc::string_view tcp_connection::negotiated_alpn() const
+{
+    return _backend->negotiated_alpn();
+}
+
 bool tcp_connection::is_open() const
 {
     return _backend->is_open();

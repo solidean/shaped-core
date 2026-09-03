@@ -19,6 +19,8 @@ add_library(clean-net
     src/clean-net/io/io_system.cc
     src/clean-net/impl/async_glue.cc
     src/clean-net/impl/native_resolve.cc
+    src/clean-net/impl/trust_store.cc
+    src/clean-net/tls/tls_mbedtls.cc
     src/clean-net/transport/tcp.cc
     src/clean-net/transport/connect.cc
     src/clean-net/transport/virtual_transport.cc
@@ -50,6 +52,7 @@ target_sources(clean-net
     src/clean-net/transport/backend.hh
     src/clean-net/transport/tcp.hh
     src/clean-net/transport/connect.hh
+    src/clean-net/tls/tls.hh
     src/clean-net/transport/virtual_transport.hh
     src/clean-net/transport/simulated_transport.hh
 )
@@ -78,8 +81,19 @@ else()
 endif()
 
 # Winsock is a separate library on Windows and part of libc everywhere else.
+# crypt32 is the Windows trust store -- CertOpenSystemStore and its neighbours.
 if(WIN32)
-    target_link_libraries(clean-net PRIVATE ws2_32)
+    target_link_libraries(clean-net PRIVATE ws2_32 crypt32)
+endif()
+
+# TLS: Mbed TLS everywhere but wasm, where the browser holds the TLS and a program never sees a handshake.
+# CNET_HAS_TLS stays PRIVATE and never leaves tls_mbedtls.cc; the API stays declared either way and
+# cnet::tls_is_supported() reports the answer at runtime.
+if(EMSCRIPTEN)
+    target_compile_definitions(clean-net PRIVATE CNET_HAS_TLS=0)
+else()
+    target_compile_definitions(clean-net PRIVATE CNET_HAS_TLS=1)
+    target_link_libraries(clean-net PRIVATE mbedtls)
 endif()
 
 # Enable conforming preprocessor for MSVC
@@ -102,6 +116,7 @@ if(SC_BUILD_TESTS)
         tests/io-system-test.cc
         tests/tcp-test.cc
         tests/connect-test.cc
+        tests/tls-test.cc
         tests/virtual-transport-test.cc
         tests/simulated-transport-test.cc
     )

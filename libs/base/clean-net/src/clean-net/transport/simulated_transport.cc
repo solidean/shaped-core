@@ -221,6 +221,7 @@ public:
 
     [[nodiscard]] endpoint local() const override { return _under->local(); }
     [[nodiscard]] endpoint peer() const override { return _under->peer(); }
+    [[nodiscard]] cc::string_view negotiated_alpn() const override { return _under->negotiated_alpn(); }
     [[nodiscard]] bool is_open() const override { return !_budget->cut && _under->is_open(); }
     void close() override { _under->close(); }
 

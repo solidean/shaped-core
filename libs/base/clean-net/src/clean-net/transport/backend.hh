@@ -4,6 +4,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-net/address/endpoint.hh>
 #include <clean-net/common/cancel.hh>
@@ -49,6 +50,12 @@ public:
 
     [[nodiscard]] virtual endpoint local() const = 0;
     [[nodiscard]] virtual endpoint peer() const = 0;
+
+    /// The application protocol a TLS handshake settled on, empty for a connection that never had one.
+    ///
+    /// Defaulted rather than pure: only the TLS wrapper has an answer, and a backend that is not one should not have
+    /// to say so.
+    [[nodiscard]] virtual cc::string_view negotiated_alpn() const { return {}; }
 
     [[nodiscard]] virtual bool is_open() const = 0;
 
