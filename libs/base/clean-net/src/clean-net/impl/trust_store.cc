@@ -185,19 +185,11 @@ constexpr cc::string_view k_bundle_paths[] = {
 
     auto stream = adapter.value().stream();
 
-    auto text = cc::string();
-    while (true)
-    {
-        byte chunk[4096];
-        auto const read = stream.read(cc::span<byte>(chunk, isize(sizeof(chunk))));
-        if (read <= 0)
-            break;
-        text += cc::string_view(reinterpret_cast<char const*>(chunk), read);
-    }
-
-    if (text.empty())
+    auto const content = stream.read_all();
+    if (content.has_error() || content.value().empty())
         return {};
-    return text;
+
+    return cc::string(cc::string_view(reinterpret_cast<char const*>(content.value().data()), content.value().size()));
 }
 } // namespace
 
