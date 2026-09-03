@@ -64,7 +64,12 @@ tests/data/
                                                 shared with the build-time generator once it exists
 cmake/
   ShaderPackage.cmake             [done]        sc_add_shader_package + sc_finalize_shader_packages
-  GenerateShaderPackage.cmake     [done]        build-time codegen: symbols, table, embedded include closure
+  generate_shader_package.py      [done]        build-time codegen: symbols, table, embedded include closure,
+                                                and the typed struct a `path:binding:namespace` entry declares
+  binding_grammar.py              [done]        the binding pass again, in Python -- what the generator parses
+                                                a registered file with; kept in step by the shared corpus
+  binding-grammar-self-test.py    [done]        that corpus against the Python half; `dev.py check`'s
+                                                `shader-grammar` gate
 ```
 
 Each embedded source is emitted as a run of ~8 KB adjacent raw string literals rather than as one literal.

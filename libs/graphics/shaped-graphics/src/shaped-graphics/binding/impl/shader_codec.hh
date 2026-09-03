@@ -19,7 +19,7 @@ namespace sg::impl
 {
 /// The layout revision this build writes.
 /// Bump it whenever a field is added, removed or reordered; older blobs then decode to nothing, and a cache reads that as a miss.
-inline constexpr u32 k_shader_codec_version = 2;
+inline constexpr u32 k_shader_codec_version = 3;
 
 [[nodiscard]] cc::vector<byte> encode_compiled_shader(compiled_shader const& shader);
 

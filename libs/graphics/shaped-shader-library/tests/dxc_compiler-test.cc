@@ -425,4 +425,39 @@ void main() {}
 
 #endif
 
+TEST("slib - a compiled shader reflects the addresses its generated table declares", exclusive("slib-shader-library"))
+{
+    // The third leg of the design's validation, and the only one that asks DXC rather than another parser:
+    // the constant table the generator produced, against what the compiler actually built.
+    //
+    // shade.hlsl reaches the group through the header that declares it, so this also covers the rewrite
+    // running on a flattened translation unit rather than on one file.
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(k_target_format));
+
+    // One-directional: reflection reports only what the entry point referenced, so its set is a subset of
+    // the declared table.
+    // shade.hlsl reads all three.
+    for (auto const& declared : slib_test::shaders::frame_bindings::group::declared_bindings())
+    {
+        auto const* reflected = find_binding(compiled, declared.name);
+        if (reflected == nullptr)
+        {
+            CC_LOG_ERROR("[package] '{}' is declared but was not reflected", declared.name);
+            CHECK(false);
+            continue;
+        }
+
+        CHECK(reflected->index == declared.index);
+        CHECK(reflected->count == declared.count);
+        CHECK(reflected->type == declared.type);
+        CHECK(reflected->texture_dimension == declared.texture_dimension);
+    }
+}
+
 #endif

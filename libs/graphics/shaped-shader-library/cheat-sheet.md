@@ -26,11 +26,14 @@ sc_add_shader_package(
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
-        blit.hlsl:fragment:main_ps)
+        blit.hlsl:fragment:main_ps
+        frame.hlsli:binding:frame_bindings) # path:binding:namespace -> a typed binding-group struct
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
+# a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a
+#   group is registered on its own -- otherwise every shader including it would generate the struct again.
 # validates: the file exists, the stage is real, no duplicate entries, no two files colliding on one C++ id.
 # call sc_finalize_shader_packages() ONCE at the bottom of the root CMakeLists: it turns "slib was never
 #   added" into a clear message instead of a missing header inside generated code at build time.
@@ -130,6 +133,20 @@ slib::parse_binding_groups(hlsl)   // -> cc::result<cc::vector<shader_binding_gr
 slib::rewrite_binding_groups(hlsl, format)
                                    // -> cc::result<cc::string>; writes register()/[[vk::binding]] and strips
                                    //   the pragmas. Runs in _compile_text, between preprocess and compile.
+```
+
+A `path:binding:namespace` entry generates a typed struct for one group, in `<NAMESPACE>::<namespace>`:
+
+```cpp
+using group = my::shaders::frame_bindings::group;
+group::group_index                 // -> constexpr sg::u32; the number the attribute gave
+group::declared_bindings()         // -> cc::span<sg::binding const>; the WHOLE table, in slot order
+group::acquire_layout(ctx)         // -> sg::binding_group_layout_handle; constant, no reflection consulted
+group::self_check()                // -> cc::string; empty while the table still describes its own shader
+group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
+                                   // -> cc::result<sg::binding_group_handle>
+// one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
+// the layout is built from the full DECLARED table, not from whatever subset one stage reflected.
 ```
 
 ```hlsl

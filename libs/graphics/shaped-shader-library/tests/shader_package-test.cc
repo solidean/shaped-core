@@ -43,7 +43,8 @@ TEST("slib - the generated package describes itself", exclusive("slib-shader-lib
 
     CHECK(pkg.name == "slib_test_shaders");
     CHECK(pkg.language == slib::shader_language::hlsl);
-    CHECK(pkg.definitions.size() == 3);
+    // One per declared entry point; a binding entry declares none, so it adds nothing here.
+    CHECK(pkg.definitions.size() == 4);
     CHECK(!pkg.source_dir.empty()); // baked absolute at configure; present in a dev build
 
     for (auto const& definition : pkg.definitions)
@@ -58,9 +59,10 @@ TEST("slib - the generated package embeds its include closure", exclusive("slib-
 {
     auto const& pkg = slib_test::shaders::package();
 
-    // Three declared entry points over two files, plus the .hlsli one of them includes.
+    // Three shader files, plus the two .hlsli they include -- one of which is also registered on its own as
+    // a binding entry, and is embedded once either way.
     // The include is the point: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry points could not resolve it.
-    REQUIRE(pkg.embedded_files.size() == 3);
+    REQUIRE(pkg.embedded_files.size() == 5);
 
     bool has_invert = false;
     bool has_blit = false;
@@ -98,4 +100,50 @@ TEST("slib - the generated package compiles from its embedded sources alone", ex
     auto const source = fake_compiler::source_of(*shader->try_value());
     CHECK(source.contains("slib_test_invert"));
     CHECK(!source.contains("#include"));
+}
+
+TEST("slib - a binding entry generates the group its namespace declares", exclusive("slib-shader-library"))
+{
+    // The typed half of the codegen: one named member per binding, and the addresses as constants rather
+    // than something reflected out of a compiled shader.
+    using group = slib_test::shaders::frame_bindings::group;
+
+    CHECK(group::group_index == 0);
+
+    auto const bindings = group::declared_bindings();
+    REQUIRE(bindings.size() == 3);
+
+    // Declaration order, and one counter across register classes — the sampler takes index 1, not s0.
+    CHECK(bindings[0].name == "albedo");
+    CHECK(bindings[0].index == 0);
+    CHECK(bindings[0].type == sg::binding_type::readonly_texture);
+    CHECK(bindings[0].texture_dimension.value() == sg::texture_view_dimension::tex_2d);
+
+    CHECK(bindings[1].name == "linear_sampler");
+    CHECK(bindings[1].index == 1);
+    CHECK(bindings[1].type == sg::binding_type::sampler);
+
+    CHECK(bindings[2].name == "histogram");
+    CHECK(bindings[2].index == 2);
+    CHECK(bindings[2].type == sg::binding_type::readwrite_structured_buffer);
+
+    // The group number is both the SPIR-V set and the HLSL space, so every binding carries it twice.
+    for (auto const& binding : bindings)
+    {
+        REQUIRE(binding.group_index.has_value());
+        REQUIRE(binding.space.has_value());
+        CHECK(binding.group_index.value() == 0);
+        CHECK(binding.space.value() == 0);
+    }
+}
+
+TEST("slib - the generated table and the runtime pass read one shader the same way", exclusive("slib-shader-library"))
+{
+    // The self-check every package carries: the table came from the Python half of the pass, and this
+    // parses the embedded bytes with the C++ half.
+    // Its corpus is every shader anyone declares, so it grows without anyone remembering to extend it.
+    auto const difference = slib_test::shaders::frame_bindings::group::self_check();
+    if (!difference.empty())
+        FAIL(difference);
+    CHECK(difference.empty());
 }

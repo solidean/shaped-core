@@ -320,7 +320,8 @@ A shader compiled through `compile_source` has no generated struct and no table,
 
 ### The build-time generator
 
-`GenerateShaderPackage.cmake` is replaced by a Python script the custom command invokes.
+`GenerateShaderPackage.cmake` is replaced by `generate_shader_package.py`, which the custom command invokes through `uv run`.
+That is the shape `tools/instruction-tracer` already uses for its own build-step codegen.
 There is no C++ host tool: it complicates building and CI, and cross-compiling would mean building it for the host while the library builds for the target.
 
 So the tokenizer exists twice — once in Python for the generator, once in C++ for the rewriter — and two tests are what make that safe.
@@ -483,7 +484,7 @@ Error messages recover the name from `layout->bindings()[slot].name`, so nothing
    No rewriting yet — a parse that reports groups and bindings is independently checkable.
 3. **[done] `rewrite_binding_groups` in `_compile_text`**, with a test that one source compiles to both targets and reflects the same addresses.
    This is where Q8's failure becomes a passing test.
-4. **The `path:binding:namespace` entry and the generated group**, the Python generator replacing the CMake one, and the per-package self-check.
+4. **[done] The `path:binding:namespace` entry and the generated group**, the Python generator replacing the CMake one, and the per-package self-check.
 5. **The mirror structs**, and the `push_constants`, `payload` and `vertex_input` attributes, after the spike pins the payload's packing.
    The generated vertex layout lands here too, since it is the same parse and the same packing engine.
 6. **`sg::slotted_view`**, the `binding_slot` doc widening, the dx12 remap, and the resolve-then-delegate refactor in both backends.

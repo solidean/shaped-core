@@ -149,6 +149,8 @@ if(SC_BUILD_TESTS)
             invert.hlsl:compute:main
             blit.hlsl:vertex:main_vs
             blit.hlsl:fragment:main_ps
+            shade.hlsl:compute:main
+            frame_bindings.hlsli:binding:frame_bindings
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
