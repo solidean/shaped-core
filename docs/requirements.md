@@ -72,6 +72,37 @@ Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and
 A hand-rolled wasm configure must too: leaving the `ON` default fails rather than silently building single-threaded.
 To develop that mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
 
+### WebGPU test runtimes
+
+None of this is needed for the wasm tier as it stands, which has no WebGPU.
+These are the runtimes the Tier-3 `SC_WASM_WEBGPU` work will test against, written down here so a machine can be prepared before that lands.
+
+What they buy is that **WebGPU is reachable from the CLI**, so a wasm graphics build need not be driven through a browser to be tested.
+They are also two different implementations of the same spec.
+Node's binding is Google's Dawn, which is what Chrome ships; Deno's is wgpu, which is what Firefox ships.
+Running both from the CLI therefore covers the quirks of both browser engines, which is the class of bug that otherwise appears only after deploying.
+
+**Deno** has WebGPU built in, with no native module to compile.
+
+```bash
+winget install DenoLand.Deno                    # Windows
+curl -fsSL https://deno.land/install.sh | sh    # Linux / macOS
+deno --version
+```
+
+WebGPU is on by default as of Deno 2.9.6, which is what this was verified against; `--unstable-webgpu` is still accepted but no longer required.
+It needs no permission flag either, which is worth knowing because Deno gates most of its capabilities by default: a plain `deno run` on a WebGPU script works.
+Deno can also present to a real OS window through `Deno.UnsafeWindowSurface`, which binds a surface to a window handle an FFI windowing library supplies rather than opening one itself.
+
+**Node** gets WebGPU from the `webgpu` package, which ships prebuilt Dawn bindings and needs no build step.
+
+```bash
+npm install webgpu
+```
+
+Node is the runtime `dev.py test` already drives for wasm, so it is the shorter path of the two.
+A wasm module reaches the binding through `globalThis.navigator.gpu`, which the harness must install before the module loads.
+
 ### `std::stacktrace`
 
 clean-core uses `std::stacktrace`, and whether it is usable at all is settled by a **link probe** at configure time.
