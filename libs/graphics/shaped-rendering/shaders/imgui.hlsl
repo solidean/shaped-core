@@ -31,7 +31,7 @@ struct imgui_constants
     float2 translate;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants space=9
 ConstantBuffer<imgui_constants> gConstants;
 
 vs_output main_vs(vs_input input)

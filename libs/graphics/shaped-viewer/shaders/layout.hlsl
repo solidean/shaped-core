@@ -23,7 +23,7 @@ struct layout_constants
     float4 separator_color; // the wipe's seam band
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants space=9
 ConstantBuffer<layout_constants> constants;
 
 struct vs_output

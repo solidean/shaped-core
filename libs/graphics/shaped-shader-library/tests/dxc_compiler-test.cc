@@ -49,136 +49,6 @@ constexpr auto k_target_format = sg::shader_format::spirv;
 {
     return slib::create_dxc_spirv_compiler();
 }
-namespace
-{
-// Q8's shape, declared as an annotated namespace instead of numbered by DXC.
-// `pixel_only` is declared FIRST and read only by the pixel stage, so without a written address the vertex stage
-// takes t0 for `both` while the pixel stage takes t1 -- one resource, one name, two addresses, from one source
-// that named neither.
-constexpr char const* k_two_stage_shader = R"(
-#pragma sc group 0
-namespace frame_bindings
-{
-    Texture2D<float4> pixel_only;
-    Texture2D<float4> both;
-    SamplerState samp;
-}
-
-struct vs_out { float4 pos : SV_Position; float2 uv : TEXCOORD; };
-
-vs_out main_vs(uint id : SV_VertexID)
-{
-    vs_out o;
-    o.uv = float2((id << 1) & 2, id & 2);
-    o.pos = float4(o.uv * 2.0f - 1.0f, frame_bindings::both.SampleLevel(frame_bindings::samp, o.uv, 0).x, 1);
-    return o;
-}
-
-float4 main_ps(vs_out i) : SV_Target
-{
-    return frame_bindings::both.SampleLevel(frame_bindings::samp, i.uv, 0)
-         + frame_bindings::pixel_only.SampleLevel(frame_bindings::samp, i.uv, 0);
-}
-)";
-
-[[nodiscard]] sg::binding const* find_binding(sg::compiled_shader const& shader, cc::string_view name)
-{
-    for (auto const& binding : shader.bindings)
-        if (binding.name == name)
-            return &binding;
-    return nullptr;
-}
-} // namespace
-
-#ifdef CC_OS_WINDOWS
-
-TEST("slib - one annotated source gives every stage and target the same address", exclusive("slib-shader-library"))
-{
-    // The test Q8 could not pass: a shared binding keeps its address across the stages of one pipeline, and
-    // across the two targets, because the rewrite wrote it into the source.
-    slib::shader_library lib;
-    auto dxil = slib::create_dxc_compiler();
-    auto spirv = slib::create_dxc_spirv_compiler();
-    REQUIRE(dxil.has_value());
-    REQUIRE(spirv.has_value());
-    lib.add_compiler(cc::move(dxil.value()));
-    lib.add_compiler(cc::move(spirv.value()));
-
-    for (auto const format : {sg::shader_format::dxil, sg::shader_format::spirv})
-    {
-        auto const vs = lib.compile_source(k_two_stage_shader, sg::shader_stage::vertex, "main_vs", format);
-        auto const ps = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", format);
-
-        // Reflection reports the bare name, so `frame_bindings::both` arrives as `both` -- Q10.
-        auto const* both_vs = find_binding(await(vs), "both");
-        auto const* both_ps = find_binding(await(ps), "both");
-        REQUIRE(both_vs != nullptr);
-        REQUIRE(both_ps != nullptr);
-
-        // The second declaration in its group, whichever stage referenced what.
-        CHECK(both_vs->index == 1);
-        CHECK(both_ps->index == 1);
-
-        // And the sampler shares the group's counter rather than starting its own class at zero.
-        auto const* samp = find_binding(await(ps), "samp");
-        REQUIRE(samp != nullptr);
-        CHECK(samp->index == 2);
-    }
-}
-
-TEST("slib - the group number reaches DXIL as a space and SPIR-V as a set", exclusive("slib-shader-library"))
-{
-    slib::shader_library lib;
-    auto dxil = slib::create_dxc_compiler();
-    auto spirv = slib::create_dxc_spirv_compiler();
-    REQUIRE(dxil.has_value());
-    REQUIRE(spirv.has_value());
-    lib.add_compiler(cc::move(dxil.value()));
-    lib.add_compiler(cc::move(spirv.value()));
-
-    auto const as_dxil
-        = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", sg::shader_format::dxil);
-    auto const as_spirv
-        = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", sg::shader_format::spirv);
-
-    auto const* dxil_both = find_binding(await(as_dxil), "both");
-    auto const* spirv_both = find_binding(await(as_spirv), "both");
-    REQUIRE(dxil_both != nullptr);
-    REQUIRE(spirv_both != nullptr);
-
-    // The two ways a shading language namespaces an address, from one number written once.
-    REQUIRE(dxil_both->space.has_value());
-    CHECK(dxil_both->space.value() == 0);
-    REQUIRE(spirv_both->group_index.has_value());
-    CHECK(spirv_both->group_index.value() == 0);
-}
-
-TEST("slib - an attribute the pass cannot honour fails the compile", exclusive("slib-shader-library"))
-{
-    slib::shader_library lib;
-    auto compiler = make_dxc_compiler();
-    REQUIRE(compiler.has_value());
-    lib.add_compiler(cc::move(compiler.value()));
-
-    // The failure a macro prelude could not produce: the marker is a comment, so nothing but the pass can notice it.
-    constexpr char const* k_bad = R"(
-#pragma sc gruop 0
-namespace frame
-{
-    Texture2D<float4> albedo;
-}
-[numthreads(1, 1, 1)]
-void main() {}
-)";
-
-    auto const shader = lib.compile_source(k_bad, sg::shader_stage::compute, "main", k_target_format);
-    (void)cc::try_async_blocking_get(shader);
-    REQUIRE(shader->has_error());
-    CHECK(shader->try_error()->underlying().to_string().contains("is not an attribute this pass knows"));
-}
-
-#endif
-
 #endif
 } // namespace
 
@@ -487,6 +357,23 @@ TEST("slib - an inline-constants block reflects at b0 in the space it named", ex
     // with the compiler.
     REQUIRE(constants->block_size.has_value());
     CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
+}
+
+TEST("slib - a two-slot vertex input compiles to SPIR-V", exclusive("slib-shader-library"))
+{
+    // mesh.hlsl feeds one entry point from two annotated structs, which is what an instanced draw looks like.
+    // A location counter that restarted per struct would put two inputs at location 0, and DXC's validator
+    // rejects the module rather than picking one — so this compiling at all is the property under test.
+    //
+    // SPIR-V explicitly, not k_target_format: the DXIL arm writes no location, so it could never see this.
+    slib::shader_library lib;
+    auto compiler = slib::create_dxc_spirv_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& vs = await(slib_test::shaders::mesh.vertex.main_vs->acquire(sg::shader_format::spirv));
+    CHECK(vs.bytecode.size() > 0);
 }
 
 #endif

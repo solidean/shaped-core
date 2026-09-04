@@ -22,11 +22,6 @@ from dataclasses import dataclass, field
 # of it, since it ignores a pragma it does not know.
 ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input")
 
-# The attributes whose meaning has not landed yet.
-# Every attribute name is honoured now, so nothing is recognised-but-refused.
-# The tuple stays because the next attribute to be designed lands here before it lands anywhere else.
-UNIMPLEMENTED_ATTRIBUTES: tuple[str, ...] = ()
-
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
 
@@ -60,7 +55,6 @@ class Token:
     offset: int
     length: int
     location: Location
-    first_on_line: bool
 
 
 @dataclass
@@ -322,7 +316,8 @@ def _is_identifier_char(c: str) -> bool:
     return c.isascii() and (c.isalnum() or c == "_")
 
 
-def _is_space(c: str) -> bool:
+def _is_inline_space(c: str) -> bool:
+    """Whitespace WITHIN a line -- the newline is what ends a directive here, so it is not one."""
     return c in " \t\r"
 
 
@@ -361,7 +356,7 @@ def lex(hlsl: str) -> list[Token]:
 
     def emit(kind: str, text: str, offset: int, length: int) -> None:
         nonlocal line_has_token
-        tokens.append(Token(kind, text, offset, length, Location(file, line), not line_has_token))
+        tokens.append(Token(kind, text, offset, length, Location(file, line)))
         line_has_token = True
 
     while i < size:
@@ -373,7 +368,7 @@ def lex(hlsl: str) -> list[Token]:
             i += 1
             continue
 
-        if _is_space(c):
+        if _is_inline_space(c):
             i += 1
             continue
 
@@ -468,13 +463,13 @@ def parse_annotation(text: str, location: Location) -> Annotation:
 
     def skip_spaces() -> None:
         nonlocal i
-        while i < size and _is_space(text[i]):
+        while i < size and _is_inline_space(text[i]):
             i += 1
 
     def read_word() -> str:
         nonlocal i
         start = i
-        while i < size and not _is_space(text[i]) and text[i] not in "=(),":
+        while i < size and not _is_inline_space(text[i]) and text[i] not in "=(),":
             i += 1
         return text[start:i]
 
@@ -581,8 +576,6 @@ class _Parser:
 
         if parsed.name not in ATTRIBUTE_NAMES:
             raise BindingError(f"{token.location}: '{parsed.name}' is not an attribute this pass knows")
-        if parsed.name in UNIMPLEMENTED_ATTRIBUTES:
-            raise BindingError(f"{token.location}: the '{parsed.name}' attribute is not supported yet")
         return parsed
 
     def run(self) -> list[Group]:
@@ -884,7 +877,14 @@ class _Parser:
         self.at += 1
 
         if type_name not in VALUE_TYPES:
-            raise BindingError(f"{location}: '{type_name}' is not a vertex attribute type this pass knows")
+            kind = "vertex attribute" if requires_semantic else "payload"
+            raise BindingError(f"{location}: '{type_name}' is not a {kind} type this pass knows")
+
+        # `bool` is the case: four bytes in a constant block, and no vertex attribute format on any API.
+        # Refused here rather than generated, since the generator would otherwise emit a format that is not one.
+        if requires_semantic and VALUE_TYPES[type_name][2] is None:
+            raise BindingError(
+                f"{location}: '{type_name}' has no vertex attribute format, so it cannot feed a vertex input")
 
         if self.at_end() or self.current().kind != "identifier":
             raise BindingError(f"{location}: expected a name after '{type_name}'")
@@ -1111,5 +1111,16 @@ def parse_binding_groups(hlsl: str) -> Bindings:
 
     # After the walk, so the struct an inline-constants block names may be declared on either side of it.
     parser.layout_inline_constants()
+
+    # A group owns its number as a space, and an inline-constants block is always b0 -- so a block sharing a
+    # space with a group would land on the group's first `b` binding the moment one is declared.
+    # Refused whether or not that binding exists yet: the alternative is a shader that breaks on a reorder.
+    if parser.inline_constants is not None:
+        constants = parser.inline_constants
+        for group in groups:
+            if group.group == constants.space:
+                raise BindingError(
+                    f"the inline-constants block '{constants.name}' takes space {constants.space}, "
+                    f"which group {group.group} ('{group.name}') already owns")
 
     return Bindings(groups, parser.inline_constants, parser.vertex_inputs, parser.payloads)

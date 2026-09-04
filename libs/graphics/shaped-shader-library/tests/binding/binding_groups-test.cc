@@ -679,6 +679,23 @@ struct vs_input
     float4 color : COLOR;
 };
 )";
+
+// Two structs feeding one entry point, which is what an instanced draw looks like.
+constexpr char const* k_two_slot_vertex_input_shader = R"(
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+};
+
+#pragma sc vertex_input slot=1 per_instance
+struct instance_input
+{
+    float3 center : TEXCOORD0;
+    uint tint : TEXCOORD1;
+};
+)";
 } // namespace
 
 TEST("slib - the SPIR-V arm numbers vertex inputs by declaration order")
@@ -689,6 +706,19 @@ TEST("slib - the SPIR-V arm numbers vertex inputs by declaration order")
     CHECK(rewritten.value().contains("[[vk::location(0)]] float3 position : POSITION;"));
     CHECK(rewritten.value().contains("[[vk::location(1)]] float3 normal : NORMAL;"));
     CHECK(rewritten.value().contains("[[vk::location(2)]] float4 color : COLOR;"));
+}
+
+TEST("slib - one location counter runs across every vertex input struct in a file")
+{
+    // A location is a position in the stage's own flat namespace, so a per-struct counter would give the
+    // per-vertex and the per-instance struct the same two numbers and the module would not be valid.
+    auto const rewritten = slib::rewrite_binding_groups(k_two_slot_vertex_input_shader, sg::shader_format::spirv);
+    REQUIRE(rewritten.has_value());
+
+    CHECK(rewritten.value().contains("[[vk::location(0)]] float3 position : POSITION;"));
+    CHECK(rewritten.value().contains("[[vk::location(1)]] float3 normal : NORMAL;"));
+    CHECK(rewritten.value().contains("[[vk::location(2)]] float3 center : TEXCOORD0;"));
+    CHECK(rewritten.value().contains("[[vk::location(3)]] uint tint : TEXCOORD1;"));
 }
 
 TEST("slib - the DXIL arm leaves a vertex input alone, since the semantic already names it")

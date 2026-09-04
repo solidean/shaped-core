@@ -55,7 +55,12 @@ namespace pt_bindings
 // A group namespace holds declarations, and this is a `cbuffer` block whose members are read unqualified in some
 // seventy places across the integrator. Moving it means a ConstantBuffer and seventy call sites, which is a change
 // to the integrator rather than to who owns an address.
-// It collides with nothing: the pass assigns `b0` to no one here.
+//
+// b0 in space 0 is free only because `background` is not the group's FIRST declaration — the pass numbers one
+// counter across register classes, so it lands on b3.
+// Reordering pt_bindings to put a ConstantBuffer first would put it here, and the pass cannot see this
+// hand-written register to refuse it.
+// So the constraint is on the declaration order above, until this block moves into the group too.
 cbuffer FrameConstants : register(b0)
 {
     Camera camera; // pinhole camera basis (see sv::camera_gpu::from)

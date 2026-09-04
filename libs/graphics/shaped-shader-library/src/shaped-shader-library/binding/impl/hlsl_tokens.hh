@@ -43,9 +43,6 @@ struct hlsl_token
     isize offset = 0; ///< where the token starts in the source; for an annotation, at its `#`
     isize length = 0; ///< how much source the token covers, which for an annotation is the whole directive
     hlsl_location location;
-
-    /// Whether nothing but whitespace precedes this token on its line.
-    bool first_on_line = false;
 };
 
 /// Splits HLSL into tokens, dropping whitespace, comments and the insides of literals.

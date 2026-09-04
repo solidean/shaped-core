@@ -612,7 +612,7 @@ struct pt_payload
     float4x4 transform;
 };
 --- error
-line 4: 'float4x4' is not a vertex attribute type this pass knows
+line 4: 'float4x4' is not a payload type this pass knows
 
 
 --- case a `payload` attribute standing before nothing is an error
@@ -945,3 +945,54 @@ void debug() { printf("never closed
 }
 --- error
 line 6: unterminated literal
+
+
+--- case an inline-constants block may not take a space a group owns
+--- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> constants;
+--- error
+the inline-constants block 'constants' takes space 0, which group 0 ('frame_bindings') already owns
+
+
+--- case a vertex input member needs a type an input assembler can fetch
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+    bool visible : TEXCOORD0;
+};
+--- error
+line 5: 'bool' has no vertex attribute format, so it cannot feed a vertex input
+
+
+--- case one location counter runs across every vertex input struct
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=1 per_instance
+struct instance_input
+{
+    float3 center : TEXCOORD0;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+vertex_input instance_input slot=1 per_instance
+  center float3 TEXCOORD0

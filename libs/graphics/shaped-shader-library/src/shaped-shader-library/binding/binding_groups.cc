@@ -27,12 +27,6 @@ using slib::impl::to_string;
 /// it, since it ignores a pragma it does not know.
 constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_constants", "payload", "vertex_input"};
 
-/// The attributes whose meaning has not landed yet.
-/// Recognised so the failure names what is missing, rather than reading as an unknown word.
-/// Every attribute name is honoured now, so nothing is recognised-but-refused.
-/// The array stays because the next attribute to be designed lands here before it lands anywhere else.
-constexpr cc::span<cc::string_view const> k_unimplemented_attributes = {};
-
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
 /// not on what a shader may contain.
@@ -173,8 +167,6 @@ struct parser
         auto const& name = parsed.value().name;
         if (!contains(k_attribute_names, name))
             return cc::error(cc::format("{}: '{}' is not an attribute this pass knows", to_string(token.location), name));
-        if (contains(k_unimplemented_attributes, name))
-            return cc::error(cc::format("{}: the '{}' attribute is not supported yet", to_string(token.location), name));
 
         return parsed;
     }
@@ -506,9 +498,16 @@ struct parser
         auto const type_offset = type_token.offset;
         ++at;
 
-        if (!slib::impl::value_type_of(type_name).has_value())
-            return cc::error(
-                cc::format("{}: '{}' is not a vertex attribute type this pass knows", to_string(location), type_name));
+        auto const value_type = slib::impl::value_type_of(type_name);
+        if (!value_type.has_value())
+            return cc::error(cc::format("{}: '{}' is not a {} type this pass knows", to_string(location), type_name,
+                                        requires_semantic ? "vertex attribute" : "payload"));
+
+        // `bool` is the case: four bytes in a constant block, and no vertex attribute format on any API.
+        // Refused here rather than generated, since the generator would otherwise emit a format that is not one.
+        if (requires_semantic && !value_type.value().format.has_value())
+            return cc::error(cc::format("{}: '{}' has no vertex attribute format, so it cannot feed a vertex input",
+                                        to_string(location), type_name));
 
         if (at_end() || current().kind != hlsl_token_kind::identifier)
             return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
@@ -913,6 +912,19 @@ struct parser
     // After the walk, so the struct an inline-constants block names may be declared on either side of it.
     CC_RETURN_IF_ERROR(p.layout_inline_constants());
 
+    // A group owns its number as a space, and an inline-constants block is always b0 — so a block sharing a
+    // space with a group would land on the group's first `b` binding the moment one is declared.
+    // Refused whether or not that binding exists yet: the alternative is a shader that breaks on a reorder.
+    if (p.inline_constants.has_value())
+    {
+        auto const& constants = p.inline_constants.value().constants;
+        for (auto const& group : groups.value())
+            if (group.group == constants.space)
+                return cc::error(cc::format("the inline-constants block '{}' takes space {}, which group {} "
+                                            "('{}') already owns",
+                                            constants.name, constants.space, group.group, group.name));
+    }
+
     // The group number is both the SPIR-V set and the HLSL space, which is what makes one address serve both targets.
     for (auto& group : groups.value())
         for (auto& binding : group.bindings)
@@ -1043,10 +1055,18 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
 
     // Vertex input locations, which only the SPIR-V arm needs: HLSL matches an input by its semantic, and the
     // semantic is already in the source.
+    //
+    // One counter across every annotated struct, not one per struct: a location is a position in the stage's own
+    // flat namespace, so two structs feeding one entry point — the per-vertex slot and the per-instance one —
+    // would otherwise both claim location 0.
+    // Declaration order is what decides it, which is the same rule the slots themselves follow.
     if (target == sg::shader_format::spirv)
+    {
+        u32 next_location = 0;
         for (auto const& input : parsed.value().vertex_inputs)
-            for (isize i = 0; i < input.member_offsets.size(); ++i)
-                edits.push_back({.offset = input.member_offsets[i], .text = cc::format("[[vk::location({})]] ", i)});
+            for (auto const offset : input.member_offsets)
+                edits.push_back({.offset = offset, .text = cc::format("[[vk::location({})]] ", next_location++)});
+    }
 
     cc::sort_by(edits, &source_edit::offset);
     return apply_edits(hlsl, edits);

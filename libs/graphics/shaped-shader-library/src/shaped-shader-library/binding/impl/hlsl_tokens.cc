@@ -21,7 +21,9 @@ namespace
     return is_identifier_start(c) || is_digit(c);
 }
 
-[[nodiscard]] bool is_space(char c)
+/// Whitespace WITHIN a line, so deliberately not `cc::is_space` — the newline is what ends a directive here,
+/// and a predicate that swallowed it would let a `#pragma sc` line run into the declaration below it.
+[[nodiscard]] bool is_inline_space(char c)
 {
     return c == ' ' || c == '\t' || c == '\r';
 }
@@ -30,9 +32,9 @@ namespace
 {
     isize begin = 0;
     isize end = sv.size();
-    while (begin < end && is_space(sv[begin]))
+    while (begin < end && is_inline_space(sv[begin]))
         ++begin;
-    while (end > begin && is_space(sv[end - 1]))
+    while (end > begin && is_inline_space(sv[end - 1]))
         --end;
     return sv.subview({.start = begin, .end = end});
 }
@@ -47,7 +49,7 @@ namespace
         return false;
 
     text.remove_prefix(word.size());
-    while (!text.empty() && is_space(text[0]))
+    while (!text.empty() && is_inline_space(text[0]))
         text.remove_prefix(1);
     return true;
 }
@@ -79,12 +81,7 @@ cc::result<cc::vector<slib::impl::hlsl_token>> slib::impl::lex_hlsl(cc::string_v
 
     auto const emit = [&](hlsl_token_kind kind, cc::string_view text, isize offset, isize length)
     {
-        tokens.push_back({.kind = kind,
-                          .text = text,
-                          .offset = offset,
-                          .length = length,
-                          .location = location,
-                          .first_on_line = !line_has_token});
+        tokens.push_back({.kind = kind, .text = text, .offset = offset, .length = length, .location = location});
         line_has_token = true;
     };
 
@@ -100,7 +97,7 @@ cc::result<cc::vector<slib::impl::hlsl_token>> slib::impl::lex_hlsl(cc::string_v
             continue;
         }
 
-        if (is_space(c))
+        if (is_inline_space(c))
         {
             ++i;
             continue;
@@ -237,7 +234,7 @@ cc::result<slib::impl::annotation> slib::impl::parse_annotation(cc::string_view 
 
     auto const skip_spaces = [&]
     {
-        while (i < size && is_space(text[i]))
+        while (i < size && is_inline_space(text[i]))
             ++i;
     };
 
@@ -246,7 +243,8 @@ cc::result<slib::impl::annotation> slib::impl::parse_annotation(cc::string_view 
     auto const read_word = [&]() -> cc::string_view
     {
         auto const start = i;
-        while (i < size && !is_space(text[i]) && text[i] != '=' && text[i] != '(' && text[i] != ')' && text[i] != ',')
+        while (i < size && !is_inline_space(text[i]) && text[i] != '=' && text[i] != '(' && text[i] != ')'
+               && text[i] != ',')
             ++i;
         return text.subview({.start = start, .end = i});
     };
