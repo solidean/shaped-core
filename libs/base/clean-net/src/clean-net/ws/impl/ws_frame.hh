@@ -86,4 +86,15 @@ void unmask(cc::span<byte> payload, u8 const mask_key[4], i64 offset);
 
 /// A fresh `Sec-WebSocket-Key`: 16 random bytes, base64-encoded.
 [[nodiscard]] cc::result<cc::string, error> generate_websocket_key();
+
+/// Fill `mask` with four unpredictable bytes for a client frame; false where this build has no random source.
+///
+/// **Unpredictable rather than merely varying**, which is RFC 6455 section 5.3's requirement and the reason a
+/// counter will not do: a client that can compute its own mask can put attacker-chosen bytes on the wire, which is
+/// the transparent-proxy cache poisoning masking exists to prevent.
+///
+/// Drawn from one process-wide CTR-DRBG, seeded on first use.
+/// False only where `CNET_HAS_TLS` is 0 -- wasm, where the browser owns the WebSocket and nothing here masks for
+/// real -- and the caller then has a framing-valid fallback that is not doing masking's job.
+[[nodiscard]] bool random_mask_key(u8 (&mask)[4]);
 } // namespace cnet::impl

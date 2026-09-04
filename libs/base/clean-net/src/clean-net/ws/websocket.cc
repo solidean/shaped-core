@@ -35,6 +35,13 @@ struct outgoing_frame
     cc::vector<byte> bytes;
     cc::shared_async<cc::unit> promise;
     deadline d;
+
+    /// Names this frame for a cancel, which cannot hold a pointer into a vector that shifts as frames go out.
+    u64 id = 0;
+
+    /// The manual operation watching this frame's token, or null.
+    /// Signalled once the frame is written or dropped, so a watch never outlives the frame it watches.
+    impl::io_operation* watch = nullptr;
 };
 
 /// What the reader is in the middle of.
@@ -76,8 +83,19 @@ struct websocket_state
         cc::vector<outgoing_frame> outbox;
         bool writing = false;
 
+        /// The next frame id, so a cancel can name the queued frame it means without holding a pointer into a
+        /// vector that shifts under it.
+        u64 next_frame_id = 1;
+
         cc::shared_async<websocket_message> pending_receive;
-        deadline receive_deadline = deadline::never();
+
+        /// Which receive `pending_receive` is, so a deadline or a cancel armed for an earlier one does nothing.
+        /// A receive is a logical operation over a shared read, so it cannot be identified by the read.
+        u64 receive_generation = 0;
+
+        /// The manual operation watching the current receive's token, or null.
+        /// Signalled when the receive settles, so the watch does not outlive what it watches.
+        impl::io_operation* receive_watch = nullptr;
 
         bool reading = false;
         bool closed = false;
@@ -90,7 +108,10 @@ struct websocket_state
         /// Anything at all arrived since the last keepalive tick, which is what "idle" is measured against.
         bool heard_from_peer = false;
 
-        /// Mask keys come from here, and they only have to differ rather than be unguessable.
+        /// The fallback mask source, for a build with no TLS backend and therefore no DRBG.
+        ///
+        /// A client there is a browser's, not ours, so nothing that masks for real ever reaches this.
+        /// See `impl::random_mask_key`: a mask key must be UNPREDICTABLE, and a counter is not.
         u32 mask_counter = 0x9E3779B9;
     };
 
@@ -105,18 +126,136 @@ void pump_reads(cc::shared_ptr<websocket_state> const& ws);
 void pump_writes(cc::shared_ptr<websocket_state> const& ws);
 void arm_keepalive(cc::shared_ptr<websocket_state> const& ws, i32 delay_ms);
 void deliver(cc::shared_ptr<websocket_state> const& ws);
+void release_receive_watch(websocket_state::data& d_state, io_system* io);
+
+/// End the receive numbered `generation`, if it is still the one outstanding.
+///
+/// **The generation is what makes this safe to arm and forget.** A deadline timer and a token watch both outlive
+/// the receive they were armed for, and neither may end the receive that came after it.
+void fail_receive(cc::shared_ptr<websocket_state> const& ws, u64 generation, error e)
+{
+    auto promise = ws->state.lock(
+        [&](websocket_state::data& d_state) -> cc::shared_async<websocket_message>
+        {
+            if (d_state.receive_generation != generation || !d_state.pending_receive.is_valid())
+                return {};
+
+            auto taken = d_state.pending_receive;
+            d_state.pending_receive = {};
+            release_receive_watch(d_state, ws->io);
+            return taken;
+        });
+
+    if (promise.is_valid())
+        promise->push_error(to_async_error(cc::move(e)));
+}
+
+/// Signal the watch the current receive armed, so it completes rather than outliving the receive.
+/// Must be called with the state locked; signalling only posts to the reactor's mailbox.
+void release_receive_watch(websocket_state::data& d_state, io_system* io)
+{
+    if (d_state.receive_watch == nullptr)
+        return;
+
+    if (io != nullptr)
+        io->signal(d_state.receive_watch);
+    d_state.receive_watch = nullptr;
+}
+
+/// A manual operation that completes as `cancelled` when a caller's token is cancelled, and successfully otherwise.
+///
+/// **A websocket operation is logical rather than a socket operation**, so a caller's token cannot be handed to the
+/// transport: one read is shared by every receive, and cancelling that read would end somebody else's.
+/// This is how a token still ends the operation the caller asked about, and nothing else.
+struct receive_watch final : impl::io_operation
+{
+    cc::unique_ptr<receive_watch> self;
+    impl::cancel_registration registration;
+    cc::shared_ptr<websocket_state> ws;
+    u64 generation = 0;
+
+    void on_complete(cc::optional<error> failure) override
+    {
+        auto const keep_alive_until_return = cc::move(self);
+        registration.detach();
+
+        ws->state.lock(
+            [this](websocket_state::data& d_state)
+            {
+                if (d_state.receive_watch == this)
+                    d_state.receive_watch = nullptr;
+            });
+
+        if (!failure.has_value() || failure.value().code != error_code::cancelled)
+            return;
+
+        fail_receive(
+            ws, generation,
+            {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the receive was cancelled")});
+    }
+};
 [[nodiscard]] cc::shared_async<cc::unit> enqueue_frame(cc::shared_ptr<websocket_state> const& ws,
                                                        impl::ws_opcode opcode,
                                                        cc::span<byte const> payload,
-                                                       deadline d);
+                                                       deadline d,
+                                                       cancel_token const& token = {});
+
+/// Drop the queued frame `id`, if it is still queued and not the one on the wire.
+///
+/// **A frame already being written cannot be cancelled**: half of it may be on the wire, and a websocket stream with
+/// half a frame in it is not one either end can carry on with.
+void cancel_queued_frame(cc::shared_ptr<websocket_state> const& ws, u64 id)
+{
+    auto promise = ws->state.lock(
+        [&](websocket_state::data& d_state) -> cc::shared_async<cc::unit>
+        {
+            // Index 0 is the frame being written when `writing` is set, and it is the one that cannot be taken back.
+            for (isize i = d_state.writing ? 1 : 0; i < d_state.outbox.size(); ++i)
+            {
+                if (d_state.outbox[i].id != id)
+                    continue;
+
+                auto taken = d_state.outbox[i].promise;
+                for (auto j = i + 1; j < d_state.outbox.size(); ++j)
+                    d_state.outbox[j - 1] = cc::move(d_state.outbox[j]);
+                d_state.outbox.remove_back();
+                return taken;
+            }
+            return {};
+        });
+
+    if (promise.is_valid())
+        promise->push_error(to_async_error(
+            {.code = error_code::cancelled, .native_code = 0, .message = cc::string("the send was cancelled")}));
+}
+
+/// Watches one queued frame's token, and drops the frame if it is cancelled before it reaches the wire.
+struct send_watch final : impl::io_operation
+{
+    cc::unique_ptr<send_watch> self;
+    impl::cancel_registration registration;
+    cc::shared_ptr<websocket_state> ws;
+    u64 frame_id = 0;
+
+    void on_complete(cc::optional<error> failure) override
+    {
+        auto const keep_alive_until_return = cc::move(self);
+        registration.detach();
+
+        if (failure.has_value() && failure.value().code == error_code::cancelled)
+            cancel_queued_frame(ws, frame_id);
+    }
+};
 
 /// Queue a frame, and start writing if nothing else is.
 [[nodiscard]] cc::shared_async<cc::unit> enqueue_frame(cc::shared_ptr<websocket_state> const& ws,
                                                        impl::ws_opcode opcode,
                                                        cc::span<byte const> payload,
-                                                       deadline d)
+                                                       deadline d,
+                                                       cancel_token const& token)
 {
     auto promise = cc::make_async_manual<cc::unit>();
+    auto out_id = u64(0);
 
     auto const refused = ws->state.lock(
         [&](websocket_state::data& d_state) -> bool
@@ -127,15 +266,27 @@ void deliver(cc::shared_ptr<websocket_state> const& ws);
             auto frame = outgoing_frame();
             frame.promise = promise;
             frame.d = d;
+            frame.id = d_state.next_frame_id++;
+            out_id = frame.id;
 
             if (ws->is_client)
             {
-                // Different every time is all this needs to be: masking is about transparent proxies, not secrecy.
-                d_state.mask_counter = d_state.mask_counter * 1664525u + 1013904223u;
-                auto const key = d_state.mask_counter;
-
-                u8 const mask[4]
-                    = {u8(key & 0xFF), u8((key >> 8) & 0xFF), u8((key >> 16) & 0xFF), u8((key >> 24) & 0xFF)};
+                // A mask key must be UNPREDICTABLE, not merely different: RFC 6455 section 5.3 requires a strong
+                // source of entropy, because a client that can compute its own mask can put attacker-chosen bytes on
+                // the wire and poison a transparent proxy's cache -- which is the only thing masking exists to stop.
+                u8 mask[4] = {};
+                if (!impl::random_mask_key(mask))
+                {
+                    // No DRBG in this build, which is a build where the browser owns the WebSocket and nothing
+                    // here is a real client.
+                    // The counter keeps the framing valid; it is not doing masking's job.
+                    d_state.mask_counter = d_state.mask_counter * 1664525u + 1013904223u;
+                    auto const key = d_state.mask_counter;
+                    mask[0] = u8(key & 0xFF);
+                    mask[1] = u8((key >> 8) & 0xFF);
+                    mask[2] = u8((key >> 16) & 0xFF);
+                    mask[3] = u8((key >> 24) & 0xFF);
+                }
                 impl::write_frame(frame.bytes, opcode, payload, true, mask);
             }
             else
@@ -151,6 +302,37 @@ void deliver(cc::shared_ptr<websocket_state> const& ws);
     if (refused)
         return impl::failed_async<cc::unit>(
             {.code = error_code::connection_closed, .native_code = 0, .message = cc::string("the websocket is closed")});
+
+    if (token.is_valid() && ws->io != nullptr)
+    {
+        auto watch = cc::make_unique<send_watch>();
+        watch->kind = impl::io_op_kind::manual;
+        watch->ws = ws;
+        watch->frame_id = out_id;
+
+        auto* const raw = watch.get();
+        raw->self = cc::move(watch);
+
+        ws->io->submit(raw);
+        raw->registration.attach(token, *ws->io, raw);
+
+        // The frame may already have gone out while this was being armed, in which case there is nothing left to
+        // cancel and the watch is signalled rather than left pending.
+        auto const still_queued = ws->state.lock(
+            [&](websocket_state::data& d_state)
+            {
+                for (auto& frame : d_state.outbox)
+                    if (frame.id == out_id)
+                    {
+                        frame.watch = raw;
+                        return true;
+                    }
+                return false;
+            });
+
+        if (!still_queued)
+            ws->io->signal(raw);
+    }
 
     pump_writes(ws);
     return promise;
@@ -188,6 +370,11 @@ void pump_writes(cc::shared_ptr<websocket_state> const& ws)
                                  d_state.writing = false;
 
                                  auto promise = d_state.outbox[0].promise;
+
+                                 // This frame is on the wire, so its token has nothing left to cancel.
+                                 if (d_state.outbox[0].watch != nullptr && ws->io != nullptr)
+                                     ws->io->signal(d_state.outbox[0].watch);
+
                                  for (isize i = 1; i < d_state.outbox.size(); ++i)
                                      d_state.outbox[i - 1] = cc::move(d_state.outbox[i]);
                                  d_state.outbox.remove_back();
@@ -348,7 +535,7 @@ void deliver(cc::shared_ptr<websocket_state> const& ws)
     };
 
     auto ready = ws->state.lock(
-        [](websocket_state::data& d_state) -> cc::optional<delivery>
+        [&ws](websocket_state::data& d_state) -> cc::optional<delivery>
         {
             if (!d_state.pending_receive.is_valid())
                 return {};
@@ -364,6 +551,7 @@ void deliver(cc::shared_ptr<websocket_state> const& ws)
                 d_state.ready.remove_back();
 
                 d_state.pending_receive = {};
+                release_receive_watch(d_state, ws->io);
                 return out;
             }
 
@@ -371,6 +559,7 @@ void deliver(cc::shared_ptr<websocket_state> const& ws)
             {
                 auto out = delivery{.promise = d_state.pending_receive, .failure = d_state.fatal};
                 d_state.pending_receive = {};
+                release_receive_watch(d_state, ws->io);
                 return out;
             }
 
@@ -381,6 +570,7 @@ void deliver(cc::shared_ptr<websocket_state> const& ws)
                                                      .native_code = 0,
                                                      .message = cc::string("the peer closed the websocket")}};
                 d_state.pending_receive = {};
+                release_receive_watch(d_state, ws->io);
                 return out;
             }
 
@@ -566,7 +756,13 @@ void pump_reads(cc::shared_ptr<websocket_state> const& ws)
     if (!start)
         return;
 
-    auto const d = ws->state.lock([](websocket_state::data const& d_state) { return d_state.receive_deadline; });
+    // The read carries the KEEPALIVE's bound and nothing else.
+    // A caller's deadline belongs to its receive, which has a timer of its own: one read is shared by every receive,
+    // so a deadline handed to the read outlives the caller who asked for it and ends a connection nobody said was
+    // dead.
+    // With keepalives off there is nothing left to bound it, which is what `never()` says.
+    auto const d = ws->ping_interval_ms > 0 ? deadline::after_ms(i64(ws->ping_interval_ms) + i64(ws->pong_timeout_ms))
+                                            : deadline::never();
 
     auto buffer = cc::span<byte>(ws->read_buffer.data(), ws->read_buffer.size());
     impl::when_ready(ws->connection->receive(buffer, d, ws->token),
@@ -579,9 +775,21 @@ void pump_reads(cc::shared_ptr<websocket_state> const& ws)
 
                                  if (received->has_error())
                                  {
-                                     // Every way a connection can end looks the same here: the peer is gone, and
-                                     // whoever was waiting for a message is not getting one.
+                                     // The connection is over either way, but WHY is not the same fact: a peer that
+                                     // hung up is the ordinary end of a websocket, and one that stopped answering
+                                     // a ping is a failure.
+                                     // Collapsing them reports the wrong one.
+                                     //
+                                     // The read's own code cannot be read back -- `cc::any_error` erases a
+                                     // `cnet::error` to its message -- so the distinction is drawn from what this
+                                     // side already knows: a read that ended while a ping was outstanding ended
+                                     // because the peer never answered it.
                                      d_state.closed = true;
+                                     if (d_state.awaiting_pong && !d_state.fatal.has_value())
+                                         d_state.fatal = error{.code = error_code::timed_out,
+                                                               .native_code = 0,
+                                                               .message = cc::string("the peer did not answer a "
+                                                                                     "keepalive ping")};
                                      return;
                                  }
 
@@ -609,30 +817,59 @@ websocket::~websocket()
     close();
 }
 
-cc::shared_async<cc::unit> websocket::send_text(cc::string_view text, deadline d, cancel_token const&)
+cc::shared_async<cc::unit> websocket::send_text(cc::string_view text, deadline d, cancel_token const& token)
 {
     auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size());
-    return enqueue_frame(_state, impl::ws_opcode::text, bytes, d);
+    return enqueue_frame(_state, impl::ws_opcode::text, bytes, d, token);
 }
 
-cc::shared_async<cc::unit> websocket::send_binary(cc::span<byte const> data, deadline d, cancel_token const&)
+cc::shared_async<cc::unit> websocket::send_binary(cc::span<byte const> data, deadline d, cancel_token const& token)
 {
-    return enqueue_frame(_state, impl::ws_opcode::binary, data, d);
+    return enqueue_frame(_state, impl::ws_opcode::binary, data, d, token);
 }
 
-cc::shared_async<websocket_message> websocket::receive(deadline d, cancel_token const&)
+cc::shared_async<websocket_message> websocket::receive(deadline d, cancel_token const& token)
 {
     auto promise = cc::make_async_manual<websocket_message>();
 
-    _state->state.lock(
+    auto const generation = _state->state.lock(
         [&](websocket_state::data& d_state)
         {
             CC_ASSERT(!d_state.pending_receive.is_valid(), "two receives at once on one websocket: the second would "
                                                            "take the message the first was promised");
 
-            d_state.receive_deadline = d;
             d_state.pending_receive = promise;
+            return ++d_state.receive_generation;
         });
+
+    // The deadline is the RECEIVE's, so it gets a timer of its own rather than being handed to the shared read.
+    if (d.is_finite() && _state->io != nullptr)
+        impl::run_after(*_state->io, d.timeout_ms,
+                        [ws = _state, generation]
+                        {
+                            fail_receive(ws, generation,
+                                         {.code = error_code::timed_out,
+                                          .native_code = 0,
+                                          .message = cc::string("no websocket message arrived in time")});
+                        });
+
+    // And the token ends this receive rather than the connection: the read underneath is shared, and cancelling it
+    // would end somebody else's receive as well as this one.
+    if (token.is_valid() && _state->io != nullptr)
+    {
+        auto watch = cc::make_unique<receive_watch>();
+        watch->kind = impl::io_op_kind::manual;
+        watch->ws = _state;
+        watch->generation = generation;
+
+        auto* const raw = watch.get();
+        raw->self = cc::move(watch);
+
+        _state->state.lock([&](websocket_state::data& d_state) { d_state.receive_watch = raw; });
+
+        _state->io->submit(raw);
+        raw->registration.attach(token, *_state->io, raw);
+    }
 
     // Whatever already arrived is parsed first, so a message that was waiting is handed over without another read.
     parse_available(_state);

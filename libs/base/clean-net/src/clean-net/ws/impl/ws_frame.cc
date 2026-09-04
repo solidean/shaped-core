@@ -270,6 +270,44 @@ cc::result<cc::string, error> generate_websocket_key()
     return cc::string(cc::string_view(reinterpret_cast<char const*>(encoded), isize(written)));
 }
 
+/// The process-wide generator mask keys are drawn from.
+///
+/// One rather than one per connection or per frame: seeding costs entropy and microseconds, and drawing does not.
+/// `mbedtls_ctr_drbg_random` takes the context's own mutex under MBEDTLS_THREADING_C, which this build enables, so
+/// it is safe from the reactor thread and from a caller's.
+struct mask_source
+{
+    mbedtls_entropy_context entropy = {};
+    mbedtls_ctr_drbg_context drbg = {};
+    bool seeded = false;
+
+    mask_source()
+    {
+        ensure_mbedtls_threading();
+        mbedtls_entropy_init(&entropy);
+        mbedtls_ctr_drbg_init(&drbg);
+
+        auto const personalization = cc::string_view("cnet websocket mask");
+        seeded = mbedtls_ctr_drbg_seed(&drbg, mbedtls_entropy_func, &entropy,
+                                       reinterpret_cast<unsigned char const*>(personalization.data()),
+                                       size_t(personalization.size()))
+              == 0;
+    }
+
+    // Never destroyed: it outlives every connection that draws from it, and tearing it down at exit would race a
+    // reactor thread still writing frames.
+    ~mask_source() = delete;
+};
+
+bool random_mask_key(u8 (&mask)[4])
+{
+    static auto* const source = new mask_source();
+    if (!source->seeded)
+        return false;
+
+    return mbedtls_ctr_drbg_random(&source->drbg, reinterpret_cast<unsigned char*>(mask), sizeof(mask)) == 0;
+}
+
 #else
 
 cc::result<cc::string, error> websocket_accept_key(cc::string_view)
@@ -282,6 +320,12 @@ cc::result<cc::string, error> websocket_accept_key(cc::string_view)
 cc::result<cc::string, error> generate_websocket_key()
 {
     return cc::error(unsupported_here("the websocket handshake"));
+}
+
+bool random_mask_key(u8 (&)[4])
+{
+    // No DRBG here, and no client either: the browser owns the WebSocket on this platform.
+    return false;
 }
 
 #endif // CNET_HAS_TLS

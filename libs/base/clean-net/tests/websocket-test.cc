@@ -479,6 +479,79 @@ struct keepalive_fixture
 };
 } // namespace
 
+TEST("cnet - cancelling a websocket receive ends that receive and nothing else")
+{
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
+    auto fixture = keepalive_fixture({});
+
+    auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url());
+    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(connecting->try_error() == nullptr);
+
+    auto const client = connecting->value();
+    REQUIRE(fixture.accepted.size() == 1);
+
+    auto const token = cancel_token::create();
+    auto waiting = client->receive(deadline::never(), token);
+
+    // Nothing has been sent, so it is parked on the shared read.
+    CHECK(!pump_briefly([&] { return waiting->is_ready(); }));
+
+    token.cancel();
+    CHECK(pump_until([&] { return waiting->is_ready(); }));
+
+    REQUIRE(waiting->try_error() != nullptr);
+    CHECK(waiting->try_error()->is_cancelled());
+
+    // The CONNECTION is untouched, which is the half a token handed to the transport would have got wrong: the read
+    // underneath is shared by every receive, so cancelling it would end somebody else's.
+    CHECK(client->is_open());
+
+    auto const sent = fixture.accepted[0]->send_text("after the cancel");
+    auto again = client->receive();
+    CHECK(pump_until([&] { return sent->is_ready() && again->is_ready(); }));
+    REQUIRE(again->try_error() == nullptr);
+    CHECK(again->value().text() == "after the cancel");
+}
+
+TEST("cnet - a receive's deadline bounds the receive rather than the connection")
+{
+    if (!tls_is_supported())
+        SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
+
+    // Keepalives on, so the shared read carries their fifteen-second window rather than any caller's deadline.
+    auto fixture = keepalive_fixture({.websocket_ping_interval_ms = 10'000, .websocket_pong_timeout_ms = 5'000});
+
+    auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url(),
+                                        {.ping_interval_ms = 10'000, .pong_timeout_ms = 5'000});
+    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(connecting->try_error() == nullptr);
+
+    auto const client = connecting->value();
+    REQUIRE(fixture.accepted.size() == 1);
+
+    // A receive that gives up after a second, while the read it shares is bounded by the keepalive's fifteen.
+    auto waiting = client->receive(deadline::after_ms(1'000));
+    CHECK(!pump_briefly([&] { return waiting->is_ready(); }));
+
+    fixture.clk.advance_ms(1'000);
+    CHECK(pump_until([&] { return waiting->is_ready(); }));
+    REQUIRE(waiting->try_error() != nullptr);
+    CHECK(!waiting->try_error()->is_cancelled());
+
+    // And the connection survived its caller, which is what a deadline stored on the shared read got wrong: the next
+    // receive still works, and the keepalive still has its own window.
+    CHECK(client->is_open());
+
+    auto const sent = fixture.accepted[0]->send_text("still connected");
+    auto again = client->receive();
+    CHECK(pump_until([&] { return sent->is_ready() && again->is_ready(); }));
+    REQUIRE(again->try_error() == nullptr);
+    CHECK(again->value().text() == "still connected");
+}
+
 TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
 {
     if (!tls_is_supported())

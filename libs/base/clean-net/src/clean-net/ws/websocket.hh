@@ -74,6 +74,10 @@ class cnet::websocket
 public:
     /// Send one text message.
     /// The bytes are copied, since a frame is built from them and the caller's buffer is theirs again on return.
+    ///
+    /// **`token` cancels this send only while its frame is still queued.** A frame already on the wire cannot be
+    /// taken back -- half a frame is not a stream either end can carry on with -- so cancelling then is a no-op and
+    /// the send completes.
     [[nodiscard]] cc::shared_async<cc::unit> send_text(cc::string_view text,
                                                        deadline d = deadline::after_secs(30),
                                                        cancel_token const& token = {});
@@ -87,6 +91,11 @@ public:
     /// Fails with `connection_closed` once the peer has closed, which is the ordinary end of a WebSocket rather than
     /// a failure -- a caller loops on this until it does.
     /// Two receives at once are a caller error: the second would take the message the first was promised.
+    ///
+    /// **`d` and `token` bound this receive rather than the connection.**
+    /// One socket read is shared by every receive, so neither is handed to it: a deadline given to that read would
+    /// outlive the caller who asked for it, and a cancel would end somebody else's receive.
+    /// Both therefore settle this call and leave the connection open and usable.
     [[nodiscard]] cc::shared_async<websocket_message> receive(deadline d = deadline::never(),
                                                               cancel_token const& token = {});
 
