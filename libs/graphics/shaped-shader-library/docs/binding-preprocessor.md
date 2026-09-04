@@ -158,6 +158,7 @@ That space matters: an inline-constants block sharing a space with a group's `b`
 Q8 applies here too, which is why the attribute must write a `register()` at all — a constants block referenced by one stage of a two-stage pipeline gets a register only in that stage.
 
 `block_size` keeps coming from reflection, which is how a routine reads it today and is never wrong.
+[done, apart from the mirror struct]
 
 ### `payload`
 

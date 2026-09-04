@@ -460,4 +460,28 @@ TEST("slib - a compiled shader reflects the addresses its generated table declar
     }
 }
 
+TEST("slib - an inline-constants block reflects at b0 in the space it named", exclusive("slib-shader-library"))
+{
+    // Its register is always b0, so a shader that shares a space with a group's `b` registers is exactly the
+    // collision stating a space prevents -- and here the group is in space 0 while the block is in space 9.
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(k_target_format));
+
+    auto const* constants = find_binding(compiled, "gConstants");
+    REQUIRE(constants != nullptr);
+    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->index == 0);
+    REQUIRE(constants->space.has_value());
+    CHECK(constants->space.value() == 9);
+
+    // block_size keeps coming from reflection, which is how a routine reads it today.
+    REQUIRE(constants->block_size.has_value());
+    CHECK(constants->block_size.value() >= 4);
+}
+
 #endif

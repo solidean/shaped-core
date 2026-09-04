@@ -45,7 +45,8 @@ struct corpus_case
     cc::string hlsl;
     cc::vector<expected_group> groups;
     cc::vector<expected_sampler> statics;
-    cc::optional<cc::string_view> error; ///< set instead of `groups` when the snippet must be rejected
+    cc::optional<cc::string> inline_constants; ///< "<name> space=<n>", or nothing when none is declared
+    cc::optional<cc::string_view> error;       ///< set instead of `groups` when the snippet must be rejected
 };
 
 struct name_of_binding_type
@@ -318,6 +319,12 @@ constexpr name_of_dimension k_dimensions[] = {
 
             if (!line.starts_with("  "))
             {
+                if (words[0] == "inline_constants")
+                {
+                    current.inline_constants = cc::format("{} {}", words[1], words[2]);
+                    break;
+                }
+
                 auto const number = value_of(words[1], "group");
                 REQUIRE(number.has_value());
                 current.groups.push_back({.name = words[0], .group = cc::from_string<u32>(number.value()).value()});
@@ -417,7 +424,18 @@ TEST("slib - the binding corpus parses as it says it does")
             continue;
         }
 
-        auto const& groups = parsed.value();
+        auto const& groups = parsed.value().groups;
+
+        auto const& constants = parsed.value().inline_constants;
+        auto const rendered_constants = constants.has_value()
+                                          ? cc::format("{} space={}", constants.value().name, constants.value().space)
+                                          : cc::string();
+        auto const wanted_constants = c.inline_constants.has_value() ? c.inline_constants.value() : cc::string();
+        if (rendered_constants != wanted_constants)
+            CC_LOG_ERROR("[corpus] '{}' inline constants are [{}], expected [{}]", c.name, rendered_constants,
+                         wanted_constants);
+        CHECK(rendered_constants == wanted_constants);
+
         if (groups.size() != c.groups.size())
         {
             CC_LOG_ERROR("[corpus] '{}' found {} group(s), expected {}", c.name, groups.size(), c.groups.size());
@@ -507,9 +525,37 @@ TEST("slib - the binding corpus parses as it says it does")
 
 TEST("slib - an empty source declares no binding group")
 {
-    auto const groups = slib::parse_binding_groups("");
-    REQUIRE(groups.has_value());
-    CHECK(groups.value().empty());
+    auto const parsed = slib::parse_binding_groups("");
+    REQUIRE(parsed.has_value());
+    CHECK(parsed.value().groups.empty());
+    CHECK(!parsed.value().inline_constants.has_value());
+}
+
+namespace
+{
+constexpr char const* k_inline_constants_shader = R"(
+#pragma sc push_constants space=9
+ConstantBuffer<frame_constants> gConstants;
+)";
+} // namespace
+
+TEST("slib - the DXIL arm gives an inline-constants block b0 in the space it named")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_inline_constants_shader, sg::shader_format::dxil);
+    REQUIRE(rewritten.has_value());
+
+    // The register is always b0, since a pipeline layout carries at most one such binding.
+    CHECK(rewritten.value().contains("ConstantBuffer<frame_constants> gConstants : register(b0, space9);"));
+    CHECK(!rewritten.value().contains("#pragma sc"));
+}
+
+TEST("slib - the SPIR-V arm makes it a push-constant block instead")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_inline_constants_shader, sg::shader_format::spirv);
+    REQUIRE(rewritten.has_value());
+
+    CHECK(rewritten.value().contains("[[vk::push_constant]] ConstantBuffer<frame_constants> gConstants;"));
+    CHECK(!rewritten.value().contains("register("));
 }
 
 namespace

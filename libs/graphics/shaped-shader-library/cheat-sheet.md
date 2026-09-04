@@ -128,7 +128,9 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 #include <shaped-shader-library/binding/binding_groups.hh>
 slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<sg::binding> bindings; }
                                    //   bindings are in declaration order -> position IS the layout slot
-slib::parse_binding_groups(hlsl)   // -> cc::result<cc::vector<shader_binding_group>>; the error names file:line
+slib::shader_inline_constants      // { cc::string name; u32 space; } -- register is always b0
+slib::shader_bindings              // { cc::vector<shader_binding_group> groups; optional<shader_inline_constants> }
+slib::parse_binding_groups(hlsl)   // -> cc::result<shader_bindings>; the error names file:line
                                    //   (recovered from the flatten's #line directives)
 slib::rewrite_binding_groups(hlsl, format)
                                    // -> cc::result<cc::string>; writes register()/[[vk::binding]] and strips
@@ -170,7 +172,10 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
-// push_constants / payload / vertex_input parse and are reported as not supported yet.
+// `#pragma sc push_constants space=<n>` before a ConstantBuffer makes it inline constants: register(b0,
+//   space<n>) on DXIL, [[vk::push_constant]] on SPIR-V. At most one per translation unit; block_size still
+//   comes from reflection.
+// payload / vertex_input parse and are reported as not supported yet.
 // text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input")
 
 # The attributes whose meaning has not landed yet.
-UNIMPLEMENTED_ATTRIBUTES = ("push_constants", "payload", "vertex_input")
+UNIMPLEMENTED_ATTRIBUTES = ("payload", "vertex_input")
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -101,6 +101,28 @@ class Group:
     group: int
     bindings: list[Binding] = field(default_factory=list)
     static_samplers: list[DeclaredSampler] = field(default_factory=list)
+
+
+@dataclass
+class InlineConstants:
+    """The inline-constants block a shader declares.
+
+    The register is always b0, since a pipeline layout carries at most one such binding, so the only number to
+    state is the space.
+    """
+
+    name: str
+    space: int
+    type_offset: int
+    semicolon_offset: int
+
+
+@dataclass
+class Bindings:
+    """Everything the pass reads out of one translation unit."""
+
+    groups: list[Group] = field(default_factory=list)
+    inline_constants: InlineConstants | None = None
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -454,6 +476,7 @@ class _Parser:
         self.tokens = tokens
         self.at = 0
         self.annotations: list[tuple[int, int]] = []  # (offset, length) of every directive consumed
+        self.inline_constants: InlineConstants | None = None
         self.group_names: set[str] = set()
         self.group_numbers: set[int] = set()
         self.binding_names: set[str] = set()
@@ -507,6 +530,13 @@ class _Parser:
                     groups.append(group)
                 continue
 
+            # A `push_constants` attribute attaches to an ordinary file-scope declaration rather than to a
+            # namespace, so it is the one attribute that reads a declaration out here.
+            if pending is not None and pending.name == "push_constants" and self.current().kind == "identifier":
+                self.parse_inline_constants(pending)
+                pending = None
+                continue
+
             self.reject_unclaimed(pending)
             self.at += 1
 
@@ -520,9 +550,44 @@ class _Parser:
 
     @staticmethod
     def reject_unclaimed(pending: Annotation | None) -> None:
-        if pending is not None:
+        if pending is None:
+            return
+        if pending.name == "push_constants":
             raise BindingError(
-                f"{pending.location}: a '{pending.name}' attribute must stand before a namespace declaration")
+                f"{pending.location}: a 'push_constants' attribute must stand before a ConstantBuffer declaration")
+        raise BindingError(
+            f"{pending.location}: a '{pending.name}' attribute must stand before a namespace declaration")
+
+    def parse_inline_constants(self, attribute: Annotation) -> None:
+        """The one `ConstantBuffer<T> name;` a `push_constants` attribute stands before."""
+        space = self.space_of(attribute)
+
+        if self.inline_constants is not None:
+            raise BindingError(
+                f"{attribute.location}: a second 'push_constants' block, and a pipeline layout carries at most one")
+
+        location = self.current().location
+        binding = self.parse_binding(0)
+
+        if binding.type != "uniform_buffer":
+            raise BindingError(
+                f"{location}: 'push_constants' describes a ConstantBuffer, and '{binding.name}' is not one")
+        if binding.count != 1:
+            raise BindingError(f"{location}: an inline-constants block is one buffer, not an array")
+
+        self.inline_constants = InlineConstants(binding.name, space, binding.type_offset, binding.semicolon_offset)
+
+    @staticmethod
+    def space_of(attribute: Annotation) -> int:
+        """The one argument `push_constants` takes: `space=<n>`."""
+        if (len(attribute.arguments) != 1 or attribute.arguments[0][0] != "space"
+                or len(attribute.arguments[0][1]) != 1):
+            raise BindingError(f"{attribute.location}: 'push_constants' takes exactly one space=<n>")
+
+        value = attribute.arguments[0][1][0]
+        if not value.isdigit():
+            raise BindingError(f"{attribute.location}: '{value}' is not a space")
+        return int(value)
 
     def parse_namespace(self, pending: Annotation | None) -> Group | None:
         keyword_location = self.current().location
@@ -687,11 +752,14 @@ class _Parser:
         return Binding(name, index, count, binding_type, dimension, register_class, type_offset, semicolon_offset)
 
 
-def parse_binding_groups(hlsl: str) -> list[Group]:
-    """Every binding group `hlsl` declares, in declaration order.
+def parse_binding_groups(hlsl: str) -> Bindings:
+    """Everything `hlsl` declares, in declaration order.
 
     Raises BindingError on anything else.
     """
     if PRAGMA_MARKER not in hlsl:
-        return []
-    return _Parser(lex(hlsl)).run()
+        return Bindings()
+
+    parser = _Parser(lex(hlsl))
+    groups = parser.run()
+    return Bindings(groups, parser.inline_constants)

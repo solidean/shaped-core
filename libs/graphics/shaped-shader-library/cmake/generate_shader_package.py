@@ -219,7 +219,7 @@ def read_binding_entry(manifest: Manifest, path: str, namespace: str) -> Binding
     """
     text = (manifest.source_dir / path).read_text(encoding="utf-8")
     try:
-        groups = parse_binding_groups(text)
+        groups = parse_binding_groups(text).groups
     except BindingError as e:
         raise GeneratorError(f"shader package '{manifest.name}': {path}: {e}") from e
 
@@ -498,7 +498,7 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
     out.append("    if (groups.has_error())\n")
     out.append(f'        return cc::format("{entry.path}: {{}}", groups.error().to_string());\n')
     out.append("\n")
-    out.append("    for (auto const& parsed : groups.value())\n")
+    out.append("    for (auto const& parsed : groups.value().groups)\n")
     out.append("    {\n")
     out.append(f'        if (parsed.name != "{group.name}")\n')
     out.append("            continue;\n")

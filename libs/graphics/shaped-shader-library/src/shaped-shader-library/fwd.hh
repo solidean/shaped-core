@@ -25,6 +25,8 @@ class mount_table;
 // binding groups
 struct declared_sampler;
 struct shader_binding_group;
+struct shader_inline_constants;
+struct shader_bindings;
 
 // shader packages
 enum class shader_language;

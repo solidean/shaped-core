@@ -16,6 +16,7 @@
 #     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
+#   inline_constants <name> space=<n>                  unindented, since it belongs to no group
 #   --- error           instead of `groups`: the message the pass must report, exactly
 #
 # A `#` comment is only a comment outside an `--- hlsl` block; inside one it is HLSL text like any other --
@@ -371,12 +372,62 @@ namespace frame
 line 4: 'filter' takes one value or a tuple of three
 
 
---- case `push_constants` is recognised and not yet honoured
+--- case an inline-constants block states its space, since its register is always b0
 --- hlsl
 #pragma sc push_constants space=9
 ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9
+
+
+--- case a block and a group live in one file, in different spaces
+--- hlsl
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc push_constants space=9
+ConstantBuffer<frame_constants> constants;
+--- groups
+frame_bindings group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+inline_constants constants space=9
+
+
+--- case `push_constants` describes a ConstantBuffer and nothing else
+--- hlsl
+#pragma sc push_constants space=9
+Texture2D<float4> albedo;
 --- error
-line 1: the 'push_constants' attribute is not supported yet
+line 2: 'push_constants' describes a ConstantBuffer, and 'albedo' is not one
+
+
+--- case a pipeline layout carries at most one inline-constants block
+--- hlsl
+#pragma sc push_constants space=9
+ConstantBuffer<a> first;
+
+#pragma sc push_constants space=10
+ConstantBuffer<b> second;
+--- error
+line 4: a second 'push_constants' block, and a pipeline layout carries at most one
+
+
+--- case `push_constants` carries its space explicitly
+--- hlsl
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- error
+line 1: 'push_constants' takes exactly one space=<n>
+
+
+--- case a `push_constants` attribute standing before nothing is an error
+--- hlsl
+#pragma sc push_constants space=9
+--- error
+line 1: a 'push_constants' attribute must stand before a ConstantBuffer declaration
 
 
 --- case `payload` is recognised and not yet honoured

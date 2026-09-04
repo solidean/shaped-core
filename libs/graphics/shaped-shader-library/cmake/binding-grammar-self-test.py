@@ -67,6 +67,7 @@ class Case:
         self.hlsl: list[str] = []
         self.groups: list[tuple[str, int, list[dict]]] = []
         self.statics: dict[str, str] = {}
+        self.inline_constants: str | None = None
         self.error: str | None = None
 
     @property
@@ -97,6 +98,9 @@ def read_corpus(text: str) -> list[Case]:
             if not words or line.startswith("#"):
                 continue
             if not line.startswith("  "):
+                if words[0] == "inline_constants":
+                    current.inline_constants = f"{words[1]} {words[2]}"
+                    continue
                 current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
                 continue
             if words[0] == "static":
@@ -116,7 +120,8 @@ def read_corpus(text: str) -> list[Case]:
 def check(case: Case) -> list[str]:
     """The differences between what the case pins and what the parse produced."""
     try:
-        groups = parse_binding_groups(case.source)
+        parsed = parse_binding_groups(case.source)
+        groups = parsed.groups
     except BindingError as e:
         if case.error is None:
             return [f"was rejected: {e}"]
@@ -141,6 +146,11 @@ def check(case: Case) -> list[str]:
             wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"])
             if got != wanted:
                 problems.append(f"binding {got}, expected {wanted}")
+
+    constants = parsed.inline_constants
+    rendered = None if constants is None else f"{constants.name} space={constants.space}"
+    if rendered != case.inline_constants:
+        problems.append(f"inline constants are [{rendered}], expected [{case.inline_constants}]")
 
     declared = {s.name: render_sampler(s.fields) for group in groups for s in group.static_samplers}
     for name, expected in case.statics.items():

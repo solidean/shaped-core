@@ -28,7 +28,7 @@ constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_consta
 
 /// The attributes whose meaning has not landed yet.
 /// Recognised so the failure names what is missing, rather than reading as an unknown word.
-constexpr cc::string_view k_unimplemented_attributes[] = {"push_constants", "payload", "vertex_input"};
+constexpr cc::string_view k_unimplemented_attributes[] = {"payload", "vertex_input"};
 
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
@@ -77,9 +77,18 @@ struct parsed_group
     cc::vector<slib::declared_sampler> static_samplers;
 };
 
+/// The inline-constants block, plus where its address has to be written.
+struct parsed_inline_constants
+{
+    slib::shader_inline_constants constants;
+    isize type_offset = 0;
+    isize semicolon_offset = 0;
+};
+
 struct parsed_source
 {
     cc::vector<parsed_group> groups;
+    cc::optional<parsed_inline_constants> inline_constants;
 
     /// Every `#pragma sc` directive the parse consumed.
     /// The rewrite deletes them: DXC ignores an unknown pragma today, but `-Wall` promotes it to
@@ -96,6 +105,7 @@ struct parser
     isize at = 0;
 
     cc::vector<source_span> annotations;
+    cc::optional<parsed_inline_constants> inline_constants;
 
     // What has been declared so far, for the collisions a namespace does not catch on its own.
     cc::set<cc::string_view> group_names;
@@ -175,6 +185,16 @@ struct parser
                 continue;
             }
 
+            // A `push_constants` attribute attaches to an ordinary file-scope declaration rather than to a
+            // namespace, so it is the one attribute that reads a declaration out here.
+            if (pending.has_value() && pending.value().name == "push_constants"
+                && current().kind == hlsl_token_kind::identifier)
+            {
+                CC_RETURN_IF_ERROR(parse_inline_constants(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
             ++at;
         }
@@ -193,10 +213,62 @@ struct parser
 
     [[nodiscard]] static cc::result<cc::unit> reject_unclaimed(cc::optional<annotation> const& pending)
     {
-        if (pending.has_value())
-            return cc::error(cc::format("{}: a '{}' attribute must stand before a namespace declaration",
-                                        to_string(pending.value().location), pending.value().name));
+        if (!pending.has_value())
+            return cc::unit();
+
+        if (pending.value().name == "push_constants")
+            return cc::error(cc::format("{}: a 'push_constants' attribute must stand before a ConstantBuffer "
+                                        "declaration",
+                                        to_string(pending.value().location)));
+
+        return cc::error(cc::format("{}: a '{}' attribute must stand before a namespace declaration",
+                                    to_string(pending.value().location), pending.value().name));
+    }
+
+    /// The one `ConstantBuffer<T> name;` a `push_constants` attribute stands before.
+    ///
+    /// The register is always `b0`, so the attribute's only argument is the space; the declaration itself is
+    /// read with the same walk a group's binding gets, which is what keeps the two subsets identical.
+    [[nodiscard]] cc::result<cc::unit> parse_inline_constants(annotation const& attribute)
+    {
+        auto space = space_of(attribute);
+        CC_RETURN_IF_ERROR(space);
+
+        if (inline_constants.has_value())
+            return cc::error(cc::format("{}: a second 'push_constants' block, and a pipeline layout carries "
+                                        "at most one",
+                                        to_string(attribute.location)));
+
+        auto const location = current().location;
+        auto binding = parse_binding(0);
+        CC_RETURN_IF_ERROR(binding);
+
+        if (binding.value().binding.type != sg::binding_type::uniform_buffer)
+            return cc::error(cc::format("{}: 'push_constants' describes a ConstantBuffer, and '{}' is not one",
+                                        to_string(location), binding.value().binding.name));
+        if (binding.value().binding.count != 1)
+            return cc::error(cc::format("{}: an inline-constants block is one buffer, not an array", to_string(location)));
+
+        inline_constants = parsed_inline_constants{
+            .constants = {.name = cc::move(binding.value().binding.name), .space = space.value()},
+            .type_offset = binding.value().type_offset,
+            .semicolon_offset = binding.value().semicolon_offset};
         return cc::unit();
+    }
+
+    /// The one argument `push_constants` takes: `space=<n>`.
+    [[nodiscard]] static cc::result<u32> space_of(annotation const& attribute)
+    {
+        if (attribute.arguments.size() != 1 || attribute.arguments[0].key != "space"
+            || attribute.arguments[0].values.size() != 1)
+            return cc::error(
+                cc::format("{}: 'push_constants' takes exactly one space=<n>", to_string(attribute.location)));
+
+        auto const number = cc::from_string<u32>(attribute.arguments[0].values[0]);
+        if (!number.has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a space", to_string(attribute.location), attribute.arguments[0].values[0]));
+        return number.value();
     }
 
     /// Consumes one `namespace` declaration, returning the group when a `group` attribute stands before it.
@@ -453,7 +525,9 @@ struct parser
             binding.binding.space = group.group;
         }
 
-    return parsed_source{.groups = cc::move(groups.value()), .annotations = cc::move(p.annotations)};
+    return parsed_source{.groups = cc::move(groups.value()),
+                         .inline_constants = cc::move(p.inline_constants),
+                         .annotations = cc::move(p.annotations)};
 }
 
 /// One replacement of `length` source bytes at `offset`.
@@ -487,12 +561,13 @@ struct source_edit
 }
 } // namespace
 
-cc::result<cc::vector<slib::shader_binding_group>> slib::parse_binding_groups(cc::string_view hlsl)
+cc::result<slib::shader_bindings> slib::parse_binding_groups(cc::string_view hlsl)
 {
     auto parsed = parse_source(hlsl);
     CC_RETURN_IF_ERROR(parsed);
 
-    cc::vector<shader_binding_group> groups;
+    shader_bindings result_bindings;
+    auto& groups = result_bindings.groups;
     groups.reserve(parsed.value().groups.size());
 
     for (auto& group : parsed.value().groups)
@@ -508,7 +583,10 @@ cc::result<cc::vector<slib::shader_binding_group>> slib::parse_binding_groups(cc
         groups.push_back(cc::move(result));
     }
 
-    return groups;
+    if (parsed.value().inline_constants.has_value())
+        result_bindings.inline_constants = cc::move(parsed.value().inline_constants.value().constants);
+
+    return result_bindings;
 }
 
 cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::shader_format target)
@@ -545,6 +623,19 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
                 edits.push_back({.offset = binding.type_offset,
                                  .text = cc::format("[[vk::binding({}, {})]] ", binding.binding.index, group.group)});
         }
+
+    // The inline-constants block, which is a register on one arm and an attribute on the other.
+    // Q8 applies here too: a constants block referenced by one stage of a two-stage pipeline would otherwise get
+    // a register only in that stage.
+    if (parsed.value().inline_constants.has_value())
+    {
+        auto const& constants = parsed.value().inline_constants.value();
+        if (target == sg::shader_format::dxil)
+            edits.push_back({.offset = constants.semicolon_offset,
+                             .text = cc::format(" : register(b0, space{})", constants.constants.space)});
+        else
+            edits.push_back({.offset = constants.type_offset, .text = cc::string("[[vk::push_constant]] ")});
+    }
 
     cc::sort_by(edits, &source_edit::offset);
     return apply_edits(hlsl, edits);

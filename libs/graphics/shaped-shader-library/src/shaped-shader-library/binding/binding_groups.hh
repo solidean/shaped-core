@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -50,9 +51,39 @@ struct slib::shader_binding_group
     cc::vector<declared_sampler> static_samplers;
 };
 
+/// The inline-constants block a shader declares:
+///
+///     #pragma sc push_constants space=9
+///     ConstantBuffer<frame_constants> frame;
+///
+/// Inline constants — dx12 root constants, Vulkan push constants — reach a shader through
+/// `pipeline_layout_description::inline_constants` rather than through a group.
+/// The register is always `b0`, since a pipeline layout carries at most one such binding, so the only number to
+/// state is the space — and stating it is the point, because a block sharing a space with a group's `b`
+/// registers is exactly the collision this pass exists to prevent.
+///
+/// `block_size` is not here: it keeps coming from reflection, which is how a routine reads it today.
+struct slib::shader_inline_constants
+{
+    cc::string name;
+    u32 space = 0;
+};
+
+/// Everything the pass reads out of one translation unit.
+///
+/// One result rather than a function per attribute, because they come out of one parse: a source is read once,
+/// and a caller that wants two of these never risks two readings of it.
+struct slib::shader_bindings
+{
+    cc::vector<shader_binding_group> groups;
+
+    /// At most one, because a pipeline layout carries at most one inline-constants binding.
+    cc::optional<shader_inline_constants> inline_constants;
+};
+
 namespace slib
 {
-/// Every binding group `hlsl` declares, in declaration order.
+/// Everything `hlsl` declares, in declaration order.
 ///
 /// An attribute is a `#pragma sc <name> [key=value]...` standing on the line before what it applies to.
 /// A pragma rather than a comment because DXC's include flatten erases comments and reproduces pragmas verbatim —
@@ -71,9 +102,9 @@ namespace slib
 ///
 /// An error names the file and line the author would recognise, which it recovers from the `#line` directives the
 /// flatten leaves behind; a source carrying none is named by line alone.
-/// `push_constants`, `payload` and `vertex_input` parse as attributes and are reported as not yet supported,
-/// so a shader written against them fails rather than compiling to something that ignores them.
-[[nodiscard]] cc::result<cc::vector<shader_binding_group>> parse_binding_groups(cc::string_view hlsl);
+/// `payload` and `vertex_input` parse as attributes and are reported as not yet supported, so a shader written
+/// against them fails rather than compiling to something that ignores them.
+[[nodiscard]] cc::result<shader_bindings> parse_binding_groups(cc::string_view hlsl);
 
 /// `hlsl` with every annotated binding carrying the address the pass assigns it: `register(t0, space0)` on the
 /// DXIL arm, `[[vk::binding(0, 0)]]` on the SPIR-V arm, and with the pass's own pragmas removed.
