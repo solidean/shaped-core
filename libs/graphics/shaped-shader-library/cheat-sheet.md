@@ -27,7 +27,8 @@ sc_add_shader_package(
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
         blit.hlsl:fragment:main_ps
-        frame.hlsli:binding:frame_bindings) # path:binding:namespace -> a typed binding-group struct
+        frame.hlsli:binding:frame_bindings  # path:binding:namespace -> a typed binding-group struct
+        mesh.hlsl:vertex_input:vs_input)    # path:vertex_input:struct -> a C++ mirror + vertex_layout_of
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
@@ -129,7 +130,8 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<sg::binding> bindings; }
                                    //   bindings are in declaration order -> position IS the layout slot
 slib::shader_inline_constants      // { cc::string name; u32 space; } -- register is always b0
-slib::shader_bindings              // { cc::vector<shader_binding_group> groups; optional<shader_inline_constants> }
+slib::shader_vertex_input          // { name; u32 slot; bool per_instance; vector<shader_struct_member> }
+slib::shader_bindings              // { groups; optional<inline_constants>; vector<vertex_inputs> }
 slib::parse_binding_groups(hlsl)   // -> cc::result<shader_bindings>; the error names file:line
                                    //   (recovered from the flatten's #line directives)
 slib::rewrite_binding_groups(hlsl, format)
@@ -155,6 +157,17 @@ group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
 // the layout is built from the full DECLARED table, not from whatever subset one stage reflected.
 ```
 
+A `path:vertex_input:struct` entry generates the C++ struct the buffer holds, plus its `sg::vertex_layout_of`:
+
+```cpp
+my::shaders::vs_input              // struct { float position[3]; float normal[3]; ... }
+sg::vertex_input_layout::create<my::shaders::vs_input, my::shaders::instance_input>()
+// the mirror DEFINES the byte layout and the specialization states that same layout, so the two cannot
+//   disagree; generated static_asserts pin the stride and every member's offsetof.
+// members are naturally packed -- a vertex buffer is a byte stream the IA decodes per attribute offset,
+//   so HLSL's constant-buffer packing never enters into it.
+```
+
 ```hlsl
 #pragma sc group 0                        // the group number is both the SPIR-V set and the HLSL space
 namespace frame_bindings
@@ -175,7 +188,9 @@ namespace frame_bindings
 // `#pragma sc push_constants space=<n>` before a ConstantBuffer makes it inline constants: register(b0,
 //   space<n>) on DXIL, [[vk::push_constant]] on SPIR-V. At most one per translation unit; block_size still
 //   comes from reflection.
-// payload / vertex_input parse and are reported as not supported yet.
+// `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
+//   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
+// payload parses and is reported as not supported yet.
 // text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 

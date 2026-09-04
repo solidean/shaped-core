@@ -10,7 +10,10 @@
 // contract itself: the symbols exist and are typed, the table matches what was declared, and the include
 // closure got embedded so a binary with no source tree still has its shaders.
 #include <shaped-graphics/binding/sampler.hh>
+#include <shaped-graphics/raster/vertex_input.hh>
 #include <slib_test_shaders.hh>
+
+using namespace cc::primitive_defines;
 
 using slib_test::fake_compiler;
 
@@ -44,8 +47,8 @@ TEST("slib - the generated package describes itself", exclusive("slib-shader-lib
 
     CHECK(pkg.name == "slib_test_shaders");
     CHECK(pkg.language == slib::shader_language::hlsl);
-    // One per declared entry point; a binding entry declares none, so it adds nothing here.
-    CHECK(pkg.definitions.size() == 4);
+    // One per declared entry point; a binding or vertex_input entry declares none, so neither adds one here.
+    CHECK(pkg.definitions.size() == 6);
     CHECK(!pkg.source_dir.empty()); // baked absolute at configure; present in a dev build
 
     for (auto const& definition : pkg.definitions)
@@ -60,10 +63,10 @@ TEST("slib - the generated package embeds its include closure", exclusive("slib-
 {
     auto const& pkg = slib_test::shaders::package();
 
-    // Three shader files, plus the two .hlsli they include -- one of which is also registered on its own as
+    // Four shader files, plus the two .hlsli they include -- one of which is also registered on its own as
     // a binding entry, and is embedded once either way.
     // The include is the point: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry points could not resolve it.
-    REQUIRE(pkg.embedded_files.size() == 5);
+    REQUIRE(pkg.embedded_files.size() == 6);
 
     bool has_invert = false;
     bool has_blit = false;
@@ -172,4 +175,39 @@ TEST("slib - the generated table and the runtime pass read one shader the same w
     if (!difference.empty())
         FAIL(difference);
     CHECK(difference.empty());
+}
+
+TEST("slib - a vertex input entry mirrors the struct and describes it to sg", exclusive("slib-shader-library"))
+{
+    // The mirror is what defines the buffer's byte layout, and the generated specialization states that same
+    // layout — so the two cannot disagree, which is the failure a hand-written pair has no way to catch.
+    using vertex = slib_test::shaders::vs_input;
+    using instance = slib_test::shaders::instance_input;
+
+    auto const layout = sg::vertex_input_layout::create<vertex, instance>();
+
+    REQUIRE(layout.slots.size() == 2);
+    CHECK(layout.slots[0].stride == isize(sizeof(vertex)));
+    CHECK(!layout.slots[0].per_instance);
+    CHECK(layout.slots[1].stride == isize(sizeof(instance)));
+    CHECK(layout.slots[1].per_instance); // the attribute said so
+
+    REQUIRE(layout.attributes.size() == 5);
+
+    // Declaration order, each attribute naming the slot its struct took in create<>().
+    CHECK(layout.attributes[0].semantic == "POSITION");
+    CHECK(layout.attributes[0].format == sg::vertex_attribute_format::vec3f);
+    CHECK(layout.attributes[0].offset == 0);
+    CHECK(layout.attributes[0].slot == 0);
+
+    CHECK(layout.attributes[2].semantic == "COLOR");
+    CHECK(layout.attributes[2].offset == 24);
+
+    // A semantic's trailing integer is its index, the way HLSL reads it.
+    CHECK(layout.attributes[3].semantic == "TEXCOORD");
+    CHECK(layout.attributes[3].semantic_index == 0);
+    CHECK(layout.attributes[3].slot == 1);
+    CHECK(layout.attributes[4].semantic == "TEXCOORD");
+    CHECK(layout.attributes[4].semantic_index == 1);
+    CHECK(layout.attributes[4].format == sg::vertex_attribute_format::u32);
 }

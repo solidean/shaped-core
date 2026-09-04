@@ -46,7 +46,11 @@ struct corpus_case
     cc::vector<expected_group> groups;
     cc::vector<expected_sampler> statics;
     cc::optional<cc::string> inline_constants; ///< "<name> space=<n>", or nothing when none is declared
-    cc::optional<cc::string_view> error;       ///< set instead of `groups` when the snippet must be rejected
+
+    /// One entry per `vertex_input` line: its header, then its members, newline-joined.
+    /// One string rather than a list, because comparing it is the whole use and cc::vector carries no ==.
+    cc::vector<cc::string> vertex_inputs;
+    cc::optional<cc::string_view> error; ///< set instead of `groups` when the snippet must be rejected
 };
 
 struct name_of_binding_type
@@ -247,6 +251,19 @@ constexpr name_of_dimension k_dimensions[] = {
     return words;
 }
 
+/// The words from `first` on, space-joined — how the corpus' own lines are compared.
+[[nodiscard]] cc::string join_from(cc::vector<cc::string_view> const& words, isize first)
+{
+    cc::string out;
+    for (isize i = first; i < words.size(); ++i)
+    {
+        if (!out.empty())
+            out += ' ';
+        out += words[i];
+    }
+    return out;
+}
+
 /// The value of `key=value`, or nothing when the word carries another key.
 [[nodiscard]] cc::optional<cc::string_view> value_of(cc::string_view word, cc::string_view key)
 {
@@ -325,9 +342,23 @@ constexpr name_of_dimension k_dimensions[] = {
                     break;
                 }
 
+                if (words[0] == "vertex_input")
+                {
+                    current.vertex_inputs.push_back(join_from(words, 1));
+                    break;
+                }
+
                 auto const number = value_of(words[1], "group");
                 REQUIRE(number.has_value());
                 current.groups.push_back({.name = words[0], .group = cc::from_string<u32>(number.value()).value()});
+                break;
+            }
+
+            // An indented line belongs to whichever unindented line opened the block it is in.
+            if (!current.vertex_inputs.empty() && current.groups.empty())
+            {
+                current.vertex_inputs.back() += '\n';
+                current.vertex_inputs.back() += join_from(words, 0);
                 break;
             }
 
@@ -436,6 +467,37 @@ TEST("slib - the binding corpus parses as it says it does")
                          wanted_constants);
         CHECK(rendered_constants == wanted_constants);
 
+        // The `vertex_input` lines: which structs the shader declares, and what each member is called.
+        cc::vector<cc::string> rendered_inputs;
+        for (auto const& input : parsed.value().vertex_inputs)
+        {
+            auto rendered = cc::format("{} slot={}", input.name, input.slot);
+            if (input.per_instance)
+                rendered += " per_instance";
+
+            for (auto const& member : input.members)
+                rendered += cc::format("\n{} {} {}{}", member.name, member.type, member.semantic, member.semantic_index);
+
+            rendered_inputs.push_back(cc::move(rendered));
+        }
+
+        if (rendered_inputs.size() != c.vertex_inputs.size())
+        {
+            CC_LOG_ERROR("[corpus] '{}' declares {} vertex input(s), expected {}", c.name, rendered_inputs.size(),
+                         c.vertex_inputs.size());
+            CHECK(false);
+            continue;
+        }
+
+        for (isize i = 0; i < rendered_inputs.size(); ++i)
+        {
+            if (rendered_inputs[i] != c.vertex_inputs[i])
+                CC_LOG_ERROR("[corpus] '{}' vertex input {} is\n{}\nexpected\n{}", c.name, i, rendered_inputs[i],
+                             c.vertex_inputs[i]);
+
+            CHECK(rendered_inputs[i] == c.vertex_inputs[i]);
+        }
+
         if (groups.size() != c.groups.size())
         {
             CC_LOG_ERROR("[corpus] '{}' found {} group(s), expected {}", c.name, groups.size(), c.groups.size());
@@ -538,6 +600,41 @@ constexpr char const* k_inline_constants_shader = R"(
 ConstantBuffer<frame_constants> gConstants;
 )";
 } // namespace
+
+namespace
+{
+constexpr char const* k_vertex_input_shader = R"(
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float4 color : COLOR;
+};
+)";
+} // namespace
+
+TEST("slib - the SPIR-V arm numbers vertex inputs by declaration order")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_vertex_input_shader, sg::shader_format::spirv);
+    REQUIRE(rewritten.has_value());
+
+    CHECK(rewritten.value().contains("[[vk::location(0)]] float3 position : POSITION;"));
+    CHECK(rewritten.value().contains("[[vk::location(1)]] float3 normal : NORMAL;"));
+    CHECK(rewritten.value().contains("[[vk::location(2)]] float4 color : COLOR;"));
+}
+
+TEST("slib - the DXIL arm leaves a vertex input alone, since the semantic already names it")
+{
+    auto const rewritten = slib::rewrite_binding_groups(k_vertex_input_shader, sg::shader_format::dxil);
+    REQUIRE(rewritten.has_value());
+
+    CHECK(!rewritten.value().contains("vk::location"));
+
+    // Only the directive goes: the struct itself is returned byte for byte.
+    CHECK(rewritten.value().contains("    float3 position : POSITION;"));
+    CHECK(!rewritten.value().contains("#pragma sc"));
+}
 
 TEST("slib - the DXIL arm gives an inline-constants block b0 in the space it named")
 {

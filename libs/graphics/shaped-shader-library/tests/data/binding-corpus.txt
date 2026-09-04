@@ -17,6 +17,8 @@
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
 #   inline_constants <name> space=<n>                  unindented, since it belongs to no group
+#   vertex_input <name> slot=<n> [per_instance]        unindented too, and one line per member follows
+#     <member> <type> <SEMANTIC><index>
 #   --- error           instead of `groups`: the message the pass must report, exactly
 #
 # A `#` comment is only a comment outside an `--- hlsl` block; inside one it is HLSL text like any other --
@@ -438,12 +440,97 @@ struct pt_payload { float3 radiance; float3 throughput; };
 line 1: the 'payload' attribute is not supported yet
 
 
---- case `vertex_input` is recognised and not yet honoured
+--- case a vertex input struct's members are numbered by declaration order
 --- hlsl
 #pragma sc vertex_input
-struct vs_input { float3 position : POSITION; };
+struct vs_input
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float4 color : COLOR;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+  normal float3 NORMAL0
+  color float4 COLOR0
+
+
+--- case a semantic's trailing integer is its index, the way HLSL reads it
+--- hlsl
+#pragma sc vertex_input slot=1 per_instance
+struct cube_instance_input
+{
+    float3 center : TEXCOORD0;
+    float3 half_extent : TEXCOORD1;
+    uint flags : TEXCOORD2;
+};
+--- groups
+vertex_input cube_instance_input slot=1 per_instance
+  center float3 TEXCOORD0
+  half_extent float3 TEXCOORD1
+  flags uint TEXCOORD2
+
+
+--- case two vertex input structs feed two slots of one pipeline
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=1 per_instance
+struct instance_input
+{
+    float4 transform : TEXCOORD0;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+vertex_input instance_input slot=1 per_instance
+  transform float4 TEXCOORD0
+
+
+--- case a vertex input member carries a semantic, since that is what HLSL matches on
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position;
+};
 --- error
-line 1: the 'vertex_input' attribute is not supported yet
+line 4: vertex input member 'position' must carry a semantic
+
+
+--- case a type outside the vertex attribute table is an error
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3x3 basis : NORMAL;
+};
+--- error
+line 4: 'float3x3' is not a vertex attribute type this pass knows
+
+
+--- case `vertex_input` takes slot and per_instance and nothing else
+--- hlsl
+#pragma sc vertex_input stride=32
+struct vs_input
+{
+    float3 position : POSITION;
+};
+--- error
+line 1: 'vertex_input' takes slot=<n> and per_instance, not 'stride'
+
+
+--- case a `vertex_input` attribute standing before nothing is an error
+--- hlsl
+#pragma sc vertex_input
+Texture2D<float4> albedo;
+--- error
+line 1: a 'vertex_input' attribute must stand before a struct declaration
 
 
 --- case two attributes cannot stack before one declaration

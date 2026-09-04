@@ -10,6 +10,7 @@
 #include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
 #include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
 #include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
+#include <shaped-shader-library/binding/impl/hlsl_value_types.hh>
 
 using namespace cc::primitive_defines;
 
@@ -28,7 +29,7 @@ constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_consta
 
 /// The attributes whose meaning has not landed yet.
 /// Recognised so the failure names what is missing, rather than reading as an unknown word.
-constexpr cc::string_view k_unimplemented_attributes[] = {"payload", "vertex_input"};
+constexpr cc::string_view k_unimplemented_attributes[] = {"payload"};
 
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
@@ -85,10 +86,18 @@ struct parsed_inline_constants
     isize semicolon_offset = 0;
 };
 
+/// A vertex input struct, plus where each member's location has to be written.
+struct parsed_vertex_input
+{
+    slib::shader_vertex_input input;
+    cc::vector<isize> member_offsets; ///< where each member's type token begins, in declaration order
+};
+
 struct parsed_source
 {
     cc::vector<parsed_group> groups;
     cc::optional<parsed_inline_constants> inline_constants;
+    cc::vector<parsed_vertex_input> vertex_inputs;
 
     /// Every `#pragma sc` directive the parse consumed.
     /// The rewrite deletes them: DXC ignores an unknown pragma today, but `-Wall` promotes it to
@@ -106,6 +115,7 @@ struct parser
 
     cc::vector<source_span> annotations;
     cc::optional<parsed_inline_constants> inline_constants;
+    cc::vector<parsed_vertex_input> vertex_inputs;
 
     // What has been declared so far, for the collisions a namespace does not catch on its own.
     cc::set<cc::string_view> group_names;
@@ -195,6 +205,13 @@ struct parser
                 continue;
             }
 
+            if (pending.has_value() && pending.value().name == "vertex_input" && is_identifier("struct"))
+            {
+                CC_RETURN_IF_ERROR(parse_vertex_input(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
             ++at;
         }
@@ -219,6 +236,10 @@ struct parser
         if (pending.value().name == "push_constants")
             return cc::error(cc::format("{}: a 'push_constants' attribute must stand before a ConstantBuffer "
                                         "declaration",
+                                        to_string(pending.value().location)));
+
+        if (pending.value().name == "vertex_input")
+            return cc::error(cc::format("{}: a 'vertex_input' attribute must stand before a struct declaration",
                                         to_string(pending.value().location)));
 
         return cc::error(cc::format("{}: a '{}' attribute must stand before a namespace declaration",
@@ -254,6 +275,146 @@ struct parser
             .type_offset = binding.value().type_offset,
             .semicolon_offset = binding.value().semicolon_offset};
         return cc::unit();
+    }
+
+    /// The `struct <name> { <type> <member> : <SEMANTIC>; ... };` a `vertex_input` attribute stands before.
+    ///
+    /// Members are numbered by declaration order, and that number is what the SPIR-V arm writes as a location:
+    /// HLSL matches a vertex input by its semantic and SPIR-V has no semantics at all.
+    [[nodiscard]] cc::result<cc::unit> parse_vertex_input(annotation const& attribute)
+    {
+        auto input = slib::shader_vertex_input();
+        CC_RETURN_IF_ERROR(read_vertex_input_arguments(attribute, input));
+
+        auto const keyword_location = current().location;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: a 'vertex_input' struct must be named", to_string(keyword_location)));
+
+        input.name = cc::string::create_copy_of(current().text);
+        ++at;
+
+        for (auto const& other : vertex_inputs)
+            if (other.input.name == input.name)
+                return cc::error(cc::format("{}: struct '{}' is declared twice", to_string(keyword_location), input.name));
+
+        if (!is_punctuation('{'))
+            return cc::error(
+                cc::format("{}: struct '{}' must open its block right away", to_string(keyword_location), input.name));
+        ++at;
+
+        cc::vector<isize> offsets;
+        while (!is_punctuation('}'))
+        {
+            if (at_end())
+                return cc::error(cc::format("{}: struct '{}' is never closed", to_string(location_here()), input.name));
+
+            auto member = parse_struct_member();
+            CC_RETURN_IF_ERROR(member);
+
+            offsets.push_back(member.value().type_offset);
+            input.members.push_back(cc::move(member.value().member));
+        }
+        ++at; // the '}'
+
+        // The declaration's own `;`, which HLSL requires and the pass does not otherwise care about.
+        if (is_punctuation(';'))
+            ++at;
+
+        vertex_inputs.push_back({.input = cc::move(input), .member_offsets = cc::move(offsets)});
+        return cc::unit();
+    }
+
+    /// `slot=<n>` and the bare `per_instance` flag, both optional.
+    [[nodiscard]] static cc::result<cc::unit> read_vertex_input_arguments(annotation const& attribute,
+                                                                          slib::shader_vertex_input& input)
+    {
+        for (auto const& argument : attribute.arguments)
+        {
+            if (argument.key.empty() && argument.values.size() == 1 && argument.values[0] == "per_instance")
+            {
+                input.per_instance = true;
+                continue;
+            }
+
+            if (argument.key == "slot" && argument.values.size() == 1)
+            {
+                auto const number = cc::from_string<u32>(argument.values[0]);
+                if (!number.has_value())
+                    return cc::error(
+                        cc::format("{}: '{}' is not a slot", to_string(attribute.location), argument.values[0]));
+                input.slot = number.value();
+                continue;
+            }
+
+            return cc::error(cc::format("{}: 'vertex_input' takes slot=<n> and per_instance, not '{}'",
+                                        to_string(attribute.location),
+                                        argument.key.empty() ? argument.values[0] : argument.key));
+        }
+        return cc::unit();
+    }
+
+    struct parsed_member
+    {
+        slib::shader_struct_member member;
+        isize type_offset = 0;
+    };
+
+    /// One `<type> <name> : <SEMANTIC>;`.
+    [[nodiscard]] cc::result<parsed_member> parse_struct_member()
+    {
+        auto const& type_token = current();
+        if (type_token.kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a member declaration, found '{}'", to_string(type_token.location),
+                                        type_token.text));
+
+        auto const type_name = type_token.text;
+        auto const location = type_token.location;
+        auto const type_offset = type_token.offset;
+        ++at;
+
+        if (!slib::impl::value_type_of(type_name).has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a vertex attribute type this pass knows", to_string(location), type_name));
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
+
+        auto member = slib::shader_struct_member{.name = cc::string::create_copy_of(current().text),
+                                                 .type = cc::string::create_copy_of(type_name)};
+        ++at;
+
+        // The semantic, which is what HLSL matches a vertex input by, and what the mirror carries into sg.
+        if (!is_punctuation(':'))
+            return cc::error(
+                cc::format("{}: vertex input member '{}' must carry a semantic", to_string(location), member.name));
+        ++at;
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a semantic after '{}'", to_string(location), member.name));
+
+        // HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
+        auto semantic = current().text;
+        isize digits = semantic.size();
+        while (digits > 0 && semantic[digits - 1] >= '0' && semantic[digits - 1] <= '9')
+            --digits;
+
+        member.semantic = cc::string::create_copy_of(semantic.subview({.start = 0, .end = digits}));
+        if (digits < semantic.size())
+        {
+            auto const index = cc::from_string<u32>(semantic.subview(digits));
+            if (!index.has_value())
+                return cc::error(cc::format("{}: '{}' is not a semantic", to_string(location), semantic));
+            member.semantic_index = index.value();
+        }
+        ++at;
+
+        if (!is_punctuation(';'))
+            return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), member.name));
+        ++at;
+
+        return parsed_member{.member = cc::move(member), .type_offset = type_offset};
     }
 
     /// The one argument `push_constants` takes: `space=<n>`.
@@ -527,6 +688,7 @@ struct parser
 
     return parsed_source{.groups = cc::move(groups.value()),
                          .inline_constants = cc::move(p.inline_constants),
+                         .vertex_inputs = cc::move(p.vertex_inputs),
                          .annotations = cc::move(p.annotations)};
 }
 
@@ -586,6 +748,10 @@ cc::result<slib::shader_bindings> slib::parse_binding_groups(cc::string_view hls
     if (parsed.value().inline_constants.has_value())
         result_bindings.inline_constants = cc::move(parsed.value().inline_constants.value().constants);
 
+    result_bindings.vertex_inputs.reserve(parsed.value().vertex_inputs.size());
+    for (auto& input : parsed.value().vertex_inputs)
+        result_bindings.vertex_inputs.push_back(cc::move(input.input));
+
     return result_bindings;
 }
 
@@ -636,6 +802,13 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
         else
             edits.push_back({.offset = constants.type_offset, .text = cc::string("[[vk::push_constant]] ")});
     }
+
+    // Vertex input locations, which only the SPIR-V arm needs: HLSL matches an input by its semantic, and the
+    // semantic is already in the source.
+    if (target == sg::shader_format::spirv)
+        for (auto const& input : parsed.value().vertex_inputs)
+            for (isize i = 0; i < input.member_offsets.size(); ++i)
+                edits.push_back({.offset = input.member_offsets[i], .text = cc::format("[[vk::location({})]] ", i)});
 
     cc::sort_by(edits, &source_edit::offset);
     return apply_edits(hlsl, edits);

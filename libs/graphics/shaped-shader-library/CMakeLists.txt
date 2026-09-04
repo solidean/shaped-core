@@ -16,6 +16,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/binding_groups.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
+    src/shaped-shader-library/binding/impl/hlsl_value_types.cc
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/shader_library.cc
@@ -151,7 +152,11 @@ if(SC_BUILD_TESTS)
             blit.hlsl:vertex:main_vs
             blit.hlsl:fragment:main_ps
             shade.hlsl:compute:main
+            mesh.hlsl:vertex:main_vs
+            mesh.hlsl:fragment:main_ps
             frame_bindings.hlsli:binding:frame_bindings
+            mesh.hlsl:vertex_input:vs_input
+            mesh.hlsl:vertex_input:instance_input
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

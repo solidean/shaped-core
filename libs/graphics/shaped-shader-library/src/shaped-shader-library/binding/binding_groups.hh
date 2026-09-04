@@ -69,6 +69,38 @@ struct slib::shader_inline_constants
     u32 space = 0;
 };
 
+/// One member of an annotated struct, as the shader declares it.
+struct slib::shader_struct_member
+{
+    cc::string name;
+    cc::string type;     ///< the HLSL type, verbatim
+    cc::string semantic; ///< the semantic without its trailing index, or empty when the member carries none
+    u32 semantic_index = 0;
+};
+
+/// A vertex input struct: what feeds one bound vertex buffer.
+///
+///     #pragma sc vertex_input
+///     struct vs_input
+///     {
+///         float3 position : POSITION;
+///         float3 normal : NORMAL;
+///     };
+///
+/// Members are numbered by declaration order, which is safe here in a way it is not for a group: a vertex input
+/// struct is declared once, in one block, where a group has to survive being shared across files.
+/// That number is what SPIR-V matches on, since it has no semantics at all.
+///
+/// The buffer's byte layout is the generated C++ mirror's rather than this struct's — a vertex buffer is a byte
+/// stream the input assembler decodes per attribute offset, and the mirror is what a caller fills.
+struct slib::shader_vertex_input
+{
+    cc::string name;
+    u32 slot = 0; ///< which bound vertex buffer, matching sg::vertex_input_layout::create's argument position
+    bool per_instance = false; ///< advance per instance rather than per vertex
+    cc::vector<shader_struct_member> members;
+};
+
 /// Everything the pass reads out of one translation unit.
 ///
 /// One result rather than a function per attribute, because they come out of one parse: a source is read once,
@@ -79,6 +111,9 @@ struct slib::shader_bindings
 
     /// At most one, because a pipeline layout carries at most one inline-constants binding.
     cc::optional<shader_inline_constants> inline_constants;
+
+    /// One per annotated vertex input struct, in declaration order.
+    cc::vector<shader_vertex_input> vertex_inputs;
 };
 
 namespace slib
@@ -102,8 +137,8 @@ namespace slib
 ///
 /// An error names the file and line the author would recognise, which it recovers from the `#line` directives the
 /// flatten leaves behind; a source carrying none is named by line alone.
-/// `payload` and `vertex_input` parse as attributes and are reported as not yet supported, so a shader written
-/// against them fails rather than compiling to something that ignores them.
+/// `payload` parses as an attribute and is reported as not yet supported, so a shader written against it fails
+/// rather than compiling to something that ignores it.
 [[nodiscard]] cc::result<shader_bindings> parse_binding_groups(cc::string_view hlsl);
 
 /// `hlsl` with every annotated binding carrying the address the pass assigns it: `register(t0, space0)` on the

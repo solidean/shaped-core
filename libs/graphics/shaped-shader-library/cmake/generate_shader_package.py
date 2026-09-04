@@ -36,7 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from binding_grammar import BindingError, DeclaredSampler, Group, parse_binding_groups  # noqa: E402
+from binding_grammar import (BindingError, DeclaredSampler, Group, VALUE_TYPES, VertexInput,  # noqa: E402
+                             parse_binding_groups)
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is load-bearing.
@@ -72,8 +73,9 @@ VALID_STAGES = (
 
 VALID_LANGUAGES = ("hlsl",)
 
-# The stage word that declares a binding group rather than an entry point.
+# The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
+VERTEX_INPUT_STAGE = "vertex_input"
 
 # Sources are embedded as raw string literals so a shipped binary carries its own shaders and needs no
 # source tree.
@@ -126,6 +128,14 @@ class BindingEntry:
     group: Group
 
 
+@dataclass
+class VertexInputEntry:
+    """One `path:vertex_input:struct` entry: a vertex input struct to mirror in C++."""
+
+    path: str
+    input: VertexInput
+
+
 def read_manifest(path: Path) -> Manifest:
     """The manifest is `key=value` lines; SHADER= repeats, one per declared entry."""
     manifest = Manifest()
@@ -159,10 +169,11 @@ def identifier_of(path: str) -> str:
     return ident
 
 
-def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEntry]]:
+def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEntry], list[VertexInputEntry]]:
     files: list[ShaderFile] = []
     by_stem: dict[str, ShaderFile] = {}
     bindings: list[BindingEntry] = []
+    vertex_inputs: list[VertexInputEntry] = []
     seen: set[str] = set()
     name = manifest.name
 
@@ -170,11 +181,11 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
         parts = entry.split(":")
         if len(parts) != 3:
             raise GeneratorError(
-                f"shader package '{name}': entry '{entry}' must be path:stage:entry_point "
-                f"or path:{BINDING_STAGE}:namespace")
+                f"shader package '{name}': entry '{entry}' must be path:stage:entry_point, "
+                f"path:{BINDING_STAGE}:namespace or path:{VERTEX_INPUT_STAGE}:struct")
 
         path, stage, tail = parts
-        if stage != BINDING_STAGE and stage not in VALID_STAGES:
+        if stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE) and stage not in VALID_STAGES:
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has unknown stage '{stage}'. "
                 f"Stages are spelled as sg::shader_stage: {' '.join(VALID_STAGES)}")
@@ -191,6 +202,10 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
             bindings.append(read_binding_entry(manifest, path, tail))
             continue
 
+        if stage == VERTEX_INPUT_STAGE:
+            vertex_inputs.append(read_vertex_input_entry(manifest, path, tail))
+            continue
+
         stem = identifier_of(path)
         existing = by_stem.get(stem)
         if existing is None:
@@ -205,7 +220,7 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
 
         existing.stages.setdefault(stage, []).append(tail)
 
-    return files, bindings
+    return files, bindings, vertex_inputs
 
 
 def read_binding_entry(manifest: Manifest, path: str, namespace: str) -> BindingEntry:
@@ -230,6 +245,27 @@ def read_binding_entry(manifest: Manifest, path: str, namespace: str) -> Binding
     declared = ", ".join(g.name for g in groups) or "none"
     raise GeneratorError(
         f"shader package '{manifest.name}': '{path}' declares no binding group named '{namespace}' "
+        f"(it declares: {declared})")
+
+
+def read_vertex_input_entry(manifest: Manifest, path: str, struct: str) -> VertexInputEntry:
+    """The one vertex input struct `struct` names, parsed out of `path` alone.
+
+    Per file and never through its includes, for the same reason a binding entry is.
+    """
+    text = (manifest.source_dir / path).read_text(encoding="utf-8")
+    try:
+        inputs = parse_binding_groups(text).vertex_inputs
+    except BindingError as e:
+        raise GeneratorError(f"shader package '{manifest.name}': {path}: {e}") from e
+
+    for candidate in inputs:
+        if candidate.name == struct:
+            return VertexInputEntry(path, candidate)
+
+    declared = ", ".join(i.name for i in inputs) or "none"
+    raise GeneratorError(
+        f"shader package '{manifest.name}': '{path}' declares no vertex input struct named '{struct}' "
         f"(it declares: {declared})")
 
 
@@ -301,12 +337,71 @@ def embed_literal(text: str) -> str:
     return "".join(f'\n    R"slibsrc({chunk.decode("utf-8", "surrogateescape")})slibsrc"' for chunk in chunks)
 
 
-def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[BindingEntry]) -> str:
+def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
+    """The C++ struct a vertex input mirrors, plus the sg::vertex_layout_of that describes it.
+
+    The mirror is what defines the buffer's byte layout, so nothing here models HLSL's own packing: a vertex
+    buffer is a byte stream the input assembler decodes per attribute offset, and this struct is what a caller
+    fills.
+    Everything the specialization states is already in the shader -- the semantic from the member, the format
+    from its type, the offset from the mirror, the stride from its total.
+    """
+    vertex_input = entry.input
+    qualified = f"{manifest.namespace}::{vertex_input.name}"
+
+    out = [f"\nnamespace {manifest.namespace}\n{{\n"]
+    out.append(f"/// The vertex buffer {vertex_input.name} reads. Generated from {entry.path}; do not edit.\n")
+    out.append(f"struct {vertex_input.name}\n{{\n")
+    for member in vertex_input.members:
+        cpp_type, _, _ = VALUE_TYPES[member.type]
+        if cpp_type.endswith("]"):
+            base, _, extent = cpp_type.partition("[")
+            out.append(f"    {base} {member.name}[{extent}\n".replace("]\n", "];\n"))
+        else:
+            out.append(f"    {cpp_type} {member.name};\n")
+    out.append("};\n")
+    out.append(f"}} // namespace {manifest.namespace}\n")
+
+    # The mirror is naturally packed, so its stride is its size -- but say so rather than assume it, since a
+    # wrong stride draws geometry rather than failing.
+    stride = sum(VALUE_TYPES[m.type][1] for m in vertex_input.members)
+    out.append(f"\nstatic_assert(sizeof({qualified}) == {stride},\n")
+    out.append(f'              "{vertex_input.name} is not the size its vertex layout states");\n')
+    offset = 0
+    for member in vertex_input.members:
+        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {offset},\n")
+        out.append(f'              "{vertex_input.name}::{member.name} is not where its vertex layout states");\n')
+        offset += VALUE_TYPES[member.type][1]
+
+    out.append(f"\n/// What sg::vertex_input_layout::create<{qualified}>() reads.\n")
+    out.append("template <>\n")
+    out.append(f"struct sg::vertex_layout_of<{qualified}>\n{{\n")
+    out.append("    [[nodiscard]] static sg::vertex_type_layout get()\n    {\n")
+    out.append(f"        return {{.stride = sizeof({qualified}),\n")
+    out.append(f"                .per_instance = {'true' if vertex_input.per_instance else 'false'},\n")
+    out.append("                .attributes = {\n")
+    for member in vertex_input.members:
+        _, _, fmt = VALUE_TYPES[member.type]
+        out.append(f'                    {{.semantic = "{member.semantic}",\n')
+        out.append(f"                     .semantic_index = {member.semantic_index},\n")
+        out.append(f"                     .format = sg::vertex_attribute_format::{fmt},\n")
+        out.append(f"                     .offset = offsetof({qualified}, {member.name})}},\n")
+    out.append("                }};\n")
+    out.append("    }\n")
+    out.append("};\n")
+    return "".join(out)
+
+
+def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[BindingEntry],
+                vertex_inputs: list[VertexInputEntry]) -> str:
     out = ["// This file is auto-generated by sc_add_shader_package. Do not edit.\n"]
     out.append("#pragma once\n\n")
     out.append("#include <shaped-shader-library/fwd.hh>\n")
     out.append("#include <shaped-shader-library/shader_asset.hh>\n")
     out.append("#include <shaped-shader-library/shader_package.hh>\n")
+    if vertex_inputs:
+        out.append("\n#include <shaped-graphics/raster/vertex_input.hh>\n")
+        out.append("\n#include <cstddef> // offsetof\n")
     if bindings:
         out.append("\n#include <clean-core/container/span.hh>\n")
         out.append("#include <clean-core/error/result.hh>\n")
@@ -335,6 +430,8 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
 
     for entry in bindings:
         out.append(emit_binding_group(manifest, entry))
+    for entry in vertex_inputs:
+        out.append(emit_vertex_input(manifest, entry))
 
     return "".join(out)
 
@@ -625,14 +722,15 @@ def main() -> int:
         return 1
 
     try:
-        files, bindings = parse_entries(manifest)
-        roots = [f.path for f in files] + [b.path for b in bindings]
+        files, bindings, vertex_inputs = parse_entries(manifest)
+        roots = [f.path for f in files] + [b.path for b in bindings] + [v.path for v in vertex_inputs]
         embedded = include_closure(manifest, roots)
     except GeneratorError as e:
         print(str(e), file=sys.stderr)
         return 1
 
-    write_if_different(args.out_dir / f"{manifest.name}.hh", emit_header(manifest, files, bindings))
+    write_if_different(args.out_dir / f"{manifest.name}.hh",
+                       emit_header(manifest, files, bindings, vertex_inputs))
     write_if_different(args.out_dir / f"{manifest.name}.cc", emit_source(manifest, files, bindings, embedded))
 
     # Depfile: every file we read.

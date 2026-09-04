@@ -205,6 +205,11 @@ A vertex input struct is declared once, in one block, and its order is the order
 `slot` and `per_instance` map onto `sg::vertex_input_slot`, which is per bound buffer.
 So one annotated struct per slot is what `vertex_input_layout::create<Vs...>()` already expects.
 
+A `path:vertex_input:struct` entry generates the mirror and its specialization, the way `path:binding:namespace` generates a group.
+The mirror needs no packing engine: a vertex buffer is a byte stream the input assembler decodes per attribute offset.
+So the mirror *defines* the layout and the specialization states that same layout, with `offsetof` between them.
+[done]
+
 
 ## The supported subset
 

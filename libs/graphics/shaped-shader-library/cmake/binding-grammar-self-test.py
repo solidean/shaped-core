@@ -68,6 +68,7 @@ class Case:
         self.groups: list[tuple[str, int, list[dict]]] = []
         self.statics: dict[str, str] = {}
         self.inline_constants: str | None = None
+        self.vertex_inputs: list[tuple[str, list[str]]] = []
         self.error: str | None = None
 
     @property
@@ -101,10 +102,16 @@ def read_corpus(text: str) -> list[Case]:
                 if words[0] == "inline_constants":
                     current.inline_constants = f"{words[1]} {words[2]}"
                     continue
+                if words[0] == "vertex_input":
+                    current.vertex_inputs.append((" ".join(words[1:]), []))
+                    continue
                 current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
                 continue
             if words[0] == "static":
                 current.statics[words[1]] = " ".join(words[2:])
+                continue
+            if current.vertex_inputs and not current.groups:
+                current.vertex_inputs[-1][1].append(" ".join(words))
                 continue
             binding = {"name": words[0], "count": 1, "dim": None}
             for word in words[1:]:
@@ -151,6 +158,17 @@ def check(case: Case) -> list[str]:
     rendered = None if constants is None else f"{constants.name} space={constants.space}"
     if rendered != case.inline_constants:
         problems.append(f"inline constants are [{rendered}], expected [{case.inline_constants}]")
+
+    rendered_inputs = []
+    for vertex_input in parsed.vertex_inputs:
+        header = f"{vertex_input.name} slot={vertex_input.slot}"
+        if vertex_input.per_instance:
+            header += " per_instance"
+        members = [f"{m.name} {m.type} {m.semantic}{m.semantic_index}" for m in vertex_input.members]
+        rendered_inputs.append((header, members))
+
+    if rendered_inputs != case.vertex_inputs:
+        problems.append(f"vertex inputs are {rendered_inputs}, expected {case.vertex_inputs}")
 
     declared = {s.name: render_sampler(s.fields) for group in groups for s in group.static_samplers}
     for name, expected in case.statics.items():
