@@ -32,3 +32,13 @@ float4 main_ps(vs_output i) : SV_Target
 {
     return i.color;
 }
+
+// A ray payload, for the generated-size half of the test. Nothing traces it here -- what is under test is
+// that the mirror and max_payload_size come out of the same parse the shader did.
+#pragma sc payload
+struct trace_payload
+{
+    float2 uv;
+    float3 radiance;
+    uint depth;
+};

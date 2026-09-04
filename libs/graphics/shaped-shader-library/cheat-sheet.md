@@ -28,7 +28,8 @@ sc_add_shader_package(
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
         blit.hlsl:fragment:main_ps
         frame.hlsli:binding:frame_bindings  # path:binding:namespace -> a typed binding-group struct
-        mesh.hlsl:vertex_input:vs_input)    # path:vertex_input:struct -> a C++ mirror + vertex_layout_of
+        mesh.hlsl:vertex_input:vs_input     # path:vertex_input:struct -> a C++ mirror + vertex_layout_of
+        rt.hlsl:payload:pt_payload)         # path:payload:struct -> a C++ mirror + max_payload_size
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
@@ -131,7 +132,8 @@ slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<s
                                    //   bindings are in declaration order -> position IS the layout slot
 slib::shader_inline_constants      // { cc::string name; u32 space; } -- register is always b0
 slib::shader_vertex_input          // { name; u32 slot; bool per_instance; vector<shader_struct_member> }
-slib::shader_bindings              // { groups; optional<inline_constants>; vector<vertex_inputs> }
+slib::shader_payload               // { name; vector<shader_struct_member> members; isize size }
+slib::shader_bindings              // { groups; optional<inline_constants>; vertex_inputs; payloads }
 slib::parse_binding_groups(hlsl)   // -> cc::result<shader_bindings>; the error names file:line
                                    //   (recovered from the flatten's #line directives)
 slib::rewrite_binding_groups(hlsl, format)
@@ -166,6 +168,9 @@ sg::vertex_input_layout::create<my::shaders::vs_input, my::shaders::instance_inp
 //   disagree; generated static_asserts pin the stride and every member's offsetof.
 // members are naturally packed -- a vertex buffer is a byte stream the IA decodes per attribute offset,
 //   so HLSL's constant-buffer packing never enters into it.
+
+my::shaders::pt_payload::max_payload_size   // constexpr cc::isize; what the pipeline must declare
+// a payload mirror is naturally packed too, for a different reason: a payload is registers, not a buffer.
 ```
 
 ```hlsl
@@ -190,7 +195,9 @@ namespace frame_bindings
 //   comes from reflection.
 // `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
 //   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
-// payload parses and is reported as not supported yet.
+// `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
+//   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
+//   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.
 // text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 

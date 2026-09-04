@@ -23,7 +23,9 @@ from dataclasses import dataclass, field
 ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input")
 
 # The attributes whose meaning has not landed yet.
-UNIMPLEMENTED_ATTRIBUTES = ("payload",)
+# Every attribute name is honoured now, so nothing is recognised-but-refused.
+# The tuple stays because the next attribute to be designed lands here before it lands anywhere else.
+UNIMPLEMENTED_ATTRIBUTES: tuple[str, ...] = ()
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -143,12 +145,26 @@ class VertexInput:
 
 
 @dataclass
+class Payload:
+    """A ray payload: the struct that travels through TraceRay to the hit and miss shaders and back.
+
+    A payload is registers rather than a buffer, so its members pack at natural alignment and its size is
+    their plain sum -- see the spike's Q13, which measured that rather than assuming it.
+    """
+
+    name: str
+    members: list[StructMember] = field(default_factory=list)
+    size: int = 0
+
+
+@dataclass
 class Bindings:
     """Everything the pass reads out of one translation unit."""
 
     groups: list[Group] = field(default_factory=list)
     inline_constants: InlineConstants | None = None
     vertex_inputs: list[VertexInput] = field(default_factory=list)
+    payloads: list[Payload] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -523,6 +539,7 @@ class _Parser:
         self.annotations: list[tuple[int, int]] = []  # (offset, length) of every directive consumed
         self.inline_constants: InlineConstants | None = None
         self.vertex_inputs: list[VertexInput] = []
+        self.payloads: list[Payload] = []
         self.group_names: set[str] = set()
         self.group_numbers: set[int] = set()
         self.binding_names: set[str] = set()
@@ -588,6 +605,11 @@ class _Parser:
                 pending = None
                 continue
 
+            if pending is not None and pending.name == "payload" and self.is_identifier("struct"):
+                self.parse_payload(pending)
+                pending = None
+                continue
+
             self.reject_unclaimed(pending)
             self.at += 1
 
@@ -606,9 +628,9 @@ class _Parser:
         if pending.name == "push_constants":
             raise BindingError(
                 f"{pending.location}: a 'push_constants' attribute must stand before a ConstantBuffer declaration")
-        if pending.name == "vertex_input":
+        if pending.name in ("vertex_input", "payload"):
             raise BindingError(
-                f"{pending.location}: a 'vertex_input' attribute must stand before a struct declaration")
+                f"{pending.location}: a '{pending.name}' attribute must stand before a struct declaration")
         raise BindingError(
             f"{pending.location}: a '{pending.name}' attribute must stand before a namespace declaration")
 
@@ -664,6 +686,43 @@ class _Parser:
 
         self.vertex_inputs.append(vertex_input)
 
+    def parse_payload(self, attribute: Annotation) -> None:
+        """The `struct <name> { <type> <member>; ... };` a `payload` attribute stands before."""
+        if attribute.arguments:
+            raise BindingError(f"{attribute.location}: 'payload' takes no arguments")
+
+        keyword_location = self.current().location
+        self.at += 1  # `struct`
+
+        if self.at_end() or self.current().kind != "identifier":
+            raise BindingError(f"{keyword_location}: a 'payload' struct must be named")
+
+        payload = Payload(self.current().text)
+        self.at += 1
+
+        if any(other.name == payload.name for other in self.payloads):
+            raise BindingError(f"{keyword_location}: struct '{payload.name}' is declared twice")
+
+        if not self.is_punctuation("{"):
+            raise BindingError(f"{keyword_location}: struct '{payload.name}' must open its block right away")
+        self.at += 1
+
+        while not self.is_punctuation("}"):
+            if self.at_end():
+                raise BindingError(f"{self.location_here()}: struct '{payload.name}' is never closed")
+            member = self.parse_struct_member(requires_semantic=False)
+            payload.size += VALUE_TYPES[member.type][1]
+            payload.members.append(member)
+        self.at += 1  # the '}'
+
+        if self.is_punctuation(";"):
+            self.at += 1
+
+        if not payload.members:
+            raise BindingError(f"{keyword_location}: payload '{payload.name}' declares no members")
+
+        self.payloads.append(payload)
+
     @staticmethod
     def read_vertex_input_arguments(attribute: Annotation, vertex_input: VertexInput) -> None:
         """`slot=<n>` and the bare `per_instance` flag, both optional."""
@@ -682,8 +741,11 @@ class _Parser:
             raise BindingError(
                 f"{attribute.location}: 'vertex_input' takes slot=<n> and per_instance, not '{named}'")
 
-    def parse_struct_member(self) -> StructMember:
-        """One `<type> <name> : <SEMANTIC>;`."""
+    def parse_struct_member(self, requires_semantic: bool = True) -> StructMember:
+        """One `<type> <name>[ : <SEMANTIC>];`.
+
+        A vertex input requires the semantic, since that is what HLSL matches an input by; a payload has none.
+        """
         token = self.current()
         if token.kind != "identifier":
             raise BindingError(f"{token.location}: expected a member declaration, found '{token.text}'")
@@ -703,20 +765,24 @@ class _Parser:
         self.at += 1
 
         # The semantic, which is what HLSL matches a vertex input by, and what the mirror carries into sg.
-        if not self.is_punctuation(":"):
+        if requires_semantic and not self.is_punctuation(":"):
             raise BindingError(f"{location}: vertex input member '{name}' must carry a semantic")
-        self.at += 1
 
-        if self.at_end() or self.current().kind != "identifier":
-            raise BindingError(f"{location}: expected a semantic after '{name}'")
+        semantic = ""
+        digits = 0
+        semantic_index = 0
+        if self.is_punctuation(":"):
+            self.at += 1
+            if self.at_end() or self.current().kind != "identifier":
+                raise BindingError(f"{location}: expected a semantic after '{name}'")
 
-        # HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
-        semantic = self.current().text
-        digits = len(semantic)
-        while digits > 0 and semantic[digits - 1].isdigit():
-            digits -= 1
-        semantic_index = int(semantic[digits:]) if digits < len(semantic) else 0
-        self.at += 1
+            # HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
+            semantic = self.current().text
+            digits = len(semantic)
+            while digits > 0 and semantic[digits - 1].isdigit():
+                digits -= 1
+            semantic_index = int(semantic[digits:]) if digits < len(semantic) else 0
+            self.at += 1
 
         if not self.is_punctuation(";"):
             raise BindingError(f"{location}: expected ';' after '{name}'")
@@ -909,4 +975,4 @@ def parse_binding_groups(hlsl: str) -> Bindings:
 
     parser = _Parser(lex(hlsl))
     groups = parser.run()
-    return Bindings(groups, parser.inline_constants, parser.vertex_inputs)
+    return Bindings(groups, parser.inline_constants, parser.vertex_inputs, parser.payloads)

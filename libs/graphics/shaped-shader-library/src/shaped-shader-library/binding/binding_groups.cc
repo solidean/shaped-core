@@ -29,7 +29,9 @@ constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_consta
 
 /// The attributes whose meaning has not landed yet.
 /// Recognised so the failure names what is missing, rather than reading as an unknown word.
-constexpr cc::string_view k_unimplemented_attributes[] = {"payload"};
+/// Every attribute name is honoured now, so nothing is recognised-but-refused.
+/// The array stays because the next attribute to be designed lands here before it lands anywhere else.
+constexpr cc::span<cc::string_view const> k_unimplemented_attributes = {};
 
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
@@ -98,6 +100,7 @@ struct parsed_source
     cc::vector<parsed_group> groups;
     cc::optional<parsed_inline_constants> inline_constants;
     cc::vector<parsed_vertex_input> vertex_inputs;
+    cc::vector<slib::shader_payload> payloads;
 
     /// Every `#pragma sc` directive the parse consumed.
     /// The rewrite deletes them: DXC ignores an unknown pragma today, but `-Wall` promotes it to
@@ -116,6 +119,7 @@ struct parser
     cc::vector<source_span> annotations;
     cc::optional<parsed_inline_constants> inline_constants;
     cc::vector<parsed_vertex_input> vertex_inputs;
+    cc::vector<slib::shader_payload> payloads;
 
     // What has been declared so far, for the collisions a namespace does not catch on its own.
     cc::set<cc::string_view> group_names;
@@ -212,6 +216,13 @@ struct parser
                 continue;
             }
 
+            if (pending.has_value() && pending.value().name == "payload" && is_identifier("struct"))
+            {
+                CC_RETURN_IF_ERROR(parse_payload(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
             ++at;
         }
@@ -238,9 +249,9 @@ struct parser
                                         "declaration",
                                         to_string(pending.value().location)));
 
-        if (pending.value().name == "vertex_input")
-            return cc::error(cc::format("{}: a 'vertex_input' attribute must stand before a struct declaration",
-                                        to_string(pending.value().location)));
+        if (pending.value().name == "vertex_input" || pending.value().name == "payload")
+            return cc::error(cc::format("{}: a '{}' attribute must stand before a struct declaration",
+                                        to_string(pending.value().location), pending.value().name));
 
         return cc::error(cc::format("{}: a '{}' attribute must stand before a namespace declaration",
                                     to_string(pending.value().location), pending.value().name));
@@ -310,7 +321,7 @@ struct parser
             if (at_end())
                 return cc::error(cc::format("{}: struct '{}' is never closed", to_string(location_here()), input.name));
 
-            auto member = parse_struct_member();
+            auto member = parse_struct_member(true);
             CC_RETURN_IF_ERROR(member);
 
             offsets.push_back(member.value().type_offset);
@@ -323,6 +334,58 @@ struct parser
             ++at;
 
         vertex_inputs.push_back({.input = cc::move(input), .member_offsets = cc::move(offsets)});
+        return cc::unit();
+    }
+
+    /// The `struct <name> { <type> <member>; ... };` a `payload` attribute stands before.
+    ///
+    /// A payload is registers rather than a buffer, so its members pack at natural alignment and its size is
+    /// their plain sum — see the spike's Q13, which measured that rather than assuming it.
+    [[nodiscard]] cc::result<cc::unit> parse_payload(annotation const& attribute)
+    {
+        if (!attribute.arguments.empty())
+            return cc::error(cc::format("{}: 'payload' takes no arguments", to_string(attribute.location)));
+
+        auto const keyword_location = current().location;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: a 'payload' struct must be named", to_string(keyword_location)));
+
+        auto payload = slib::shader_payload{.name = cc::string::create_copy_of(current().text)};
+        ++at;
+
+        for (auto const& other : payloads)
+            if (other.name == payload.name)
+                return cc::error(
+                    cc::format("{}: struct '{}' is declared twice", to_string(keyword_location), payload.name));
+
+        if (!is_punctuation('{'))
+            return cc::error(cc::format("{}: struct '{}' must open its block right away", to_string(keyword_location),
+                                        payload.name));
+        ++at;
+
+        while (!is_punctuation('}'))
+        {
+            if (at_end())
+                return cc::error(cc::format("{}: struct '{}' is never closed", to_string(location_here()), payload.name));
+
+            auto member = parse_struct_member(false);
+            CC_RETURN_IF_ERROR(member);
+
+            payload.size += slib::impl::value_type_of(member.value().member.type).value().size;
+            payload.members.push_back(cc::move(member.value().member));
+        }
+        ++at; // the '}'
+
+        if (is_punctuation(';'))
+            ++at;
+
+        if (payload.members.empty())
+            return cc::error(
+                cc::format("{}: payload '{}' declares no members", to_string(keyword_location), payload.name));
+
+        payloads.push_back(cc::move(payload));
         return cc::unit();
     }
 
@@ -361,8 +424,9 @@ struct parser
         isize type_offset = 0;
     };
 
-    /// One `<type> <name> : <SEMANTIC>;`.
-    [[nodiscard]] cc::result<parsed_member> parse_struct_member()
+    /// One `<type> <name>[ : <SEMANTIC>];`.
+    /// A vertex input requires the semantic, since that is what HLSL matches an input by; a payload has none.
+    [[nodiscard]] cc::result<parsed_member> parse_struct_member(bool requires_semantic)
     {
         auto const& type_token = current();
         if (type_token.kind != hlsl_token_kind::identifier)
@@ -386,29 +450,32 @@ struct parser
         ++at;
 
         // The semantic, which is what HLSL matches a vertex input by, and what the mirror carries into sg.
-        if (!is_punctuation(':'))
+        if (requires_semantic && !is_punctuation(':'))
             return cc::error(
                 cc::format("{}: vertex input member '{}' must carry a semantic", to_string(location), member.name));
-        ++at;
 
-        if (at_end() || current().kind != hlsl_token_kind::identifier)
-            return cc::error(cc::format("{}: expected a semantic after '{}'", to_string(location), member.name));
-
-        // HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
-        auto semantic = current().text;
-        isize digits = semantic.size();
-        while (digits > 0 && semantic[digits - 1] >= '0' && semantic[digits - 1] <= '9')
-            --digits;
-
-        member.semantic = cc::string::create_copy_of(semantic.subview({.start = 0, .end = digits}));
-        if (digits < semantic.size())
+        if (is_punctuation(':'))
         {
-            auto const index = cc::from_string<u32>(semantic.subview(digits));
-            if (!index.has_value())
-                return cc::error(cc::format("{}: '{}' is not a semantic", to_string(location), semantic));
-            member.semantic_index = index.value();
+            ++at;
+            if (at_end() || current().kind != hlsl_token_kind::identifier)
+                return cc::error(cc::format("{}: expected a semantic after '{}'", to_string(location), member.name));
+
+            // HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
+            auto semantic = current().text;
+            isize digits = semantic.size();
+            while (digits > 0 && semantic[digits - 1] >= '0' && semantic[digits - 1] <= '9')
+                --digits;
+
+            member.semantic = cc::string::create_copy_of(semantic.subview({.start = 0, .end = digits}));
+            if (digits < semantic.size())
+            {
+                auto const index = cc::from_string<u32>(semantic.subview(digits));
+                if (!index.has_value())
+                    return cc::error(cc::format("{}: '{}' is not a semantic", to_string(location), semantic));
+                member.semantic_index = index.value();
+            }
+            ++at;
         }
-        ++at;
 
         if (!is_punctuation(';'))
             return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), member.name));
@@ -689,6 +756,7 @@ struct parser
     return parsed_source{.groups = cc::move(groups.value()),
                          .inline_constants = cc::move(p.inline_constants),
                          .vertex_inputs = cc::move(p.vertex_inputs),
+                         .payloads = cc::move(p.payloads),
                          .annotations = cc::move(p.annotations)};
 }
 
@@ -751,6 +819,8 @@ cc::result<slib::shader_bindings> slib::parse_binding_groups(cc::string_view hls
     result_bindings.vertex_inputs.reserve(parsed.value().vertex_inputs.size());
     for (auto& input : parsed.value().vertex_inputs)
         result_bindings.vertex_inputs.push_back(cc::move(input.input));
+
+    result_bindings.payloads = cc::move(parsed.value().payloads);
 
     return result_bindings;
 }

@@ -19,6 +19,7 @@
 #   inline_constants <name> space=<n>                  unindented, since it belongs to no group
 #   vertex_input <name> slot=<n> [per_instance]        unindented too, and one line per member follows
 #     <member> <type> <SEMANTIC><index>
+#   payload <name> size=<bytes>                        unindented, with one `<member> <type>` line per member
 #   --- error           instead of `groups`: the message the pass must report, exactly
 #
 # A `#` comment is only a comment outside an `--- hlsl` block; inside one it is HLSL text like any other --
@@ -432,12 +433,84 @@ line 1: 'push_constants' takes exactly one space=<n>
 line 1: a 'push_constants' attribute must stand before a ConstantBuffer declaration
 
 
---- case `payload` is recognised and not yet honoured
+--- case a payload packs at natural alignment, which the spike's Q13 measured
 --- hlsl
 #pragma sc payload
-struct pt_payload { float3 radiance; float3 throughput; };
+struct pt_payload
+{
+    float2 a;
+    float3 b;
+    uint tag;
+};
+--- groups
+payload pt_payload size=24
+  a float2
+  b float3
+  tag uint
+
+
+--- case the same members would be 32 bytes under a constant buffer's row rules
+--- hlsl
+#pragma sc payload
+struct one_scalar
+{
+    uint value;
+};
+--- groups
+payload one_scalar size=4
+  value uint
+
+
+--- case a payload member carries no semantic, since nothing matches it by one
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float3 radiance : COLOR;
+};
+--- groups
+payload pt_payload size=12
+  radiance float3
+
+
+--- case `payload` takes no arguments
+--- hlsl
+#pragma sc payload size=104
+struct pt_payload
+{
+    uint value;
+};
 --- error
-line 1: the 'payload' attribute is not supported yet
+line 1: 'payload' takes no arguments
+
+
+--- case an empty payload is an error rather than a zero-byte one
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+};
+--- error
+line 2: payload 'pt_payload' declares no members
+
+
+--- case a payload member's type comes from the same table a vertex attribute's does
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float4x4 transform;
+};
+--- error
+line 4: 'float4x4' is not a vertex attribute type this pass knows
+
+
+--- case a `payload` attribute standing before nothing is an error
+--- hlsl
+#pragma sc payload
+Texture2D<float4> albedo;
+--- error
+line 1: a 'payload' attribute must stand before a struct declaration
 
 
 --- case a vertex input struct's members are numbered by declaration order

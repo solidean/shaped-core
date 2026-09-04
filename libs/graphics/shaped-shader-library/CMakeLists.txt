@@ -157,6 +157,7 @@ if(SC_BUILD_TESTS)
             frame_bindings.hlsli:binding:frame_bindings
             mesh.hlsl:vertex_input:vs_input
             mesh.hlsl:vertex_input:instance_input
+            mesh.hlsl:payload:trace_payload
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

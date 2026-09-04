@@ -69,6 +69,7 @@ class Case:
         self.statics: dict[str, str] = {}
         self.inline_constants: str | None = None
         self.vertex_inputs: list[tuple[str, list[str]]] = []
+        self.payloads: list[tuple[str, list[str]]] = []
         self.error: str | None = None
 
     @property
@@ -105,10 +106,16 @@ def read_corpus(text: str) -> list[Case]:
                 if words[0] == "vertex_input":
                     current.vertex_inputs.append((" ".join(words[1:]), []))
                     continue
+                if words[0] == "payload":
+                    current.payloads.append((" ".join(words[1:]), []))
+                    continue
                 current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
                 continue
             if words[0] == "static":
                 current.statics[words[1]] = " ".join(words[2:])
+                continue
+            if current.payloads and not current.groups:
+                current.payloads[-1][1].append(" ".join(words))
                 continue
             if current.vertex_inputs and not current.groups:
                 current.vertex_inputs[-1][1].append(" ".join(words))
@@ -169,6 +176,11 @@ def check(case: Case) -> list[str]:
 
     if rendered_inputs != case.vertex_inputs:
         problems.append(f"vertex inputs are {rendered_inputs}, expected {case.vertex_inputs}")
+
+    rendered_payloads = [(f"{p.name} size={p.size}", [f"{m.name} {m.type}" for m in p.members])
+                         for p in parsed.payloads]
+    if rendered_payloads != case.payloads:
+        problems.append(f"payloads are {rendered_payloads}, expected {case.payloads}")
 
     declared = {s.name: render_sampler(s.fields) for group in groups for s in group.static_samplers}
     for name, expected in case.statics.items():

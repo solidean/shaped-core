@@ -47,6 +47,9 @@ struct corpus_case
     cc::vector<expected_sampler> statics;
     cc::optional<cc::string> inline_constants; ///< "<name> space=<n>", or nothing when none is declared
 
+    /// One entry per `payload` line: its header, then its members, newline-joined.
+    cc::vector<cc::string> payloads;
+
     /// One entry per `vertex_input` line: its header, then its members, newline-joined.
     /// One string rather than a list, because comparing it is the whole use and cc::vector carries no ==.
     cc::vector<cc::string> vertex_inputs;
@@ -348,6 +351,12 @@ constexpr name_of_dimension k_dimensions[] = {
                     break;
                 }
 
+                if (words[0] == "payload")
+                {
+                    current.payloads.push_back(join_from(words, 1));
+                    break;
+                }
+
                 auto const number = value_of(words[1], "group");
                 REQUIRE(number.has_value());
                 current.groups.push_back({.name = words[0], .group = cc::from_string<u32>(number.value()).value()});
@@ -355,6 +364,13 @@ constexpr name_of_dimension k_dimensions[] = {
             }
 
             // An indented line belongs to whichever unindented line opened the block it is in.
+            if (!current.payloads.empty() && current.groups.empty())
+            {
+                current.payloads.back() += '\n';
+                current.payloads.back() += join_from(words, 0);
+                break;
+            }
+
             if (!current.vertex_inputs.empty() && current.groups.empty())
             {
                 current.vertex_inputs.back() += '\n';
@@ -496,6 +512,32 @@ TEST("slib - the binding corpus parses as it says it does")
                              c.vertex_inputs[i]);
 
             CHECK(rendered_inputs[i] == c.vertex_inputs[i]);
+        }
+
+        // The `payload` lines: what each declares, and the size the pass computed for it.
+        cc::vector<cc::string> rendered_payloads;
+        for (auto const& payload : parsed.value().payloads)
+        {
+            auto rendered = cc::format("{} size={}", payload.name, payload.size);
+            for (auto const& member : payload.members)
+                rendered += cc::format("\n{} {}", member.name, member.type);
+            rendered_payloads.push_back(cc::move(rendered));
+        }
+
+        if (rendered_payloads.size() != c.payloads.size())
+        {
+            CC_LOG_ERROR("[corpus] '{}' declares {} payload(s), expected {}", c.name, rendered_payloads.size(),
+                         c.payloads.size());
+            CHECK(false);
+            continue;
+        }
+
+        for (isize i = 0; i < rendered_payloads.size(); ++i)
+        {
+            if (rendered_payloads[i] != c.payloads[i])
+                CC_LOG_ERROR("[corpus] '{}' payload {} is\n{}\nexpected\n{}", c.name, i, rendered_payloads[i],
+                             c.payloads[i]);
+            CHECK(rendered_payloads[i] == c.payloads[i]);
         }
 
         if (groups.size() != c.groups.size())

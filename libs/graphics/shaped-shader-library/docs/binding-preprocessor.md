@@ -171,9 +171,9 @@ struct pt_payload { float3 radiance; float3 throughput; uint rng; float bsdf_pdf
 Nothing in `sg::compiled_shader` reports it, so the pass computes it from the struct.
 
 **A payload does not pack like a constant buffer.**
-It is registers rather than a buffer, so the 16-byte row rule should not apply and its members should pack at natural alignment.
-"Should" is doing work in that sentence, so the packing rule is pinned in the spike before the payload layout function is written.
-Declare a payload whose two layouts differ, and read back what the driver actually reserved.
+It is registers rather than a buffer, so the 16-byte row rule does not apply and its members pack at natural alignment.
+Q13 pins it: `struct { float2 a; float3 b; uint tag; }` is 24 bytes under natural alignment and 32 under the constant-buffer rules, and `CreateStateObject` accepts 24 while refusing 20.
+A larger declared size is always legal, so only the refusal of 20 could have told the two apart.
 
 ### `vertex_input`
 

@@ -101,6 +101,24 @@ struct slib::shader_vertex_input
     cc::vector<shader_struct_member> members;
 };
 
+/// A ray payload: the struct that travels through `TraceRay` to the hit and miss shaders and back.
+///
+///     #pragma sc payload
+///     struct pt_payload { float3 radiance; float3 throughput; uint rng; };
+///
+/// `raytracing_pipeline_description::max_payload_size` is a byte count written by hand in C++ today, against a
+/// struct in another language, and nothing in `sg::compiled_shader` reports one — so the pass computes it.
+///
+/// **A payload packs at natural alignment, not in a constant buffer's 16-byte rows**, which the spike's Q13
+/// pins rather than assumes: `CreateStateObject` accepts the natural size and refuses one field less.
+/// That is also why the generated C++ mirror needs no padding members: naturally packed is what C++ does.
+struct slib::shader_payload
+{
+    cc::string name;
+    cc::vector<shader_struct_member> members;
+    isize size = 0; ///< what max_payload_size must be, computed from the members
+};
+
 /// Everything the pass reads out of one translation unit.
 ///
 /// One result rather than a function per attribute, because they come out of one parse: a source is read once,
@@ -114,6 +132,9 @@ struct slib::shader_bindings
 
     /// One per annotated vertex input struct, in declaration order.
     cc::vector<shader_vertex_input> vertex_inputs;
+
+    /// One per annotated ray payload struct, in declaration order.
+    cc::vector<shader_payload> payloads;
 };
 
 namespace slib
@@ -137,8 +158,7 @@ namespace slib
 ///
 /// An error names the file and line the author would recognise, which it recovers from the `#line` directives the
 /// flatten leaves behind; a source carrying none is named by line alone.
-/// `payload` parses as an attribute and is reported as not yet supported, so a shader written against it fails
-/// rather than compiling to something that ignores it.
+/// Every attribute the grammar knows is honoured; a name outside it is an error naming the line.
 [[nodiscard]] cc::result<shader_bindings> parse_binding_groups(cc::string_view hlsl);
 
 /// `hlsl` with every annotated binding carrying the address the pass assigns it: `register(t0, space0)` on the

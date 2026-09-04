@@ -36,8 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from binding_grammar import (BindingError, DeclaredSampler, Group, VALUE_TYPES, VertexInput,  # noqa: E402
-                             parse_binding_groups)
+from binding_grammar import (BindingError, DeclaredSampler, Group, Payload, StructMember,  # noqa: E402
+                             VALUE_TYPES, VertexInput, parse_binding_groups)
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is load-bearing.
@@ -76,6 +76,7 @@ VALID_LANGUAGES = ("hlsl",)
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
 VERTEX_INPUT_STAGE = "vertex_input"
+PAYLOAD_STAGE = "payload"
 
 # Sources are embedded as raw string literals so a shipped binary carries its own shaders and needs no
 # source tree.
@@ -136,6 +137,14 @@ class VertexInputEntry:
     input: VertexInput
 
 
+@dataclass
+class PayloadEntry:
+    """One `path:payload:struct` entry: a ray payload to mirror in C++, and to size."""
+
+    path: str
+    payload: Payload
+
+
 def read_manifest(path: Path) -> Manifest:
     """The manifest is `key=value` lines; SHADER= repeats, one per declared entry."""
     manifest = Manifest()
@@ -169,11 +178,13 @@ def identifier_of(path: str) -> str:
     return ident
 
 
-def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEntry], list[VertexInputEntry]]:
+def parse_entries(
+        manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEntry], list[VertexInputEntry], list[PayloadEntry]]:
     files: list[ShaderFile] = []
     by_stem: dict[str, ShaderFile] = {}
     bindings: list[BindingEntry] = []
     vertex_inputs: list[VertexInputEntry] = []
+    payloads: list[PayloadEntry] = []
     seen: set[str] = set()
     name = manifest.name
 
@@ -182,10 +193,11 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
         if len(parts) != 3:
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' must be path:stage:entry_point, "
-                f"path:{BINDING_STAGE}:namespace or path:{VERTEX_INPUT_STAGE}:struct")
+                f"path:{BINDING_STAGE}:namespace, path:{VERTEX_INPUT_STAGE}:struct "
+                f"or path:{PAYLOAD_STAGE}:struct")
 
         path, stage, tail = parts
-        if stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE) and stage not in VALID_STAGES:
+        if stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE) and stage not in VALID_STAGES:
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has unknown stage '{stage}'. "
                 f"Stages are spelled as sg::shader_stage: {' '.join(VALID_STAGES)}")
@@ -206,6 +218,10 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
             vertex_inputs.append(read_vertex_input_entry(manifest, path, tail))
             continue
 
+        if stage == PAYLOAD_STAGE:
+            payloads.append(read_payload_entry(manifest, path, tail))
+            continue
+
         stem = identifier_of(path)
         existing = by_stem.get(stem)
         if existing is None:
@@ -220,7 +236,7 @@ def parse_entries(manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEnt
 
         existing.stages.setdefault(stage, []).append(tail)
 
-    return files, bindings, vertex_inputs
+    return files, bindings, vertex_inputs, payloads
 
 
 def read_binding_entry(manifest: Manifest, path: str, namespace: str) -> BindingEntry:
@@ -266,6 +282,24 @@ def read_vertex_input_entry(manifest: Manifest, path: str, struct: str) -> Verte
     declared = ", ".join(i.name for i in inputs) or "none"
     raise GeneratorError(
         f"shader package '{manifest.name}': '{path}' declares no vertex input struct named '{struct}' "
+        f"(it declares: {declared})")
+
+
+def read_payload_entry(manifest: Manifest, path: str, struct: str) -> PayloadEntry:
+    """The one ray payload `struct` names, parsed out of `path` alone."""
+    text = (manifest.source_dir / path).read_text(encoding="utf-8")
+    try:
+        payloads = parse_binding_groups(text).payloads
+    except BindingError as e:
+        raise GeneratorError(f"shader package '{manifest.name}': {path}: {e}") from e
+
+    for candidate in payloads:
+        if candidate.name == struct:
+            return PayloadEntry(path, candidate)
+
+    declared = ", ".join(p.name for p in payloads) or "none"
+    raise GeneratorError(
+        f"shader package '{manifest.name}': '{path}' declares no payload struct named '{struct}' "
         f"(it declares: {declared})")
 
 
@@ -337,6 +371,63 @@ def embed_literal(text: str) -> str:
     return "".join(f'\n    R"slibsrc({chunk.decode("utf-8", "surrogateescape")})slibsrc"' for chunk in chunks)
 
 
+def emit_mirror_members(members: list[StructMember]) -> str:
+    """The members of a mirror struct, naturally packed the way both HLSL and C++ pack them."""
+    out = []
+    for member in members:
+        cpp_type, _, _ = VALUE_TYPES[member.type]
+        if cpp_type.endswith("]"):
+            base, _, extent = cpp_type.partition("[")
+            out.append(f"    {base} {member.name}[{extent[:-1]}];\n")
+        else:
+            out.append(f"    {cpp_type} {member.name};\n")
+    return "".join(out)
+
+
+def emit_mirror_asserts(qualified: str, name: str, members: list[StructMember], what: str) -> str:
+    """Size and every member's offset, against what the generator computed.
+
+    Size alone would pass a mirror whose fields are in the wrong places and whose padding happens to add up,
+    which is exactly the failure a hand-written mirror has today.
+    """
+    out = []
+    total = sum(VALUE_TYPES[m.type][1] for m in members)
+    out.append(f"\nstatic_assert(sizeof({qualified}) == {total},\n")
+    out.append(f'              "{name} is not the size its {what} states");\n')
+
+    offset = 0
+    for member in members:
+        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {offset},\n")
+        out.append(f'              "{name}::{member.name} is not where its {what} states");\n')
+        offset += VALUE_TYPES[member.type][1]
+    return "".join(out)
+
+
+def emit_payload(manifest: Manifest, entry: PayloadEntry) -> str:
+    """The C++ struct a ray payload mirrors, and the max_payload_size a pipeline must declare for it.
+
+    A payload packs at natural alignment rather than in a constant buffer's 16-byte rows -- the spike's Q13
+    measured that rather than assuming it -- and natural packing is what C++ does, so the mirror needs no
+    padding members at all.
+    The static_asserts below are what says so rather than hoping it.
+    """
+    payload = entry.payload
+    qualified = f"{manifest.namespace}::{payload.name}"
+
+    out = [f"\nnamespace {manifest.namespace}\n{{\n"]
+    out.append(f"/// The ray payload {payload.name} carries. Generated from {entry.path}; do not edit.\n")
+    out.append(f"struct {payload.name}\n{{\n")
+    out.append(emit_mirror_members(payload.members))
+    out.append("\n")
+    out.append("    /// What raytracing_pipeline_description::max_payload_size must be for this payload.\n")
+    out.append("    /// The driver refuses a smaller one, which is what the spike's Q13 measured.\n")
+    out.append(f"    static constexpr cc::isize max_payload_size = {payload.size};\n")
+    out.append("};\n")
+    out.append(f"}} // namespace {manifest.namespace}\n")
+    out.append(emit_mirror_asserts(qualified, payload.name, payload.members, "payload size"))
+    return "".join(out)
+
+
 def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
     """The C++ struct a vertex input mirrors, plus the sg::vertex_layout_of that describes it.
 
@@ -352,26 +443,13 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
     out = [f"\nnamespace {manifest.namespace}\n{{\n"]
     out.append(f"/// The vertex buffer {vertex_input.name} reads. Generated from {entry.path}; do not edit.\n")
     out.append(f"struct {vertex_input.name}\n{{\n")
-    for member in vertex_input.members:
-        cpp_type, _, _ = VALUE_TYPES[member.type]
-        if cpp_type.endswith("]"):
-            base, _, extent = cpp_type.partition("[")
-            out.append(f"    {base} {member.name}[{extent}\n".replace("]\n", "];\n"))
-        else:
-            out.append(f"    {cpp_type} {member.name};\n")
+    out.append(emit_mirror_members(vertex_input.members))
     out.append("};\n")
     out.append(f"}} // namespace {manifest.namespace}\n")
 
     # The mirror is naturally packed, so its stride is its size -- but say so rather than assume it, since a
     # wrong stride draws geometry rather than failing.
-    stride = sum(VALUE_TYPES[m.type][1] for m in vertex_input.members)
-    out.append(f"\nstatic_assert(sizeof({qualified}) == {stride},\n")
-    out.append(f'              "{vertex_input.name} is not the size its vertex layout states");\n')
-    offset = 0
-    for member in vertex_input.members:
-        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {offset},\n")
-        out.append(f'              "{vertex_input.name}::{member.name} is not where its vertex layout states");\n')
-        offset += VALUE_TYPES[member.type][1]
+    out.append(emit_mirror_asserts(qualified, vertex_input.name, vertex_input.members, "vertex layout"))
 
     out.append(f"\n/// What sg::vertex_input_layout::create<{qualified}>() reads.\n")
     out.append("template <>\n")
@@ -393,7 +471,7 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
 
 
 def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[BindingEntry],
-                vertex_inputs: list[VertexInputEntry]) -> str:
+                vertex_inputs: list[VertexInputEntry], payloads: list[PayloadEntry]) -> str:
     out = ["// This file is auto-generated by sc_add_shader_package. Do not edit.\n"]
     out.append("#pragma once\n\n")
     out.append("#include <shaped-shader-library/fwd.hh>\n")
@@ -401,6 +479,9 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append("#include <shaped-shader-library/shader_package.hh>\n")
     if vertex_inputs:
         out.append("\n#include <shaped-graphics/raster/vertex_input.hh>\n")
+    if payloads:
+        out.append("\n#include <clean-core/fwd.hh> // cc::isize\n")
+    if vertex_inputs or payloads:
         out.append("\n#include <cstddef> // offsetof\n")
     if bindings:
         out.append("\n#include <clean-core/container/span.hh>\n")
@@ -432,6 +513,8 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append(emit_binding_group(manifest, entry))
     for entry in vertex_inputs:
         out.append(emit_vertex_input(manifest, entry))
+    for entry in payloads:
+        out.append(emit_payload(manifest, entry))
 
     return "".join(out)
 
@@ -722,15 +805,16 @@ def main() -> int:
         return 1
 
     try:
-        files, bindings, vertex_inputs = parse_entries(manifest)
-        roots = [f.path for f in files] + [b.path for b in bindings] + [v.path for v in vertex_inputs]
+        files, bindings, vertex_inputs, payloads = parse_entries(manifest)
+        roots = ([f.path for f in files] + [b.path for b in bindings] + [v.path for v in vertex_inputs]
+                 + [p.path for p in payloads])
         embedded = include_closure(manifest, roots)
     except GeneratorError as e:
         print(str(e), file=sys.stderr)
         return 1
 
     write_if_different(args.out_dir / f"{manifest.name}.hh",
-                       emit_header(manifest, files, bindings, vertex_inputs))
+                       emit_header(manifest, files, bindings, vertex_inputs, payloads))
     write_if_different(args.out_dir / f"{manifest.name}.cc", emit_source(manifest, files, bindings, embedded))
 
     # Depfile: every file we read.

@@ -211,3 +211,20 @@ TEST("slib - a vertex input entry mirrors the struct and describes it to sg", ex
     CHECK(layout.attributes[4].semantic_index == 1);
     CHECK(layout.attributes[4].format == sg::vertex_attribute_format::u32);
 }
+
+TEST("slib - a payload entry mirrors the struct and sizes it", exclusive("slib-shader-library"))
+{
+    using payload = slib_test::shaders::trace_payload;
+
+    // The number sv maintains by hand today, against a struct in another language.
+    // 24 is natural alignment; a constant buffer's 16-byte rows would have made the same members 32.
+    CHECK(payload::max_payload_size == 24);
+    CHECK(isize(sizeof(payload)) == payload::max_payload_size);
+
+    // The generator's own offsets are asserted in the generated header; this is the shape a caller sees.
+    auto p = payload{};
+    p.uv[0] = 1.0f;
+    p.radiance[2] = 2.0f;
+    p.depth = 3;
+    CHECK(p.depth == 3u);
+}

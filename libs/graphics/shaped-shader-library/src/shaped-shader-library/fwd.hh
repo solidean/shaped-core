@@ -28,6 +28,7 @@ struct shader_binding_group;
 struct shader_inline_constants;
 struct shader_struct_member;
 struct shader_vertex_input;
+struct shader_payload;
 struct shader_bindings;
 
 // shader packages
