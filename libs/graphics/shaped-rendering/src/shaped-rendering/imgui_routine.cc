@@ -310,12 +310,8 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 
                 // Transient: one descriptor allocation per texture switch, recycled with the epoch.
                 // With a single font atlas that is one group for the whole frame.
-                auto group = shaders::imgui_bindings::group{.texture = texture.value().as_readonly_view()}.create(
+                bound_group = shaders::imgui_bindings::group{.texture = texture.value().as_readonly_view()}.create(
                     ctx, sg::lifetime_scope::transient);
-                if (group.has_error())
-                    continue; // the layout moved under us; skip rather than bind garbage
-
-                bound_group = cc::move(group.value());
                 shaders::imgui_bindings::group::bind(scope, *bound_group);
                 bound_texture = dc.GetTexID();
             }

@@ -47,6 +47,8 @@ vulkan_binding_group::~vulkan_binding_group()
     _ctx->schedule_deferred_deletion(cc::move(expiring));
 }
 
+namespace
+{
 [[nodiscard]] cc::result<cc::vector<vulkan_resolved_view>> resolve_by_name(cc::span<sg::binding const> bindings,
                                                                            cc::span<sg::named_view const> views)
 {
@@ -88,6 +90,7 @@ vulkan_binding_group::~vulkan_binding_group()
     }
     return resolved;
 }
+} // namespace
 
 cc::result<vulkan_binding_group_handle> vulkan_binding_group::create(vulkan_context& ctx,
                                                                      vulkan_binding_group_layout_handle const& layout,

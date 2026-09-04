@@ -186,14 +186,11 @@ void layout_routine::execute(sg::rendering_scope& scope,
             // It samples neither; binding the same texture twice is cheaper than a second layout.
             if (textures.targets.empty())
                 continue;
-            auto built = shaders::layout_bindings::group{
+            group = shaders::layout_bindings::group{
                 .source_0 = textures.targets[0].as_readonly_view(),
                 .source_1 = textures.targets[0].as_readonly_view(),
                 .source_sampler
                 = {}}.create(ctx, sg::lifetime_scope::transient);
-            if (built.has_error())
-                continue;
-            group = cc::move(built.value());
         }
         else
         {
@@ -213,7 +210,7 @@ void layout_routine::execute(sg::rendering_scope& scope,
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
-            auto built
+            group
                 = shaders::layout_bindings::group{.source_0 = primary->as_readonly_view(),
                                                   .source_1 = secondary->as_readonly_view(),
                                                   .source_sampler = {.min_filter = filter,
@@ -222,9 +219,6 @@ void layout_routine::execute(sg::rendering_scope& scope,
                                                                      .address_u = sg::sampler_address_mode::clamp_edge,
                                                                      .address_v = sg::sampler_address_mode::clamp_edge}}
                       .create(ctx, sg::lifetime_scope::transient);
-            if (built.has_error())
-                continue;
-            group = cc::move(built.value());
         }
 
         scope.set_viewport(

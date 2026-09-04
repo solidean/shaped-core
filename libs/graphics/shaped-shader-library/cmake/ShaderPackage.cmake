@@ -140,9 +140,14 @@ function(sc_add_shader_package)
 
     # Checked by sc_finalize_shader_packages; see the header comment.
     set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_TARGETS "${PKG_TARGET}")
+
+    # And the generated dir, so finalize can offer it to the sibling test. Recorded rather than acted on here
+    # because a library declares its package before its own test target exists.
+    set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_GEN_DIRS "${PKG_TARGET}|${_gen_dir}")
 endfunction()
 
-# Fails configure with an actionable message if a package was declared but slib is missing.
+# Fails configure with an actionable message if a package was declared but slib is missing, and hands each
+# package's generated header to the sibling <target>-test where there is one.
 # Call once, at the bottom of the root CMakeLists.
 function(sc_finalize_shader_packages)
     get_property(_pkg_targets GLOBAL PROPERTY SC_SHADER_PACKAGE_TARGETS)
@@ -153,4 +158,20 @@ function(sc_finalize_shader_packages)
             "sc_add_shader_package was called for [${_pkg_list}], but the shaped-shader-library target was "
             "never defined. Check the add_subdirectory order in the root CMakeLists.")
     endif()
+
+    # A package declared by a LIBRARY generates a header that library alone can see, so the generated
+    # self_check() -- the parse of the embedded source against the table the generator emitted -- would have
+    # nobody to call it.
+    # Its sibling test is the one place that both links the library and may link nexus, so it gets the include
+    # dir and calls self_check() itself.
+    # Here rather than in sc_add_shader_package, because a library declares its package before its test exists.
+    get_property(_gen_dirs GLOBAL PROPERTY SC_SHADER_PACKAGE_GEN_DIRS)
+    foreach(_entry IN LISTS _gen_dirs)
+        string(REPLACE "|" ";" _parts "${_entry}")
+        list(GET _parts 0 _pkg_target)
+        list(GET _parts 1 _pkg_gen_dir)
+        if(TARGET ${_pkg_target}-test)
+            target_include_directories(${_pkg_target}-test PRIVATE "${_pkg_gen_dir}")
+        endif()
+    endforeach()
 endfunction()

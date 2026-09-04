@@ -135,6 +135,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/gpu-types-test.cc
+        tests/shader-package-test.cc
     )
 
     target_link_libraries(shaped-rendering-test

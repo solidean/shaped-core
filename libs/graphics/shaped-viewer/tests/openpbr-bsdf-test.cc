@@ -179,10 +179,9 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     auto const group = sv_test::shaders::probe_bindings::group{.Cases = case_buffer.as_readonly_buffer(),
                                                                .Results = result_buffer.as_readwrite_buffer()}
                            .create(ctx, sg::lifetime_scope::transient);
-    REQUIRE(group.has_value());
 
     cmd->compute.bind_pipeline(*built);
-    sv_test::shaders::probe_bindings::group::bind(cmd->compute, *group.value());
+    sv_test::shaders::probe_bindings::group::bind(cmd->compute, *group);
     cmd->compute.dispatch_threads(item_count);
 
     auto readback = cmd->download.data_from_buffer(result_buffer);

@@ -248,3 +248,17 @@ TEST("slib - a constants entry mirrors the block with HLSL's padding, not C++'s"
     c.exposure = 3.0f;
     CHECK(c.exposure == 3.0f);
 }
+
+TEST("slib - the generated tables still describe the shaders they came from", exclusive("slib-shader-library"))
+{
+    // The generator's Python parse against the runtime C++ one, over the exact bytes the package embedded.
+    // The corpus covers the cases we thought of; this covers every shader anyone declares, and it grows
+    // without anyone remembering to extend it.
+    //
+    // Here rather than on the render path: it re-parses each source, which is a build-time property to check
+    // once, not something a frame should pay for.
+    auto const message = slib_test::shaders::self_check();
+    CHECK(message.empty());
+    if (!message.empty())
+        FAIL(message);
+}

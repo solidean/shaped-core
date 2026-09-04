@@ -204,6 +204,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
+        tests/shader-package-test.cc
     )
 
     target_link_libraries(shaped-viewer-test

@@ -63,19 +63,17 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
-    auto built = shaders::flat_bindings::group{.scene = tlas->as_view(),
-                                               .Output = d.output.as_readwrite_view(),
-                                               .frame = d.frame.as_uniform_buffer(),
-                                               .background = d.background.as_uniform_buffer(),
-                                               .Materials = d.materials.as_readonly_buffer(),
-                                               .Vertices = d.vertices.as_readonly_buffer(),
-                                               .Indices = d.indices.as_readonly_buffer()}
-                     .create(ctx, sg::lifetime_scope::transient);
-    if (built.has_error())
-        return; // the layout moved under us; leave the target untouched, as for a broken shader
+    auto const group = shaders::flat_bindings::group{.scene = tlas->as_view(),
+                                                     .Output = d.output.as_readwrite_view(),
+                                                     .frame = d.frame.as_uniform_buffer(),
+                                                     .background = d.background.as_uniform_buffer(),
+                                                     .Materials = d.materials.as_readonly_buffer(),
+                                                     .Vertices = d.vertices.as_readonly_buffer(),
+                                                     .Indices = d.indices.as_readonly_buffer()}
+                           .create(ctx, sg::lifetime_scope::transient);
 
     cmd.raytracing.bind_pipeline(*self._pipeline);
-    shaders::flat_bindings::group::bind(cmd.raytracing, *built.value());
+    shaders::flat_bindings::group::bind(cmd.raytracing, *group);
     cmd.raytracing.dispatch_rays(*self._table, self._raygen, d.size[0], d.size[1]);
 }
 } // namespace sv
