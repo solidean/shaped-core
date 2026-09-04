@@ -1,4 +1,4 @@
-#include <babel-serializer/data/base64.hh>
+#include <babel-data/data/base64.hh>
 #include <clean-core/common/utility.hh> // cc::memcpy, cc::move
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/record/log.hh> // CC_LOG_ERROR, CC_LOG_WARNING

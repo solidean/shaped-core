@@ -475,7 +475,7 @@ A type without one is still bindable; it simply shows no default.
 
 ## Open ends
 
-* **Config-file value sources** (JSON, YAML, INI) are deliberately out: babel-serializer sits above nexus, so nexus cannot parse them.
+* **Config-file value sources** (JSON, YAML, INI) are simply `[todo]` — nothing about the layering forbids them, since nexus already links babel-data and so already has `babel::json`.
   The intended seam is a `.value_source(...)` hook the application implements with whatever parser it likes.
 * **Enum name tables** are per-type traits today.
   A general `cc::custom::enum_names<E>` in clean-core is the eventual right home, once a second caller exists — `cc::custom::enum_traits` is flags-only and cannot be extended for it.

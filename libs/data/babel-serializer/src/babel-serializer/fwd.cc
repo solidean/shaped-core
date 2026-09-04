@@ -2,26 +2,13 @@
 
 #include <clean-core/record/domain.hh>
 
-// One TU for every domain babel declares, so a format's own .cc stays about the format.
+// One TU for every domain babel-serializer declares, so a format's own .cc stays about the format.
 // Also checks that fwd.hh compiles standalone.
 //
 // Each format gets its own domain rather than sharing babel's, because they are silenced at different times:
 // a tool loading meshes has no use for the image decoder's profiling scopes, and vice versa.
-
-namespace babel
-{
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel");
-} // namespace babel
-
-namespace babel::json
-{
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.json");
-} // namespace babel::json
-
-namespace babel::markdown
-{
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.markdown");
-} // namespace babel::markdown
+//
+// `babel`, `babel.json` and `babel.markdown` are defined in babel-data's fwd.cc instead.
 
 namespace babel::obj
 {

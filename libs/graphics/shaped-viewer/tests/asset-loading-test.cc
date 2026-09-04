@@ -1,4 +1,4 @@
-#include <babel-serializer/data/base64.hh>
+#include <babel-data/data/base64.hh>
 #include <babel-serializer/geometry/gltf.hh>
 #include <babel-serializer/geometry/obj.hh>
 #include <babel-serializer/geometry/stl.hh>

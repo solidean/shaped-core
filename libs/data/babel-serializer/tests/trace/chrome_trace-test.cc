@@ -1,4 +1,4 @@
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <babel-serializer/trace/chrome_trace.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>

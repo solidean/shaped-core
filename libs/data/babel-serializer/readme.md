@@ -1,34 +1,39 @@
 # babel-serializer
 
 Serialization and deserialization of various formats.
-Namespace `babel`. Depends on **clean-core** (streams, containers, `result`) and **typed-geometry** (`vec` / `pos` / `mat` / `quat` for the geometry formats).
+Namespace `babel`, shared with **[babel-data](../babel-data/readme.md)** — the base64 / JSON / markdown base this sits on.
+Depends on that, plus **clean-core** (streams, containers, `result`) and **typed-geometry** (`vec` / `pos` / `mat` / `quat` for the geometry formats).
 
 ```cpp
-#include <babel-serializer/data/json.hh>
+#include <babel-serializer/geometry/obj.hh>
 
-auto const doc = babel::json::read(R"({"name": "shaped", "tags": [1, 2, 3]})").value();
-auto const name = doc.root()["name"].as_string();  // "shaped"
-auto const tag0 = doc.root()["tags"][0].as_double(); // 1
+auto const mesh = babel::obj::read(cc::string_view("v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+")).value();
+auto const vertex_count = mesh.vertices.size(); // 3
 ```
 
 Headers are included by their full path from `src/`, e.g. `#include <babel-serializer/geometry/obj.hh>`.
-Each format lives in its own sub-namespace (`babel::json`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella.
+Each format lives in its own sub-namespace (`babel::sqlite`, `babel::obj`); `<babel-serializer/all.hh>` is the umbrella over both libraries.
 
-## One namespace, several link targets
+## One namespace, two libraries
 
-`babel-serializer` is **the** target — link it when in doubt, and it carries every format below.
+`babel-serializer` is **the** target — link it when in doubt, and it carries every format below plus everything in babel-data.
 It is not the only one, because the namespace and the link graph answer different questions.
 
-- **`babel-data`** is the base: the formats that are pure parsing and need nothing but clean-core (base64, JSON, markdown).
+- **[`babel-data`](../babel-data/readme.md)** is the base: the formats that are pure parsing and need nothing but clean-core (base64, JSON, markdown).
   Its whole contract is that dependency list, so a consumer that wants JSON does not link an image decoder, a database engine or typed-geometry to get it.
-  That is why `data/` itself spans two targets — `sqlite` sits above because of what it *needs*, not because of what it *is*.
+  That is why `data/` spans both libraries — `sqlite` sits here because of what it *needs*, not because of what it *is*.
 - **`babel-serializer`** is everything else, and links `babel-data` publicly.
 
 Spin off a third only when a format arrives carrying a dependency nobody should pay for by accident — a cursed vendor SDK, a heavyweight decoder — and give it the same treatment.
-**The namespace never splits with the targets**: `babel::json` is `babel::json` wherever it is linked from, and `fwd.hh` stays single.
+**The namespace never splits with the libraries**: `babel::json` is `babel::json` wherever it is linked from, and `fwd.hh` layers rather than forks.
 
 This library is at an **early stage**.
-A base64 codec, a JSON reader and writer, a markdown block reader, a live SQLite handle, OBJ, STL and glTF/GLB readers, PNG/JPG/HDR/PFM image read+write, and a Chrome Trace writer exist so far.
+A live SQLite handle, OBJ, STL and glTF/GLB readers, PNG/JPG/HDR/PFM image read+write, and a Chrome Trace writer exist so far.
+babel-data carries the base64 codec, the JSON reader and writer, and the markdown block reader underneath them.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
 ## Design at a glance
@@ -51,8 +56,8 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 
 | Folder      | What's in it |
 |-------------|--------------|
-| (root)      | `fwd.hh` (forward decls + vocabulary aliases), `all.hh` (umbrella) |
-| `data/`     | `base64` — the base64 codec (`decode` / `decode_into` / `decoded_size` / `encode`); `json` — the JSON reader (`document` / `node` / `ref`, `read`); `markdown` — the block-level markdown reader (same `document` / `ref` shape); `sqlite` — a live SQLite handle (`database` / `statement` / `row`) |
+| (root)      | `fwd.hh` (forward decls for the formats here, over babel-data's), `all.hh` (umbrella over both libraries) |
+| `data/`     | `sqlite` — a live SQLite handle (`database` / `statement` / `row`); base64, JSON and markdown live in [babel-data](../babel-data/readme.md) |
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `stl` — the STL reader, both containers (`data`, `detect_container`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes) |
 | `image/`    | `png` / `jpg` / `hdr` / `pfm` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 | `trace/`    | `chrome_trace` — writes a `cc::rec::recording` as Chrome Trace Event JSON, for `chrome://tracing` and `ui.perfetto.dev` (`encode` / `write`) |
@@ -79,10 +84,7 @@ Build and test through the repo driver — never run the `babel-serializer-test`
 
 ```bash
 uv run dev.py test              # build + run the full suite
-uv run dev.py test "json -"     # just the JSON tests while iterating
-uv run dev.py test "markdown -"
-uv run dev.py test "base64 -"
-uv run dev.py test "sqlite -"
+uv run dev.py test "sqlite -"   # just the SQLite tests while iterating
 uv run dev.py test "obj -"
 uv run dev.py test "gltf -"
 uv run dev.py test "image -"    # the aggregator; the codecs are "png -", "jpg -", "hdr -" and "pfm -"
@@ -93,6 +95,7 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
+- [babel-data](../babel-data/readme.md) — the base64 / JSON / markdown base this library sits on.
 - [docs/_index.md](docs/_index.md) — babel-serializer's documentation hub.
 - [docs/structure.md](docs/structure.md) — the format roadmap (`[done]` / `[planned]`).
 - [docs/lower-library-gaps.md](docs/lower-library-gaps.md) — what babel wants from clean-core / typed-geometry that isn't there yet.

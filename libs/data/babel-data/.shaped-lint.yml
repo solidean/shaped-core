@@ -1,0 +1,10 @@
+# babel-data's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+
+rules:
+  - kind: allow-include
+    value: <charconv>
+    reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
+    files: src/babel-data/data/json.cc

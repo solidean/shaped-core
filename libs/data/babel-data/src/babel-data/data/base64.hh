@@ -1,6 +1,6 @@
 #pragma once
 
-#include <babel-serializer/fwd.hh>
+#include <babel-data/fwd.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>

@@ -24,7 +24,7 @@ using namespace cc::primitive_defines;
 /// A minimal recursive-descent JSON reader, scoped to what `llvm-mca -json` emits: objects, arrays, strings (with `\uXXXX` escapes), numbers (int and float), bool, null.
 /// Not spec-complete and not a general library — lookup is first-key-wins, and big integers lose precision past a double's 2^53.
 ///
-/// Deliberately local rather than babel-serializer's reader: instruction-tracer-core links clean-core only, and one llvm-mca parse does not justify the dependency.
+/// Deliberately local rather than `babel::json`'s reader: one llvm-mca parse does not justify pulling a document model into the parse path.
 struct itrace::json_value
 {
     enum class kind
