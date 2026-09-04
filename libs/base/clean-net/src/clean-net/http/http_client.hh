@@ -118,8 +118,8 @@ public:
     ///
     /// **Two things `client` names are not written here yet**: a streamed request body, and response trailers
     /// reaching the caller.
-    /// Both are recorded under "Still to come" in `docs/http.md` rather than trimmed out of the rung, because they
-    /// are scope this ran out of rather than capabilities anybody decided against.
+    /// Both are recorded under "Still to come" in [docs/http.md](../../../docs/http.md) rather than trimmed out of
+    /// the rung, because they are scope this ran out of rather than capabilities anybody decided against.
     [[nodiscard]] http_level level() const override { return http_level::client; }
 
     [[nodiscard]] cc::shared_async<http_response_head> send_streaming(http_request request,
