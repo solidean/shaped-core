@@ -1,7 +1,6 @@
 #pragma once
 
 #include "pt_common.hlsli"
-#include "background.hlsli" // background_radiance (the SH environment probe)
 
 // The path tracer's closest-hit, as the tail of a GENERATED material permutation.
 //
@@ -136,7 +135,7 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
     float w = pt_mis_weight(PT_ENV_PDF, sv::bsdf_pdf(bsdf, wo_local, wi_local));
 
-    return background_radiance(wi) * f * (wi_local.z / PT_ENV_PDF) * w;
+    return background_radiance(background.sh, wi) * f * (wi_local.z / PT_ENV_PDF) * w;
 }
 
 /// The cutout test, run at every intersection a non-opaque instance reports.

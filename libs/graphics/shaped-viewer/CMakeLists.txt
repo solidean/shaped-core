@@ -176,6 +176,7 @@ sc_add_shader_package(
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
+        common.hlsli:binding:flat_bindings
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.

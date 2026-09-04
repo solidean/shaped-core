@@ -1,5 +1,6 @@
 #pragma once
 
+#include "background.hlsli" // Background + the SH evaluation the miss and the hits use
 #include "camera.hlsli"
 #include "light.hlsli"
 
@@ -18,6 +19,10 @@ static const int pt_roulette_after = 16;
 // The hard ceiling on one walk, which the roulette should reach only for a medium that absorbs nothing at all.
 // A guard against a dispatch that never ends rather than a quality control — see the roulette in pathtrace.hlsl.
 static const int pt_scatter_cap = 4096;
+
+// Declared here rather than in background.hlsli, which two pipelines share: a binding belongs to one group.
+// Still hand-addressed — this world has not moved onto the binding pass yet.
+ConstantBuffer<Background> background : register(b1);
 
 cbuffer FrameConstants : register(b0)
 {

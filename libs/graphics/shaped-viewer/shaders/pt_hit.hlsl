@@ -1,5 +1,4 @@
-#include "pt_common.hlsli"
-#include "background.hlsli" // background_radiance (the SH environment probe)
+#include "pt_common.hlsli" // PtPayload, and the `background` buffer the SH probe reads
 
 // The path tracer's two miss shaders.
 //
@@ -14,7 +13,7 @@ void PtMiss(inout PtPayload payload)
     // The environment radiance along the escaped direction rides back in `emission` — the raygen adds
     // `throughput * emission` on escape, so the SH probe lights the scene exactly like a distant emitter.
     payload.direct = float3(0, 0, 0);
-    payload.emission = background_radiance(normalize(WorldRayDirection()));
+    payload.emission = background_radiance(background.sh, normalize(WorldRayDirection()));
     payload.throughput = float3(0, 0, 0);
     payload.direction = float3(0, 0, 0);
     payload.normal = float3(0, 0, 0);
