@@ -220,6 +220,9 @@ node is the default because it is what CI runs and what the emsdk bundles, so a 
 deno is opt-in rather than picked up when present.
 A default that followed whatever happened to be installed would let two machines silently exercise two different WebGPU implementations, which is the divergence the pair exists to catch.
 
+On a wasm preset the default node is emsdk's own pinned build rather than whatever sits on `PATH`, which is what keeps a run reproducible across machines that happen to have different system nodes.
+A native preset has no emsdk environment and falls back to `PATH` as before.
+
 `--node-path` and `--deno-path` name a specific install, and selecting one of them selects that runtime.
 `SC_JS_RUNTIME`, `SC_NODE_PATH` and `SC_DENO_PATH` are the environment-variable equivalents.
 The same three flags are on `run`, `example` and `benchmark`.

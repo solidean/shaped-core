@@ -78,6 +78,13 @@ def _locate(kind: str, explicit: str | None, env: dict[str, str] | None) -> Path
     if from_env:
         candidates.append(Path(from_env))
 
+    # emsdk ships a pinned node, and a wasm run should use that rather than whatever the machine happens to have.
+    # Taken from the environment ahead of PATH rather than by relying on the emsdk overlay sorting first.
+    if kind == "node":
+        from_emsdk = (env or os.environ).get("EMSDK_NODE")
+        if from_emsdk:
+            candidates.append(Path(from_emsdk))
+
     for c in candidates:
         # A directory is accepted as the install dir, which is how these are usually spelled.
         if c.is_dir():
