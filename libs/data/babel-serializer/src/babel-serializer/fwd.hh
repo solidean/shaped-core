@@ -1,60 +1,17 @@
 #pragma once
 
-#include <clean-core/fwd.hh>
-#include <clean-core/record/domain_fwd.hh>
+#include <babel-data/fwd.hh>
 
 /// Aggregate forward declarations for babel-serializer.
-/// Each format lives in its own sub-namespace — babel::base64, babel::json, babel::markdown, babel::sqlite,
-/// babel::obj, babel::stl, babel::gltf, babel::png, babel::jpg, babel::hdr, babel::pfm — plus the babel::image
-/// aggregator on top of the four image codecs.
+/// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
+/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::png, babel::jpg,
+/// babel::hdr, babel::pfm, the babel::image aggregator over the four codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
-
-namespace babel
-{
-// Pull in the shaped-core vocabulary types (i32, u8, isize, ...) so we write them bare inside babel
-// without leaking them into the global namespace.
-using namespace cc::primitive_defines;
-
-/// The domain a babel recording site falls back to when its format declares none of its own.
-CC_REC_DECLARE_DOMAIN(g_rec_domain);
-} // namespace babel
 
 namespace babel::chrome_trace
 {
 struct write_options;
 } // namespace babel::chrome_trace
-
-namespace babel::json
-{
-enum class node_kind : u8;
-struct node;
-class document;
-struct ref;
-
-enum class non_finite_policy : u8;
-enum class large_integer_policy : u8;
-enum class layout : u8;
-struct write_report;
-struct write_options;
-class writer;
-struct object_writer;
-struct array_writer;
-class string_writer;
-
-/// The domain every recording site in babel::json is attributed to.
-CC_REC_DECLARE_DOMAIN(g_rec_domain);
-} // namespace babel::json
-
-namespace babel::markdown
-{
-enum class node_kind : u8;
-struct node;
-class document;
-struct ref;
-
-/// The domain every recording site in babel::markdown is attributed to.
-CC_REC_DECLARE_DOMAIN(g_rec_domain);
-} // namespace babel::markdown
 
 namespace babel::obj
 {

@@ -1,4 +1,4 @@
-#include <babel-serializer/data/base64.hh>
+#include <babel-data/data/base64.hh>
 #include <clean-core/common/utility.hh> // cc::move, cc::unit
 #include <clean-core/string/format.hh>
 

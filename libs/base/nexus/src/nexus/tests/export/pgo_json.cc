@@ -1,6 +1,6 @@
 #include "pgo_json.hh"
 
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/record/desc.hh>
 

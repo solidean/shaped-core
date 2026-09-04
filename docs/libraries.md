@@ -78,26 +78,35 @@ The planned scope:
 Understanding data: the formats it arrives in, and the structures that outlive a session — documents, their history, and the files they live in.
 Layered on `base`, below the graphics stack.
 
-### babel-serializer — namespace `babel` — depends on clean-core, typed-geometry
+### babel-data — namespace `babel` — depends on clean-core
+
+[readme](../libs/data/babel-data/readme.md) ·
+[cheat-sheet](../libs/data/babel-data/cheat-sheet.md)
+
+The externals-free base of babel: a base64 codec, JSON reading and writing, and a block-level markdown reader.
+Depending on clean-core and nothing else is the library's whole contract, which is what lets nexus link it into every `*-test` binary.
+It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so babel's `fwd.hh` layers rather than forks.
+
+### babel-serializer — namespace `babel` — depends on babel-data, typed-geometry
 
 [readme](../libs/data/babel-serializer/readme.md) ·
 [cheat-sheet](../libs/data/babel-serializer/cheat-sheet.md) ·
 [docs](../libs/data/babel-serializer/docs/_index.md)
 
-Serialization and deserialization of various formats, often thin wrappers over existing libraries and often our own take on a parse.
+Serialization and deserialization of the formats that need more than clean-core, often thin wrappers over existing libraries and often our own take on a parse.
 Two layers, kept distinct: each format parses into an **unopinionated native structure**, and **opinionated aggregators** — "load an image", "load a mesh" — sit on top of those.
 Reading is optimized for the read-once case and takes a `cc::read_stream`, with one deviation for a format that must hand back zero-copy views of its input.
-[coding-guidelines.md](../libs/data/babel-serializer/docs/coding-guidelines.md) owns all of that.
-Today: a base64 codec, JSON reading and writing, a markdown reader plus a SQLite engine wrapper (`data/`), and Wavefront OBJ and glTF 2.0/GLB readers (`geometry/`).
+[coding-guidelines.md](../libs/data/babel-serializer/docs/coding-guidelines.md) owns all of that, for both libraries.
+Today: a SQLite engine wrapper (`data/`), and Wavefront OBJ, STL and glTF 2.0/GLB readers (`geometry/`).
 Plus PNG read+write over the vendored libspng, ancillary chunks included, and JPEG over the vendored stb.
 Fully native Radiance HDR and PFM codecs too, with the `babel::image` aggregator on top (`image/`).
 The sample type follows the format — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for HDR/PFM — and the aggregator refuses to encode a mismatch.
 
-**One namespace, several link targets.**
-`babel-data` is the externals-free base — base64, JSON and markdown over clean-core alone — and `babel-serializer` is everything else on top of it, the target to link when in doubt.
-The split is by dependency rather than by topic, so `data/` itself spans both: `sqlite` sits in the upper target because of what it needs, not because of what it is.
+**One namespace, two libraries.**
+The split is by dependency rather than by topic, so `data/` spans both: `sqlite` sits up here because of what it needs, not because of what it is.
+`babel-serializer` is the target to link when in doubt, and it links babel-data publicly.
 
-The roadmap lives in [structure.md](../libs/data/babel-serializer/docs/structure.md).
+The roadmap across both lives in [structure.md](../libs/data/babel-serializer/docs/structure.md).
 
 ### versioned-document — namespace `vdoc` — depends on clean-core
 

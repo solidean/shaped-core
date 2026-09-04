@@ -1,4 +1,4 @@
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/streams/growing_stream.hh>
 #include <clean-core/streams/stream.hh>
@@ -14,7 +14,7 @@ using namespace cc::primitive_defines;
 // So "load it, change one field, save it" is not what this library does — you read what you need and write what you
 // want, and the two never meet in a mutable tree.
 
-EXAMPLE("babel-serializer/json-read")
+EXAMPLE("babel-data/json-read")
 {
     auto const text = cc::string_view(R"({
         "name": "shaped-core",
@@ -40,7 +40,7 @@ EXAMPLE("babel-serializer/json-read")
     cc::println("has ci  = {}", root.has("ci"));
 }
 
-EXAMPLE("babel-serializer/json-write")
+EXAMPLE("babel-data/json-write")
 {
     // string_writer owns the cc::string it writes into, and hands it over with no copy
     auto w = babel::json::string_writer({.indent = 2});
@@ -66,7 +66,7 @@ EXAMPLE("babel-serializer/json-write")
     cc::println("{}", w.finish().value());
 }
 
-EXAMPLE("babel-serializer/json-imperative")
+EXAMPLE("babel-data/json-imperative")
 {
     // The RAII scopes are sugar: begin_* / end_* is the layer underneath, and it is the one to reach for when the
     // structure comes from somewhere a scope handle cannot follow — a visitor, a state machine, a recursive walk.
@@ -97,7 +97,7 @@ EXAMPLE("babel-serializer/json-imperative")
     cc::println("{}", w.finish().value());
 }
 
-EXAMPLE("babel-serializer/json-write-stream")
+EXAMPLE("babel-data/json-write-stream")
 {
     // the writer only ever sees a cc::write_stream, so the sink is the caller's choice — here a growing byte buffer,
     // elsewhere a file or a socket, with no change to the writing code
@@ -125,7 +125,7 @@ EXAMPLE("babel-serializer/json-write-stream")
     cc::println("{} bytes: {}", bytes.size(), cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()));
 }
 
-EXAMPLE("babel-serializer/json-write-numbers")
+EXAMPLE("babel-data/json-write-numbers")
 {
     auto const infinity = 1e308 * 10;
     auto const not_a_number = infinity - infinity;
@@ -153,7 +153,7 @@ EXAMPLE("babel-serializer/json-write-numbers")
     cc::println("non-finite: {}, past 2^53: {}, clean: {}", report.non_finite, report.large_integers, report.is_clean());
 }
 
-EXAMPLE("babel-serializer/json-newline-delimited")
+EXAMPLE("babel-data/json-newline-delimited")
 {
     // one record per line, which is what a log or a stream of events wants
     auto w = babel::json::string_writer({.newline_delimited = true});
@@ -168,7 +168,7 @@ EXAMPLE("babel-serializer/json-newline-delimited")
     cc::print("{}", w.finish().value());
 }
 
-EXAMPLE("babel-serializer/json-round-trip")
+EXAMPLE("babel-data/json-round-trip")
 {
     // write with one API, read back with the other — there is no shared document in between
     auto w = babel::json::string_writer();

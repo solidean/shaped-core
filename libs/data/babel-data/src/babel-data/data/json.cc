@@ -1,4 +1,4 @@
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/char_predicates.hh>

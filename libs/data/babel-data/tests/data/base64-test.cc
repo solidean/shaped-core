@@ -1,4 +1,4 @@
-#include <babel-serializer/data/base64.hh>
+#include <babel-data/data/base64.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>

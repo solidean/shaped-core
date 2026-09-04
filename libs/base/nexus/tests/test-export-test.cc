@@ -1,4 +1,4 @@
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/pgo.hh>
