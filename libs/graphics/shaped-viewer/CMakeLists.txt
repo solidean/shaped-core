@@ -247,6 +247,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 bsdf_probe.hlsl:compute:BsdfProbe
+                bsdf_probe.hlsl:binding:probe_bindings
         )
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the

@@ -159,7 +159,7 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     auto const* const compiled = shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
+    auto const group_layout = sv_test::shaders::probe_bindings::group::acquire_layout(ctx);
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
     auto const built = cc::async_blocking_get(pipeline);
@@ -176,12 +176,13 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     auto const result_buffer = ctx.transient.create_buffer<tg::vec4f>(
         item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
-    auto const group = ctx.transient.create_binding_group(
-        group_layout, {{.name = "Cases", .view = case_buffer.as_readonly_buffer()},
-                       {.name = "Results", .view = result_buffer.as_readwrite_buffer()}});
+    auto const group = sv_test::shaders::probe_bindings::group{.Cases = case_buffer.as_readonly_buffer(),
+                                                               .Results = result_buffer.as_readwrite_buffer()}
+                           .create(ctx, sg::lifetime_scope::transient);
+    REQUIRE(group.has_value());
 
     cmd->compute.bind_pipeline(*built);
-    cmd->compute.bind_group(0, *group);
+    sv_test::shaders::probe_bindings::group::bind(cmd->compute, *group.value());
     cmd->compute.dispatch_threads(item_count);
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
