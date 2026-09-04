@@ -149,7 +149,9 @@ private:
             && a.barriered_read_stages == b.barriered_read_stages && a.barriered_read_access == b.barriered_read_access
             && a.inflight_read_stages == b.inflight_read_stages && a.inflight_read_access == b.inflight_read_access
             && a.inflight_write_stages == b.inflight_write_stages && a.inflight_write_access == b.inflight_write_access
-            && a.curr_layout == b.curr_layout && a.prev_layout == b.prev_layout;
+            && a.curr_layout == b.curr_layout && a.prev_layout == b.prev_layout && a.entry_begun == b.entry_begun
+            && a.has_entry_requirement == b.has_entry_requirement && a.entry_stages == b.entry_stages
+            && a.entry_access == b.entry_access && a.entry_layout == b.entry_layout;
     }
 
     subresource_extent _extent;

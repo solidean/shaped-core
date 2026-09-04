@@ -10,6 +10,12 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
+namespace sg::backend::vulkan
+{
+/// Mints the process-unique stamp behind vulkan_texture::_identity.
+[[nodiscard]] u64 next_texture_identity();
+} // namespace sg::backend::vulkan
+
 /// Vulkan implementation of sg::raw_texture.
 /// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
 /// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
@@ -51,7 +57,7 @@ protected:
     void on_expired() const override;
 
 public:
-    /// Accumulate one declared access over `range`, seeding from the canonical layout on first touch.
+    /// Accumulate one declared access over `range`, entering an untouched box at `layout`.
     /// Thread-safe.
     void declare_access(sg::command_list_slot slot,
                         sg::subresource_range range,
@@ -62,11 +68,28 @@ public:
         _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
     }
 
-    /// The canonical layout of `range`.
-    /// Thread-safe.
-    [[nodiscard]] sg::texture_layout canonical_layout_of(sg::subresource_range range) const
+    /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.
+    ///
+    /// A command list that touches such a texture must not move its layout, even though it waits for the transfer and
+    /// therefore runs after it: the validation layer reads submit-call order, and a list's entry barrier is submitted
+    /// before the copy of a transfer whose actor has not got to it yet.
+    /// Moving the layout there would make that copy name a layout the image has left.
+    [[nodiscard]] bool has_pending_transfer() const
     {
-        return _access.lock([&](vulkan_texture_access& a) { return a.canonical_layout_of(range); });
+        auto const pending = [](vulkan_completion_group_handle const& group, u64 value)
+        { return group != nullptr && value != 0 && !group->has_reached(value); };
+
+        return pending(_upload_group, _pending_async_upload_value.load(cc::memory_order_acquire))
+            || pending(_upload_group, _pending_stream_copy_value.load(cc::memory_order_acquire))
+            || pending(_download_group, _pending_async_download_value.load(cc::memory_order_acquire))
+            || pending(_download_group, _pending_stream_download_value.load(cc::memory_order_acquire));
+    }
+
+    /// The layout `range` is in as of the last submitted command list.
+    /// Thread-safe.
+    [[nodiscard]] sg::texture_layout current_layout_of(sg::subresource_range range) const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.current_layout_of(range); });
     }
 
     /// Claims the one-time UNDEFINED -> resting transition for the caller, or false if someone already has.
@@ -85,7 +108,7 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.needs_initial_transition(); });
     }
 
-    /// The layout this texture rests in between lists — what an initial transition targets.
+    /// The layout this texture starts in before anything has used it — what the initial transition targets.
     [[nodiscard]] sg::texture_layout resting_layout() const
     {
         return _access.lock([&](vulkan_texture_access& a) { return a.resting_layout(); });
@@ -109,13 +132,14 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.flush(slot); });
     }
 
-    /// `slot`'s list was submitted; the last one out commits its layout, any earlier one reverts to canonical.
+    /// `slot`'s list was submitted: its layouts become the current ones, and the barriers returned are the entry
+    /// transitions the caller prepends to that same submit.
     [[nodiscard]] cc::small_vector<vulkan_subresource_barrier, 4> finalize_slot(sg::command_list_slot slot) const
     {
         return _access.lock([&](vulkan_texture_access& a) { return a.finalize(slot); });
     }
 
-    /// `slot`'s list was dropped; its work never runs, so the canonical layout is untouched.
+    /// `slot`'s list was dropped; its work never runs, so the current layout is untouched.
     void discard_slot(sg::command_list_slot slot) const
     {
         _access.lock([&](vulkan_texture_access& a) { a.discard(slot); });
@@ -123,6 +147,11 @@ public:
 
     vulkan_context& _ctx;      // creating context — outlives this texture
     sg::epoch _creation_epoch; // epoch this texture was created in (immutable identity / diagnostics)
+
+    /// Process-unique for the life of the context, and the key the image view cache is built on.
+    /// The address is NOT a usable identity there: it is reusable the moment this object dies, while the cache
+    /// entries naming it survive until the owning epoch retires — see vulkan_view_desc.hh.
+    u64 _identity = next_texture_identity();
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;

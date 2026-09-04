@@ -183,7 +183,7 @@ REC_TEST("record/hot - stacktrace events are folded in only when asked for")
     CHECK(cc::rec::hot_functions(r, {.include_stacktrace_events = true}).sample_count > 0);
 }
 
-REC_TEST("record/hot - the order is the same twice, and sorted by self time")
+REC_TEST("record/hot - the rows are totally ordered, by self time and then by name")
 {
     if (!can_capture_stacks())
         SKIP("this build cannot walk a native stack, so nothing folds a stacktrace event");
@@ -196,14 +196,31 @@ REC_TEST("record/hot - the order is the same twice, and sorted by self time")
     auto const b = cc::rec::hot_functions(r, {.include_stacktrace_events = true});
 
     REQUIRE(!a.empty());
-    REQUIRE(a.functions.size() == b.functions.size());
 
-    // Deterministic order is what makes a report assertable: ties break by name rather than by map iteration.
-    for (isize i = 0; i < a.functions.size(); ++i)
-        CHECK(a.functions[i].function == b.functions[i].function);
+    // Folding is what has to repeat exactly: it reads the recording and nothing else.
+    //
+    // The rows are NOT compared across the two, and deliberately.
+    // Each call opens its own cc::symbolizer, every field of which is best-effort — so an address that resolves in one
+    // and not in the other files under its module rather than its function, which merges two rows into one.
+    // That is the environment answering differently, not the report ordering differently, and asserting on it makes
+    // this test fail on a loaded machine for a reason it does not test.
+    CHECK(a.sample_count == b.sample_count);
+    CHECK(a.unresolved_samples == b.unresolved_samples);
 
+    // What makes a report assertable is that its order is a TOTAL one: equal counts break by name rather than by map
+    // iteration, so one report's rows pin the property that two identical ones only imply.
     for (isize i = 1; i < a.functions.size(); ++i)
-        CHECK(a.functions[i - 1].self_samples >= a.functions[i].self_samples);
+    {
+        auto const& prev = a.functions[i - 1];
+        auto const& row = a.functions[i];
+
+        if (prev.self_samples != row.self_samples)
+            CHECK(prev.self_samples > row.self_samples);
+        else if (prev.total_samples != row.total_samples)
+            CHECK(prev.total_samples > row.total_samples);
+        else
+            CHECK(prev.function < row.function);
+    }
 }
 
 REC_TEST("record/hot - min_self_ratio drops the tail and nothing else")

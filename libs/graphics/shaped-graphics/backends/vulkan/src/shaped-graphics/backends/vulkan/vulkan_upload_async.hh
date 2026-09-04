@@ -35,14 +35,6 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     sg::texture_region region;         // texture copies
     isize row_bytes = 0;               // texture copies: bytes per row of the region, the chunk granularity
 
-    /// Texture copies: the layout this transfer must hand the texture back in.
-    ///
-    /// The transfer queue *borrows* a texture's layout — it transitions from this and restores it — so the canonical
-    /// layout keeps a single writer, a graphics list's finalize.
-    /// Captured at enqueue beside `wait_token`, and for the same reason: that token is what orders this transfer
-    /// after every list that could have set the layout being read.
-    sg::texture_layout restore_layout = sg::texture_layout::general;
-
     /// The whole payload, for a resident transfer; empty for a source-driven one.
     cc::pinned_data<byte const> src;
 

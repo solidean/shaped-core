@@ -152,12 +152,13 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/vulkan-barrier-test.cc
         tests/vulkan-buffer-access-test.cc
+        tests/vulkan-concurrent-lists-test.cc
         tests/vulkan-compute-test.cc
         tests/vulkan-raster-test.cc
         tests/vulkan-query-test.cc
         tests/vulkan-raytracing-test.cc
         tests/vulkan-texture-access-test.cc
-        tests/vulkan-texture-transfer-test.cc
+        tests/vulkan-transient-attachment-test.cc
         tests/vulkan-test.cc
     )
 

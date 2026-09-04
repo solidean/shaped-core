@@ -46,12 +46,12 @@ command_list_slot command_list_slot_allocator::acquire()
         });
 }
 
-bool command_list_slot_allocator::release(command_list_slot slot)
+void command_list_slot_allocator::release(command_list_slot slot)
 {
     int const i = int(slot);
     CC_ASSERT(i >= 0, "releasing an invalid command_list_slot");
-    return _state.lock(
-        [i](state& s) -> bool
+    _state.lock(
+        [i](state& s)
         {
             CC_ASSERT(s.live > 0, "releasing a command_list_slot when none are live");
             --s.live;
@@ -68,7 +68,6 @@ bool command_list_slot_allocator::release(command_list_slot slot)
                 CC_ASSERT(j < s.overflow.size() && s.overflow[j], "releasing an overflow slot that is not live");
                 s.overflow[j] = false;
             }
-            return s.live == 0;
         });
 }
 

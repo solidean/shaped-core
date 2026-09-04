@@ -1,6 +1,6 @@
 #include "listing_json.hh"
 
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 
 namespace

@@ -39,7 +39,6 @@
 #include <atomic>
 
 /// Per-backend creation config for the Vulkan context.
-/// The two flags are independent.
 struct sg::backend::vulkan::vulkan_config
 {
     /// Enable the Khronos validation layer plus a debug messenger for its messages.
@@ -47,6 +46,12 @@ struct sg::backend::vulkan::vulkan_config
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
     /// The analogue of dx12_config::enable_debug_layer, and off by default for the same reason: it costs real time.
     bool enable_validation_layers = false;
+
+    /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
+    /// submissions and reports hazards no other check can see — a read racing an earlier submission's write.
+    /// Ignored unless enable_validation_layers is on, and off by default because it costs far more than core
+    /// validation: it is the tool for cross-list and cross-queue ordering work rather than a default gate.
+    bool enable_sync_validation = false;
 
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.
@@ -534,6 +539,35 @@ public:
 
     // Epoch contract — bodies in vulkan_epoch.cc.
     // Realized on a pair of timeline semaphores: the epoch timeline gates reclamation, the submission timeline answers per-list queries.
+
+    /// `general` whichever way the transfer goes, so a texture transferred in both directions never changes layout
+    /// between them.
+    ///
+    /// The transfer queue could copy from TRANSFER_SRC_OPTIMAL and into TRANSFER_DST_OPTIMAL, and a direction-specific
+    /// layout would keep whatever compression that buys.
+    /// What rules it out is the validation layer, which tracks image layouts in `vkQueueSubmit` **call** order and
+    /// models no semaphore: an upload enqueued and then a download enqueued before the upload's actor has submitted
+    /// puts the download's fixup, which is a direct-queue submit issued immediately, ahead of the upload's copy in
+    /// call order.
+    /// The layer then reads the upload's copy as naming a layout the image has left, though the semaphores order them
+    /// the other way on the GPU.
+    /// One layout for both directions removes the second fixup, and with it the interleave.
+    ///
+    /// The direction is therefore accepted and ignored, as it is on dx12.
+    /// It stays in the API because it is the caller's statement of intent rather than this backend's answer, and a
+    /// transfer path that submitted its own fixup in queue order could honour it.
+    [[nodiscard]] sg::texture_layout async_ready_layout(sg::async_direction) const override
+    {
+        return sg::texture_layout::general;
+    }
+
+    [[nodiscard]] sg::texture_layout current_texture_layout(sg::raw_texture_handle const& texture,
+                                                            sg::subresource_range const& range) const override
+    {
+        auto const t = std::dynamic_pointer_cast<vulkan_texture const>(texture);
+        CC_ASSERT(t != nullptr, "texture is not a vulkan_texture");
+        return t->current_layout_of(range);
+    }
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;

@@ -159,6 +159,33 @@ public:
             on_expired();
     }
 
+    /// Test-and-set the one-time flag behind the async-fixup warning; true only for the first caller.
+    /// Per texture rather than per process, because a second offending texture is a second thing to fix — and per
+    /// texture rather than per occurrence, because a streamed one would otherwise warn every frame.
+    [[nodiscard]] bool claim_async_fixup_warning() const
+    {
+        return !_warned_async_fixup.exchange(true, std::memory_order_relaxed);
+    }
+
+    /// Test-and-set the flag behind the stream-wait warning, for the transfer whose completion value is `value`.
+    /// True only the first time for that stream, since each one reserves a value above every earlier one.
+    /// A high-water mark rather than a bool: a texture streamed every frame would otherwise warn about the first
+    /// stream and stay silent about the hundred after it.
+    [[nodiscard]] bool claim_stream_wait_warning(u64 value) const
+    {
+        u64 previous = _warned_stream_wait.load(std::memory_order_relaxed);
+        while (previous < value)
+            if (_warned_stream_wait.compare_exchange_weak(previous, value, std::memory_order_acq_rel,
+                                                          std::memory_order_relaxed))
+                return true;
+        return false;
+    }
+
+    /// Mark the stream whose completion value is `value` as one nobody should be warned about — its wait is what the
+    /// caller asked for.
+    /// `promote_to_async` is the request; see stream_handle.hh.
+    void suppress_stream_wait_warning(u64 value) const { (void)claim_stream_wait_warning(value); }
+
 protected:
     explicit raw_texture(texture_description const& desc);
 
@@ -169,4 +196,7 @@ protected:
     texture_description _desc;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
+    mutable std::atomic<bool> _warned_async_fixup
+        = {false};                                      // mutable: the warning is about the texture, not a change to it
+    mutable std::atomic<u64> _warned_stream_wait = {0}; // highest stream value already warned about, or promoted
 };

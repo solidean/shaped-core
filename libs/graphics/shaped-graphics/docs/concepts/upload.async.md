@@ -177,19 +177,18 @@ Not invariants — v1 shortcuts:
 
 The shape is dx12's; two things differ and both concern textures.
 
-- **The transfer queue borrows a texture's layout rather than changing it.**
-  Vulkan's transfer queue *can* run layout barriers, so a texture copy brackets `resting -> TRANSFER_DST -> resting`, reading
-  that layout when the transfer is enqueued — beside the reverse token, so the token really does cover every list that could
-  have set it.
-  It never writes the layout back, which is what keeps a single writer on the canonical state.
-  See [barriers](barriers.md).
+- **The transfer queue emits no image barrier at all.**
+  The texture is put in the layout the copy needs by the *direct* queue, before the transfer is enqueued, and the
+  semaphore that orders this submit after that one also makes its writes visible here.
+  Vulkan's transfer queue *could* run the barrier itself, and doing so was wrong for a reason the GPU has no part in:
+  the validation layer tracks image layouts in `vkQueueSubmit` **call** order and models no semaphore, so it reported a
+  mismatch a correct program could not avoid.
+  A transfer that claims no layout has nothing for it to disagree with.
+  See [barriers](barriers.md#the-transfer-queue-never-changes-a-layout--the-direct-queue-settles-it-first).
 - **A texture takes the same per-resource stamps a buffer does**, in both directions, so an async texture transfer is ordered
   against command lists exactly as an async buffer transfer is.
 
-Interleaving a command list with an async transfer of one texture still is not supported, even though vulkan's GPU ordering
-for it is correct: the validation layer tracks image layouts in `vkQueueSubmit` **call** order and does not model semaphores,
-so it reports a mismatch a correct program cannot avoid.
-The [TODO](../TODO.md)'s prepare-for-async entry is the fix, and it is the same one dx12 needs.
+Interleaving a command list with an async transfer of one texture is therefore supported on both backends.
 
 ## See also
 

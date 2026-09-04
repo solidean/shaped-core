@@ -365,7 +365,7 @@ void vulkan_swapchain::record_present_transition(sg::command_list& cmd)
     // than anything on this queue's timeline.
     auto const& backbuffer = *_backbuffers[_acquired_index];
     auto const whole = sg::subresource_range::whole(subresource_extent_of(backbuffer.description()));
-    vk->track_texture_access(backbuffer, whole, {}, {}, sg::texture_layout::present);
+    (void)vk->track_texture_access(backbuffer, whole, {}, {}, sg::texture_layout::present);
     vk->flush_barriers();
 
     // This submit is the present handshake's other half — see the members on vulkan_command_list.

@@ -441,7 +441,7 @@ src/instruction-tracer/
 ```
 
 `report/mca.{hh,cc}` is pure — asm builder, `-json` parse, alignment — and unit-tested against a checked-in fixture; `debug/mca_runner.cc` is the Win32 subprocess that feeds `llvm-mca`.
-The JSON is read by a minimal in-tree reader (`report/json_reader.hh`) rather than babel-serializer's, which this tool does not depend on.
+The JSON is read by a minimal in-tree reader (`report/json_reader.hh`) rather than `babel::json`, which `instruction-tracer-core` reaches only for writing the report.
 
 `report/html/` is not compiled: `embed-html-assets.py` turns `app.js` and `app.css` into a generated `html_assets.hh` at build time, which `html_export.cc` inlines into the page.
 So the front end is edited in those two files, never in the generated header.

@@ -2,11 +2,14 @@ name: macOS Clang
 
 # Tier-2 wide-but-shallow gate: macOS arm64, Homebrew LLVM, RelWithDebInfo.
 # Single config; the deep debug/release matrix lives in ci-linux-clang.yml.
-# The macos-arm-llvm-* presets point at /opt/homebrew/opt/llvm and link against
-# Homebrew libc++, so LLVM (and Ninja) come from brew; CMake ships on the runner.
-# Homebrew's LLVM is an unversioned binary, so --toolset 22 *asserts* it is clang
-# 22 (a hard error if Homebrew moves on, so the bump is loud) rather than
-# selecting it. Everything runs through dev.py with an explicit preset.
+# The macos-arm-llvm-* presets point at /opt/homebrew/opt/llvm@22 and link
+# against Homebrew libc++, so LLVM (and Ninja) come from brew; CMake ships on the
+# runner.
+# THE FORMULA IS VERSIONED ON PURPOSE: the unversioned `llvm` is whatever Homebrew
+# ships today, so a build pinned to it breaks the day upstream moves -- which it
+# did, from 22 to 23, with nothing in the repo having changed.
+# --toolset 22 stays as the assertion that the formula is the version we think it
+# is. Everything runs through dev.py with an explicit preset.
 # See docs/guides/ci.md.
 
 on:
@@ -26,7 +29,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install LLVM + Ninja
-        run: brew install llvm ninja
+        run: brew install llvm@22 ninja
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6

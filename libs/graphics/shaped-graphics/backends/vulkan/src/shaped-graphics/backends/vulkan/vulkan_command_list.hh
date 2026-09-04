@@ -58,11 +58,17 @@ public:
     void track_buffer_access(vulkan_buffer const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 
     /// The texture equivalent, scoped to one subresource range and carrying the layout the op needs it in.
-    void track_texture_access(vulkan_texture const& texture,
-                              sg::subresource_range range,
-                              sg::pipeline_stage_flags stages,
-                              sg::access_flags access,
-                              sg::texture_layout layout);
+    /// Declare one access, returning the layout this call asked the tracker for — which is not always `layout`, since
+    /// a texture with a transfer in flight is held at `general` instead.
+    /// A recorded copy command names a layout literally, so it has to use what comes back rather than what it wanted.
+    /// It is what this call asked for rather than what the box settled on: a second declare against the same box in
+    /// one op still goes through `combine_layouts`, which can widen it further, and only the copy paths — one declare,
+    /// flushed immediately — use the return value.
+    [[nodiscard]] sg::texture_layout track_texture_access(vulkan_texture const& texture,
+                                                          sg::subresource_range range,
+                                                          sg::pipeline_stage_flags stages,
+                                                          sg::access_flags access,
+                                                          sg::texture_layout layout);
 
     /// Record one vkCmdPipelineBarrier2 for everything declared since the last flush, then clear the staging.
     /// Called once per op, immediately before recording it.
@@ -183,6 +189,10 @@ public:
 protected:
     // Stages the bytes in the context's upload ring and records a copy out of it.
     // Body in vulkan_command_list.cc.
+    void transition_texture_layout(sg::raw_texture_handle texture,
+                                   sg::texture_layout layout,
+                                   cc::optional<sg::subresource_range> const& range) override;
+
     void upload_bytes_to_buffer(sg::raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes) override;
     // Body in vulkan_command_list.cc.
     void upload_bytes_to_texture(sg::raw_texture_handle texture,

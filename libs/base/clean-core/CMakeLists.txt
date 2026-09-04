@@ -80,6 +80,7 @@ add_library(clean-core
     src/clean-core/string/string_view.cc
     src/clean-core/string/conversion.cc
     src/clean-core/string/glob.cc
+    src/clean-core/string/uri.cc
     src/clean-core/string/interned_string.cc
     src/clean-core/container/vector.cc
     src/clean-core/container/byte_stream_builder.cc
@@ -210,6 +211,7 @@ target_sources(clean-core
     src/clean-core/string/print.hh
     src/clean-core/string/conversion.hh
     src/clean-core/string/glob.hh
+    src/clean-core/string/uri.hh
     src/clean-core/string/interned_string.hh
 
     src/clean-core/function/function_ref.hh
@@ -546,6 +548,7 @@ if(SC_BUILD_TESTS)
         tests/string/string_view-test.cc
         tests/string/to_chars-test.cc
         tests/string/to_debug_string-test.cc
+        tests/string/uri-test.cc
 
         tests/function/function_ref-test.cc
         tests/function/unique_function-test.cc

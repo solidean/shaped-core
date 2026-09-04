@@ -72,14 +72,11 @@ TEST("sg dx12 - texture access declares layout transitions")
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const slot = sg::command_list_slot(0);
 
-    // First use as a copy dest: transition from the canonical (general / COMMON) layout to copy_dst.
+    // First use as a copy dest: the list enters the box at copy_dst, so its body emits nothing.
+    // The transition from the current (general / COMMON) layout is the submit's, out of finalize.
     auto b0 = declare_flush(acc, slot, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                             sg::texture_layout::copy_dst);
-    REQUIRE(b0.size() == 1);
-    CHECK(b0[0].barrier.needed);
-    CHECK(b0[0].barrier.src_layout == sg::texture_layout::general);
-    CHECK(b0[0].barrier.dst_layout == sg::texture_layout::copy_dst);
-    CHECK(b0[0].barrier.dst_access.has(sg::access_flag::copy_write));
+    CHECK(b0.empty());
 
     // Then sample it: transition copy_dst → shader_readonly (a read-after-write hazard across layouts).
     auto b1 = declare_flush(acc, slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
@@ -87,6 +84,14 @@ TEST("sg dx12 - texture access declares layout transitions")
     REQUIRE(b1.size() == 1);
     CHECK(b1[0].barrier.src_layout == sg::texture_layout::copy_dst);
     CHECK(b1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+
+    // And the entry barrier the submit prepends carries the first use, from where the texture really is.
+    auto const entry = acc.finalize(slot);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].barrier.needed);
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::general);
+    CHECK(entry[0].barrier.dst_layout == sg::texture_layout::copy_dst);
+    CHECK(entry[0].barrier.dst_access.has(sg::access_flag::copy_write));
 }
 
 TEST("sg dx12 - multiple declares before one flush merge into a single barrier")
@@ -204,45 +209,27 @@ TEST("sg dx12 - texture access fragments per subresource range")
     sg::subresource_range mip1;
     mip1.mip_range = {.start = 1, .end = 2};
 
-    auto a = declare_flush(acc, slot, mip0, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                           sg::texture_layout::copy_dst);
-    REQUIRE(a.size() == 1);
-    CHECK(a[0].range.mip_range.start == 0);
-    CHECK(a[0].range.mip_range.end == 1);
-
-    auto b = declare_flush(acc, slot, mip1, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                           sg::texture_layout::shader_readonly);
-    REQUIRE(b.size() == 1);
-    CHECK(b[0].range.mip_range.start == 1);
+    // Each mip enters at its own first use, so neither first touch emits anything in the body.
+    CHECK(declare_flush(acc, slot, mip0, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
+                        sg::texture_layout::copy_dst)
+              .empty());
+    CHECK(declare_flush(acc, slot, mip1, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
+                        sg::texture_layout::shader_readonly)
+              .empty());
 
     // The whole texture now spans two differently-laid-out boxes → one barrier each.
     auto c = declare_flush(acc, slot, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_read,
                            sg::texture_layout::copy_src);
     CHECK(c.size() == 2);
+
+    // And the entry barriers keep the mips apart too: one per box, each from the layout it was really in.
+    auto const entry = acc.finalize(slot);
+    REQUIRE(entry.size() == 2);
+    CHECK(entry[0].range.mip_range.end - entry[0].range.mip_range.start == 1);
+    CHECK(entry[1].range.mip_range.end - entry[1].range.mip_range.start == 1);
 }
 
-TEST("sg dx12 - a non-final submit reverts the texture to its canonical layout")
-{
-    auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
-    dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
-
-    // Two concurrent lists both touch the texture (active slot count 2); slot0 transitions it to copy_dst.
-    auto const s0 = sg::command_list_slot(0);
-    auto const s1 = sg::command_list_slot(1);
-    (void)declare_flush(acc, s1, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                        sg::texture_layout::shader_readonly);
-    (void)declare_flush(acc, s0, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                        sg::texture_layout::copy_dst);
-
-    // slot0 finalizes while slot1 is still open (not the last active slot): it must restore the canonical
-    // layout (general) so slot1 hands the texture off unchanged.
-    auto revert = acc.finalize(s0);
-    REQUIRE(revert.size() == 1);
-    CHECK(revert[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(revert[0].barrier.dst_layout == sg::texture_layout::general);
-}
-
-TEST("sg dx12 - the last active slot promotes without reverting")
+TEST("sg dx12 - every submit commits its layout, and the next list enters from it")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -250,19 +237,21 @@ TEST("sg dx12 - the last active slot promotes without reverting")
 
     (void)declare_flush(acc, slot, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                         sg::texture_layout::copy_dst);
-    auto out = acc.finalize(slot); // the only active slot -> promote
-    CHECK(out.empty());            // promote commits the new layout; nothing to emit
+    auto out = acc.finalize(slot);
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].barrier.src_layout == sg::texture_layout::general);
+    CHECK(out[0].barrier.dst_layout == sg::texture_layout::copy_dst);
 
-    // A fresh list now seeds from the canonical copy_dst layout: re-declaring copy_dst needs no layout
-    // transition (only a write-after-write hazard against the canonical write remains).
+    // A fresh list enters from the committed copy_dst layout: re-declaring copy_dst needs no layout transition
+    // (only a write-after-write hazard against the committed write remains).
     auto const slot2 = sg::command_list_slot(0);
-    auto again = declare_flush(acc, slot2, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                               sg::texture_layout::copy_dst);
-    for (auto const& sb : again)
+    (void)declare_flush(acc, slot2, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
+                        sg::texture_layout::copy_dst);
+    for (auto const& sb : acc.finalize(slot2))
         CHECK(sb.barrier.src_layout == sb.barrier.dst_layout); // no layout change, at most a WAW barrier
 }
 
-TEST("sg dx12 - promote is per-texture: only the last active slot commits, earlier ones revert")
+TEST("sg dx12 - a concurrently recorded list enters from what the earlier one left")
 {
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
@@ -270,26 +259,30 @@ TEST("sg dx12 - promote is per-texture: only the last active slot commits, earli
     auto const s1 = sg::command_list_slot(1);
 
     // Two concurrent lists touch the same texture: s0 -> copy_dst, s1 -> shader_readonly (active count 2).
+    // Neither can know what the texture will be in when it submits, so neither records a transition into it.
     (void)declare_flush(acc, s0, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                         sg::texture_layout::copy_dst);
     (void)declare_flush(acc, s1, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
                         sg::texture_layout::shader_readonly);
 
-    // s0 finalizes first: not the last active slot, so it reverts to the (still general) canonical layout.
+    // s0 submits first, entering from the layout the texture starts in and leaving it in copy_dst.
     auto r0 = acc.finalize(s0);
     REQUIRE(r0.size() == 1);
-    CHECK(r0[0].barrier.dst_layout == sg::texture_layout::general);
+    CHECK(r0[0].barrier.src_layout == sg::texture_layout::general);
+    CHECK(r0[0].barrier.dst_layout == sg::texture_layout::copy_dst);
 
-    // s1 finalizes last: it is now the only active slot, so it promotes its shader_readonly layout, no revert.
+    // s1 submits second, and enters from copy_dst — what is really there — although it recorded before that.
     auto r1 = acc.finalize(s1);
-    CHECK(r1.empty());
+    REQUIRE(r1.size() == 1);
+    CHECK(r1[0].barrier.src_layout == sg::texture_layout::copy_dst);
+    CHECK(r1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
 
-    // A fresh list seeds from the newly canonical shader_readonly layout: re-declaring it needs no transition.
+    // A fresh list now enters from the committed shader_readonly layout: re-declaring it needs no transition.
     auto const s2 = sg::command_list_slot(0);
-    auto again = declare_flush(acc, s2, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                               sg::texture_layout::shader_readonly);
-    for (auto const& sb : again)
-        CHECK(sb.barrier.src_layout == sb.barrier.dst_layout); // canonical is shader_readonly now
+    (void)declare_flush(acc, s2, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
+                        sg::texture_layout::shader_readonly);
+    for (auto const& sb : acc.finalize(s2))
+        CHECK(sb.barrier.src_layout == sb.barrier.dst_layout);
 }
 
 TEST("sg dx12 - d3d12_layout_from maps the layouts")
@@ -317,21 +310,24 @@ INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers on WARP", (dx12::dx
     auto const range = whole_of(d);
 
     // Drive the declare → emit path by hand, the way track_texture_access does for a real op.
-    // general → copy_dst, then copy_dst → shader_readonly.
-    auto emit = [&](cc::span<dx12::dx12_subresource_barrier const> barriers)
+    // The list enters at copy_dst and then transitions copy_dst → shader_readonly in its own body; the entry
+    // transition out of COMMON is finalize's, and goes into the pre-list executed ahead of this one — which is what
+    // submit does for a real list.
+    auto emit = [&](ID3D12GraphicsCommandList* list, cc::span<dx12::dx12_subresource_barrier const> barriers)
     {
         cc::vector<D3D12_TEXTURE_BARRIER> batch;
         for (auto const& sb : barriers)
             batch.push_back(dx12::make_texture_barrier(dtex->_resource.Get(), sb.range, sb.barrier));
-        dx12::submit_barriers(cmd.value()->_list.Get(), {}, batch);
+        dx12::submit_barriers(list, {}, batch);
     };
     dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                                  sg::texture_layout::copy_dst);
-    emit(dtex->flush_texture_access(cmd.value()->slot()));
+    emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
     dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::compute,
                                  sg::access_flag::shader_read, sg::texture_layout::shader_readonly);
-    emit(dtex->flush_texture_access(cmd.value()->slot()));
-    emit(dtex->finalize_slot(cmd.value()->slot())); // sole active slot -> promote
+    emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
+    // The pre-list is created on demand, so a caller recording into it by hand has to ask for one.
+    emit(c.acquire_pre_list(*cmd.value()), dtex->finalize_slot(cmd.value()->slot()));
 
     c.submit_dx12_command_list(cc::move(cmd.value()));
     c.advance_epoch_and_wait_for_idle();

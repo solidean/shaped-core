@@ -52,5 +52,10 @@ rules:
     files: backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_driver_lock.hh
 
   - kind: allow-include
+    value: <mutex>
+    reason: std::unique_lock over the std::shared_mutex above, and <shared_mutex> does not guarantee it. Goes away with the same migration
+    files: backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_driver_lock.hh
+
+  - kind: allow-include
     value: <atomic>
     reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"

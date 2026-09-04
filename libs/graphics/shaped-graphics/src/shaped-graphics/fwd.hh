@@ -151,6 +151,7 @@ namespace sg
 enum class access_flag : u32;         // a set of them is access_flags
 enum class pipeline_stage_flag : u32; // a set of them is pipeline_stage_flags
 enum class texture_layout : u32;
+enum class async_direction : u32;
 struct access_barrier;
 struct resource_access_state;
 struct subresource_box;       // one tile of a covering partition (see barrier/subresource_state.hh)

@@ -53,6 +53,29 @@ void fold_group_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 }
 } // namespace
 
+namespace
+{
+/// Fold a STREAMING transfer's value into a list's wait set, warning the first time it makes a list wait.
+///
+/// A list that touches a resource a stream is still filling waits for it, which is what makes a stream as safe as an
+/// async transfer rather than a documented data race.
+/// The wait is the caller's cue: it stalls the list until the whole transfer lands, so it says so once per stream —
+/// unless promote_to_async has already declared the wait intended.
+template <class Resource>
+void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
+                      sg::backend::dx12::dx12_group_value const& wait,
+                      Resource const& resource)
+{
+    if (wait.group == nullptr || wait.value == 0)
+        return;
+    if (resource->claim_stream_wait_warning(wait.value))
+        CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the whole "
+                       "transfer lands. Wait on the stream handle yourself before using the resource, or call "
+                       "promote_to_async on it if the wait is what you want");
+    fold_group_wait(waits, wait);
+}
+} // namespace
+
 void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                             sg::pipeline_stage_flags stages,
                                             sg::access_flags access)
@@ -72,6 +95,14 @@ void dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
         fold_group_wait(_required_download_waits,
                         {buffer->_download_group, buffer->_pending_async_download_value.load(std::memory_order_acquire)});
     }
+
+    // A streaming transfer's values join the async ones, warning where they make this list wait.
+    fold_stream_wait(_required_copy_waits,
+                     {buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)}, buffer);
+    if (sg::is_unordered_write(access))
+        fold_stream_wait(
+            _required_download_waits,
+            {buffer->_download_group, buffer->_pending_stream_download_value.load(std::memory_order_acquire)}, buffer);
 
     // Accumulate the access; no barrier yet.
     // Declaring rather than flushing here is what lets a buffer bound several times to one op merge into a single barrier with the union of its stages/access.
@@ -106,10 +137,27 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
             _required_download_waits,
             {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
 
+    // A streaming transfer's values join the async ones, warning where they make this list wait.
+    fold_stream_wait(_required_copy_waits,
+                     {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
+                     texture);
+    if (sg::is_unordered_write(access))
+        fold_stream_wait(
+            _required_download_waits,
+            {texture->_download_group, texture->_pending_stream_download_value.load(std::memory_order_acquire)}, texture);
+
     // Accumulate the access over the range; no barrier yet.
     // Declaring rather than flushing here is what lets a texture bound several times to one op merge its declares into one barrier per subresource box.
     // flush_barriers() does the merge just before the op.
     // mark_pending_barrier enqueues it for that flush exactly once, so it appears in _pending_barrier_textures once.
+
+    // A texture with a transfer in flight stays in the layout that transfer needs.
+    // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
+    // list's entry barrier is submitted before the copy of a transfer whose actor has not got to it yet.
+    // `general` serves this list's access too, at the compression cost combine_layouts already trades away elsewhere.
+    if (texture->has_pending_transfer())
+        layout = sg::texture_layout::general;
+
     texture->declare_texture_access(slot(), range, stages, access, layout);
     if (texture->mark_pending_barrier(slot()))
         _pending_barrier_textures.push_back(texture);
@@ -137,6 +185,21 @@ void dx12_command_list::flush_barriers()
     submit_barriers(_list.Get(), _pending_buffer_barriers, _pending_texture_barriers);
     _pending_buffer_barriers.clear();
     _pending_texture_barriers.clear();
+}
+
+void dx12_command_list::transition_texture_layout(sg::raw_texture_handle texture,
+                                                  sg::texture_layout layout,
+                                                  cc::optional<sg::subresource_range> const& range)
+{
+    auto const t = std::dynamic_pointer_cast<dx12_texture const>(texture);
+    CC_ASSERT(t != nullptr, "texture is not a dx12 texture");
+    CC_ASSERT(!t->is_expired(), "ensure_layout uses a transient texture past its epoch (expired)");
+
+    // No stages and no access: this asks for a layout and nothing else, so the state machine sees a pure layout
+    // change and the barrier it produces carries the transition alone.
+    auto const whole = sg::subresource_range::whole(subresource_extent_of(t->description()));
+    track_texture_access(t, range.has_value() ? range.value() : whole, {}, {}, layout);
+    flush_barriers();
 }
 
 void dx12_command_list::transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout)
@@ -585,9 +648,29 @@ cc::result<std::unique_ptr<dx12_command_list>> dx12_context::create_dx12_command
     // Left open (recording); submit closes it.
     // Stamped with the epoch it must be submitted/dropped in, plus an access-tracking slot that keys its private per-resource state, released on submit/drop.
     // The slot allocator is internally synchronized, and creation touches no resource layout, so it needs no extra sync.
+    // No pre-list here: it is created only if this list turns out to need entry barriers at submit.
     return std::make_unique<dx12_command_list>(*this, current_epoch(), _command_list_slots.acquire(), queue,
                                                cc::move(acquired.value().allocator.allocator),
                                                cc::move(acquired.value().list));
+}
+
+ID3D12GraphicsCommandList* dx12_context::acquire_pre_list(dx12_command_list& cmd)
+{
+    if (cmd._pre_list)
+        return cmd._pre_list.Get();
+
+    // Fallible, and reached from inside the submission lock.
+    // Throwing rather than returning null: the caller records into whatever comes back, and a null there would drop
+    // the entry barriers silently in a release build.
+    // The unwind releases the submission guard, exactly as the Close failure below it does.
+    auto acquired = _cmd_pool.acquire_command_list(cmd._queue);
+    if (acquired.has_error())
+        throw sg::allocation_exception("could not acquire a command list for a submit's entry barriers", 0,
+                                       acquired.error());
+
+    cmd._pre_allocator = cc::move(acquired.value().allocator.allocator);
+    cmd._pre_list = cc::move(acquired.value().list);
+    return cmd._pre_list.Get();
 }
 
 sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd)
@@ -601,9 +684,8 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                                                           "in (it cannot span epochs)");
 
     // Finalize + Close + Execute + Signal all run under _next_submission, so for each list they are one atomic step in a single global order.
-    // finalize writes each touched resource's canonical layout and the ExecuteCommandLists below realizes it, so finalize order must equal execute order.
-    // Running both under this one lock is what guarantees that, since submit is thread-safe / multi_threaded.
-    // The revert-vs-promote decision itself is per-resource — the last list to finalize a resource commits its layout — and is made under each resource's own mutex.
+    // finalize writes each touched resource's current layout and the ExecuteCommandLists below realizes it, so finalize order must equal execute order.
+    // Running both under this one lock is what guarantees that, since submit is thread-safe / multi_threaded, and it is what lets a resource's current state mean "after everything submitted so far".
     // Work that neither changes a layout nor needs the ordering (the reverse upload/download stamp, pool returns, slot release) runs after the lock.
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
@@ -613,20 +695,30 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             // Its readbacks ride _pending_downloads and are stamped by enqueue_submitted at the end of this lambda.
             cmd->finalize_queries_before_close();
 
-            // Finalize access tracking before closing.
-            // Each resource decides per-itself: the last command list using it commits its final state as the new canonical, the one case that may leave a texture in a new layout.
-            // Every earlier list rolls back to canonical.
-            // For buffers this is a no-op, since the layout is always general.
-            // For textures the rollback returns transitions back to the canonical layout, recorded here before Close, plus a hidden-cost warning.
+            // Finalize access tracking: each touched resource's layouts become the current ones, and what it returns
+            // is what this list needs on ENTRY, resolved against the state the resource is really in by now.
+            // Those go into the pre-list, executed ahead of this one, rather than into the list's own body — a list
+            // that recorded second may submit first, so a barrier it recorded against a guess would name the wrong
+            // LayoutBefore.
+            // For buffers this is a no-op: a D3D12 buffer has no layout and decays to COMMON at ExecuteCommandLists.
             for (auto const& b : cmd->_touched_buffers)
                 b->finalize_slot(cmd->slot());
             // Both sets stay populated for the reverse async-copy stamp below, which needs the submission token; cleared there.
+            cc::vector<D3D12_TEXTURE_BARRIER> entry_barriers;
             for (auto const& t : cmd->_touched_textures)
                 for (auto const& sb : t->finalize_slot(cmd->slot()))
-                    cmd->_pending_texture_barriers.push_back(
-                        make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
-            // Record the finalize reverts (the only barriers left pending — every op flushed its own) before Close.
-            cmd->flush_barriers();
+                    entry_barriers.push_back(make_texture_barrier(t->_resource.Get(), sb.range, sb.barrier));
+
+            CC_ASSERT(cmd->_pending_texture_barriers.empty() && cmd->_pending_buffer_barriers.empty(),
+                      "a declared access was never flushed by a GPU op");
+
+            if (!entry_barriers.empty())
+                submit_barriers(acquire_pre_list(*cmd), {}, entry_barriers);
+            if (cmd->_pre_list)
+            {
+                HRESULT const pre_closed = cmd->_pre_list->Close();
+                CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+            }
 
             HRESULT const hr = cmd->_list->Close();
             if (FAILED(hr))
@@ -651,8 +743,16 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             for (auto const& w : cmd->_required_download_waits)
                 _queue->Wait(w.group->fence.Get(), w.value);
 
-            ID3D12CommandList* lists[] = {cmd->_list.Get()};
-            _queue->ExecuteCommandLists(1, lists);
+            // The pre-list first, so its entry transitions have run before anything the list itself recorded.
+            //
+            // Executed iff one was ever acquired, which is the condition rather than whether `entry_barriers` above
+            // is empty: that vector says what THIS function put there, and anything else that recorded into the
+            // pre-list — a test driving the declare/emit path by hand, say — would be dropped by that test.
+            ID3D12CommandList* lists[2] = {cmd->_pre_list.Get(), cmd->_list.Get()};
+            if (cmd->_pre_list)
+                _queue->ExecuteCommandLists(2, lists);
+            else
+                _queue->ExecuteCommandLists(1, &lists[1]);
 
             // Take a monotonic completion token and signal it under this same lock, so token order equals queue submission and signal order.
             // The queue is free-threaded, but out-of-order signals would move the fence's completed value backwards and break is_submission_complete.
@@ -696,7 +796,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // The list is already closed and can be reused now — resetting an in-flight list onto a fresh, GPU-safe allocator is legal — so return it to the pool for the next acquire.
     _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_list));
     _cmd_pool.return_submitted_allocator({cc::move(cmd->_allocator), cmd->_queue});
-    (void)_command_list_slots.release(cmd->slot());
+    if (cmd->_pre_list)
+    {
+        _cmd_pool.return_command_list(cmd->_queue, cc::move(cmd->_pre_list));
+        _cmd_pool.return_submitted_allocator({cc::move(cmd->_pre_allocator), cmd->_queue});
+    }
+    _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
     return token;
@@ -725,15 +830,15 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     cmd._leased_query_heaps.clear();
     cmd._active_timestamp_lease = -1;
 
-    // The recorded work never runs, so its declared accesses leave no canonical state.
-    // Clear each touched resource's slot, which only decrements that resource's active-slot count: the canonical layout is unchanged and no barriers are emitted.
+    // The recorded work never runs, so its declared accesses leave nothing behind.
+    // Clear each touched resource's slot, which only decrements that resource's active-slot count: the current layout is unchanged and no barriers are emitted.
     // Then release the access-tracking slot.
     // No submit lock: drop changes no layout, and each resource's active-slot count and the slot allocator are already independently synced.
     for (auto const& b : cmd._touched_buffers)
         b->discard_slot(cmd.slot());
     for (auto const& t : cmd._touched_textures)
         t->discard_slot(cmd.slot());
-    (void)_command_list_slots.release(cmd.slot());
+    _command_list_slots.release(cmd.slot());
     cmd._touched_buffers.clear();
     cmd._touched_textures.clear();
 
@@ -744,6 +849,13 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
     _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
     _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
+    if (cmd._pre_list)
+    {
+        HRESULT const pre_closed = cmd._pre_list->Close();
+        CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+        _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
+        _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
+    }
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 

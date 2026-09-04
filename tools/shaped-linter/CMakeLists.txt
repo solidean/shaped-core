@@ -99,12 +99,13 @@ if(SC_BUILD_TESTS)
         tests/rules/corpus-test.cc
     )
 
-    # babel-serializer is a test-only dependency: the corpus files are markdown, and babel::markdown
-    # reads them. A tool consuming a library is the allowed direction, and it keeps shaped-linter-core
+    # babel-data is a test-only dependency: the corpus files are markdown, and babel::markdown reads them.
+    # babel-data rather than babel-serializer, because markdown is all this needs and the lower library is
+    # externals-free. A tool consuming a library is the allowed direction, and it keeps shaped-linter-core
     # itself on clean-core alone.
-    target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus babel-serializer)
+    target_link_libraries(shaped-linter-test PRIVATE shaped-linter-core nexus babel-data)
 
-    # CC_STD here where the core takes CC: the test links babel-serializer too, and measured 0.47 against 0.53 at CC.
+    # CC_STD here where the core takes CC: the test links babel-data too, and measured 0.47 against 0.53 at CC.
     sc_target_pch(shaped-linter-test CC_STD NEXUS)
 
     # The corpus lives next to each rule and is read at run time, so the test binary is told where the

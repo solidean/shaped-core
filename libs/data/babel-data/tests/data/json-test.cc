@@ -1,0 +1,685 @@
+#include <babel-data/data/json.hh>
+#include <clean-core/common/assert.hh>  // CC_ASSERT_ENABLED
+#include <clean-core/common/utility.hh> // cc::min
+#include <clean-core/container/span.hh>
+#include <clean-core/streams/span_stream.hh>
+#include <clean-core/streams/stream.hh>
+#include <clean-core/string/string.hh>
+#include <nexus/test.hh>
+
+
+using namespace cc::primitive_defines;
+
+namespace
+{
+// A non-seekable, chunked read source: serves the input in fixed-size chunks through a tiny buffer, so the
+// parser must refill mid-value.
+// Exercises the streaming path, with strings and tokens split across windows.
+class chunked_reader
+{
+public:
+    chunked_reader(cc::string_view data, isize chunk)
+      : _data(reinterpret_cast<byte const*>(data.data()), data.size()), _chunk(chunk)
+    {
+    }
+    chunked_reader(chunked_reader&&) = delete;
+    chunked_reader& operator=(chunked_reader&&) = delete;
+
+    [[nodiscard]] cc::read_stream stream() { return cc::read_stream(_buffer, _buffer, &impl_flush, this); }
+
+private:
+    static cc::result<i64>
+    impl_flush(byte*& curr, byte*& end, byte*& /*write_end*/, void* ctx, i64 /*off*/, cc::seek_dir /*dir*/, byte* /*fw*/)
+    {
+        auto& self = *static_cast<chunked_reader*>(ctx);
+        auto* const base = self._buffer;
+        auto const leftover = isize(end - curr);
+        cc::memmove(base, curr, size_t(leftover));
+
+        auto const room = isize(sizeof(self._buffer)) - leftover;
+        auto const want = cc::min(self._chunk, room);
+        auto const avail = self._data.size() - self._pos;
+        auto const n = cc::min(want, avail);
+        if (n > 0)
+            cc::memcpy(base + leftover, self._data.data() + self._pos, size_t(n));
+        self._pos += n;
+
+        curr = base;
+        end = base + leftover + n;
+        return i64(-1); // no meaningful position
+    }
+
+    cc::span<byte const> _data;
+    isize _chunk;
+    isize _pos = 0;
+    byte _buffer[8];
+};
+} // namespace
+
+TEST("json - scalar values")
+{
+    CHECK(babel::json::read("true").value().root().as_bool() == true);
+    CHECK(babel::json::read("false").value().root().as_bool() == false);
+    CHECK(babel::json::read("null").value().root().is_null());
+    CHECK(babel::json::read("42").value().root().as_double() == 42);
+    CHECK(babel::json::read("-1.5e2").value().root().as_double() == -150.0);
+    CHECK(babel::json::read("\"hello\"").value().root().as_string() == "hello");
+}
+
+TEST("json - nested object and array traversal")
+{
+    auto const doc = babel::json::read(R"({"a": 1, "b": [10, 20, 30], "c": {"d": true}})").value();
+    auto const root = doc.root();
+
+    REQUIRE(root.is_object());
+    CHECK(root.size() == 3);
+    CHECK(root["a"].as_double() == 1);
+
+    auto const b = root["b"];
+    REQUIRE(b.is_array());
+    CHECK(b.size() == 3);
+    CHECK(b[0].as_double() == 10);
+    CHECK(b[1].as_double() == 20);
+    CHECK(b[2].as_double() == 30);
+
+    CHECK(root["c"]["d"].as_bool() == true);
+
+    // positional access carries the member key
+    CHECK(root[0].key() == "a");
+    CHECK(root[2].key() == "c");
+    CHECK(root.has("b"));
+    CHECK(!root.has("zzz"));
+}
+
+TEST("json - string escapes")
+{
+    // backslash escapes (raw C++ literal: the parser sees literal \n \t \" \\ \/)
+    CHECK(babel::json::read(R"("a\n\t\"\\\/b")").value().root().as_string() == "a\n\t\"\\/b");
+
+    // \uXXXX in the BMP, built as an ASCII-only literal ("\\u" is the two chars backslash-u):
+    // BMP escapes: decodes to 'A' followed by code point U+00E9 (UTF-8 bytes C3 A9)
+    CHECK(babel::json::read("\"\\u0041\\u00e9\"").value().root().as_string() == "A\xC3\xA9");
+
+    // surrogate pair: decodes to code point U+1F600 (UTF-8 bytes F0 9F 98 80)
+    CHECK(babel::json::read("\"\\uD83D\\uDE00\"").value().root().as_string() == "\xF0\x9F\x98\x80");
+}
+
+TEST("json - empty object and array")
+{
+    CHECK(babel::json::read("{}").value().root().size() == 0);
+    CHECK(babel::json::read("[]").value().root().size() == 0);
+    CHECK(babel::json::read("{}").value().root().is_object());
+    CHECK(babel::json::read("[]").value().root().is_array());
+}
+
+TEST("json - kind-tolerant accessors and invalid refs")
+{
+    auto const doc = babel::json::read("42").value();
+    auto const root = doc.root();
+
+    CHECK(root.as_string("fallback") == "fallback"); // wrong kind -> fallback
+    CHECK(root.as_bool(true) == true);
+    CHECK(!root["missing"].is_valid()); // subscript on a non-object
+    CHECK(!root[0].is_valid());         // subscript on a non-array
+    CHECK(root["missing"].as_double(7) == 7);
+}
+
+TEST("json - errors")
+{
+    CHECK(babel::json::read("").has_error());           // empty input
+    CHECK(babel::json::read("   ").has_error());        // only whitespace
+    CHECK(babel::json::read("{").has_error());          // unterminated object
+    CHECK(babel::json::read("[1, 2").has_error());      // unterminated array
+    CHECK(babel::json::read("[1 2]").has_error());      // missing comma
+    CHECK(babel::json::read("nul").has_error());        // truncated literal
+    CHECK(babel::json::read("true false").has_error()); // trailing junk
+    CHECK(babel::json::read(R"({"k": })").has_error()); // missing value
+}
+
+TEST("json - parsing over a chunked stream matches in-memory")
+{
+    auto const text = cc::string_view(R"({"msg": "hello world", "nums": [1, 2, 3], "nested": {"ok": true}})");
+
+    for (auto const chunk : {isize(1), isize(2), isize(5)})
+    {
+        auto reader = chunked_reader(text, chunk);
+        auto stream = reader.stream();
+        auto const doc = babel::json::read(stream).value();
+        auto const root = doc.root();
+
+        CHECK(root["msg"].as_string() == "hello world");
+        CHECK(root["nums"].size() == 3);
+        CHECK(root["nums"][2].as_double() == 3);
+        CHECK(root["nested"]["ok"].as_bool() == true);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// writing
+
+namespace
+{
+/// Runs `build` against a string_writer and returns the text it produced.
+template <class F>
+cc::string written(babel::json::write_options opts, F&& build)
+{
+    auto w = babel::json::string_writer(opts);
+    build(w);
+    return w.finish().value();
+}
+} // namespace
+
+TEST("json - write scalars and containers")
+{
+    CHECK(written({}, [](auto& w) { w.write(nullptr); }) == "null");
+    CHECK(written({}, [](auto& w) { w.write(true); }) == "true");
+    CHECK(written({}, [](auto& w) { w.write(42); }) == "42");
+    CHECK(written({}, [](auto& w) { w.write(-7); }) == "-7");
+    CHECK(written({}, [](auto& w) { w.write(0.5); }) == "0.5");
+    CHECK(written({}, [](auto& w) { w.write("hi"); }) == "\"hi\"");
+
+    CHECK(written({}, [](auto& w) { auto o = w.object(); }) == "{}");
+    CHECK(written({}, [](auto& w) { auto a = w.array(); }) == "[]");
+
+    auto const nested = written({},
+                                [](auto& w)
+                                {
+                                    auto o = w.object();
+                                    o.write("name", "shaped");
+                                    o.write("n", 3);
+                                    {
+                                        auto tags = o.write_array("tags");
+                                        tags.write(1);
+                                        tags.write(2);
+                                        auto inner = tags.write_object();
+                                        inner.write("deep", true);
+                                    }
+                                    o.write("done", nullptr);
+                                });
+    CHECK(nested == R"({"name":"shaped","n":3,"tags":[1,2,{"deep":true}],"done":null})");
+}
+
+TEST("json - write indented")
+{
+    auto const text = written({.indent = 2},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write("a", 1);
+                                  auto arr = o.write_array("b");
+                                  arr.write(1);
+                                  arr.write(2);
+                              });
+
+    CHECK(text == "{\n  \"a\": 1,\n  \"b\": [\n    1,\n    2\n  ]\n}");
+
+    // an empty container stays on one line whatever the indent
+    CHECK(written({.indent = 4}, [](auto& w) { auto o = w.object(); }) == "{}");
+
+    auto const four = written({.indent = 4},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  auto inner = o.write_object("x");
+                                  inner.write("y", 1);
+                              });
+    CHECK(four == "{\n    \"x\": {\n        \"y\": 1\n    }\n}");
+}
+
+TEST("json - write compact scopes inside an indented document")
+{
+    // one record per line: the outer document indents, each record puts itself (and everything in it) on one line
+    auto const text = written({.indent = 1},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  auto events = o.write_array("events");
+                                  for (auto i = 0; i < 2; ++i)
+                                  {
+                                      auto e = events.write_object(babel::json::layout::compact);
+                                      e.write("i", i);
+                                      auto inner = e.write_array("in"); // an inner scope inherits the compact run
+                                      inner.write(1);
+                                  }
+                              });
+
+    CHECK(text == "{\n \"events\": [\n  {\"i\":0,\"in\":[1]},\n  {\"i\":1,\"in\":[1]}\n ]\n}");
+
+    // indentation resumes after the compact scope closes
+    auto const after = written({.indent = 2},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   {
+                                       auto c = o.write_object("compact", babel::json::layout::compact);
+                                       c.write("a", 1);
+                                   }
+                                   o.write("after", 2);
+                               });
+    CHECK(after == "{\n  \"compact\": {\"a\":1},\n  \"after\": 2\n}");
+
+    // compact means nothing when the writer was not indenting anyway
+    CHECK(written({},
+                  [](auto& w)
+                  {
+                      auto o = w.object(babel::json::layout::compact);
+                      o.write("a", 1);
+                  })
+          == R"({"a":1})");
+}
+
+TEST("json - write html-safe strings")
+{
+    // "</script>" must not be able to end the tag the JSON is embedded in
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("</script>"); }) == "\"\\u003c/script>\"");
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("<!--"); }) == "\"\\u003c!--\"");
+
+    // off by default, and it never touches anything but '<'
+    CHECK(written({}, [](auto& w) { w.write("</script>"); }) == R"("</script>")");
+    CHECK(written({.escape_html = true}, [](auto& w) { w.write("a > b"); }) == R"("a > b")");
+
+    // keys go through the same escaper
+    auto const keyed = written({.escape_html = true},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("<k>", 1);
+                               });
+    CHECK(keyed == "{\"\\u003ck>\":1}");
+}
+
+TEST("json - write escapes")
+{
+    CHECK(written({}, [](auto& w) { w.write("a\"b\\c"); }) == R"("a\"b\\c")");
+    CHECK(written({}, [](auto& w) { w.write("\b\f\n\r\t"); }) == R"("\b\f\n\r\t")");
+    CHECK(written({}, [](auto& w) { w.write(cc::string_view("\x01\x1F")); }) == "\"\\u0001\\u001f\"");
+
+    // UTF-8 passes through byte-for-byte by default
+    CHECK(written({}, [](auto& w) { w.write("\xC3\xA4"); }) == "\"\xC3\xA4\"");
+
+    // ...and becomes \uXXXX on request, astral code points as a surrogate pair
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write("\xC3\xA4"); }) == "\"\\u00e4\"");
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write("\xF0\x9F\x98\x80"); }) == "\"\\ud83d\\ude00\"");
+
+    // a byte that does not decode is passed on rather than replaced or rejected
+    CHECK(written({.escape_non_ascii = true}, [](auto& w) { w.write(cc::string_view("\xFF")); }) == "\"\xFF\"");
+
+    // keys go through the same escaper
+    auto const keyed = written({},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("a\nb", 1);
+                               });
+    CHECK(keyed == R"({"a\nb":1})");
+}
+
+TEST("json - write floats")
+{
+    CHECK(written({}, [](auto& w) { w.write(0.1); }) == "0.1"); // shortest round-trip, not 0.100000000000000006
+    CHECK(written({}, [](auto& w) { w.write(1.0); }) == "1");
+    CHECK(written({.floats = cc::float_notation::fixed, .float_precision = 2}, [](auto& w) { w.write(1.5); }) == "1.50");
+    CHECK(written({.floats = cc::float_notation::scientific, .float_precision = 1}, [](auto& w) { w.write(1500.0); })
+          == "1.5e+03");
+
+    // one value can pick its own notation without touching the writer's default
+    auto const mixed = written({},
+                               [](auto& w)
+                               {
+                                   auto o = w.object();
+                                   o.write("shortest", 1.5);
+                                   o.write("fixed", 1.5, cc::float_notation::fixed, 3);
+                               });
+    CHECK(mixed == R"({"shortest":1.5,"fixed":1.500})");
+}
+
+TEST("json - write non-finite")
+{
+    auto const inf = 1e308 * 10;
+    auto const nan = inf - inf;
+
+    SECTION("error is the default")
+    {
+        auto w = babel::json::string_writer();
+        w.write(nan);
+        CHECK(w.finish().has_error());
+    }
+
+    SECTION("null")
+    {
+        CHECK(written({.non_finite = babel::json::non_finite_policy::null}, [&](auto& w) { w.write(nan); }) == "null");
+        CHECK(written({.non_finite = babel::json::non_finite_policy::null}, [&](auto& w) { w.write(inf); }) == "null");
+    }
+
+    SECTION("string")
+    {
+        auto const opts = babel::json::write_options{.non_finite = babel::json::non_finite_policy::string};
+        CHECK(written(opts, [&](auto& w) { w.write(nan); }) == "\"NaN\"");
+        CHECK(written(opts, [&](auto& w) { w.write(inf); }) == "\"Infinity\"");
+        CHECK(written(opts, [&](auto& w) { w.write(-inf); }) == "\"-Infinity\"");
+    }
+}
+
+TEST("json - write large integers")
+{
+    constexpr auto exact_max = u64(1) << 53; // 2^53 round-trips through a double; 2^53 + 1 does not
+
+    SECTION("the default emits the digits, exact in the file")
+    {
+        CHECK(written({}, [](auto& w) { w.write(u64(exact_max + 1)); }) == "9007199254740993");
+        CHECK(written({}, [](auto& w) { w.write(i64(-9007199254740993ll)); }) == "-9007199254740993");
+    }
+
+    SECTION("string keeps an id readable to a double-based parser")
+    {
+        auto const opts = babel::json::write_options{.large_integers = babel::json::large_integer_policy::string};
+        CHECK(written(opts, [](auto& w) { w.write(u64(exact_max + 1)); }) == "\"9007199254740993\"");
+        CHECK(written(opts, [](auto& w) { w.write(i64(-9007199254740993ll)); }) == "\"-9007199254740993\"");
+
+        // 2^53 itself is exact, so it stays a number — the boundary is the point of the rule
+        CHECK(written(opts, [](auto& w) { w.write(u64(exact_max)); }) == "9007199254740992");
+        CHECK(written(opts, [](auto& w) { w.write(42); }) == "42");
+
+        // i64's minimum is where a naive negation overflows
+        CHECK(written(opts, [](auto& w) { w.write(i64(-9223372036854775807ll - 1)); }) == "\"-9223372036854775808\"");
+    }
+
+    SECTION("error refuses to write a value it would lose")
+    {
+        auto w = babel::json::string_writer({.large_integers = babel::json::large_integer_policy::error});
+        w.write(u64(exact_max + 1));
+        CHECK(w.finish().has_error());
+    }
+}
+
+TEST("json - write report counts what changed on the way out")
+{
+    auto const infinity = 1e308 * 10;
+
+    SECTION("a faithful document reports nothing")
+    {
+        auto w = babel::json::string_writer({});
+        {
+            auto o = w.object();
+            o.write("a", 1);
+            o.write("b", 0.5);
+            o.write("c", "text");
+        }
+        CHECK(w.report().is_clean());
+    }
+
+    SECTION("substituted non-finites are counted, whatever the policy did")
+    {
+        auto w = babel::json::string_writer({.non_finite = babel::json::non_finite_policy::null});
+        {
+            auto a = w.array();
+            a.write(infinity);
+            a.write(infinity - infinity);
+            a.write(float(infinity)); // the float path counts once, not twice
+            a.write(1.0);
+        }
+        CHECK(w.report().non_finite == 3);
+        CHECK(!w.report().is_clean());
+    }
+
+    SECTION("integers past 2^53 are counted even when they are emitted as-is")
+    {
+        auto w = babel::json::string_writer({});
+        {
+            auto a = w.array();
+            a.write(u64((u64(1) << 53) + 1));
+            a.write(u64(1) << 53); // exact, so not counted
+            a.write(7);
+        }
+        CHECK(w.report().large_integers == 1);
+    }
+
+    SECTION("undecodable bytes are counted only when escape_non_ascii looks at them")
+    {
+        auto w = babel::json::string_writer({.escape_non_ascii = true});
+        w.write(cc::string_view("a\xFF"
+                                "b\xFE"));
+        CHECK(w.report().undecodable_bytes == 2);
+
+        auto passthrough = babel::json::string_writer({});
+        passthrough.write(cc::string_view("a\xFF"
+                                          "b"));
+        CHECK(passthrough.report().is_clean());
+    }
+
+    SECTION("the report survives finish()")
+    {
+        auto w = babel::json::string_writer({.non_finite = babel::json::non_finite_policy::null});
+        w.write(infinity);
+        CHECK(w.finish().has_value());
+        CHECK(w.report().non_finite == 1);
+    }
+}
+
+TEST("json - escape_non_ascii passes malformed UTF-8 through rather than inventing an escape")
+{
+    // A sequence whose bits parse is not automatically well-formed, and each of these decodes into something no
+    // \\uXXXX escape can honestly represent — so they take the passthrough path and land in the report.
+    auto const cases = {
+        cc::string_view("\xC0\x80"),        // overlong NUL: would become \\u0000 and smuggle a terminator through
+        cc::string_view("\xED\xA0\x80"),    // a surrogate encoded as UTF-8: would become a lone \\ud800
+        cc::string_view("\xF7\xBF\xBF\xBF") // past U+10FFFF: no code point, so no surrogate pair either
+    };
+
+    for (auto const bad : cases)
+    {
+        auto w = babel::json::string_writer({.escape_non_ascii = true});
+        w.write(bad);
+        auto const text = w.finish().value();
+
+        CHECK(w.report().undecodable_bytes == bad.size());
+        CHECK(!text.contains("\\u")); // nothing was escaped, because nothing decoded
+    }
+
+    // ...while a well-formed astral code point still goes out as its surrogate pair
+    auto ok = babel::json::string_writer({.escape_non_ascii = true});
+    ok.write(cc::string_view("\xF0\x9F\x98\x80"));
+    CHECK(ok.finish().value() == R"("\ud83d\ude00")");
+    CHECK(ok.report().is_clean());
+}
+
+TEST("json - a precision past the fixed buffer still renders every digit")
+{
+    // cc::to_chars_float_max covers the shortest form and the default precision; beyond that the writer has to size
+    // off cc::to_chars_size, and getting that wrong would splice unspecified bytes into the document.
+    auto const precision = 400;
+    auto const text
+        = written({.floats = cc::float_notation::fixed, .float_precision = precision}, [](auto& w) { w.write(0.5); });
+
+    CHECK(text.size() == isize(1 + 1 + precision)); // "0" + "." + the digits
+    CHECK(text.subview({.offset = 0, .size = 4}) == "0.50");
+    CHECK(babel::json::read(text).value().root().as_double() == 0.5);
+}
+
+TEST("json - write raw and ascii")
+{
+    auto const text = written({},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write_raw("pre", R"([1,{"a":2}])");
+                                  o.write_ascii("uml", "\xC3\xA4");
+                                  auto a = o.write_array("more");
+                                  a.write_raw("1e999");
+                              });
+    CHECK(text == "{\"pre\":[1,{\"a\":2}],\"uml\":\"\\u00e4\",\"more\":[1e999]}");
+}
+
+TEST("json - write newline-delimited")
+{
+    auto const text = written({.indent = 2, .newline_delimited = true}, // nd forces compact whatever the indent says
+                              [](auto& w)
+                              {
+                                  for (auto i = 0; i < 3; ++i)
+                                  {
+                                      auto o = w.object();
+                                      o.write("i", i);
+                                  }
+                              });
+    CHECK(text == "{\"i\":0}\n{\"i\":1}\n{\"i\":2}\n");
+}
+
+TEST("json - write round-trips through the reader")
+{
+    auto const text = written({.indent = 2},
+                              [](auto& w)
+                              {
+                                  auto o = w.object();
+                                  o.write("msg", "hello \"world\"\n");
+                                  o.write("pi", 3.25);
+                                  o.write("big", u64(9007199254740993ull));
+                                  o.write("neg", -12345);
+                                  o.write("yes", true);
+                                  o.write("nothing", nullptr);
+                                  {
+                                      auto arr = o.write_array("list");
+                                      arr.write(1);
+                                      arr.write("two");
+                                      {
+                                          auto sub = arr.write_object();
+                                          sub.write("three", 3.5);
+                                      }
+                                      auto empty = arr.write_array();
+                                  }
+                              });
+
+    auto const doc = babel::json::read(text).value();
+    auto const root = doc.root();
+    CHECK(root["msg"].as_string() == "hello \"world\"\n");
+    CHECK(root["pi"].as_double() == 3.25);
+    CHECK(root["neg"].as_double() == -12345);
+    CHECK(root["yes"].as_bool());
+    CHECK(root["nothing"].is_null());
+    REQUIRE(root["list"].size() == 4);
+    CHECK(root["list"][1].as_string() == "two");
+    CHECK(root["list"][2]["three"].as_double() == 3.5);
+    CHECK(root["list"][3].size() == 0);
+}
+
+// Structural misuse is a contract violation and asserts, so there is nothing here that pins it: a test would have to
+// run only on assert-disabled presets, and testing a promise on the one build where it degrades is the wrong shape.
+// What IS tested below is the failure the writer reports rather than asserts on — a scope still open at finish().
+
+TEST("json - the imperative layer writes the same document as the RAII one")
+{
+    auto const via_scopes = written({.indent = 2},
+                                    [](auto& w)
+                                    {
+                                        auto root = w.object();
+                                        root.write("name", "shaped");
+                                        auto tags = root.write_array("tags");
+                                        tags.write(1);
+                                        auto inner = tags.write_object();
+                                        inner.write("deep", true);
+                                    });
+
+    auto w = babel::json::string_writer({.indent = 2});
+    {
+        auto& imp = w.underlying();
+        imp.begin_object();
+        imp.write("name", "shaped");
+        imp.begin_array("tags");
+        imp.write(1);
+        imp.begin_object();
+        imp.write("deep", true);
+        imp.end_object();
+        imp.end_array();
+        imp.end_object();
+    }
+
+    CHECK(w.finish().value() == via_scopes);
+}
+
+TEST("json - the two layers mix on one document")
+{
+    auto w = babel::json::string_writer();
+    {
+        auto root = w.object();
+        root.write("a", 1);
+        {
+            // a scope opened by hand INSIDE an RAII scope, closed by hand again
+            auto& imp = w.underlying();
+            imp.begin_array("b");
+            imp.write(2);
+            imp.end_array();
+        }
+        root.write("c", 3);
+    }
+    CHECK(w.finish().value() == R"({"a":1,"b":[2],"c":3})");
+}
+
+TEST("json - a scope left open is reported rather than asserted")
+{
+    auto w = babel::json::string_writer();
+    w.underlying().begin_object();
+    w.underlying().write("a", 1);
+    // no end_object(): an imperative caller can forget one, and that is not a call-site mistake anything can assert on
+
+    auto const r = w.finish();
+    REQUIRE(r.has_error());
+
+    // ...and the brackets were still emitted, so what did reach the sink parses
+    auto second = babel::json::string_writer();
+    second.underlying().begin_object();
+    second.underlying().write("a", 1);
+    (void)second.finish();
+}
+
+TEST("json - finish() reports the same outcome when called twice")
+{
+    byte buffer[4]; // far too small, so the very first write fails
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+    auto w = babel::json::writer(stream);
+
+    {
+        auto o = w.object();
+        o.write("key", "a value that does not fit");
+    }
+
+    CHECK(w.finish().has_error());
+    CHECK(w.finish().has_error()); // the message moved out with the first report; the failure did not
+    CHECK(w.has_error());
+}
+
+
+TEST("json - write errors are sticky")
+{
+    // a span sink far too small for the document: the first overflowing write fails, the rest are no-ops
+    byte buffer[8];
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+    auto w = babel::json::writer(stream);
+
+    {
+        auto o = w.object();
+        for (auto i = 0; i < 100; ++i)
+            o.write("key", "a long value that will not fit");
+    }
+    CHECK(w.has_error());
+    CHECK(w.finish().has_error());
+}
+
+TEST("json - write into a bounded span sink")
+{
+    // the writer only ever sees a cc::write_stream, so a growing buffer and a bounded span behave the same
+    byte buffer[64];
+    auto adapter = cc::span_write_stream_adapter(buffer);
+    cc::write_stream stream = adapter;
+
+    {
+        auto w = babel::json::writer(stream);
+        {
+            auto o = w.object();
+            o.write("ok", true);
+        }
+        REQUIRE(w.finish().has_value());
+    }
+
+    CHECK(cc::string_view(reinterpret_cast<char const*>(buffer), 11) == R"({"ok":true})");
+}

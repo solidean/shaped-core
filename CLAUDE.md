@@ -37,20 +37,30 @@ One-liner per library:
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
-* **`libs/data/babel-serializer`** — serialization / deserialization of various formats.
+* **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
+  Namespace `cnet`. Depends on clean-core.
+  **The transport and the protocol clients are peers, not layers.**
+  A browser has no sockets and does have `fetch`, and wasm is tier 1 — so HTTP is an interface with backends, and our transport is one of them.
+  `cnet::http_level` is the capability ladder a caller checks once; the transport answers `is_supported()` instead.
+  Nothing here requires blocking to obtain a result, and the reactor is driven through `cc::thread_pump_all()` like every other unthreaded system in the repo.
+  Early stage — see its [docs/structure.md](libs/base/clean-net/docs/structure.md) roadmap and support matrix.
+* **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
+  Namespace `babel`. Depends on clean-core and nothing else, which is the library's whole contract.
+  It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
+  See its [readme](libs/data/babel-data/readme.md) and [cheat-sheet](libs/data/babel-data/cheat-sheet.md).
+* **`libs/data/babel-serializer`** — the rest of babel: everything that needs more than clean-core.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
   The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
-  So far: a base64 codec, JSON + markdown readers and a SQLite engine wrapper (`data/`).
-  Plus Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`).
+  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`).
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
-  Its [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns those rules and the rest of babel's own conventions.
-  Namespace `babel`. Depends on clean-core + typed-geometry.
-  **One namespace, several link targets**: `babel-data` is the externals-free base — base64, JSON and markdown over clean-core and nothing more.
-  `babel-serializer` is everything else on top of it, and the target to link when in doubt.
-  The split is by dependency rather than by topic, which is why `data/` itself spans both — see the [readme](libs/data/babel-serializer/readme.md).
-  Early stage — see its [docs/structure.md](libs/data/babel-serializer/docs/structure.md) roadmap.
+  Namespace `babel`. Depends on babel-data + typed-geometry.
+  **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.
+  `babel-serializer` is the target to link when in doubt; it links babel-data publicly.
+  Its [docs/](libs/data/babel-serializer/docs/_index.md) are babel-wide: [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns the conventions both libraries follow,
+  and [docs/structure.md](libs/data/babel-serializer/docs/structure.md) is the roadmap across both.
+  Early stage.
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.

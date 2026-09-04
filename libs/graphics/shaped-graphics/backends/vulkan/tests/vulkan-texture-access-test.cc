@@ -5,6 +5,11 @@
 // Pure logic with no device, so these run everywhere.
 // Unlike the buffer tracker beside it this is not a vulkan-specific divergence — textures need between-lists state on
 // any backend, because a layout is physical and whatever one list leaves behind is what the next list finds.
+//
+// The shape to hold on to: a list's private partition starts EMPTY, entering each box at the layout its first declare
+// asks for, so `flush` never produces that entry transition.
+// `finalize` does, against the layout the texture is really in by the time the list submits, and the caller prepends
+// what it returns to that submit.
 
 namespace
 {
@@ -24,9 +29,9 @@ sg::subresource_range whole(sg::subresource_extent e)
     return sg::subresource_range::whole(e);
 }
 
-// A tracker over one subresource, resting in `resting`.
-// The resting layout is where the texture sits between lists; the UNDEFINED it is really in after vkCreateImage is
-// closed separately, by the initial transition whichever submit path claims it records.
+// A tracker over one subresource, starting in `resting`.
+// The resting layout is where the texture starts before anything uses it; the UNDEFINED it is really in after
+// vkCreateImage is closed separately, by the initial transition whichever submit path claims it records.
 vulkan::vulkan_texture_access tracker(sg::texture_layout resting = sg::texture_layout::general)
 {
     return vulkan::vulkan_texture_access(single(), resting);
@@ -56,21 +61,24 @@ TEST("sg vulkan - combining with general is free, and a real mismatch is a confl
     CHECK(bad.result == vulkan::layout_combine::conflict);
 }
 
-TEST("sg vulkan - a first layout transition starts from the resting layout, not from undefined")
+TEST("sg vulkan - the entry transition comes out of finalize, not out of the list's own flush")
 {
     auto access = tracker(sg::texture_layout::shader_readonly);
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
 
-    auto const barriers = access.flush(k_first);
-    REQUIRE(barriers.size() == 1);
-    CHECK(barriers[0].barrier.needed);
-    CHECK(barriers[0].barrier.dst_layout == sg::texture_layout::copy_dst);
+    // The list enters the box at copy_dst, so its body has nothing to transition from.
+    CHECK(access.flush(k_first).empty());
 
-    // The discard from UNDEFINED is the initial transition's job, and it has already run by the time any list's
-    // barriers execute.
-    // What a list sees is the resting layout.
-    CHECK(barriers[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    auto const entry = access.finalize(k_first);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].barrier.needed);
+    CHECK(entry[0].barrier.dst_layout == sg::texture_layout::copy_dst);
+
+    // The discard from UNDEFINED is the initial transition's job, and it has already run by the time this barrier
+    // executes.
+    // What the entry barrier starts from is the layout the texture is really in.
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
 }
 
 TEST("sg vulkan - the initial transition is claimed exactly once")
@@ -88,69 +96,72 @@ TEST("sg vulkan - the initial transition is claimed exactly once")
     CHECK(!access.claim_initial_transition());
 }
 
-TEST("sg vulkan - reading the canonical layout does not spend the initial claim")
+TEST("sg vulkan - the current layout is undefined until the initial transition is claimed")
 {
-    // The two are deliberately separate calls, and the async transfer path takes them at different moments: it reads
-    // the layout to restore when the transfer is enqueued, and claims the discard only where it records the barrier.
-    // A claim spent on a job that is later skipped would leave the image in UNDEFINED with every list assuming it
-    // rests somewhere real.
+    // What reads this is the async fixup, deciding whether the transfer queue can copy the image as it stands.
+    // Until the initial transition has been claimed the image really is UNDEFINED, whatever layout this tracker was
+    // seeded to rest in — so it says so, and the fixup submits the list that claims it rather than copying from an
+    // image vkCreateImage has not left yet.
     auto access = tracker(sg::texture_layout::copy_dst);
 
-    CHECK(access.canonical_layout_of(whole(single())) == sg::texture_layout::copy_dst);
-    CHECK(access.canonical_layout_of(whole(single())) == sg::texture_layout::copy_dst);
+    CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::undefined);
     CHECK(access.needs_initial_transition());
 
+    // Reading it does not spend the claim, which stays available for whichever submit path takes it.
     CHECK(access.claim_initial_transition());
-    CHECK(access.canonical_layout_of(whole(single())) == sg::texture_layout::copy_dst);
+    CHECK(access.current_layout_of(whole(single())) == sg::texture_layout::copy_dst);
 }
 
-TEST("sg vulkan - the last list to finalize commits its layout")
+TEST("sg vulkan - every finalize commits its layout")
 {
     auto access = tracker();
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
     (void)access.flush(k_first);
-
-    // Sole user, so its layout becomes canonical rather than being reverted.
-    auto const reverts = access.finalize(k_first);
-    CHECK(reverts.empty());
+    (void)access.finalize(k_first);
     CHECK(access.active_slot_count() == 0);
 
-    // The next list therefore finds it in copy_dst and transitions from there.
+    // The next list therefore finds it in copy_dst, and its entry barrier starts there.
     access.declare(k_second, whole(single()), sg::pipeline_stage_flag::fragment, sg::access_flag::shader_read,
                    sg::texture_layout::shader_readonly);
-    auto const barriers = access.flush(k_second);
-    REQUIRE(barriers.size() == 1);
-    CHECK(barriers[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(barriers[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+    CHECK(access.flush(k_second).empty());
+
+    auto const entry = access.finalize(k_second);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::copy_dst);
+    CHECK(entry[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
 }
 
-TEST("sg vulkan - a list that is not the last reverts to canonical, which is never undefined")
+TEST("sg vulkan - a concurrently recorded list enters from what the earlier one left, not from what it assumed")
 {
-    // Two lists open at once.
-    // The first to finalize must hand the texture back as it found it: the second list's already-recorded barriers
-    // were computed against the canonical layout.
+    // Two lists open at once, and the case the entry model exists for.
+    // Neither can know what the texture will be in when it submits, so neither records a transition into it: the
+    // second list's entry barrier is computed at ITS finalize, by which time the first has committed copy_dst.
     auto access = tracker(sg::texture_layout::shader_readonly);
 
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
-    (void)access.flush(k_first);
+    CHECK(access.flush(k_first).empty());
     access.declare(k_second, whole(single()), sg::pipeline_stage_flag::fragment, sg::access_flag::shader_read,
                    sg::texture_layout::shader_readonly);
-    (void)access.flush(k_second);
+    CHECK(access.flush(k_second).empty());
     CHECK(access.active_slot_count() == 2);
 
-    auto const reverts = access.finalize(k_first);
-    REQUIRE(reverts.size() == 1);
-    CHECK(reverts[0].barrier.needed);
-    // Back to what it entered with — and that is a real layout.
-    // Reverting to `undefined` would hand the texture back discardable, losing whatever this list just wrote, and
-    // Vulkan rejects the barrier outright: newLayout must never be UNDEFINED.
-    CHECK(reverts[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
-    CHECK(reverts[0].barrier.dst_layout != sg::texture_layout::undefined);
+    // The first list enters from the layout the texture starts in, and leaves it in copy_dst.
+    auto const first_entry = access.finalize(k_first);
+    REQUIRE(first_entry.size() == 1);
+    CHECK(first_entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    CHECK(first_entry[0].barrier.dst_layout == sg::texture_layout::copy_dst);
+
+    // The second enters from copy_dst — what is really there — although it recorded while the texture was elsewhere.
+    // The old model reverted instead, which held only while command lists were the only things moving a layout.
+    auto const second_entry = access.finalize(k_second);
+    REQUIRE(second_entry.size() == 1);
+    CHECK(second_entry[0].barrier.src_layout == sg::texture_layout::copy_dst);
+    CHECK(second_entry[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
 }
 
-TEST("sg vulkan - a dropped list leaves the canonical layout alone")
+TEST("sg vulkan - a dropped list leaves the current layout alone")
 {
     auto access = tracker(sg::texture_layout::shader_readonly);
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
@@ -159,12 +170,13 @@ TEST("sg vulkan - a dropped list leaves the canonical layout alone")
     access.discard(k_first);
     CHECK(access.active_slot_count() == 0);
 
-    // Its work never ran, so the next list still finds the texture resting rather than in copy_dst.
+    // Its work never ran, so the next list still enters from the starting layout rather than from copy_dst.
     access.declare(k_second, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
-    auto const barriers = access.flush(k_second);
-    REQUIRE(barriers.size() == 1);
-    CHECK(barriers[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    (void)access.flush(k_second);
+    auto const entry = access.finalize(k_second);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
 }
 
 TEST("sg vulkan - mip levels are tracked independently")
@@ -178,10 +190,13 @@ TEST("sg vulkan - mip levels are tracked independently")
 
     access.declare(k_first, one_mip, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
-    auto const barriers = access.flush(k_first);
-    REQUIRE(barriers.size() == 1);
-    CHECK(barriers[0].range.mip_range.start == 1);
-    CHECK(barriers[0].range.mip_range.end == 2);
+    (void)access.flush(k_first);
+
+    // Only the touched mip carries an entry requirement, so only it is transitioned.
+    auto const entry = access.finalize(k_first);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].range.mip_range.start == 1);
+    CHECK(entry[0].range.mip_range.end == 2);
 }
 
 TEST("sg vulkan - one texture bound twice to one op yields one barrier")
@@ -196,8 +211,10 @@ TEST("sg vulkan - one texture bound twice to one op yields one barrier")
                    sg::texture_layout::shader_readonly);
     CHECK(!access.mark_pending_barrier(k_first)); // already enqueued for this op
 
-    auto const barriers = access.flush(k_first);
-    REQUIRE(barriers.size() == 1);
-    CHECK(barriers[0].barrier.dst_stages.has(sg::pipeline_stage_flag::fragment));
-    CHECK(barriers[0].barrier.dst_stages.has(sg::pipeline_stage_flag::compute));
+    CHECK(access.flush(k_first).empty()); // the entry transition is the submit's, and both declares merged into it
+
+    auto const entry = access.finalize(k_first);
+    REQUIRE(entry.size() == 1);
+    CHECK(entry[0].barrier.dst_stages.has(sg::pipeline_stage_flag::fragment));
+    CHECK(entry[0].barrier.dst_stages.has(sg::pipeline_stage_flag::compute));
 }

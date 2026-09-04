@@ -341,6 +341,15 @@ A console that also printed every scope and stat would be unreadable, and those 
 
 It is not installed for you — see the note at the top of this document.
 
+### A listener over a socket lives above clean-core
+
+Streaming a recording to a live view in a browser is the natural end of this road, and it needs a socket.
+That listener belongs in [clean-net](../../../clean-net/readme.md) and registers from above, exactly as the console
+listener is installed by a binary rather than by clean-core.
+
+Nothing about that requires clean-core to gain networking, which is why it did not.
+A listener is an interface, and the side that owns the socket is the side that implements it.
+
 ---
 
 ## Chunks

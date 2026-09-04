@@ -1,4 +1,3 @@
-#include <babel-serializer/data/json.hh>
 #include <babel-serializer/image/image.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
@@ -61,35 +60,6 @@ scope_probe probe_scopes(cc::rec::recording const& r, cc::string_view name)
     return out;
 }
 } // namespace
-
-TEST("babel/recording - a json parse is scoped only once it is big enough",
-     nx::config::exclusive(),
-     nx::config::owns_recorder)
-{
-    rec_fixture const fixture;
-
-    cc::rec::recording_listener rl;
-    auto const handle = cc::rec::register_listener(rl);
-
-    // Small: a value rather than a document, and gating it is the whole point of CC_RECORD_SCOPE_IF.
-    (void)babel::json::read(cc::string_view("{\"a\":1}"));
-
-    // Big: comfortably past the threshold, so it earns a span.
-    auto big = cc::string("[");
-    while (big.size() < 200 * 1024)
-        big += "1,";
-    big += "1]";
-    (void)babel::json::read(cc::string_view(big));
-
-    cc::rec::flush_blocking();
-    cc::rec::unregister_listener(handle);
-
-    auto const r = rl.take();
-    auto const json = probe_scopes(r, "json.read");
-
-    CHECK(json.count == 1);
-    CHECK(json.domain == "babel.json"); // its own sub-domain, so it silences separately from the mesh readers
-}
 
 TEST("babel/recording - an image decode is scoped and counts its bytes", nx::config::exclusive(), nx::config::owns_recorder)
 {

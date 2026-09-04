@@ -153,6 +153,37 @@ INVOCABLE_TEST("sg stream - dropping the handle cancels the transfer", (sg::cont
     CHECK(completion->is_ready());
 }
 
+INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it without being asked",
+               (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const src = pattern(8192, 23);
+    auto buf = c.persistent.create_raw_buffer(8192, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto stream = c.stream.bytes_to_buffer(buf, cc::make_pinned_data(src));
+    REQUIRE(stream.is_valid());
+
+    // No promotion, and no explicit wait on the handle: a list recorded now still reads the whole streamed payload,
+    // because a list touching a resource a stream is still filling waits for it at submit.
+    // It also warns once that it did, since the stall is the caller's to know about.
+    //
+    // A command list rather than ctx.download: the wait lives in the list's submit, and the async tier reaches the
+    // copy queue without one.
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto back = cmd->download.bytes_from_buffer(buf, 0, 8192);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = c.wait_for(back);
+    REQUIRE(bytes.has_value());
+    CHECK(bytes.value()[0] == src[0]);
+    CHECK(bytes.value()[8191] == src[8191]);
+    CHECK(stream.is_settled());
+}
+
 INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the transfer", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

@@ -907,6 +907,29 @@ public:
     /// Structural hash over the bytes; delegates to string_view so equal content hashes equally regardless of SSO vs heap storage (and matches a string_view of the same content).
     [[nodiscard]] friend u64 hash(string const& s) { return hash(string_view(s)); }
 
+    /// An ASCII-lowercased copy; every byte outside `A`-`Z` is left exactly as it is.
+    /// `_ascii` because that is the whole promise: a cc::string is UTF-8, and `Ä` comes back unchanged.
+    [[nodiscard]] string to_lower_ascii() const { return string_view(*this).to_lower_ascii(); }
+
+    /// An ASCII-uppercased copy, on the same terms.
+    [[nodiscard]] string to_upper_ascii() const { return string_view(*this).to_upper_ascii(); }
+
+    /// ASCII-lowercase in place, which allocates nothing.
+    void make_lower_ascii()
+    {
+        auto* const p = data();
+        for (isize i = 0; i < size(); ++i)
+            p[i] = cc::to_lower(p[i]);
+    }
+
+    /// ASCII-uppercase in place, which allocates nothing.
+    void make_upper_ascii()
+    {
+        auto* const p = data();
+        for (isize i = 0; i < size(); ++i)
+            p[i] = cc::to_upper(p[i]);
+    }
+
     /// Returns true if the string begins with prefix.
     [[nodiscard]] bool starts_with(string_view prefix) const { return string_view(*this).starts_with(prefix); }
 

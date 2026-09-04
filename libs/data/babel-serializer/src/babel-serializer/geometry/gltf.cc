@@ -1,5 +1,5 @@
-#include <babel-serializer/data/base64.hh>
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/base64.hh>
+#include <babel-data/data/json.hh>
 #include <babel-serializer/geometry/gltf.hh>
 #include <clean-core/common/endian.hh> // cc::load_bytes_le — GLB is little-endian, whatever the host is
 #include <clean-core/common/profiling.hh>

@@ -10,16 +10,15 @@ using namespace cc::primitive_defines;
 // nothing sg does to keep layouts predictable across concurrently recorded lists may throw the contents away.
 //
 // The mechanism both backends use is the same, and is worth stating because these tests are written against it.
-// Each open list keeps a private layout partition seeded from `canonical`, the between-lists state; a per-texture
-// count tracks how many lists are open over it.
-// The list whose submit drops that count to zero commits its partition as the new canonical.
-// A list that submits while another is still open instead hands the texture back in the canonical layout, so the
-// still-open list finds it as it left it.
+// Each open list keeps a private layout partition that starts EMPTY, entering each box at whatever its own first op
+// asks for; every submit then commits what its list left, unconditionally and in submission order.
+// So a list that submits while another is still open moves the layout, and the still-open list's own submit repairs
+// that with an entry barrier computed against what is really there by then.
 //
 // A texture therefore rests in a real layout from the start, never in `undefined`.
 // Creation does leave it there, and the one-time transition out of it belongs to no list — see libs/graphics/shaped-graphics/docs/concepts/barriers.md.
-// Handing a texture back "in the canonical layout" must never mean handing it back as `undefined`, which is both a
-// discard of what the list just wrote and, on Vulkan, a barrier the spec forbids outright.
+// No entry barrier may target `undefined`, which is both a discard of what the list just wrote and, on Vulkan, a
+// barrier the spec forbids outright.
 
 namespace
 {
@@ -49,8 +48,7 @@ INVOCABLE_TEST("sg - a texture written while another list is open keeps its cont
     REQUIRE(holder != nullptr);
     (void)holder->download.bytes_from_texture(target.raw());
 
-    // The writer.
-    // Its submit therefore takes the "another list is still open" path rather than promoting canonical.
+    // The writer, submitting while the holder is still open.
     {
         auto writer = ctx->create_command_list();
         REQUIRE(writer != nullptr);
@@ -74,8 +72,9 @@ INVOCABLE_TEST("sg - a texture written while another list is open keeps its cont
     REQUIRE(pixels.has_value());
     REQUIRE(pixels.value().size() == isize(k_pixels) * 4);
 
-    // The whole point: a texture handed back to the canonical layout must still hold what the writer put in it.
-    // If the revert targets `undefined`, every byte here is zero.
+    // The whole point: whatever layout the concurrent lists leave the texture in, it must still hold what the writer
+    // put in it.
+    // If any of those transitions targets `undefined`, every byte here is zero.
     int written = 0;
     int zeroed = 0;
     auto const* const p = reinterpret_cast<u8 const*>(pixels.value().data());
