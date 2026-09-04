@@ -18,7 +18,9 @@ Anything more reaches for the transport directly, and `cnet::http_level` is how 
 - **`fetch` (0)** — a browser: method, URL, a restricted header set, a body.
   Redirects are followed for you and cannot be inspected, connections are not yours to see, CORS applies.
 - **`client` (1)** — every header, explicit redirect control, connection reuse and pooling, a streamed request body,
-  response trailers, a timeout per phase.
+  response trailers.
+  One budget covers a whole request rather than each phase of it, deliberately: a per-phase timeout lets a request to a
+  four-address host take four times what the caller asked for.
   **The portable target**, because everything in it is expressible over a platform HTTP stack.
 - **`connection` (2)** — the socket itself: protocol upgrades, client certificates, per-socket options.
   Native only, and separate precisely *because* taking the socket is not expressible over a platform stack.
@@ -31,8 +33,11 @@ production, a refused call in the first test run.
 
 ## Bodies, and why backpressure is in the signature
 
-`body_sink` returns how many bytes it consumed.
-Returning less than the chunk stops the transport reading more, and TCP's own window does the rest.
+`body_sink` returns how many bytes it consumed, and is handed a `cnet::resume_body` alongside the chunk.
+Returning less than the chunk stops the request reading more; `flow.resume()` starts it again.
+Nothing is pulled off the connection in between, so the receive window closes and the sender slows down — which is
+backpressure reaching TCP rather than a buffer of ours.
+A request that is never resumed ends on its own deadline, because a stalled consumer is not a reason to wait forever.
 
 **That is the primitive, and buffering is written over it.**
 `http_send` is the sink that keeps the bytes and nothing else.

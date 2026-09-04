@@ -40,8 +40,8 @@ namespace cnet
 /// Attempts start staggered by `attempt_delay_ms` and the first success wins; the losers are cancelled, including one
 /// that succeeded a moment too late, whose connection is closed rather than leaked.
 ///
-/// Every attempt gets a child of `token`, so cancelling the caller's token cancels the whole race while finishing the
-/// race cancels only its own attempts.
+/// The race runs under a child of `token` and every attempt is started with it, so cancelling the caller's token
+/// cancels the whole race while finishing the race cancels only its own attempts.
 ///
 /// Fails with `name_not_resolved` if the host has no address, and with the FIRST attempt's failure if every attempt
 /// failed -- the first rather than the last, because it is the one about the address the OS thought best.

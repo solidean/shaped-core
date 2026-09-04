@@ -50,7 +50,7 @@ cnet::backend_missing("the curl backend", "none was found"); // cnet::error
 #include <clean-net/common/level.hh>
 
 cnet::http_level::fetch;       // 0 — a browser: restricted headers, no connection control, redirects hidden
-cnet::http_level::client;      // 1 — every header, redirect control, pooling, streamed request body, per-phase timeouts
+cnet::http_level::client;      // 1 — every header, redirect control, pooling, streamed request body, response trailers
 cnet::http_level::connection;  // 2 — the socket itself: upgrades, client certificates, socket options
 
 cnet::to_string(cnet::http_level);  // cc::string_view
@@ -249,20 +249,25 @@ Three things worth knowing.
 ```cpp
 #include <clean-net/http/http_client.hh>
 
-auto client = cnet::make_http_client(io).value();          // owns a native transport and a resolver
-auto client = cnet::native_http_client(transport, resolver); // or bring your own — a virtual network, in a test
+auto client = cnet::make_http_client(io).value();               // owns a native transport and a resolver
+auto own_client = cnet::native_http_client(transport, resolver); // or bring your own — a virtual network, in a test
 
 cnet::http_get(*client, "https://example.com/thing");      // cc::shared_async<http_response>
 cnet::http_send(*client, cc::move(request), {.timeout = cnet::deadline::after_secs(10), .max_body_bytes = 1 << 20});
+// max_body_bytes: 0 = the platform default (~3 GiB on 64-bit), request_options::unlimited = no cap at all
 
-client->send_streaming(cc::move(request), [](cc::span<byte const> chunk) { return consume(chunk); }, {}, token);
+client->send_streaming(cc::move(request),                   // the sink is handed a resume_body alongside the chunk
+                       [](cc::span<byte const> chunk, cnet::resume_body const& flow) { return consume(chunk); },
+                       {}, token);
+req.body = cc::make_pinned_data(cc::move(bytes));           // the body carries its OWNER, so it outlives this call
 client->level();                                            // cnet::http_level::client for this backend
 ```
 
 Five things worth knowing.
 **`send_streaming` is the primitive** and the buffered form is written over it — the sink that keeps the bytes is all `http_send` is.
 **The returned async completes when the whole message is done**; the head is its value, and the body has already gone to the sink by then.
-**A sink that takes fewer bytes than offered pushes back** all the way down to the socket, and it runs on the reactor thread — hand the bytes on, do no work there.
+**A sink that takes fewer bytes than offered stops the request reading**, and `flow.resume()` starts it again — which is backpressure reaching TCP's receive window rather than a buffer of ours.
+It runs on the reactor thread: hand the bytes on, do no work there.
 **One budget covers the whole request** — resolve, connect, handshake and every read — because a per-phase timeout lets a four-address host take four times what the caller asked for.
 **Connections are pooled** per origin, and a request that fails on a pooled connection before any byte arrived is retried once on a fresh one — which is what makes reuse safe.
 
@@ -275,6 +280,7 @@ Redirects are followed by default, up to `max_redirects`; a 301, 302 or 303 turn
 
 auto server = cnet::http_server::try_create(io).value();          // loopback, a port the OS picked
 auto server = cnet::http_server::try_create(io, {.port = 8080, .max_body_bytes = 1 << 20}).value();
+auto server = cnet::http_server::try_create(io, {.family = cnet::ip_family::v6}).value();  // binds ::1, not 127.0.0.1
 auto server = cnet::http_server::try_create(virtual_net).value(); // for a test
 
 server->route(cnet::http_method::get, "/hello",
@@ -283,6 +289,7 @@ server->route(cnet::http_method::get, "/files/*", handler);       // a trailing 
 server->websocket_route("/feed", handler);                         // upgrade this path instead of answering it
 server->serve_directory("/app", "./web");                          // GET + HEAD, confined under the root
 server->local();                                                   // endpoint — which port it got
+server->routed_requests();                                         // i64 — requests that reached a HANDLER; a 404 did not
 server->stop();                                                    // and the destructor does too
 ```
 
@@ -318,6 +325,7 @@ ws->send_text("hello");                            // shared_async<cc::unit>
 ws->send_binary(bytes);
 auto msg = ws->receive();                          // shared_async<websocket_message> — one WHOLE message
 msg->value().is_text; msg->value().text(); msg->value().data;
+ws->receive(cnet::deadline::after_secs(5), token);  // both bound THIS receive; the connection is left open
 ws->close(1000, "done");                           // 4000-4999 is yours to invent in
 ws->is_open(); ws->protocol(); ws->peer();
 

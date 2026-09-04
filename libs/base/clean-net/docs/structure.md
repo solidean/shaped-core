@@ -52,6 +52,8 @@ Framing is strict, control frames are answered here, and both ends run over the 
 **[done]** the loopback dev server.
 Routes, static files confined under their root, streamed responses over chunked encoding, keep-alive, the limits that
 keep it from being trivially crashable, and shutdown through its own token.
+It binds ONE address family, IPv4 by default -- `http_server_description::family` picks it, and `bind_all_interfaces`
+means every interface of that family.
 Not hardened for hostile input, on purpose; [http.md](http.md#the-server) says what that means and what it refuses to
 grow into.
 

@@ -1,3 +1,4 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -84,6 +85,8 @@ EXAMPLE("clean-net/dev-server")
     auto server = cnet::http_server::try_create(*io).value();
     auto const base = cc::format("http://127.0.0.1:{}", server->local().port);
 
+    // The library logs the same thing through `cc::rec`, whose console listener writes in batches -- so that line
+    // lands wherever the batch ends rather than here, and this is the one a reader should follow.
     cc::println("serving on {}", base);
     cc::println("");
 
@@ -126,24 +129,23 @@ EXAMPLE("clean-net/dev-server")
 
     auto home = cnet::http_get(*client, cc::format("{}/", base));
     await(home);
-    cc::println("GET  /                -> {} {}", home->value().status(), home->value().body_text());
+    cc::println("GET  {:<21} -> {} {}", "/", home->value().status(), home->value().body_text());
 
     auto posted = cnet::http_request{.method = cnet::http_method::post,
                                      .target = cnet::http_target::parse(cc::format("{}/echo", base)).value()};
-    // The body is a SPAN rather than owned bytes, so it must outlive the request -- which is what lets a caller send
-    // something it already has without copying it first.
-    auto const payload = cc::string("ping");
-    posted.body = cc::span<byte const>(reinterpret_cast<byte const*>(payload.data()), payload.size());
+    // The body carries its OWNER, so it outlives this call without the caller having to keep anything alive:
+    // `make_pinned_data` moves the string in rather than copying it.
+    posted.body = cc::make_pinned_data(cc::string("ping")).reinterpret_as<byte const>();
 
     auto echoed = cnet::http_send(*client, cc::move(posted));
     await(echoed);
-    cc::println("POST /echo            -> {} {}", echoed->value().status(), echoed->value().body_text());
+    cc::println("POST {:<21} -> {} {}", "/echo", echoed->value().status(), echoed->value().body_text());
 
     if (files.written)
     {
         auto served = cnet::http_get(*client, cc::format("{}/files/{}", base, files.name));
         await(served);
-        cc::println("GET  /files/<file>    -> {} {}", served->value().status(), served->value().body_text());
+        cc::println("GET  {:<21} -> {} {}", "/files/<file>", served->value().status(), served->value().body_text());
     }
 
     // Every way out of the root is a 404, whether it is spelled plainly or hidden behind a percent-escape.
@@ -151,7 +153,7 @@ EXAMPLE("clean-net/dev-server")
     {
         auto refused = cnet::http_get(*client, cc::format("{}{}", base, escape));
         await(refused);
-        cc::println("GET  {:<16} -> {}", escape, refused->value().status());
+        cc::println("GET  {:<21} -> {}", escape, refused->value().status());
     }
 
     // ---- the streamed body, from both ends ---------------------------------------------------------
@@ -173,7 +175,7 @@ EXAMPLE("clean-net/dev-server")
     open_streams.clear();
 
     await(events);
-    cc::println("GET  /events          -> {} chunked, {} bytes after {} writes", events->value().status(),
+    cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", events->value().status(),
                 events->value().body.size(), 3);
 
     // ---- the websocket, from both ends -------------------------------------------------------------
@@ -206,7 +208,7 @@ EXAMPLE("clean-net/dev-server")
     // ---- shutdown ----------------------------------------------------------------------------------
 
     cc::println("");
-    cc::println("{} requests handled", server->requests_handled());
+    cc::println("{} requests reached a route", server->routed_requests());
 
     // Immediate, through the server's own cancellation token: everything in flight ends rather than waiting for a
     // deadline nobody set.

@@ -196,6 +196,9 @@ struct http_response_head;
 /// A response whose body was buffered.
 struct http_response;
 
+/// How a body sink that is not ready for more asks to be offered the rest.
+class resume_body;
+
 /// What a request is allowed to take, and to buffer.
 struct request_options;
 

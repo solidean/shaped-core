@@ -26,7 +26,10 @@ enum class cnet::http_level : cnet::u8
     fetch = 0,
 
     /// A complete HTTP client: every header, explicit redirect control, connection reuse and pooling, a streamed
-    /// request body, response trailers, and a timeout per phase.
+    /// request body, and response trailers.
+    ///
+    /// One budget covers a whole request rather than each phase of it, deliberately: a per-phase timeout lets a
+    /// request to a four-address host take four times what the caller asked for.
     client = 1,
 
     /// The connection itself: protocol upgrades to something we did not write, client certificates, and per-socket

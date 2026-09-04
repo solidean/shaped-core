@@ -44,6 +44,8 @@ struct cnet::ip_address
     /// IPv4 is a dotted quad, and **a leading zero is rejected rather than read as octal**: `010.0.0.1` is
     /// ambiguous, different resolvers disagree about it, and the disagreement is how an allowlist gets walked past.
     /// IPv6 accepts the `::` run, a trailing dotted quad, and a `%scope` suffix, and is otherwise RFC 4291.
+    /// The scope is **numeric only**: an interface may be named rather than numbered on some platforms, and
+    /// resolving a name needs the OS.
     /// Brackets are NOT accepted here -- they belong to the endpoint grammar, not the address one.
     [[nodiscard]] static cc::optional<ip_address> parse(cc::string_view text);
 

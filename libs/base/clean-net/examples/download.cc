@@ -23,6 +23,11 @@ namespace
 /// An unthreaded io_system runs on whatever already calls `cc::thread_pump_all()`, which in an application is the
 /// frame loop and here is this function.
 /// A threaded one would need none of this; nothing in the API changes either way.
+///
+/// `cc::async_blocking_get` is NOT the shorter spelling of this, however much it looks like it.
+/// It hands the graph to the ambient scheduler first, and the run's pool parks on a manual node that only a pump can
+/// complete -- so it never reaches the `cc::thread_pump_all()` in its own loop.
+/// Pumping first is the whole difference.
 template <class T>
 void await(cc::shared_async<T> const& a)
 {
@@ -81,8 +86,9 @@ EXAMPLE("clean-net/download")
     // ---- a body that never lands in memory ---------------------------------------------------------
 
     // The sink runs on the reactor thread and its RETURN VALUE is the backpressure: taking fewer bytes than offered
-    // stops the transport reading more, all the way down to the socket.
-    // So hand the bytes on and do no work here.
+    // stops the request reading more until the `resume_body` it was handed says otherwise.
+    // This one takes everything, so it never pushes back and never needs the flow.
+    // Either way, hand the bytes on and do no work here.
     auto received = i64(0);
     auto chunks = i64(0);
 
@@ -90,7 +96,7 @@ EXAMPLE("clean-net/download")
                                       .target = cnet::http_target::parse(cc::format("{}/big", base)).value()};
 
     auto streamed = client->send_streaming(cc::move(request),
-                                           [&](cc::span<byte const> chunk)
+                                           [&](cc::span<byte const> chunk, cnet::resume_body const&)
                                            {
                                                received += chunk.size();
                                                ++chunks;
@@ -138,5 +144,5 @@ EXAMPLE("clean-net/download")
 
     cc::println("");
     cc::println("5 polite requests, 2 at a time, all {}", batch[0]->value().status());
-    cc::println("the server saw {} requests on {} connection(s)", server->requests_handled(), server->open_connections());
+    cc::println("the server saw {} requests on {} connection(s)", server->routed_requests(), server->open_connections());
 }

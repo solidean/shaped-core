@@ -98,7 +98,9 @@ public:
     [[nodiscard]] endpoint peer() const;
 
     /// The application protocol a TLS handshake settled on, empty for a connection that never had one.
-    /// `cnet::tls_negotiated_alpn` is the spelling a caller reaches for.
+    ///
+    /// **For the transport layer.** `cnet::tls_negotiated_alpn` is the spelling a caller reaches for, and it is in
+    /// `tls.hh` because that is where a reader looking for ALPN goes; this is what it forwards to.
     [[nodiscard]] cc::string_view negotiated_alpn() const;
 
     /// Whether the connection is still usable.
