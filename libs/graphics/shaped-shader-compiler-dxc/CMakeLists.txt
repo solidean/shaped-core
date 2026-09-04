@@ -61,6 +61,7 @@ if(SC_BUILD_TESTS)
         tests/preprocess-test.cc
         tests/compile-test.cc
         tests/portable-hlsl-spike-test.cc
+        tests/constant-packing-spike-test.cc
     )
 
     # Both of these compile to DXIL and assert what comes back from its reflection container, which needs the Windows

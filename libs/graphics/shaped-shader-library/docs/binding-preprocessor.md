@@ -413,8 +413,18 @@ A generated mirror makes that lockstep mechanical, and `sizeof` becomes true rat
 
 Getting it right means emitting HLSL's packing, not C++'s.
 A constant buffer packs in 16-byte rows and an element may not straddle one, so `struct { float2 a; float3 b; }` is 32 bytes in HLSL and 20 in the naive C++ transcription.
-Four edges are a silent wrong number if guessed rather than defined.
-Matrices, where row-major is fixed; `bool`, four bytes in HLSL and one in C++; array stride, padded to 16 in a constant buffer and not elsewhere; and nested structs, row-aligned in a constant buffer.
+
+Every edge is a silent wrong number if guessed, so **Q14 measures each one against DXC on both targets** rather than restating the folklore — and three of them came out other than the folklore says:
+
+- **An array's stride is 16, but its last element does not claim the rest of its row.**
+  `float a[2]; float probe;` puts `probe` at 20, not at 32, so an array of N takes `(N - 1) * 16 + sizeof(element)` and the next member packs against that.
+- **A nested struct is neither row-aligned nor rounded up to a row.**
+  `struct { float x; } s; float probe;` is 16 bytes total, with `probe` at 4 — and a named struct type behaves identically, so it is not an artefact of declaring one inline.
+- **`row_major float3x3` followed by anything is not portable at all.**
+  DXIL packs the next member into the matrix's last row at offset 44, and SPIR-V then rejects the module outright: under `-fvk-use-dx-layout` the validator calls that an overlap.
+  So it is not a layout to reproduce but a construct a portable shader cannot contain, and the pass rejects it rather than generating a mirror for something that will not build.
+
+What Q14 confirmed as expected: no straddling, `float4x4` filling its rows exactly, a row being filled before it is left, and `bool` taking four bytes.
 
 Two `static_assert`s guard the result, and both are generated: the struct's total size against the size the generator computed, and **every member's `offsetof` against the offset it computed**.
 Size alone would pass a mirror whose fields are in the wrong places and whose padding happens to add up.
