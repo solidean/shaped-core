@@ -8,9 +8,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-#if CC_HAS_STACKTRACE
-#include <string> // std::to_string(std::stacktrace) is the only renderer that produces frame text
-#endif
 
 #ifdef CC_OS_WINDOWS
 #include <clean-core/platform/win32_sanitized.hh>
@@ -239,7 +236,7 @@ void report_stacks(char const* banner, char const* reason) noexcept
 
 #if CC_HAS_STACKTRACE
     std::fputs("\nstacktrace (faulting thread):\n", stderr);
-    auto const text = std::to_string(cc::stacktrace::current());
+    auto const text = cc::to_string(cc::stacktrace::current());
     std::fwrite(text.data(), 1, text.size(), stderr);
     std::fputc('\n', stderr);
 #else

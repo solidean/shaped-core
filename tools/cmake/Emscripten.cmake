@@ -37,6 +37,15 @@ if(EMSCRIPTEN)
         add_link_options("SHELL:--use-port=emdawnwebgpu")
     endif()
 
+    # Keep the wasm name section, so a captured stack reads as function names rather than as bare indices.
+    # cc::stacktrace's Emscripten backend renders whatever emscripten_get_callstack can see, and without this it can
+    # see only numbers -- which is the difference between a usable assert and a useless one.
+    # Release is left stripped: those names are a large part of the size a release wasm build exists to avoid.
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_compile_options(--profiling-funcs)
+        add_link_options(--profiling-funcs)
+    endif()
+
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they
     # must be enabled. Emscripten disables them by default; -fexceptions is the broadly-compatible JS-based
     # mode. -fwasm-exceptions (native wasm EH, faster, needs a newer runtime) is reserved for later.

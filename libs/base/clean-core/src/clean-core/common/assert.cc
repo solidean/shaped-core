@@ -15,7 +15,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <string>
 
 #ifdef CC_OS_WINDOWS
 extern "C" __declspec(dllimport) int __stdcall IsDebuggerPresent() noexcept;
@@ -73,10 +72,11 @@ void default_assert_handler(cc::impl::assertion_info const& info)
     cc::eprint(
         cc::format("Assertion failed: {}\n  Message: {}\n  Location: {}\n", info.expression, info.message, location));
 
-    // Only the real std::stacktrace can render frames; on toolchains without <stacktrace> (Emscripten / WASI)
-    // cc::stacktrace is an empty stub, so say so instead.
+    // CC_HAS_STACKTRACE is whether frames can be rendered at all, which is not the same question as <stacktrace>:
+    // Emscripten has no such header and still renders them, while WASI has neither and falls back to the empty stub.
+    // cc::to_string hides which backend answered.
 #if CC_HAS_STACKTRACE
-    auto const trace = std::to_string(cc::stacktrace::current());
+    auto const trace = cc::to_string(cc::stacktrace::current());
     cc::eprint("\nStacktrace:\n");
     cc::eprint(cc::string_view(trace.data(), cc::isize(trace.size())));
     cc::eprint("\n");
