@@ -114,18 +114,29 @@ if(SC_USE_VENDORED_IMGUI)
     add_subdirectory(imgui)
 endif()
 
-if(SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
+# The four fetched deps below are host-side, so a cross-target build must not pick them up.
+# dev.py already declines to fetch them for such a preset (_NON_NATIVE in tools/dev/lib/pipeline/prereqs.py);
+# the pin.txt guards only see whether some *earlier native* configure left an install behind, which on a developer
+# machine it has. Without this a wasm build links host binaries CI never sees -- a prebuilt libdxcompiler, an SDL
+# that has no shared linkage here -- so the same tree builds on CI and fails on a workstation.
+# Named platforms rather than CMAKE_CROSSCOMPILING, which would also strip an arm64 cross build that wants them.
+set(SC_HOST_SIDE_DEPS ON)
+if(EMSCRIPTEN OR ANDROID OR IOS)
+    set(SC_HOST_SIDE_DEPS OFF)
+endif()
+
+if(SC_HOST_SIDE_DEPS AND SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
     add_subdirectory(dxc)
 endif()
 
-if(SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND SC_ARCH_X64 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
+if(SC_HOST_SIDE_DEPS AND SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND SC_ARCH_X64 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
     add_subdirectory(zydis)
 endif()
 
-if(SC_USE_VENDORED_SDL3 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdl3/.install/pin.txt")
+if(SC_HOST_SIDE_DEPS AND SC_USE_VENDORED_SDL3 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdl3/.install/pin.txt")
     add_subdirectory(sdl3)
 endif()
 
-if(SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
+if(SC_HOST_SIDE_DEPS AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
     add_subdirectory(sqlite)
 endif()
