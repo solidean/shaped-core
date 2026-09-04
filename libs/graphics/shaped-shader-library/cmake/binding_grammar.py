@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input")
 
 # The attributes whose meaning has not landed yet.
-UNIMPLEMENTED_ATTRIBUTES = ("static", "push_constants", "payload", "vertex_input")
+UNIMPLEMENTED_ATTRIBUTES = ("push_constants", "payload", "vertex_input")
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -83,10 +83,24 @@ class Binding:
 
 
 @dataclass
+class DeclaredSampler:
+    """A sampler the shader marked `static`, and the state it declared.
+
+    The keys are sg::sampler's own field names and the values its own enumerator names, spelled exactly.
+    Everything omitted takes sg::sampler's default, which is a trilinear repeating sampler.
+    Kept as C++ spellings rather than as values, because emitting them is all the generator does with them.
+    """
+
+    name: str
+    fields: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class Group:
     name: str
     group: int
     bindings: list[Binding] = field(default_factory=list)
+    static_samplers: list[DeclaredSampler] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -123,6 +137,84 @@ BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
     "SamplerComparisonState": ("s", "sampler", None),
     "RaytracingAccelerationStructure": ("t", "acceleration_structure", None),
 }
+
+
+# ---------------------------------------------------------------------------------------------------
+# sampler state
+# ---------------------------------------------------------------------------------------------------
+
+SAMPLER_FILTERS = ("nearest", "linear")
+SAMPLER_ADDRESS_MODES = ("repeat", "mirror_repeat", "clamp_edge", "clamp_border", "mirror_clamp_edge")
+SAMPLER_BORDER_COLORS = ("transparent_black", "opaque_black", "opaque_white")
+COMPARE_OPS = ("never", "less", "equal", "less_equal", "greater", "not_equal", "greater_equal", "always")
+
+# key -> (the sg::sampler fields it sets, the enumerator set its values come from).
+# A shorthand sets three fields at once, and its tuple form addresses them in the order sg::sampler declares.
+SAMPLER_ENUM_KEYS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "filter": (("min_filter", "mag_filter", "mip_filter"), SAMPLER_FILTERS),
+    "address": (("address_u", "address_v", "address_w"), SAMPLER_ADDRESS_MODES),
+    "min_filter": (("min_filter",), SAMPLER_FILTERS),
+    "mag_filter": (("mag_filter",), SAMPLER_FILTERS),
+    "mip_filter": (("mip_filter",), SAMPLER_FILTERS),
+    "address_u": (("address_u",), SAMPLER_ADDRESS_MODES),
+    "address_v": (("address_v",), SAMPLER_ADDRESS_MODES),
+    "address_w": (("address_w",), SAMPLER_ADDRESS_MODES),
+    "border_color": (("border_color",), SAMPLER_BORDER_COLORS),
+    "compare": (("compare",), COMPARE_OPS),
+}
+
+SAMPLER_FLOAT_KEYS = ("mip_lod_bias", "min_lod", "max_lod")
+
+
+def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
+    """The sg::sampler fields a `static` attribute sets, as C++ spellings.
+
+    Keep in step with impl/hlsl_sampler_state.cc, error messages included.
+    """
+    fields: dict[str, str] = {}
+
+    for key, values in attribute.arguments:
+        if not key:
+            raise BindingError(
+                f"{attribute.location}: 'static' takes key=value arguments, not '{values[0]}'")
+
+        if key in SAMPLER_ENUM_KEYS:
+            targets, allowed = SAMPLER_ENUM_KEYS[key]
+            if len(targets) == 3:
+                if len(values) not in (1, 3):
+                    raise BindingError(f"{attribute.location}: '{key}' takes one value or a tuple of three")
+            elif len(values) != 1:
+                raise BindingError(f"{attribute.location}: '{key}' takes exactly one value")
+
+            for value in values:
+                if value not in allowed:
+                    raise BindingError(f"{attribute.location}: '{value}' is not a value of '{key}'")
+
+            spread = values * 3 if len(targets) == 3 and len(values) == 1 else values
+            for target, value in zip(targets, spread):
+                fields[target] = value
+            continue
+
+        if len(values) != 1:
+            raise BindingError(f"{attribute.location}: '{key}' takes exactly one value")
+
+        if key in SAMPLER_FLOAT_KEYS:
+            try:
+                float(values[0])
+            except ValueError:
+                raise BindingError(f"{attribute.location}: '{values[0]}' is not a number") from None
+            fields[key] = values[0]
+            continue
+
+        if key == "max_anisotropy":
+            if not values[0].isdigit() or int(values[0]) == 0:
+                raise BindingError(f"{attribute.location}: '{values[0]}' is not an anisotropy")
+            fields[key] = values[0]
+            continue
+
+        raise BindingError(f"{attribute.location}: '{key}' is not a field of sg::sampler")
+
+    return fields
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -422,6 +514,11 @@ class _Parser:
         return groups
 
     @staticmethod
+    def reject_unclaimed_static(pending: Annotation | None) -> None:
+        if pending is not None:
+            raise BindingError(f"{pending.location}: a 'static' attribute must stand before a sampler declaration")
+
+    @staticmethod
     def reject_unclaimed(pending: Annotation | None) -> None:
         if pending is not None:
             raise BindingError(
@@ -459,7 +556,8 @@ class _Parser:
             raise BindingError(f"{keyword_location}: namespace '{name}' must open its block right away")
         self.at += 1
 
-        return Group(name, number, self.parse_bindings(name))
+        bindings, statics = self.parse_bindings(name)
+        return Group(name, number, bindings, statics)
 
     @staticmethod
     def group_number_of(attribute: Annotation) -> int:
@@ -471,23 +569,33 @@ class _Parser:
             raise BindingError(f"{attribute.location}: '{value}' is not a group number")
         return int(value)
 
-    def parse_bindings(self, group_name: str) -> list[Binding]:
+    def parse_bindings(self, group_name: str) -> tuple[list[Binding], list[DeclaredSampler]]:
         bindings: list[Binding] = []
+        statics: list[DeclaredSampler] = []
         next_index = 0
+
+        # A `static` attribute stands on the line before the sampler it describes.
+        pending: Annotation | None = None
 
         while True:
             if self.at_end():
                 raise BindingError(f"{self.location_here()}: namespace '{group_name}' is never closed")
 
             if self.is_punctuation("}"):
+                self.reject_unclaimed_static(pending)
                 self.at += 1
-                return bindings
+                return bindings, statics
 
             token = self.current()
 
             if token.kind == "annotation":
                 parsed = self.read_annotation()
-                raise BindingError(f"{token.location}: '{parsed.name}' is not an attribute of a binding")
+                if parsed.name != "static":
+                    raise BindingError(f"{token.location}: '{parsed.name}' is not an attribute of a binding")
+                if pending is not None:
+                    raise BindingError(f"{token.location}: two attributes stand before one declaration")
+                pending = parsed
+                continue
 
             if token.kind == "punctuation" and token.text == "#":
                 raise BindingError(
@@ -501,6 +609,13 @@ class _Parser:
                     f"{token.location}: '{token.text}' is not supported inside an annotated namespace")
 
             binding = self.parse_binding(next_index)
+
+            if pending is not None:
+                if binding.type != "sampler":
+                    raise BindingError(
+                        f"{pending.location}: 'static' describes a sampler, and '{binding.name}' is not one")
+                statics.append(DeclaredSampler(binding.name, parse_sampler_state(pending)))
+                pending = None
 
             # An array consumes one index per element, because DXIL numbers every element while SPIR-V numbers
             # the array once -- advancing by one would put the next binding at an address the two disagree on.

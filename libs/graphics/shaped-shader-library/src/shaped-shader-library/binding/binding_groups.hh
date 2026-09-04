@@ -4,7 +4,19 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-shader-library/fwd.hh>
+
+/// A sampler the shader marked `static`, and the state it declared.
+///
+/// A static sampler is baked into the pipeline layout's root signature rather than given a descriptor, so it
+/// costs no per-group descriptor and never varies frame to frame.
+/// It still occupies its slot and its register: only where the state comes from changes.
+struct slib::declared_sampler
+{
+    cc::string name;
+    sg::sampler sampler;
+};
 
 /// One binding group a shader declares, as an annotated namespace:
 ///
@@ -32,6 +44,10 @@ struct slib::shader_binding_group
     /// array once — so the counter must advance by the length or the two targets disagree past it.
     /// Position and index are therefore the same number only in a group with no arrays.
     cc::vector<sg::binding> bindings;
+
+    /// The subset of `bindings` the shader marked `static`, with the state each declared.
+    /// A sampler binding absent from here is dynamic: the group supplies it, not the layout.
+    cc::vector<declared_sampler> static_samplers;
 };
 
 namespace slib
@@ -55,8 +71,8 @@ namespace slib
 ///
 /// An error names the file and line the author would recognise, which it recovers from the `#line` directives the
 /// flatten leaves behind; a source carrying none is named by line alone.
-/// `static`, `push_constants`, `payload` and `vertex_input` parse as attributes and are reported as not yet
-/// supported, so a shader written against them fails rather than compiling to something that ignores them.
+/// `push_constants`, `payload` and `vertex_input` parse as attributes and are reported as not yet supported,
+/// so a shader written against them fails rather than compiling to something that ignores them.
 [[nodiscard]] cc::result<cc::vector<shader_binding_group>> parse_binding_groups(cc::string_view hlsl);
 
 /// `hlsl` with every annotated binding carrying the address the pass assigns it: `register(t0, space0)` on the

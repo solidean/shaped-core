@@ -8,6 +8,7 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
+#include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
 #include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
 
 using namespace cc::primitive_defines;
@@ -27,7 +28,7 @@ constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_consta
 
 /// The attributes whose meaning has not landed yet.
 /// Recognised so the failure names what is missing, rather than reading as an unknown word.
-constexpr cc::string_view k_unimplemented_attributes[] = {"static", "push_constants", "payload", "vertex_input"};
+constexpr cc::string_view k_unimplemented_attributes[] = {"push_constants", "payload", "vertex_input"};
 
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
@@ -73,6 +74,7 @@ struct parsed_group
     cc::string_view name;
     u32 group = 0;
     cc::vector<parsed_binding> bindings;
+    cc::vector<slib::declared_sampler> static_samplers;
 };
 
 struct parsed_source
@@ -181,6 +183,14 @@ struct parser
         return groups;
     }
 
+    [[nodiscard]] static cc::result<cc::unit> reject_unclaimed_static(cc::optional<annotation> const& pending)
+    {
+        if (pending.has_value())
+            return cc::error(cc::format("{}: a 'static' attribute must stand before a sampler declaration",
+                                        to_string(pending.value().location)));
+        return cc::unit();
+    }
+
     [[nodiscard]] static cc::result<cc::unit> reject_unclaimed(cc::optional<annotation> const& pending)
     {
         if (pending.has_value())
@@ -233,8 +243,10 @@ struct parser
         auto bindings = parse_bindings(name);
         CC_RETURN_IF_ERROR(bindings);
 
-        return cc::optional<parsed_group>(
-            parsed_group{.name = name, .group = number.value(), .bindings = cc::move(bindings.value())});
+        return cc::optional<parsed_group>(parsed_group{.name = name,
+                                                       .group = number.value(),
+                                                       .bindings = cc::move(bindings.value().bindings),
+                                                       .static_samplers = cc::move(bindings.value().statics)});
     }
 
     /// The one argument `group` takes: the number, positional.
@@ -251,11 +263,21 @@ struct parser
         return number.value();
     }
 
-    /// The body of an annotated namespace, up to and including its closing brace.
-    [[nodiscard]] cc::result<cc::vector<parsed_binding>> parse_bindings(cc::string_view group_name)
+    /// A group's body, as the two lists it produces.
+    struct group_body
     {
         cc::vector<parsed_binding> bindings;
+        cc::vector<slib::declared_sampler> statics;
+    };
+
+    /// The body of an annotated namespace, up to and including its closing brace.
+    [[nodiscard]] cc::result<group_body> parse_bindings(cc::string_view group_name)
+    {
+        group_body body;
         u32 next_index = 0;
+
+        // A `static` attribute stands on the line before the sampler it describes.
+        cc::optional<annotation> pending;
 
         while (true)
         {
@@ -264,8 +286,9 @@ struct parser
 
             if (is_punctuation('}'))
             {
+                CC_RETURN_IF_ERROR(reject_unclaimed_static(pending));
                 ++at;
-                return bindings;
+                return body;
             }
 
             auto const& token = current();
@@ -274,8 +297,15 @@ struct parser
             {
                 auto parsed = read_annotation();
                 CC_RETURN_IF_ERROR(parsed);
-                return cc::error(cc::format("{}: '{}' is not an attribute of a binding", to_string(token.location),
-                                            parsed.value().name));
+                if (parsed.value().name != "static")
+                    return cc::error(cc::format("{}: '{}' is not an attribute of a binding", to_string(token.location),
+                                                parsed.value().name));
+                if (pending.has_value())
+                    return cc::error(
+                        cc::format("{}: two attributes stand before one declaration", to_string(token.location)));
+
+                pending = cc::move(parsed.value());
+                continue;
             }
 
             if (token.kind == hlsl_token_kind::punctuation && token.text[0] == '#')
@@ -294,10 +324,23 @@ struct parser
             auto binding = parse_binding(next_index);
             CC_RETURN_IF_ERROR(binding);
 
+            if (pending.has_value())
+            {
+                if (binding.value().binding.type != sg::binding_type::sampler)
+                    return cc::error(cc::format("{}: 'static' describes a sampler, and '{}' is not one",
+                                                to_string(pending.value().location), binding.value().binding.name));
+
+                auto state = slib::impl::parse_sampler_state(pending.value());
+                CC_RETURN_IF_ERROR(state);
+                body.statics.push_back(
+                    {.name = cc::string::create_copy_of(binding.value().binding.name), .sampler = state.value()});
+                pending = cc::nullopt;
+            }
+
             // An array consumes one index per element, because DXIL numbers every element while SPIR-V numbers the
             // array once — advancing by one would put the next binding at an address the two targets disagree on.
             next_index += binding.value().binding.count;
-            bindings.push_back(cc::move(binding.value()));
+            body.bindings.push_back(cc::move(binding.value()));
         }
     }
 
@@ -460,6 +503,7 @@ cc::result<cc::vector<slib::shader_binding_group>> slib::parse_binding_groups(cc
         result.bindings.reserve(group.bindings.size());
         for (auto& binding : group.bindings)
             result.bindings.push_back(cc::move(binding.binding));
+        result.static_samplers = cc::move(group.static_samplers);
 
         groups.push_back(cc::move(result));
     }

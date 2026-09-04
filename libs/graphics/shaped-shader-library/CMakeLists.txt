@@ -15,6 +15,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/impl/watch_registry.cc
     src/shaped-shader-library/binding/binding_groups.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
+    src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/shader_library.cc

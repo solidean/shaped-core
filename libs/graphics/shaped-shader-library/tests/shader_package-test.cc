@@ -9,6 +9,7 @@
 // The generated package (see sc_add_shader_package in this library's CMakeLists). These pin the codegen
 // contract itself: the symbols exist and are typed, the table matches what was declared, and the include
 // closure got embedded so a binary with no source tree still has its shaders.
+#include <shaped-graphics/binding/sampler.hh>
 #include <slib_test_shaders.hh>
 
 using slib_test::fake_compiler;
@@ -135,6 +136,31 @@ TEST("slib - a binding entry generates the group its namespace declares", exclus
         CHECK(binding.group_index.value() == 0);
         CHECK(binding.space.value() == 0);
     }
+}
+
+TEST("slib - a `static` sampler reaches the layout rather than the group", exclusive("slib-shader-library"))
+{
+    using group = slib_test::shaders::frame_bindings::group;
+
+    // It still occupies its slot and its register: only where the state comes from changes.
+    CHECK(group::declared_bindings()[1].name == "linear_sampler");
+    CHECK(group::declared_bindings()[1].index == 1);
+
+    auto const declared = group::declared_samplers();
+    REQUIRE(declared.size() == 1);
+    CHECK(declared[0].name == "linear_sampler");
+    CHECK(declared[0].sampler.address_u == sg::sampler_address_mode::clamp_edge);
+    CHECK(declared[0].sampler.address_v == sg::sampler_address_mode::clamp_edge);
+    CHECK(declared[0].sampler.address_w == sg::sampler_address_mode::clamp_edge);
+
+    // Everything omitted takes sg::sampler's default, which is a trilinear repeating sampler.
+    CHECK(declared[0].sampler.min_filter == sg::sampler_filter::linear);
+    CHECK(!declared[0].sampler.compare.has_value());
+
+    // And the struct has no field for it: a caller cannot supply what the layout already bakes in.
+    // `group{}` names every remaining member, so this stops compiling the day that changes.
+    auto const g = group{.albedo = {}, .histogram = {}};
+    (void)g;
 }
 
 TEST("slib - the generated table and the runtime pass read one shader the same way", exclusive("slib-shader-library"))

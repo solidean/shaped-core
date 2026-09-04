@@ -141,6 +141,8 @@ The tuple form addresses them individually, in the field order `sg::sampler` dec
 
 The generated struct exposes what the shader declared as a constant, and `acquire_layout` also takes runtime samplers for a sampler the shader left undeclared.
 **A declared sampler wins**: passing a runtime sampler for one the shader already declared is an error, not an override.
+The merged list puts the declared samplers first and appends only names they do not already carry, so the shader wins in every build and the assertion is what names the mistake in a checked one.
+[done]
 
 ### `push_constants`
 

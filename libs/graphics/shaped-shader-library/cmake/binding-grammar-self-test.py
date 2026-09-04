@@ -26,11 +26,47 @@ from binding_grammar import BindingError, parse_binding_groups  # noqa: E402
 CORPUS = Path(__file__).parent.parent / "tests" / "data" / "binding-corpus.txt"
 
 
+# sg::sampler's own field order, and its defaults -- what a `static` line is rendered against.
+SAMPLER_FIELD_ORDER = ("min_filter", "mag_filter", "mip_filter", "address_u", "address_v", "address_w",
+                       "mip_lod_bias", "max_anisotropy", "min_lod", "max_lod", "compare", "border_color")
+
+SAMPLER_DEFAULTS = {
+    "min_filter": "linear", "mag_filter": "linear", "mip_filter": "linear",
+    "address_u": "repeat", "address_v": "repeat", "address_w": "repeat",
+    "mip_lod_bias": "0", "max_anisotropy": "1", "min_lod": "0", "max_lod": "",
+}
+
+
+def render_sampler(fields: dict[str, str]) -> str:
+    """Every field that differs from sg::sampler's default, in sg::sampler's own order.
+
+    One canonical rendering both halves of the corpus compare as text, so neither has to model the other's
+    value types.
+    """
+    out = []
+    for key in SAMPLER_FIELD_ORDER:
+        value = fields.get(key)
+        if value is None:
+            continue
+        if key in SAMPLER_DEFAULTS and _same_number_or_text(value, SAMPLER_DEFAULTS[key]):
+            continue
+        out.append(f"{key}={value}")
+    return " ".join(out)
+
+
+def _same_number_or_text(a: str, b: str) -> bool:
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return a == b
+
+
 class Case:
     def __init__(self, name: str) -> None:
         self.name = name
         self.hlsl: list[str] = []
         self.groups: list[tuple[str, int, list[dict]]] = []
+        self.statics: dict[str, str] = {}
         self.error: str | None = None
 
     @property
@@ -62,6 +98,9 @@ def read_corpus(text: str) -> list[Case]:
                 continue
             if not line.startswith("  "):
                 current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
+                continue
+            if words[0] == "static":
+                current.statics[words[1]] = " ".join(words[2:])
                 continue
             binding = {"name": words[0], "count": 1, "dim": None}
             for word in words[1:]:
@@ -102,6 +141,16 @@ def check(case: Case) -> list[str]:
             wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"])
             if got != wanted:
                 problems.append(f"binding {got}, expected {wanted}")
+
+    declared = {s.name: render_sampler(s.fields) for group in groups for s in group.static_samplers}
+    for name, expected in case.statics.items():
+        if name not in declared:
+            problems.append(f"'{name}' is not declared static")
+        elif declared[name] != expected:
+            problems.append(f"static '{name}' is [{declared[name]}], expected [{expected}]")
+    for name in declared:
+        if name not in case.statics:
+            problems.append(f"'{name}' is declared static, and the case names no static sampler for it")
 
     return problems
 

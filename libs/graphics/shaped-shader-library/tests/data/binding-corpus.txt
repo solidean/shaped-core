@@ -14,6 +14,8 @@
 #   --- groups          the expected parse, or nothing at all when the snippet declares no group
 #   <namespace> group=<n>
 #     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
+#     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
+#                                                      in the order sg::sampler declares them
 #   --- error           instead of `groups`: the message the pass must report, exactly
 #
 # A `#` comment is only a comment outside an `--- hlsl` block; inside one it is HLSL text like any other --
@@ -239,16 +241,134 @@ namespace frame
 shaders/frame_bindings.hlsli:40: 'gruop' is not an attribute this pass knows
 
 
---- case `static` is recognised and not yet honoured
+--- case a `static` sampler is baked into the layout, and still takes its slot
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+#pragma sc static address=clamp_edge
+    SamplerState linear_sampler;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  linear_sampler index=1 type=sampler count=1
+  static linear_sampler address_u=clamp_edge address_v=clamp_edge address_w=clamp_edge
+
+
+--- case a tuple addresses the shorthand's fields individually, in sg::sampler's own order
+--- hlsl
+#pragma sc group 0
+namespace shadow
+{
+#pragma sc static filter=(linear, linear, nearest) address=(clamp_edge, clamp_border, repeat) compare=less
+    SamplerComparisonState compare_sampler;
+}
+--- groups
+shadow group=0
+  compare_sampler index=0 type=sampler count=1
+  static compare_sampler mip_filter=nearest address_u=clamp_edge address_v=clamp_border compare=less
+
+
+--- case everything omitted takes sg::sampler's default, which is a trilinear repeating sampler
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+  static samp
+
+
+--- case the numeric fields are sg::sampler's too
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static max_anisotropy=4 mip_lod_bias=0.5 border_color=opaque_white
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+  static samp mip_lod_bias=0.5 max_anisotropy=4 border_color=opaque_white
+
+
+--- case a sampler the shader did not mark `static` stays dynamic
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+
+
+--- case `static` describes a sampler and nothing else
 --- hlsl
 #pragma sc group 0
 namespace frame
 {
 #pragma sc static address=clamp_edge
-    SamplerState linear_sampler;
+    Texture2D<float4> albedo;
 }
 --- error
-line 4: the 'static' attribute is not supported yet
+line 4: 'static' describes a sampler, and 'albedo' is not one
+
+
+--- case a `static` attribute standing before nothing is an error
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    SamplerState samp;
+#pragma sc static address=clamp_edge
+}
+--- error
+line 5: a 'static' attribute must stand before a sampler declaration
+
+
+--- case a key outside sg::sampler is an error rather than something ignored
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static wrap=clamp_edge
+    SamplerState samp;
+}
+--- error
+line 4: 'wrap' is not a field of sg::sampler
+
+
+--- case a value outside the enumerator set is an error
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static address=clamp_to_border
+    SamplerState samp;
+}
+--- error
+line 4: 'clamp_to_border' is not a value of 'address'
+
+
+--- case a shorthand takes one value or a tuple of three
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static filter=(linear, nearest)
+    SamplerState samp;
+}
+--- error
+line 4: 'filter' takes one value or a tuple of three
 
 
 --- case `push_constants` is recognised and not yet honoured

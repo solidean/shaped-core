@@ -6,8 +6,10 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/to_string.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 
 using namespace cc::primitive_defines;
@@ -30,11 +32,19 @@ struct expected_group
     cc::vector<expected_binding> bindings;
 };
 
+/// One `static <name> <field>=<value>...` line: the sampler's state, rendered canonically.
+struct expected_sampler
+{
+    cc::string_view name;
+    cc::string fields; ///< the `key=value` words, space-joined, in the order the line gives them
+};
+
 struct corpus_case
 {
     cc::string_view name;
     cc::string hlsl;
     cc::vector<expected_group> groups;
+    cc::vector<expected_sampler> statics;
     cc::optional<cc::string_view> error; ///< set instead of `groups` when the snippet must be rejected
 };
 
@@ -90,6 +100,111 @@ constexpr name_of_dimension k_dimensions[] = {
         if (entry.value == dimension.value())
             return entry.name;
     return "<unknown>";
+}
+
+[[nodiscard]] cc::string_view name_of(sg::sampler_filter filter)
+{
+    return filter == sg::sampler_filter::nearest ? "nearest" : "linear";
+}
+
+[[nodiscard]] cc::string_view name_of(sg::sampler_address_mode mode)
+{
+    switch (mode)
+    {
+    case sg::sampler_address_mode::repeat:
+        return "repeat";
+    case sg::sampler_address_mode::mirror_repeat:
+        return "mirror_repeat";
+    case sg::sampler_address_mode::clamp_edge:
+        return "clamp_edge";
+    case sg::sampler_address_mode::clamp_border:
+        return "clamp_border";
+    case sg::sampler_address_mode::mirror_clamp_edge:
+        return "mirror_clamp_edge";
+    }
+    return "<unknown>";
+}
+
+[[nodiscard]] cc::string_view name_of(sg::sampler_border_color color)
+{
+    switch (color)
+    {
+    case sg::sampler_border_color::transparent_black:
+        return "transparent_black";
+    case sg::sampler_border_color::opaque_black:
+        return "opaque_black";
+    case sg::sampler_border_color::opaque_white:
+        return "opaque_white";
+    }
+    return "<unknown>";
+}
+
+[[nodiscard]] cc::string_view name_of(sg::compare_op op)
+{
+    switch (op)
+    {
+    case sg::compare_op::never:
+        return "never";
+    case sg::compare_op::less:
+        return "less";
+    case sg::compare_op::equal:
+        return "equal";
+    case sg::compare_op::less_equal:
+        return "less_equal";
+    case sg::compare_op::greater:
+        return "greater";
+    case sg::compare_op::not_equal:
+        return "not_equal";
+    case sg::compare_op::greater_equal:
+        return "greater_equal";
+    case sg::compare_op::always:
+        return "always";
+    }
+    return "<unknown>";
+}
+
+/// Every field that differs from sg::sampler's default, in sg::sampler's own order.
+///
+/// One canonical rendering both halves of the corpus compare as text, so neither has to model the other's
+/// value types — the Python side renders the same string out of the spellings it read.
+[[nodiscard]] cc::string render(sg::sampler const& s)
+{
+    auto const defaults = sg::sampler();
+    cc::string out;
+
+    auto const add = [&](cc::string_view key, cc::string_view value)
+    {
+        if (!out.empty())
+            out += ' ';
+        out += cc::format("{}={}", key, value);
+    };
+
+    if (s.min_filter != defaults.min_filter)
+        add("min_filter", name_of(s.min_filter));
+    if (s.mag_filter != defaults.mag_filter)
+        add("mag_filter", name_of(s.mag_filter));
+    if (s.mip_filter != defaults.mip_filter)
+        add("mip_filter", name_of(s.mip_filter));
+    if (s.address_u != defaults.address_u)
+        add("address_u", name_of(s.address_u));
+    if (s.address_v != defaults.address_v)
+        add("address_v", name_of(s.address_v));
+    if (s.address_w != defaults.address_w)
+        add("address_w", name_of(s.address_w));
+    if (s.mip_lod_bias != defaults.mip_lod_bias)
+        add("mip_lod_bias", cc::to_string(s.mip_lod_bias));
+    if (s.max_anisotropy != defaults.max_anisotropy)
+        add("max_anisotropy", cc::to_string(s.max_anisotropy));
+    if (s.min_lod != defaults.min_lod)
+        add("min_lod", cc::to_string(s.min_lod));
+    if (s.max_lod != defaults.max_lod)
+        add("max_lod", cc::to_string(s.max_lod));
+    if (s.compare.has_value())
+        add("compare", name_of(s.compare.value()));
+    if (s.border_color != defaults.border_color)
+        add("border_color", name_of(s.border_color));
+
+    return out;
 }
 
 /// Splits `text` at newlines, keeping neither the newline nor a trailing carriage return.
@@ -210,6 +325,18 @@ constexpr name_of_dimension k_dimensions[] = {
             }
 
             REQUIRE(!current.groups.empty());
+            if (words[0] == "static")
+            {
+                cc::string fields;
+                for (isize w = 2; w < words.size(); ++w)
+                {
+                    if (!fields.empty())
+                        fields += ' ';
+                    fields += words[w];
+                }
+                current.statics.push_back({.name = words[1], .fields = cc::move(fields)});
+                break;
+            }
             expected_binding binding;
             binding.name = words[0];
             for (isize w = 1; w < words.size(); ++w)
@@ -339,6 +466,41 @@ TEST("slib - the binding corpus parses as it says it does")
                 CHECK(binding.group_index.value() == expected.group);
                 CHECK(binding.space.value() == expected.group);
             }
+        }
+
+        // The `static` lines: which samplers the layout bakes in, and the state each declared.
+        isize declared_count = 0;
+        for (auto const& group : groups)
+            declared_count += group.static_samplers.size();
+
+        if (declared_count != c.statics.size())
+        {
+            CC_LOG_ERROR("[corpus] '{}' declares {} static sampler(s), expected {}", c.name, declared_count,
+                         c.statics.size());
+            CHECK(false);
+            continue;
+        }
+
+        for (auto const& want : c.statics)
+        {
+            slib::declared_sampler const* found = nullptr;
+            for (auto const& group : groups)
+                for (auto const& declared : group.static_samplers)
+                    if (declared.name == want.name)
+                        found = &declared;
+
+            if (found == nullptr)
+            {
+                CC_LOG_ERROR("[corpus] '{}' does not declare '{}' static", c.name, want.name);
+                CHECK(false);
+                continue;
+            }
+
+            auto const rendered = render(found->sampler);
+            if (rendered != want.fields)
+                CC_LOG_ERROR("[corpus] '{}' static '{}' is [{}], expected [{}]", c.name, want.name, rendered,
+                             want.fields);
+            CHECK(rendered == want.fields);
         }
     }
 }

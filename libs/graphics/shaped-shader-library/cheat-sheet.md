@@ -141,11 +141,15 @@ A `path:binding:namespace` entry generates a typed struct for one group, in `<NA
 using group = my::shaders::frame_bindings::group;
 group::group_index                 // -> constexpr sg::u32; the number the attribute gave
 group::declared_bindings()         // -> cc::span<sg::binding const>; the WHOLE table, in slot order
+group::declared_samplers()         // -> cc::span<sg::named_sampler const>; the ones marked `static`
 group::acquire_layout(ctx)         // -> sg::binding_group_layout_handle; constant, no reflection consulted
+group::acquire_layout(ctx, samplers)  // + static samplers for the ones the shader left undeclared;
+                                   //   a declared one WINS, and supplying it again asserts
 group::self_check()                // -> cc::string; empty while the table still describes its own shader
 group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
                                    // -> cc::result<sg::binding_group_handle>
 // one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
+// a `static` sampler has NO member -- it is baked into the layout, though it still takes its slot.
 // the layout is built from the full DECLARED table, not from whatever subset one stage reflected.
 ```
 
@@ -163,7 +167,10 @@ namespace frame_bindings
 // a pragma whose first word is not `sc` is passed through untouched.
 // an array consumes `count` indices — DXIL numbers every element, SPIR-V numbers the array once.
 // inside a group only `Type name;` / `Type name[N];` with N a literal; anything else is an error.
-// static / push_constants / payload / vertex_input parse and are reported as not supported yet.
+// `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
+//   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
+//   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
+// push_constants / payload / vertex_input parse and are reported as not supported yet.
 // text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 

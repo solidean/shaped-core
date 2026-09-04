@@ -23,6 +23,7 @@ class real_filesystem;
 class mount_table;
 
 // binding groups
+struct declared_sampler;
 struct shader_binding_group;
 
 // shader packages

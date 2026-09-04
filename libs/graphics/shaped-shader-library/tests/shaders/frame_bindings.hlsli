@@ -9,6 +9,7 @@
 namespace frame_bindings
 {
     Texture2D<float4> albedo;
+#pragma sc static address=clamp_edge
     SamplerState linear_sampler;
     RWStructuredBuffer<float> histogram;
 }

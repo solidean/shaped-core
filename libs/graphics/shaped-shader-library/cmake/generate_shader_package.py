@@ -36,7 +36,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from binding_grammar import BindingError, Group, parse_binding_groups  # noqa: E402
+from binding_grammar import BindingError, DeclaredSampler, Group, parse_binding_groups  # noqa: E402
+
+# How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
+# initializer has to follow the declaration order, so the order here is load-bearing.
+SAMPLER_FIELDS: tuple[tuple[str, str], ...] = (
+    ("min_filter", "sg::sampler_filter::{}"),
+    ("mag_filter", "sg::sampler_filter::{}"),
+    ("mip_filter", "sg::sampler_filter::{}"),
+    ("address_u", "sg::sampler_address_mode::{}"),
+    ("address_v", "sg::sampler_address_mode::{}"),
+    ("address_w", "sg::sampler_address_mode::{}"),
+    ("mip_lod_bias", "{}f"),
+    ("max_anisotropy", "{}u"),
+    ("min_lod", "{}f"),
+    ("max_lod", "{}f"),
+    ("compare", "sg::compare_op::{}"),
+    ("border_color", "sg::sampler_border_color::{}"),
+)
+
+
+def emit_sampler(sampler: DeclaredSampler) -> str:
+    """One sg::sampler as a designated initializer, carrying only the fields the shader named."""
+    parts = [pattern.format(sampler.fields[key]) for key, pattern in SAMPLER_FIELDS if key in sampler.fields]
+    named = [f".{key} = {value}"
+             for (key, _), value in zip([f for f in SAMPLER_FIELDS if f[0] in sampler.fields], parts)]
+    return "{" + ", ".join(named) + "}"
 
 # Kept in step with sg::shader_stage (shaped-graphics/binding/compiled_shader.hh). The DSL spells stages
 # exactly as the enum does, so the generator emits the enumerator rather than a string for C++ to parse back.
@@ -324,9 +349,12 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("/// wrote the addresses into the shader produced this table.\n")
     out.append("struct group\n{\n")
 
+    static_names = {s.name for s in group.static_samplers}
     for binding in group.bindings:
         if binding.type == "sampler":
-            out.append(f"    sg::sampler {binding.name};\n")
+            # A sampler the shader marked `static` is baked into the layout, so the group has no field for it.
+            if binding.name not in static_names:
+                out.append(f"    sg::sampler {binding.name};\n")
         else:
             out.append(f"    sg::bound_view {binding.name};\n")
 
@@ -337,8 +365,18 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("    /// The declared bindings, in slot order — the whole table, not a stage's reflected subset.\n")
     out.append("    [[nodiscard]] static cc::span<sg::binding const> declared_bindings();\n")
     out.append("\n")
+    out.append("    /// The samplers the shader declared `static`, in declaration order.\n")
+    out.append("    /// Baked into the pipeline layout's root signature, so they cost no per-group descriptor.\n")
+    out.append("    [[nodiscard]] static cc::span<sg::named_sampler const> declared_samplers();\n")
+    out.append("\n")
     out.append("    /// The layout these declarations define — constant, so no reflection is consulted.\n")
     out.append("    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(sg::context& ctx);\n")
+    out.append("\n")
+    out.append("    /// The same, plus static samplers for the ones the shader left undeclared.\n")
+    out.append("    /// A declared sampler wins: supplying one the shader already declared is a mistake, not an\n")
+    out.append("    /// override, and it is dropped with an assertion rather than quietly taking effect.\n")
+    out.append("    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(\n")
+    out.append("        sg::context& ctx, cc::span<sg::named_sampler const> samplers);\n")
     out.append("\n")
     out.append("    /// Builds a group from the fields above.\n")
     out.append("    [[nodiscard]] cc::result<sg::binding_group_handle> create(sg::context& ctx) const;\n")
@@ -435,6 +473,13 @@ def emit_binding_table(entry: BindingEntry, embedded: list[str]) -> str:
             out.append(f"     .texture_dimension = sg::texture_view_dimension::{binding.dimension},\n")
         out.append("    },\n")
     out.append("};\n")
+
+    if group.static_samplers:
+        out.append(f"\nsg::named_sampler const k_static_samplers_{ident}[] = {{\n")
+        for sampler in group.static_samplers:
+            out.append(f'    {{.name = "{sampler.name}", .sampler = {emit_sampler(sampler)}}},\n')
+        out.append("};\n")
+
     return "".join(out)
 
 
@@ -487,18 +532,51 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
 def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: list[str]) -> str:
     group = entry.group
     qualified = f"{manifest.namespace}::{group.name}::group"
+    static_names = {s.name for s in group.static_samplers}
     views = [b for b in group.bindings if b.type != "sampler"]
-    samplers = [b for b in group.bindings if b.type == "sampler"]
+    samplers = [b for b in group.bindings if b.type == "sampler" and b.name not in static_names]
 
     out = [f"\ncc::span<sg::binding const> {qualified}::declared_bindings()\n{{\n"]
     out.append(f"    return k_bindings_{group.name};\n")
+    out.append("}\n")
+
+    out.append(f"\ncc::span<sg::named_sampler const> {qualified}::declared_samplers()\n{{\n")
+    if group.static_samplers:
+        out.append(f"    return k_static_samplers_{group.name};\n")
+    else:
+        out.append("    return {};\n")
     out.append("}\n")
 
     out.append(f"\nsg::binding_group_layout_handle {qualified}::acquire_layout(sg::context& ctx)\n{{\n")
     out.append("    // At the first acquire the table and the shader came from the same build, so a difference\n")
     out.append("    // between them means this generator is wrong rather than that a shader moved on.\n")
     out.append("    CC_ASSERT(self_check().empty(), \"the generated binding table does not describe its own shader\");\n")
-    out.append(f"    return ctx.cached.acquire_binding_group_layout(k_bindings_{group.name});\n")
+    out.append(f"    return ctx.cached.acquire_binding_group_layout(k_bindings_{group.name}, declared_samplers());\n")
+    out.append("}\n")
+
+    out.append(f"\nsg::binding_group_layout_handle {qualified}::acquire_layout(\n")
+    out.append("    sg::context& ctx, cc::span<sg::named_sampler const> samplers)\n{\n")
+    out.append("    CC_ASSERT(self_check().empty(), \"the generated binding table does not describe its own shader\");\n")
+    out.append("\n")
+    out.append("    cc::vector<sg::named_sampler> merged;\n")
+    out.append("    merged.reserve(declared_samplers().size() + samplers.size());\n")
+    out.append("    for (auto const& declared : declared_samplers())\n")
+    out.append("        merged.push_back(declared);\n")
+    out.append("\n")
+    out.append("    // Declared first, then only what the shader did not declare, so the shader wins in every build\n")
+    out.append("    // and the assertion is what names the mistake in a checked one.\n")
+    out.append("    for (auto const& supplied : samplers)\n")
+    out.append("    {\n")
+    out.append("        bool already_declared = false;\n")
+    out.append("        for (auto const& declared : declared_samplers())\n")
+    out.append("            already_declared = already_declared || declared.name == supplied.name;\n")
+    out.append("\n")
+    out.append("        CC_ASSERT(!already_declared, \"the shader already declared this sampler static\");\n")
+    out.append("        if (!already_declared)\n")
+    out.append("            merged.push_back(supplied);\n")
+    out.append("    }\n")
+    out.append("\n")
+    out.append(f"    return ctx.cached.acquire_binding_group_layout(k_bindings_{group.name}, merged);\n")
     out.append("}\n")
 
     out.append(f"\ncc::result<sg::binding_group_handle> {qualified}::create(sg::context& ctx) const\n{{\n")
