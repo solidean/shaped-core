@@ -18,6 +18,12 @@
 ///
 /// **The transport layer is not on this ladder.** Sockets, listeners and datagrams are a different API rather than
 /// more of this one, so they answer `is_supported()` instead of a level.
+///
+/// **A rung names what a COMPLETE backend at that level provides, and a backend short of its rung records the gap
+/// rather than the rung being narrowed to fit it.**
+/// Trimming a rung to whatever happens to be written turns "we ran out of scope" into something that reads, a year
+/// later, exactly like "we decided against it" -- and only the second belongs in a header.
+/// Where a backend is short, its own `level()` says what of, and where that is tracked.
 enum class cnet::http_level : cnet::u8
 {
     /// What a browser's `fetch` can do: a method, a URL, a restricted header set, and a body.

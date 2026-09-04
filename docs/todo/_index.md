@@ -36,3 +36,5 @@ In the order it is meant to be built:
 - [cnet-datagrams.md](cnet-datagrams.md) — UDP, and the requirements a future multiplayer layer must not have lost.
 - [cnet-reactor-scaling.md](cnet-reactor-scaling.md) — IOCP and epoll, and what would make them worth it.
 - [cnet-housekeeping.md](cnet-housekeeping.md) — the small things, including one real defect in babel's glTF reader.
+- [cnet-waiting-on-an-async.md](cnet-waiting-on-an-async.md) — why `cc::async_blocking_get` hangs on a pump-driven graph.
+  Two bugs and one macro behind it, none of them cnet's.

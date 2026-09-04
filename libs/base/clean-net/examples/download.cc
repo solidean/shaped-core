@@ -27,7 +27,8 @@ namespace
 /// `cc::async_blocking_get` is NOT the shorter spelling of this, however much it looks like it.
 /// It hands the graph to the ambient scheduler first, and the run's pool parks on a manual node that only a pump can
 /// complete -- so it never reaches the `cc::thread_pump_all()` in its own loop.
-/// Pumping first is the whole difference.
+/// Pumping first is the whole difference, and that it has to be hand-rolled is a bug rather than a design:
+/// docs/todo/cnet-waiting-on-an-async.md.
 template <class T>
 void await(cc::shared_async<T> const& a)
 {

@@ -1,5 +1,6 @@
 #include "io_system.hh"
 
+#include <clean-core/common/asserts.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -149,6 +150,13 @@ public:
     {
         _handle = cc::make_threaded_actor<io_actor_impl>(*_reactor, _pending, _stopping, max_wait_ms, _unthreaded);
         _handle->start(_unthreaded ? cc::threaded_actor_mode::unthreaded : cc::threaded_actor_mode::threaded_if_possible);
+
+        // The actor is the authority on what it became, and this is the one moment the two can be compared: the
+        // answer had to be decided BEFORE start(), because the thread start() spawns can reach on_process before any
+        // store here would land.
+        // So the duplicate is a claim rather than a second source of truth, and this is what checks it.
+        CC_ASSERT(_handle->is_unthreaded() == _unthreaded,
+                  "the io_system and its actor disagree about whether there is a reactor thread");
     }
 
     void submit(io_operation* op)
@@ -210,9 +218,14 @@ cc::result<cc::unique_ptr<io_system>, error> io_system::try_create(io_system_des
     if (reactor.has_error())
         return cc::error(cc::move(reactor).error());
 
-    // Decided before start() rather than read back from it, so no thread can run on_process before the answer is in.
+    // Decided before start() rather than read back from it: `io_actor_impl::on_process` branches on this, and the
+    // thread start() spawns can reach it before a value stored afterwards would be visible.
+    // `cc::threaded_actor::is_unthreaded()` is the authority and start() asserts the two agree; both terms below are
+    // compile-time or startup facts, so there is nothing to race.
+    //
     // A build without threads is unthreaded whatever the description says, exactly as cc::threaded_actor decides it.
-    // So is a build without sockets: with nothing to wait on, a reactor thread could only spin.
+    // So is a build without sockets: with nothing to wait on, a reactor thread could only spin -- and that one is not
+    // a fact the actor knows.
     auto const unthreaded = desc.unthreaded || CC_HAS_THREADS == 0 || !impl::sockets_are_supported();
 
     auto system = cc::make_unique<io_system>();
