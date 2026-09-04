@@ -43,7 +43,8 @@ class vulkan_sampler_cache;        // VkSamplers for bound sampler states, keyed
 struct vulkan_hazard_view;         // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)
 struct vulkan_texture_hazard_view; // the texture analogue
 struct vulkan_array_element;       // one element of an array binding
-struct vulkan_array_binding;       // an array binding's per-element resources
+struct vulkan_array_binding;
+struct vulkan_resolved_view; // an array binding's per-element resources
 class vulkan_binding_group;
 using vulkan_binding_group_handle = std::shared_ptr<vulkan_binding_group const>;
 class vulkan_staging_binding_group;

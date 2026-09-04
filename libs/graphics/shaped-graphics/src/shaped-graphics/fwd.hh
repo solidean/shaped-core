@@ -220,6 +220,7 @@ struct compute_pipeline_description; // {shader, layout} — input to create_com
 class binding_group;
 struct bound_view;    // one raw_view (inline) or a vector of them — a named_view's element list
 struct named_view;    // {name, bound_view} — input to create_binding_group (one view per array element)
+struct slotted_view;  // {binding_slot, bound_view} — the same input, keyed by slot rather than by name
 struct named_sampler; // {name, sampler} — static sampler (group layout) / dynamic sampler (group)
 
 // The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
@@ -318,9 +319,13 @@ inline constexpr int max_vertex_buffers = 8;
 } // namespace sg
 
 /// A binding's identity inside a staging_binding_group, resolved once from its name.
-/// Opaque: it is an index into the group's internal slot table, not a descriptor position — that indirection
-/// is what carries a binding's heap, its first descriptor and its element count, and it is where every set is bounds-checked.
-/// Only meaningful for the group it came from, and `invalid` is what an unknown name resolves to.
+/// A position in the layout's `bindings()`, which is what a binding's declaration order already means.
+///
+/// Opaque all the same: what it indexes internally is a slot table carrying the binding's heap, its first
+/// descriptor and its element count, and that indirection is where every set is bounds-checked.
+/// Meaningful only for the layout it came from — a slot from another one is in range, wrong and silent, where
+/// a wrong *name* is an error message.
+/// `invalid` is what an unknown name resolves to.
 enum class sg::binding_slot : sg::u32
 {
     invalid = ~u32(0),

@@ -457,6 +457,14 @@ protected:
                                                                                     cc::span<named_sampler const> samplers,
                                                                                     lifetime_scope scope) = 0;
 
+    /// The same, keyed by layout slot rather than by binding name.
+    /// A slot is a position in the layout's `bindings()`, so a caller holding one is expected to know it is
+    /// talking to the layout it got it from — see sg::slotted_view.
+    [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                                    cc::span<slotted_view const> views,
+                                                                                    cc::span<named_sampler const> samplers,
+                                                                                    lifetime_scope scope) = 0;
+
     /// Builds a staging_binding_group over `layout` — a mutable descriptor image, fully vacant, that mints binding_groups on demand.
     /// `scope` must be persistent: a staging group exists to outlive the epoch that built it.
     [[nodiscard]] virtual cc::result<staging_binding_group_handle> try_create_staging_binding_group(

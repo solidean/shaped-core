@@ -47,11 +47,79 @@ vulkan_binding_group::~vulkan_binding_group()
     _ctx->schedule_deferred_deletion(cc::move(expiring));
 }
 
+[[nodiscard]] cc::result<cc::vector<vulkan_resolved_view>> resolve_by_name(cc::span<sg::binding const> bindings,
+                                                                           cc::span<sg::named_view const> views)
+{
+    cc::vector<vulkan_resolved_view> resolved;
+    resolved.reserve(views.size());
+
+    for (auto const& nv : views)
+    {
+        isize slot = -1;
+        for (isize i = 0; i < bindings.size(); ++i)
+            if (!sg::is_sampler(bindings[i].type) && bindings[i].name == nv.name)
+            {
+                slot = i;
+                break;
+            }
+        if (slot < 0)
+            return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
+
+        resolved.push_back({.slot = slot, .name = nv.name, .view = &nv.view});
+    }
+    return resolved;
+}
+
+[[nodiscard]] cc::result<cc::vector<vulkan_resolved_view>> resolve_by_slot(cc::span<sg::binding const> bindings,
+                                                                           cc::span<sg::slotted_view const> views)
+{
+    cc::vector<vulkan_resolved_view> resolved;
+    resolved.reserve(views.size());
+
+    for (auto const& sv : views)
+    {
+        auto const slot = isize(u32(sv.slot));
+        if (sv.slot == sg::binding_slot::invalid || slot >= bindings.size())
+            return cc::error(cc::format("binding_group: slot {} is not a position in this layout's bindings()", slot));
+        if (sg::is_sampler(bindings[slot].type))
+            return cc::error(cc::format("binding_group: '{}' is a sampler, not a view", bindings[slot].name));
+
+        resolved.push_back({.slot = slot, .name = bindings[slot].name, .view = &sv.view});
+    }
+    return resolved;
+}
+
 cc::result<vulkan_binding_group_handle> vulkan_binding_group::create(vulkan_context& ctx,
                                                                      vulkan_binding_group_layout_handle const& layout,
                                                                      cc::span<sg::named_view const> views,
                                                                      cc::span<sg::named_sampler const> samplers,
                                                                      sg::lifetime_scope scope)
+{
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+
+    auto resolved = resolve_by_name(layout->bindings(), views);
+    CC_RETURN_IF_ERROR(resolved);
+    return create_resolved(ctx, layout, resolved.value(), samplers, scope);
+}
+
+cc::result<vulkan_binding_group_handle> vulkan_binding_group::create(vulkan_context& ctx,
+                                                                     vulkan_binding_group_layout_handle const& layout,
+                                                                     cc::span<sg::slotted_view const> views,
+                                                                     cc::span<sg::named_sampler const> samplers,
+                                                                     sg::lifetime_scope scope)
+{
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+
+    auto resolved = resolve_by_slot(layout->bindings(), views);
+    CC_RETURN_IF_ERROR(resolved);
+    return create_resolved(ctx, layout, resolved.value(), samplers, scope);
+}
+
+cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vulkan_context& ctx,
+                                                                              vulkan_binding_group_layout_handle const& layout,
+                                                                              cc::span<vulkan_resolved_view const> views,
+                                                                              cc::span<sg::named_sampler const> samplers,
+                                                                              sg::lifetime_scope scope)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
 
@@ -85,19 +153,10 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create(vulkan_cont
     auto view_filled = cc::vector<char>::create_filled(bindings.size(), char(0));
     for (auto const& nv : views)
     {
-        isize slot = -1;
-        for (isize i = 0; i < bindings.size(); ++i)
-            if (!sg::is_sampler(bindings[i].type) && bindings[i].name == nv.name)
-            {
-                slot = i;
-                break;
-            }
-        if (slot < 0)
-            return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
-
+        auto const slot = nv.slot;
         auto const& b = bindings[slot];
         bool const is_array = b.is_array();
-        auto const element_views = nv.view.span();
+        auto const element_views = nv.view->span();
         if (element_views.size() != isize(b.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",

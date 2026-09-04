@@ -868,13 +868,25 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
     out.append("}\n")
 
     out.append(f"\ncc::result<sg::binding_group_handle> {qualified}::create(sg::context& ctx) const\n{{\n")
+    out.append("    auto const layout = acquire_layout(ctx);\n")
+    out.append("\n")
+    out.append("    // A slot is a position in THIS layout's bindings(), and one from another layout would be\n")
+    out.append("    // in range, wrong and silent — where a wrong name is an error message.\n")
+    out.append("    // So the layout is checked to be the one these slots were generated against.\n")
+    out.append(f"    CC_ASSERT(layout->structural_hash()\n")
+    out.append(f"                  == ctx.cached.acquire_binding_group_layout(k_bindings_{group.name},\n")
+    out.append("                                                             declared_samplers())\n")
+    out.append("                         ->structural_hash(),\n")
+    out.append("              \"the layout is not the one this group was generated against\");\n")
+    out.append("\n")
     if views:
-        out.append(f"    cc::vector<sg::named_view> views;\n")
+        out.append("    cc::vector<sg::slotted_view> views;\n")
         out.append(f"    views.reserve({len(views)});\n")
         for binding in views:
-            out.append(f'    views.push_back({{.name = "{binding.name}", .view = {binding.name}}});\n')
+            slot = group.bindings.index(binding)
+            out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {binding.name}}});\n")
     else:
-        out.append("    cc::vector<sg::named_view> const views;\n")
+        out.append("    cc::vector<sg::slotted_view> const views;\n")
     out.append("\n")
     if samplers:
         out.append("    // A sampler the shader did not mark `static` is per-group rather than baked into the layout.\n")
@@ -885,7 +897,7 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
     else:
         out.append("    cc::vector<sg::named_sampler> const samplers;\n")
     out.append("\n")
-    out.append("    return ctx.persistent.try_create_binding_group(acquire_layout(ctx), views, samplers);\n")
+    out.append("    return ctx.persistent.try_create_binding_group(layout, views, samplers);\n")
     out.append("}\n")
 
     out.append(emit_self_check(manifest, entry, embedded))
