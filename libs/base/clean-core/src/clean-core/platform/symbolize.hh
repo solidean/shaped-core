@@ -82,8 +82,14 @@ struct cc::symbol_info
 /// The cache is the point rather than an optimization: a sampled profile is thousands of hits on a handful of
 /// addresses, and a debug-info lookup is milliseconds.
 ///
-/// **Not thread-safe, and neither is the platform underneath it** — Windows' DbgHelp requires callers to serialize.
-/// One symbolizer per thread, or one behind a lock.
+/// **Not thread-safe as an object**: the cache above is unguarded, so one symbolizer per thread, or one behind a lock.
+///
+/// The platform underneath it IS serialized here, which is a different question and not a caller's to answer.
+/// Windows' DbgHelp is single-threaded and its state is process-wide rather than per-session, so two symbolizers on
+/// two threads share it however separate their sessions look; every call into it goes through one process-global
+/// mutex for that reason.
+/// Leaving that to callers is not workable when an assertion can symbolize its own stack from any thread, and the
+/// failure mode is not a missing name but a corrupted heap that surfaces later somewhere unrelated.
 struct cc::symbolizer
 {
     /// Resolves against this process's own modules.

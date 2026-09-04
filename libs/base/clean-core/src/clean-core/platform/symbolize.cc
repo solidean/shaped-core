@@ -4,6 +4,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <clean-core/platform/win32_sanitized.hh>
@@ -16,6 +17,29 @@ namespace
 {
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 constexpr bool has_symbolization = true;
+
+/// Serializes every DbgHelp call this process makes.
+///
+/// DbgHelp is documented single-threaded, and its state is process-wide rather than per-session: two threads
+/// resolving through DIFFERENT session handles still land in the same library state, so a per-symbolizer lock would
+/// not do and neither would one per session.
+/// The failure mode is why this is not left to callers -- a race does not lose a name, it corrupts the heap, and the
+/// crash then lands in an unrelated allocation far from here.
+///
+/// Nothing under it may symbolize, since re-entering here on the same thread would deadlock: a plain log is fine,
+/// a stacktrace capture that resolves its frames is not.
+///
+/// The guarded value is a tag rather than state of ours -- DbgHelp owns the real state, and holding this is the right
+/// to call into it.
+struct dbghelp_access
+{
+};
+
+cc::mutex<dbghelp_access>& dbghelp_lock()
+{
+    static cc::mutex<dbghelp_access> m;
+    return m;
+}
 
 /// The file name of a path, so a MODULE reads as `app.exe` rather than wherever it was installed from.
 /// Source paths deliberately keep theirs — see resolve.
@@ -77,6 +101,8 @@ void ensure_symbol_handler()
 {
     static bool const once = []
     {
+        auto const guard = dbghelp_lock().lock_scoped();
+
         // DEFERRED_LOADS so standing this up does not read every PDB the process has; LOAD_LINES because a file and a
         // line are most of the value; UNDNAME so a name reads as C++ rather than as a mangling.
         ::SymSetOptions(::SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
@@ -142,6 +168,9 @@ cc::symbolizer::symbolizer(cc::span<cc::loaded_module const> modules, cc::symbol
     static cc::atomic<u64> next_session = 1;
     _session = reinterpret_cast<void*>(u64(0xCC5E5510u) << 32 | next_session.fetch_add(1, cc::memory_order_relaxed));
 
+    // Held across the whole open, so a concurrent resolve cannot land between SymInitialize and the modules it needs.
+    auto const guard = dbghelp_lock().lock_scoped();
+
     ::SymSetOptions(::SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
     if (::SymInitialize(HANDLE(_session), nullptr, FALSE) == 0)
     {
@@ -178,7 +207,10 @@ cc::symbolizer::~symbolizer()
     // Only a session this symbolizer opened.
     // The process session belongs to the whole process and is deliberately never cleaned up.
     if (_session != nullptr)
+    {
+        auto const guard = dbghelp_lock().lock_scoped();
         ::SymCleanup(HANDLE(_session));
+    }
 #endif
 }
 
@@ -208,6 +240,10 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
     auto const process = _session != nullptr ? HANDLE(_session) : ::GetCurrentProcess();
     if (is_foreign() && _session == nullptr)
         return out; // the session could not be opened, so the table is all there is
+
+    // Guards the platform, not this object: the cache above is still one symbolizer's own, so a single instance
+    // remains single-threaded while two instances on two threads are now safe.
+    auto const guard = dbghelp_lock().lock_scoped();
 
     // The name is variable-length and lives past the end of the struct, which is why this is a byte buffer rather
     // than a SYMBOL_INFO.
