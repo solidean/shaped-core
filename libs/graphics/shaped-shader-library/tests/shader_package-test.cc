@@ -228,3 +228,23 @@ TEST("slib - a payload entry mirrors the struct and sizes it", exclusive("slib-s
     p.depth = 3;
     CHECK(p.depth == 3u);
 }
+
+TEST("slib - a constants entry mirrors the block with HLSL's padding, not C++'s", exclusive("slib-shader-library"))
+{
+    using constants = slib_test::shaders::shade_constants;
+
+    // `tint` cannot straddle the first 16-byte row, so it lands at 16 rather than at 8, which is the whole
+    // reason the mirror is generated rather than transcribed.
+    // The naive C++ struct would be 24 bytes.
+    CHECK(sizeof(constants) == 32);
+    CHECK(offsetof(constants, uv_scale) == 0);
+    CHECK(offsetof(constants, tint) == 16);
+    CHECK(offsetof(constants, exposure) == 28);
+
+    // The generated header asserts all of that too; this is the shape a caller sees.
+    auto c = constants{};
+    c.uv_scale[0] = 1.0f;
+    c.tint[2] = 2.0f;
+    c.exposure = 3.0f;
+    CHECK(c.exposure == 3.0f);
+}

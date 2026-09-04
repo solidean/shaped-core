@@ -480,8 +480,13 @@ TEST("slib - an inline-constants block reflects at b0 in the space it named", ex
     CHECK(constants->space.value() == 9);
 
     // block_size keeps coming from reflection, which is how a routine reads it today.
+    //
+    // And this is the check that closes the loop on the generated mirror: the size DXC computed for the block,
+    // against the size the generator computed for the C++ struct a caller fills.
+    // The corpus proves the two halves of the pass agree with each other; only this compares either of them
+    // with the compiler.
     REQUIRE(constants->block_size.has_value());
-    CHECK(constants->block_size.value() >= 4);
+    CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
 }
 
 #endif

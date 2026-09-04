@@ -67,7 +67,9 @@ class Case:
         self.hlsl: list[str] = []
         self.groups: list[tuple[str, int, list[dict]]] = []
         self.statics: dict[str, str] = {}
-        self.inline_constants: str | None = None
+        self.inline_constants: tuple[str, list[str]] | None = None
+        # Which unindented line opened the block the next indented lines belong to.
+        self.open_block: str = ""
         self.vertex_inputs: list[tuple[str, list[str]]] = []
         self.payloads: list[tuple[str, list[str]]] = []
         self.error: str | None = None
@@ -101,23 +103,30 @@ def read_corpus(text: str) -> list[Case]:
                 continue
             if not line.startswith("  "):
                 if words[0] == "inline_constants":
-                    current.inline_constants = f"{words[1]} {words[2]}"
+                    current.open_block = "inline_constants"
+                    current.inline_constants = (" ".join(words[1:]), [])
                     continue
                 if words[0] == "vertex_input":
+                    current.open_block = "vertex_input"
                     current.vertex_inputs.append((" ".join(words[1:]), []))
                     continue
                 if words[0] == "payload":
+                    current.open_block = "payload"
                     current.payloads.append((" ".join(words[1:]), []))
                     continue
+                current.open_block = "group"
                 current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
                 continue
             if words[0] == "static":
                 current.statics[words[1]] = " ".join(words[2:])
                 continue
-            if current.payloads and not current.groups:
+            if current.open_block == "inline_constants":
+                current.inline_constants[1].append(" ".join(words))
+                continue
+            if current.open_block == "payload":
                 current.payloads[-1][1].append(" ".join(words))
                 continue
-            if current.vertex_inputs and not current.groups:
+            if current.open_block == "vertex_input":
                 current.vertex_inputs[-1][1].append(" ".join(words))
                 continue
             binding = {"name": words[0], "count": 1, "dim": None}
@@ -162,9 +171,12 @@ def check(case: Case) -> list[str]:
                 problems.append(f"binding {got}, expected {wanted}")
 
     constants = parsed.inline_constants
-    rendered = None if constants is None else f"{constants.name} space={constants.space}"
+    rendered = None
+    if constants is not None:
+        header = f"{constants.name} space={constants.space} type={constants.type} size={constants.size}"
+        rendered = (header, [f"{m.name} {m.type} @{m.offset}" for m in constants.members])
     if rendered != case.inline_constants:
-        problems.append(f"inline constants are [{rendered}], expected [{case.inline_constants}]")
+        problems.append(f"inline constants are {rendered}, expected {case.inline_constants}")
 
     rendered_inputs = []
     for vertex_input in parsed.vertex_inputs:

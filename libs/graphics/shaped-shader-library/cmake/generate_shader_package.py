@@ -36,8 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from binding_grammar import (BindingError, DeclaredSampler, Group, Payload, StructMember,  # noqa: E402
-                             VALUE_TYPES, VertexInput, parse_binding_groups)
+from binding_grammar import (BindingError, DeclaredSampler, Group, InlineConstants, Payload,  # noqa: E402
+                             StructMember, VALUE_TYPES, VertexInput, parse_binding_groups)
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is load-bearing.
@@ -77,6 +77,7 @@ VALID_LANGUAGES = ("hlsl",)
 BINDING_STAGE = "binding"
 VERTEX_INPUT_STAGE = "vertex_input"
 PAYLOAD_STAGE = "payload"
+CONSTANTS_STAGE = "constants"
 
 # Sources are embedded as raw string literals so a shipped binary carries its own shaders and needs no
 # source tree.
@@ -145,6 +146,14 @@ class PayloadEntry:
     payload: Payload
 
 
+@dataclass
+class ConstantsEntry:
+    """One `path:constants:name` entry: an inline-constants block to mirror in C++."""
+
+    path: str
+    constants: InlineConstants
+
+
 def read_manifest(path: Path) -> Manifest:
     """The manifest is `key=value` lines; SHADER= repeats, one per declared entry."""
     manifest = Manifest()
@@ -178,13 +187,31 @@ def identifier_of(path: str) -> str:
     return ident
 
 
-def parse_entries(
-        manifest: Manifest) -> tuple[list[ShaderFile], list[BindingEntry], list[VertexInputEntry], list[PayloadEntry]]:
-    files: list[ShaderFile] = []
+@dataclass
+class Entries:
+    """Everything a package's manifest declares, grouped by what it generates."""
+
+    files: list[ShaderFile] = field(default_factory=list)
+    bindings: list[BindingEntry] = field(default_factory=list)
+    vertex_inputs: list[VertexInputEntry] = field(default_factory=list)
+    payloads: list[PayloadEntry] = field(default_factory=list)
+    constants: list[ConstantsEntry] = field(default_factory=list)
+
+    @property
+    def paths(self) -> list[str]:
+        """Every file an entry names, which is what the embed closure starts from."""
+        return ([f.path for f in self.files] + [b.path for b in self.bindings]
+                + [v.path for v in self.vertex_inputs] + [p.path for p in self.payloads]
+                + [c.path for c in self.constants])
+
+
+def parse_entries(manifest: Manifest) -> Entries:
+    entries = Entries()
+    files = entries.files
     by_stem: dict[str, ShaderFile] = {}
-    bindings: list[BindingEntry] = []
-    vertex_inputs: list[VertexInputEntry] = []
-    payloads: list[PayloadEntry] = []
+    bindings = entries.bindings
+    vertex_inputs = entries.vertex_inputs
+    payloads = entries.payloads
     seen: set[str] = set()
     name = manifest.name
 
@@ -193,11 +220,12 @@ def parse_entries(
         if len(parts) != 3:
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' must be path:stage:entry_point, "
-                f"path:{BINDING_STAGE}:namespace, path:{VERTEX_INPUT_STAGE}:struct "
-                f"or path:{PAYLOAD_STAGE}:struct")
+                f"path:{BINDING_STAGE}:namespace, path:{VERTEX_INPUT_STAGE}:struct, "
+                f"path:{PAYLOAD_STAGE}:struct or path:{CONSTANTS_STAGE}:name")
 
         path, stage, tail = parts
-        if stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE) and stage not in VALID_STAGES:
+        if (stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE)
+                and stage not in VALID_STAGES):
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has unknown stage '{stage}'. "
                 f"Stages are spelled as sg::shader_stage: {' '.join(VALID_STAGES)}")
@@ -222,6 +250,10 @@ def parse_entries(
             payloads.append(read_payload_entry(manifest, path, tail))
             continue
 
+        if stage == CONSTANTS_STAGE:
+            entries.constants.append(read_constants_entry(manifest, path, tail))
+            continue
+
         stem = identifier_of(path)
         existing = by_stem.get(stem)
         if existing is None:
@@ -236,7 +268,7 @@ def parse_entries(
 
         existing.stages.setdefault(stage, []).append(tail)
 
-    return files, bindings, vertex_inputs, payloads
+    return entries
 
 
 def read_binding_entry(manifest: Manifest, path: str, namespace: str) -> BindingEntry:
@@ -301,6 +333,25 @@ def read_payload_entry(manifest: Manifest, path: str, struct: str) -> PayloadEnt
     raise GeneratorError(
         f"shader package '{manifest.name}': '{path}' declares no payload struct named '{struct}' "
         f"(it declares: {declared})")
+
+
+def read_constants_entry(manifest: Manifest, path: str, name: str) -> ConstantsEntry:
+    """The inline-constants block `name` names, parsed out of `path` alone."""
+    text = (manifest.source_dir / path).read_text(encoding="utf-8")
+    try:
+        constants = parse_binding_groups(text).inline_constants
+    except BindingError as e:
+        raise GeneratorError(f"shader package '{manifest.name}': {path}: {e}") from e
+
+    if constants is None:
+        raise GeneratorError(
+            f"shader package '{manifest.name}': '{path}' declares no inline-constants block")
+    if constants.name != name:
+        raise GeneratorError(
+            f"shader package '{manifest.name}': '{path}' declares an inline-constants block named "
+            f"'{constants.name}', not '{name}'")
+
+    return ConstantsEntry(path, constants)
 
 
 def include_closure(manifest: Manifest, roots: list[str]) -> list[str]:
@@ -403,6 +454,57 @@ def emit_mirror_asserts(qualified: str, name: str, members: list[StructMember], 
     return "".join(out)
 
 
+def emit_constants(manifest: Manifest, entry: ConstantsEntry) -> str:
+    """The C++ mirror of an inline-constants block, with the padding its HLSL layout needs.
+
+    A constant block's layout is DXC's rather than C++'s, so unlike a vertex input or a payload this mirror
+    reproduces a layout instead of defining one -- the padding is where a hand-written mirror goes quietly
+    wrong, and the spike's Q14 is where each rule came from.
+    """
+    constants = entry.constants
+    qualified = f"{manifest.namespace}::{constants.type}"
+
+    out = [f"\nnamespace {manifest.namespace}\n{{\n"]
+    out.append(f"/// The inline constants {constants.name} carries. Generated from {entry.path}; do not edit.\n")
+    out.append("///\n")
+    out.append("/// The padding is HLSL's constant-buffer layout, not C++'s: an element may not straddle a\n")
+    out.append("/// 16-byte row, and a row is filled before it is left.\n")
+    out.append(f"struct {constants.type}\n{{\n")
+
+    offset = 0
+    pad_index = 0
+    for member in constants.members:
+        if member.offset > offset:
+            words = (member.offset - offset) // 4
+            out.append(f"    unsigned _padding{pad_index}[{words}];\n")
+            pad_index += 1
+            offset = member.offset
+
+        cpp_type, size, _ = VALUE_TYPES[member.type]
+        if cpp_type.endswith("]"):
+            base, _, extent = cpp_type.partition("[")
+            out.append(f"    {base} {member.name}[{extent[:-1]}];\n")
+        else:
+            out.append(f"    {cpp_type} {member.name};\n")
+        offset += size
+
+    # The block's own total rounds up to a whole row, and the mirror has to carry that tail: a CBV is sized in
+    # whole rows, so a shorter struct would upload fewer bytes than the shader reads.
+    if constants.size > offset:
+        out.append(f"    unsigned _padding{pad_index}[{(constants.size - offset) // 4}];\n")
+
+    out.append("};\n")
+    out.append(f"}} // namespace {manifest.namespace}\n")
+
+    out.append(f"\nstatic_assert(sizeof({qualified}) == {constants.size},\n")
+    out.append(f'              "{constants.type} is not the size its constant block states");\n')
+    for member in constants.members:
+        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {member.offset},\n")
+        out.append(f'              "{constants.type}::{member.name} is not where its constant block states");\n')
+
+    return "".join(out)
+
+
 def emit_payload(manifest: Manifest, entry: PayloadEntry) -> str:
     """The C++ struct a ray payload mirrors, and the max_payload_size a pipeline must declare for it.
 
@@ -470,8 +572,12 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
     return "".join(out)
 
 
-def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[BindingEntry],
-                vertex_inputs: list[VertexInputEntry], payloads: list[PayloadEntry]) -> str:
+def emit_header(manifest: Manifest, entries: Entries) -> str:
+    files = entries.files
+    bindings = entries.bindings
+    vertex_inputs = entries.vertex_inputs
+    payloads = entries.payloads
+    constants = entries.constants
     out = ["// This file is auto-generated by sc_add_shader_package. Do not edit.\n"]
     out.append("#pragma once\n\n")
     out.append("#include <shaped-shader-library/fwd.hh>\n")
@@ -481,7 +587,7 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("\n#include <shaped-graphics/raster/vertex_input.hh>\n")
     if payloads:
         out.append("\n#include <clean-core/fwd.hh> // cc::isize\n")
-    if vertex_inputs or payloads:
+    if vertex_inputs or payloads or constants:
         out.append("\n#include <cstddef> // offsetof\n")
     if bindings:
         out.append("\n#include <clean-core/container/span.hh>\n")
@@ -497,10 +603,10 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     for file in files:
         out.append(f"/// {file.path}\n")
         out.append(f"struct {file.stem}_t\n{{\n")
-        for stage, entries in file.stages.items():
+        for stage, entry_points in file.stages.items():
             out.append("    struct\n    {\n")
-            for entry in entries:
-                out.append(f"        slib::shader_asset_handle {entry};\n")
+            for entry_point in entry_points:
+                out.append(f"        slib::shader_asset_handle {entry_point};\n")
             out.append(f"    }} {stage};\n")
         out.append("};\n")
         out.append(f"extern {file.stem}_t {file.stem};\n\n")
@@ -515,6 +621,8 @@ def emit_header(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append(emit_vertex_input(manifest, entry))
     for entry in payloads:
         out.append(emit_payload(manifest, entry))
+    for entry in constants:
+        out.append(emit_constants(manifest, entry))
 
     return "".join(out)
 
@@ -805,17 +913,15 @@ def main() -> int:
         return 1
 
     try:
-        files, bindings, vertex_inputs, payloads = parse_entries(manifest)
-        roots = ([f.path for f in files] + [b.path for b in bindings] + [v.path for v in vertex_inputs]
-                 + [p.path for p in payloads])
-        embedded = include_closure(manifest, roots)
+        entries = parse_entries(manifest)
+        embedded = include_closure(manifest, entries.paths)
     except GeneratorError as e:
         print(str(e), file=sys.stderr)
         return 1
 
-    write_if_different(args.out_dir / f"{manifest.name}.hh",
-                       emit_header(manifest, files, bindings, vertex_inputs, payloads))
-    write_if_different(args.out_dir / f"{manifest.name}.cc", emit_source(manifest, files, bindings, embedded))
+    write_if_different(args.out_dir / f"{manifest.name}.hh", emit_header(manifest, entries))
+    write_if_different(args.out_dir / f"{manifest.name}.cc",
+                       emit_source(manifest, entries.files, entries.bindings, embedded))
 
     # Depfile: every file we read.
     # This is what makes editing an .hlsli regenerate the package -- DEPENDS alone only covers the entry

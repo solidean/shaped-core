@@ -62,11 +62,17 @@ struct slib::shader_binding_group
 /// state is the space — and stating it is the point, because a block sharing a space with a group's `b`
 /// registers is exactly the collision this pass exists to prevent.
 ///
-/// `block_size` is not here: it keeps coming from reflection, which is how a routine reads it today.
+/// The block's layout is here, because the generator emits a C++ mirror of it and `sizeof` is then simply true
+/// rather than asserted — which is what `sv::frame_constants_gpu` carries by hand and by comment today.
+/// `block_size` also keeps coming from reflection, which is how a routine reads it and is never wrong.
 struct slib::shader_inline_constants
 {
     cc::string name;
     u32 space = 0;
+
+    cc::string type;                          ///< the ConstantBuffer's argument, and the mirror's name
+    cc::vector<shader_struct_member> members; ///< in declaration order, each carrying its constant-block offset
+    isize size = 0;                           ///< the block's total, rounded up to a whole 16-byte row
 };
 
 /// One member of an annotated struct, as the shader declares it.
@@ -76,6 +82,13 @@ struct slib::shader_struct_member
     cc::string type;     ///< the HLSL type, verbatim
     cc::string semantic; ///< the semantic without its trailing index, or empty when the member carries none
     u32 semantic_index = 0;
+
+    /// The byte offset the member sits at.
+    ///
+    /// For a vertex input or a payload this is natural packing, which the generated mirror then *defines*.
+    /// For a constant block it is DXC's own layout, which the mirror has to reproduce with explicit padding —
+    /// and which the spike's Q14 measured rather than assumed.
+    isize offset = 0;
 };
 
 /// A vertex input struct: what feeds one bound vertex buffer.

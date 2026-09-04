@@ -82,6 +82,7 @@ class Binding:
     register_class: str
     type_offset: int
     semicolon_offset: int
+    template_argument: str = ""
 
 
 @dataclass
@@ -111,12 +112,17 @@ class InlineConstants:
 
     The register is always b0, since a pipeline layout carries at most one such binding, so the only number to
     state is the space.
+    The block's layout is here too, because the generator emits a C++ mirror of it -- see the spike's Q14 for
+    where each rule came from.
     """
 
     name: str
     space: int
     type_offset: int
     semicolon_offset: int
+    type: str = ""
+    members: list[StructMember] = field(default_factory=list)
+    size: int = 0
 
 
 @dataclass
@@ -128,6 +134,7 @@ class StructMember:
     semantic: str
     semantic_index: int
     type_offset: int
+    offset: int = 0  # the byte offset the layout puts it at; a constant block's is DXC's, not C++'s
 
 
 @dataclass
@@ -246,6 +253,8 @@ VALUE_TYPES: dict[str, tuple[str, int, str]] = {
     "uint2": ("unsigned[2]", 8, "vec2u"),
     "uint3": ("unsigned[3]", 12, "vec3u"),
     "uint4": ("unsigned[4]", 16, "vec4u"),
+    # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
+    "bool": ("unsigned", 4, None),
 }
 
 
@@ -540,6 +549,9 @@ class _Parser:
         self.inline_constants: InlineConstants | None = None
         self.vertex_inputs: list[VertexInput] = []
         self.payloads: list[Payload] = []
+        # Where one file-scope `struct <name> { ... }` body sits, as token indices -- recorded rather than
+        # parsed, because reading one is only necessary when a `push_constants` block names it.
+        self.struct_bodies: list[tuple[str, int, int]] = []
         self.group_names: set[str] = set()
         self.group_numbers: set[int] = set()
         self.binding_names: set[str] = set()
@@ -611,10 +623,123 @@ class _Parser:
                 continue
 
             self.reject_unclaimed(pending)
+
+            if self.is_identifier("struct") and self.record_struct_body():
+                continue
+
             self.at += 1
 
         self.reject_unclaimed(pending)
         return groups
+
+    def record_struct_body(self) -> bool:
+        """Notes where an unannotated `struct <name> { ... }` body is and skips it.
+
+        Reports False and leaves the cursor alone when this was not one.
+        """
+        start = self.at
+        self.at += 1  # `struct`
+
+        if self.at_end() or self.current().kind != "identifier":
+            self.at = start
+            return False
+
+        name = self.current().text
+        self.at += 1
+
+        if not self.is_punctuation("{"):
+            self.at = start
+            return False
+        self.at += 1
+
+        first = self.at
+        depth = 1
+        while not self.at_end() and depth > 0:
+            if self.is_punctuation("{"):
+                depth += 1
+            elif self.is_punctuation("}"):
+                depth -= 1
+            self.at += 1
+
+        if depth != 0:
+            self.at = start
+            return False
+
+        self.struct_bodies.append((name, first, self.at - 1))
+        return True
+
+    def layout_inline_constants(self) -> None:
+        """Reads the struct an inline-constants block names, and lays it out the way a constant buffer does.
+
+        Run after the whole file is walked, so the struct may be declared on either side of the block.
+        The rules are the spike's Q14, measured against DXC on both targets rather than restated.
+        """
+        if self.inline_constants is None:
+            return
+
+        constants = self.inline_constants
+        body = next((b for b in self.struct_bodies if b[0] == constants.type), None)
+        if body is None:
+            raise BindingError(
+                f"the inline-constants block '{constants.name}' names a struct '{constants.type}' "
+                f"this file does not declare")
+
+        saved = self.at
+        self.at = body[1]
+
+        offset = 0
+        while self.at < body[2]:
+            member = self.parse_constant_member()
+            size = VALUE_TYPES[member.type][1]
+
+            # A scalar or vector may not straddle a row, and a row is filled before it is left.
+            if offset % 16 + size > 16:
+                offset += 16 - offset % 16
+
+            member.offset = offset
+            offset += size
+            constants.members.append(member)
+
+        self.at = saved
+
+        if not constants.members:
+            raise BindingError(f"the inline-constants block '{constants.name}' declares no members")
+
+        # The block's own total rounds up to a whole row.
+        constants.size = offset if offset % 16 == 0 else offset + (16 - offset % 16)
+
+    def parse_constant_member(self) -> StructMember:
+        """One `<type> <name>;` of a constant block.
+
+        The subset is scalars, vectors and `bool`. An array or a matrix is refused rather than mirrored, and
+        Q14 is why: the member after one packs into its last row's tail, which C++ cannot express.
+        """
+        token = self.current()
+        if token.kind != "identifier":
+            raise BindingError(f"{token.location}: expected a member declaration, found '{token.text}'")
+
+        type_name = token.text
+        location = token.location
+        self.at += 1
+
+        if self.at_end() or self.current().kind != "identifier":
+            raise BindingError(f"{location}: expected a name after '{type_name}'")
+
+        name = self.current().text
+        self.at += 1
+
+        if self.is_punctuation("["):
+            raise BindingError(f"{location}: an array is not supported in a constant block, because the member "
+                               f"after it packs into its last row")
+
+        if not self.is_punctuation(";"):
+            raise BindingError(f"{location}: expected ';' after '{name}'")
+        self.at += 1
+
+        if type_name not in VALUE_TYPES:
+            raise BindingError(f"{location}: '{type_name}' is not a constant block type this pass knows")
+
+        return StructMember(name, type_name, "", 0, token.offset)
 
     @staticmethod
     def reject_unclaimed_static(pending: Annotation | None) -> None:
@@ -650,8 +775,11 @@ class _Parser:
                 f"{location}: 'push_constants' describes a ConstantBuffer, and '{binding.name}' is not one")
         if binding.count != 1:
             raise BindingError(f"{location}: an inline-constants block is one buffer, not an array")
+        if not binding.template_argument:
+            raise BindingError(f"{location}: an inline-constants block must name the struct it holds")
 
-        self.inline_constants = InlineConstants(binding.name, space, binding.type_offset, binding.semicolon_offset)
+        self.inline_constants = InlineConstants(binding.name, space, binding.type_offset, binding.semicolon_offset,
+                                                binding.template_argument)
 
     def parse_vertex_input(self, attribute: Annotation) -> None:
         """The `struct <name> { <type> <member> : <SEMANTIC>; ... };` a `vertex_input` attribute stands before."""
@@ -906,9 +1034,13 @@ class _Parser:
         location = self.current().location
         self.at += 1
 
-        # The template arguments say what the resource holds, never where it is bound.
+        # The template arguments say what the resource holds, never where it is bound -- except the one a
+        # `push_constants` block needs, which is the struct it mirrors.
+        template_argument = ""
         if self.is_punctuation("<"):
             self.at += 1
+            if not self.at_end() and self.current().kind == "identifier":
+                template_argument = self.current().text
             while not self.is_punctuation(">"):
                 if self.at_end() or self.is_punctuation(";") or self.is_punctuation("{"):
                     raise BindingError(f"{location}: '{type_name}' opens an argument list it never closes")
@@ -962,7 +1094,8 @@ class _Parser:
         self.binding_names.add(name)
 
         register_class, binding_type, dimension = entry
-        return Binding(name, index, count, binding_type, dimension, register_class, type_offset, semicolon_offset)
+        return Binding(name, index, count, binding_type, dimension, register_class, type_offset, semicolon_offset,
+                       template_argument)
 
 
 def parse_binding_groups(hlsl: str) -> Bindings:
@@ -975,4 +1108,8 @@ def parse_binding_groups(hlsl: str) -> Bindings:
 
     parser = _Parser(lex(hlsl))
     groups = parser.run()
+
+    # After the walk, so the struct an inline-constants block names may be declared on either side of it.
+    parser.layout_inline_constants()
+
     return Bindings(groups, parser.inline_constants, parser.vertex_inputs, parser.payloads)

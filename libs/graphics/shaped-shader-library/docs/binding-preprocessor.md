@@ -158,7 +158,9 @@ That space matters: an inline-constants block sharing a space with a group's `b`
 Q8 applies here too, which is why the attribute must write a `register()` at all — a constants block referenced by one stage of a two-stage pipeline gets a register only in that stage.
 
 `block_size` keeps coming from reflection, which is how a routine reads it today and is never wrong.
-[done, apart from the mirror struct]
+The generator also emits the block's C++ mirror, from the struct the `ConstantBuffer` names, so `sizeof` is true rather than asserted.
+That struct must be declared in the same file, which is what a mirror needs and what every block in the tree already does.
+[done]
 
 ### `payload`
 
@@ -511,8 +513,9 @@ Error messages recover the name from `layout->bindings()[slot].name`, so nothing
 3. **[done] `rewrite_binding_groups` in `_compile_text`**, with a test that one source compiles to both targets and reflects the same addresses.
    This is where Q8's failure becomes a passing test.
 4. **[done] The `path:binding:namespace` entry and the generated group**, the Python generator replacing the CMake one, and the per-package self-check.
-5. **The mirror structs**, and the `push_constants`, `payload` and `vertex_input` attributes, after the spike pins the payload's packing.
+5. **[done] The mirror structs**, and the `push_constants`, `payload` and `vertex_input` attributes, after the spike pins the payload's packing.
    The generated vertex layout lands here too, since it is the same parse and the same packing engine.
+   The constant-block subset is scalars, vectors and `bool`; an array, a matrix or a nested struct is refused rather than mirrored, each for a reason Q14 measured.
 6. **`sg::slotted_view`**, the `binding_slot` doc widening, the dx12 remap, and the resolve-then-delegate refactor in both backends.
 7. **Port a real shader.**
    `imgui.hlsl` is the best first target: it has a texture, a static sampler and an inline-constants block, and its group is rebuilt whenever the bound texture changes.

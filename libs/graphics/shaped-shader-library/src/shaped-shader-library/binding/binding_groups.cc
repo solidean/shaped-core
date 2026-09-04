@@ -67,6 +67,7 @@ struct source_span
 struct parsed_binding
 {
     sg::binding binding;
+    cc::string_view template_argument; ///< the single `<...>` identifier, empty when there is none
     char register_class = 't';
     isize type_offset = 0;      ///< where the declaration's type token begins
     isize semicolon_offset = 0; ///< where its ';' is
@@ -120,6 +121,19 @@ struct parser
     cc::optional<parsed_inline_constants> inline_constants;
     cc::vector<parsed_vertex_input> vertex_inputs;
     cc::vector<slib::shader_payload> payloads;
+
+    /// Where one file-scope `struct <name> { ... }` body sits, as token indices.
+    ///
+    /// Recorded rather than parsed, because most of them are none of the pass's business: a shader is full of
+    /// structs whose members it does not understand, and reading one is only necessary when a `push_constants`
+    /// block names it.
+    struct struct_body
+    {
+        cc::string_view name;
+        isize first = 0; ///< the token after the '{'
+        isize last = 0;  ///< the '}' token
+    };
+    cc::vector<struct_body> struct_bodies;
 
     // What has been declared so far, for the collisions a namespace does not catch on its own.
     cc::set<cc::string_view> group_names;
@@ -224,6 +238,10 @@ struct parser
             }
 
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
+
+            if (is_identifier("struct") && record_struct_body())
+                continue;
+
             ++at;
         }
 
@@ -237,6 +255,50 @@ struct parser
             return cc::error(cc::format("{}: a 'static' attribute must stand before a sampler declaration",
                                         to_string(pending.value().location)));
         return cc::unit();
+    }
+
+    /// Notes where an unannotated `struct <name> { ... }` body is and skips it, or reports that this was not
+    /// one and leaves the cursor alone.
+    [[nodiscard]] bool record_struct_body()
+    {
+        auto const start = at;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+        {
+            at = start;
+            return false;
+        }
+
+        auto const name = current().text;
+        ++at;
+
+        if (!is_punctuation('{'))
+        {
+            at = start;
+            return false;
+        }
+        ++at;
+
+        auto const first = at;
+        auto depth = 1;
+        while (!at_end() && depth > 0)
+        {
+            if (is_punctuation('{'))
+                ++depth;
+            else if (is_punctuation('}'))
+                --depth;
+            ++at;
+        }
+
+        if (depth != 0)
+        {
+            at = start;
+            return false;
+        }
+
+        struct_bodies.push_back({.name = name, .first = first, .last = at - 1});
+        return true;
     }
 
     [[nodiscard]] static cc::result<cc::unit> reject_unclaimed(cc::optional<annotation> const& pending)
@@ -281,8 +343,14 @@ struct parser
         if (binding.value().binding.count != 1)
             return cc::error(cc::format("{}: an inline-constants block is one buffer, not an array", to_string(location)));
 
+        if (binding.value().template_argument.empty())
+            return cc::error(
+                cc::format("{}: an inline-constants block must name the struct it holds", to_string(location)));
+
         inline_constants = parsed_inline_constants{
-            .constants = {.name = cc::move(binding.value().binding.name), .space = space.value()},
+            .constants = {.name = cc::move(binding.value().binding.name),
+                          .space = space.value(),
+                          .type = cc::string::create_copy_of(binding.value().template_argument)},
             .type_offset = binding.value().type_offset,
             .semicolon_offset = binding.value().semicolon_offset};
         return cc::unit();
@@ -484,6 +552,98 @@ struct parser
         return parsed_member{.member = cc::move(member), .type_offset = type_offset};
     }
 
+    /// Reads the struct an inline-constants block names, and lays it out the way a constant buffer does.
+    ///
+    /// Run after the whole file is walked, so the struct may be declared on either side of the block.
+    /// The rules are the spike's Q14, measured against DXC on both targets rather than restated:
+    /// a scalar or vector may not straddle a 16-byte row but a row is filled before it is left, and the
+    /// block's own total rounds up to a whole row.
+    [[nodiscard]] cc::result<cc::unit> layout_inline_constants()
+    {
+        if (!inline_constants.has_value())
+            return cc::unit();
+
+        auto& constants = inline_constants.value().constants;
+        struct_body const* body = nullptr;
+        for (auto const& candidate : struct_bodies)
+            if (candidate.name == constants.type)
+                body = &candidate;
+
+        if (body == nullptr)
+            return cc::error(cc::format("the inline-constants block '{}' names a struct '{}' this file does not "
+                                        "declare",
+                                        constants.name, constants.type));
+
+        auto const saved = at;
+        at = body->first;
+
+        isize offset = 0;
+        while (at < body->last)
+        {
+            auto member = parse_constant_member();
+            CC_RETURN_IF_ERROR(member);
+
+            auto const size = slib::impl::value_type_of(member.value().type).value().size;
+
+            // A scalar or vector may not straddle a row, and a row is filled before it is left.
+            if (offset % 16 + size > 16)
+                offset += 16 - offset % 16;
+
+            member.value().offset = offset;
+            offset += size;
+            constants.members.push_back(cc::move(member.value()));
+        }
+
+        at = saved;
+
+        if (constants.members.empty())
+            return cc::error(cc::format("the inline-constants block '{}' declares no members", constants.name));
+
+        // The block's own total rounds up to a whole row.
+        constants.size = offset % 16 == 0 ? offset : offset + (16 - offset % 16);
+        return cc::unit();
+    }
+
+    /// One `<type> <name>;` of a constant block.
+    ///
+    /// The subset is scalars, vectors and `bool`, which is what the blocks in the tree actually hold.
+    /// An array or a matrix is refused rather than mirrored, and Q14 is why: in a constant block the member
+    /// after one packs into its last row's tail, which C++ cannot express, and for a matrix whose rows are not
+    /// full float4s SPIR-V rejects the module outright.
+    [[nodiscard]] cc::result<slib::shader_struct_member> parse_constant_member()
+    {
+        auto const& token = current();
+        if (token.kind != hlsl_token_kind::identifier)
+            return cc::error(
+                cc::format("{}: expected a member declaration, found '{}'", to_string(token.location), token.text));
+
+        auto const type_name = token.text;
+        auto const location = token.location;
+        ++at;
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
+
+        auto member = slib::shader_struct_member{.name = cc::string::create_copy_of(current().text),
+                                                 .type = cc::string::create_copy_of(type_name)};
+        ++at;
+
+        if (is_punctuation('['))
+            return cc::error(cc::format("{}: an array is not supported in a constant block, because the member "
+                                        "after it packs into its last row",
+                                        to_string(location)));
+
+        if (!is_punctuation(';'))
+            return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), member.name));
+        ++at;
+
+        if (!slib::impl::value_type_of(type_name).has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a constant block type this pass knows", to_string(location), type_name));
+
+        return member;
+    }
+
     /// The one argument `push_constants` takes: `space=<n>`.
     [[nodiscard]] static cc::result<u32> space_of(annotation const& attribute)
     {
@@ -655,10 +815,14 @@ struct parser
         ++at;
 
         // The template arguments say what the resource holds, never where it is bound, so they are checked for
-        // shape and then dropped.
+        // shape and dropped — except the one a `push_constants` block needs, which is the struct it mirrors.
+        cc::string_view template_argument;
         if (is_punctuation('<'))
         {
             ++at;
+            if (!at_end() && current().kind == hlsl_token_kind::identifier)
+                template_argument = current().text;
+
             while (!is_punctuation('>'))
             {
                 if (at_end() || is_punctuation(';') || is_punctuation('{'))
@@ -724,6 +888,7 @@ struct parser
                                           .count = count,
                                           .type = type.value().type,
                                           .texture_dimension = type.value().dimension},
+                              .template_argument = template_argument,
                               .register_class = type.value().register_class,
                               .type_offset = type_offset,
                               .semicolon_offset = semicolon_offset};
@@ -744,6 +909,9 @@ struct parser
 
     auto groups = p.run();
     CC_RETURN_IF_ERROR(groups);
+
+    // After the walk, so the struct an inline-constants block names may be declared on either side of it.
+    CC_RETURN_IF_ERROR(p.layout_inline_constants());
 
     // The group number is both the SPIR-V set and the HLSL space, which is what makes one address serve both targets.
     for (auto& group : groups.value())

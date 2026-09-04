@@ -29,7 +29,8 @@ sc_add_shader_package(
         blit.hlsl:fragment:main_ps
         frame.hlsli:binding:frame_bindings  # path:binding:namespace -> a typed binding-group struct
         mesh.hlsl:vertex_input:vs_input     # path:vertex_input:struct -> a C++ mirror + vertex_layout_of
-        rt.hlsl:payload:pt_payload)         # path:payload:struct -> a C++ mirror + max_payload_size
+        rt.hlsl:payload:pt_payload          # path:payload:struct -> a C++ mirror + max_payload_size
+        shade.hlsl:constants:gConstants)    # path:constants:name -> a C++ mirror with HLSL's padding
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
@@ -133,6 +134,7 @@ slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<s
 slib::shader_inline_constants      // { cc::string name; u32 space; } -- register is always b0
 slib::shader_vertex_input          // { name; u32 slot; bool per_instance; vector<shader_struct_member> }
 slib::shader_payload               // { name; vector<shader_struct_member> members; isize size }
+slib::shader_inline_constants      // { name; u32 space; type; members (with offsets); isize size }
 slib::shader_bindings              // { groups; optional<inline_constants>; vertex_inputs; payloads }
 slib::parse_binding_groups(hlsl)   // -> cc::result<shader_bindings>; the error names file:line
                                    //   (recovered from the flatten's #line directives)
@@ -171,6 +173,12 @@ sg::vertex_input_layout::create<my::shaders::vs_input, my::shaders::instance_inp
 
 my::shaders::pt_payload::max_payload_size   // constexpr cc::isize; what the pipeline must declare
 // a payload mirror is naturally packed too, for a different reason: a payload is registers, not a buffer.
+
+my::shaders::frame_constants               // the inline-constants mirror, with HLSL's padding
+// a constant block REPRODUCES a layout rather than defining one: an element may not straddle a 16-byte row,
+//   a row is filled before it is left, and the total rounds up to a row (spike Q14).
+// the block's struct must be declared in the same file, and the subset is scalars, vectors and bool --
+//   an array or a matrix is refused, because the member after one packs into its last row.
 ```
 
 ```hlsl
@@ -198,6 +206,7 @@ namespace frame_bindings
 // `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
 //   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
 //   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.
+// `#pragma sc push_constants` also generates the block's mirror now, from the struct the ConstantBuffer names.
 // text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 

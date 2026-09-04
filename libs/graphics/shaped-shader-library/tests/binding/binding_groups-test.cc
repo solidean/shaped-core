@@ -45,7 +45,11 @@ struct corpus_case
     cc::string hlsl;
     cc::vector<expected_group> groups;
     cc::vector<expected_sampler> statics;
-    cc::optional<cc::string> inline_constants; ///< "<name> space=<n>", or nothing when none is declared
+    /// The `inline_constants` line and its members, newline-joined, or nothing when none is declared.
+    cc::optional<cc::string> inline_constants;
+
+    /// Which unindented line opened the block the next indented lines belong to.
+    cc::string_view open_block;
 
     /// One entry per `payload` line: its header, then its members, newline-joined.
     cc::vector<cc::string> payloads;
@@ -341,37 +345,48 @@ constexpr name_of_dimension k_dimensions[] = {
             {
                 if (words[0] == "inline_constants")
                 {
-                    current.inline_constants = cc::format("{} {}", words[1], words[2]);
+                    current.open_block = "inline_constants";
+                    current.inline_constants = join_from(words, 1);
                     break;
                 }
 
                 if (words[0] == "vertex_input")
                 {
+                    current.open_block = "vertex_input";
                     current.vertex_inputs.push_back(join_from(words, 1));
                     break;
                 }
 
                 if (words[0] == "payload")
                 {
+                    current.open_block = "payload";
                     current.payloads.push_back(join_from(words, 1));
                     break;
                 }
 
                 auto const number = value_of(words[1], "group");
                 REQUIRE(number.has_value());
+                current.open_block = "group";
                 current.groups.push_back({.name = words[0], .group = cc::from_string<u32>(number.value()).value()});
                 break;
             }
 
             // An indented line belongs to whichever unindented line opened the block it is in.
-            if (!current.payloads.empty() && current.groups.empty())
+            if (current.open_block == "inline_constants")
+            {
+                current.inline_constants.value() += '\n';
+                current.inline_constants.value() += join_from(words, 0);
+                break;
+            }
+
+            if (current.open_block == "payload")
             {
                 current.payloads.back() += '\n';
                 current.payloads.back() += join_from(words, 0);
                 break;
             }
 
-            if (!current.vertex_inputs.empty() && current.groups.empty())
+            if (current.open_block == "vertex_input")
             {
                 current.vertex_inputs.back() += '\n';
                 current.vertex_inputs.back() += join_from(words, 0);
@@ -474,9 +489,14 @@ TEST("slib - the binding corpus parses as it says it does")
         auto const& groups = parsed.value().groups;
 
         auto const& constants = parsed.value().inline_constants;
-        auto const rendered_constants = constants.has_value()
-                                          ? cc::format("{} space={}", constants.value().name, constants.value().space)
-                                          : cc::string();
+        auto rendered_constants = cc::string();
+        if (constants.has_value())
+        {
+            rendered_constants = cc::format("{} space={} type={} size={}", constants.value().name,
+                                            constants.value().space, constants.value().type, constants.value().size);
+            for (auto const& member : constants.value().members)
+                rendered_constants += cc::format("\n{} {} @{}", member.name, member.type, member.offset);
+        }
         auto const wanted_constants = c.inline_constants.has_value() ? c.inline_constants.value() : cc::string();
         if (rendered_constants != wanted_constants)
             CC_LOG_ERROR("[corpus] '{}' inline constants are [{}], expected [{}]", c.name, rendered_constants,
@@ -638,6 +658,11 @@ TEST("slib - an empty source declares no binding group")
 namespace
 {
 constexpr char const* k_inline_constants_shader = R"(
+struct frame_constants
+{
+    float exposure;
+};
+
 #pragma sc push_constants space=9
 ConstantBuffer<frame_constants> gConstants;
 )";

@@ -16,7 +16,8 @@
 #     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
-#   inline_constants <name> space=<n>                  unindented, since it belongs to no group
+#   inline_constants <name> space=<n> type=<T> size=<bytes>   unindented, since it belongs to no group,
+#     <member> <type> @<offset>                               with one line per member of the block's struct
 #   vertex_input <name> slot=<n> [per_instance]        unindented too, and one line per member follows
 #     <member> <type> <SEMANTIC><index>
 #   payload <name> size=<bytes>                        unindented, with one `<member> <type>` line per member
@@ -377,14 +378,122 @@ line 4: 'filter' takes one value or a tuple of three
 
 --- case an inline-constants block states its space, since its register is always b0
 --- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
 #pragma sc push_constants space=9
 ConstantBuffer<frame_constants> frame;
 --- groups
-inline_constants frame space=9
+inline_constants frame space=9 type=frame_constants size=16
+  exposure float @0
+
+
+--- case a constant block's members carry DXC's offsets, which Q14 measured
+--- hlsl
+struct frame_constants
+{
+    float2 a;
+    float3 b;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=32
+  a float2 @0
+  b float3 @16
+
+
+--- case a row is filled before it is left, so nothing is padded that need not be
+--- hlsl
+struct frame_constants
+{
+    float a;
+    float3 b;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=16
+  a float @0
+  b float3 @4
+
+
+--- case a bool takes four bytes in a constant block
+--- hlsl
+struct frame_constants
+{
+    bool flag;
+    float3 tint;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=16
+  flag bool @0
+  tint float3 @4
+
+
+--- case the block's struct may be declared after the block that names it
+--- hlsl
+#pragma sc push_constants space=1
+ConstantBuffer<frame_constants> frame;
+
+struct frame_constants
+{
+    float4 tint;
+};
+--- groups
+inline_constants frame space=1 type=frame_constants size=16
+  tint float4 @0
+
+
+--- case a block naming a struct the file does not declare is an error
+--- hlsl
+#pragma sc push_constants space=9
+ConstantBuffer<nowhere_constants> frame;
+--- error
+the inline-constants block 'frame' names a struct 'nowhere_constants' this file does not declare
+
+
+--- case an array in a constant block is refused, since the next member packs into its last row
+--- hlsl
+struct frame_constants
+{
+    float weights[4];
+    float probe;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: an array is not supported in a constant block, because the member after it packs into its last row
+
+
+--- case a matrix is refused for the same reason, and float3x3 is not portable at all
+--- hlsl
+struct frame_constants
+{
+    float4x4 transform;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: 'float4x4' is not a constant block type this pass knows
 
 
 --- case a block and a group live in one file, in different spaces
 --- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
 #pragma sc group 0
 namespace frame_bindings
 {
@@ -396,7 +505,8 @@ ConstantBuffer<frame_constants> constants;
 --- groups
 frame_bindings group=0
   albedo index=0 type=readonly_texture count=1 dim=tex_2d
-inline_constants constants space=9
+inline_constants constants space=9 type=frame_constants size=16
+  exposure float @0
 
 
 --- case `push_constants` describes a ConstantBuffer and nothing else

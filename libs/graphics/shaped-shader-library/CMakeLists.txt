@@ -158,6 +158,7 @@ if(SC_BUILD_TESTS)
             mesh.hlsl:vertex_input:vs_input
             mesh.hlsl:vertex_input:instance_input
             mesh.hlsl:payload:trace_payload
+            shade.hlsl:constants:gConstants
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.
