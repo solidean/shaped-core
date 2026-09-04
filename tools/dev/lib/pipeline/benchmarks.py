@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import Preset, Target
+from ..toolchain import jsruntime as jsr
 from .eligibility import _suggest, query_listing
 
 _CACHE_FILE = "benchmark-listings.json"
@@ -71,6 +72,7 @@ def collect_benchmarks(
     *,
     root: Path,
     binary_names: list[str] | None = None,
+    launcher: jsr.LazyLauncher | None = None,
 ) -> list[Benchmark]:
     """Every benchmark in the selected `*-test` binaries, sorted by name.
 
@@ -93,7 +95,7 @@ def collect_benchmarks(
         if stamp is not None and cached is not None and cached.get("stamp") == stamp:
             records = cached.get("tests", [])
         else:
-            listing = query_listing(preset, target, test_name=None, extra_args=["--benchmarks"], root=root)
+            listing = query_listing(preset, target, test_name=None, extra_args=["--benchmarks"], root=root, launcher=launcher)
             if listing is None:
                 continue
             records = [t for t in listing.tests if t.get("bucket") == "benchmark"]

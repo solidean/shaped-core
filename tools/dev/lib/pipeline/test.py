@@ -21,11 +21,8 @@ from ..core import console
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset
 from ..core.process import emsdk_env, run_step
+from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
-
-# Artifact suffixes that are not directly runnable and must be launched via node.
-# Emscripten emits a `<name>.js` loader next to the `.wasm`.
-_WASM_LAUNCH_SUFFIXES = {".js", ".mjs", ".wasm"}
 
 # nexus prints this when a name filter matches no tests in a binary.
 # With a filter active that is "nothing to run here", not a failure.
@@ -101,6 +98,7 @@ def test(
     mirror: bool = False,
     verbose: bool = False,
     emsdk_path: str | None = None,
+    runtime: jsr.JsRuntimeRequest | None = None,
 ) -> list[dict]:
     """Run the named test binaries, optionally filtered by `test_name`.
 
@@ -142,6 +140,9 @@ def test(
             else:
                 preset_base_env = wasm_env
 
+        # Resolved against the emsdk overlay above, since that is where node is expected to live.
+        launcher_for_preset = jsr.LazyLauncher(runtime, preset_base_env)
+
         records: list[dict] = []
         for name in binary_names:
             target = by_name.get(name)
@@ -149,12 +150,8 @@ def test(
                 continue
             xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
 
-            # Emscripten emits a non-executable .js/.wasm artifact; launch it via node.
-            launcher = (
-                ["node"]
-                if preset.is_emscripten or target.artifact.suffix.lower() in _WASM_LAUNCH_SUFFIXES
-                else []
-            )
+            # Emscripten emits a non-executable .js/.wasm artifact; hand it to the JS runtime instead.
+            launcher = launcher_for_preset.prefix() if jsr.needs_launcher(preset.is_emscripten, target.artifact) else []
             cmd = [*launcher, str(target.artifact)]
             if test_name:
                 cmd.append(test_name)

@@ -13,6 +13,8 @@ import sys
 
 from tools import dev
 
+from tools.dev.lib.toolchain import jsruntime as jsr
+
 from . import args as a
 from .context import Context
 
@@ -24,6 +26,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.jsruntime(p)
     a.profile(p)
     p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
     p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
@@ -64,9 +67,16 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if artifact is None:
         ctx.die(f"target {name!r} has no built artifact for preset {preset.name!r}")
 
+    # A wasm artifact is a .js loader plus a .wasm and cannot be executed directly.
+    launcher = (
+        jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args), dev.emsdk_env(args.emsdk_path)).prefix()
+        if jsr.needs_launcher(preset.is_emscripten, artifact)
+        else []
+    )
+
     # Mirrored by default: seeing the program's output IS the point of this command.
     result = dev.run_step(
-        [str(artifact), *program_args],
+        [*launcher, str(artifact), *program_args],
         step_type="run", name=name,
         build_dir=preset.build_dir, cwd=ctx.root,
         timeout=args.timeout if args.timeout else None,
