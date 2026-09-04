@@ -129,9 +129,9 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 
 ```cpp
 #include <shaped-shader-library/binding/binding_groups.hh>
-slib::shader_binding_group         // { cc::string name; u32 group; cc::vector<sg::binding> bindings; }
+slib::shader_binding_group         // { name; u32 group; vector<sg::binding> bindings; vector<declared_sampler> static_samplers }
                                    //   bindings are in declaration order -> position IS the layout slot
-slib::shader_inline_constants      // { cc::string name; u32 space; } -- register is always b0
+slib::declared_sampler             // { cc::string name; sg::sampler sampler } -- one marked `static`
 slib::shader_vertex_input          // { name; u32 slot; bool per_instance; vector<shader_struct_member> }
 slib::shader_payload               // { name; vector<shader_struct_member> members; isize size }
 slib::shader_inline_constants      // { name; u32 space; type; members (with offsets); isize size }
@@ -154,9 +154,14 @@ group::acquire_layout(ctx)         // -> sg::binding_group_layout_handle; consta
 group::acquire_layout(ctx, samplers)  // + static samplers for the ones the shader left undeclared;
                                    //   a declared one WINS, and supplying it again asserts
 group::self_check()                // -> cc::string; empty while the table still describes its own shader
+<NAMESPACE>::self_check()          // -> cc::string; every group in the package, for the owning target's test
+                                   //   NOT called on the render path: it re-parses the embedded source
+                                   //   a LIBRARY's generated header reaches its sibling <target>-test, which is what calls this
+                                   //   (sc_finalize_shader_packages hands it the include dir)
 group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
-                                   // -> cc::result<sg::binding_group_handle>; binds by SLOT, no name lookup
-                                   //   asserts the layout's structural_hash matches the one it was generated against
+                                   // -> sg::binding_group_handle; binds by SLOT, no name lookup
+                                   //   throws sg::binding_group_exception / device_lost_exception; try_create is the result twin
+                                   //   no layout check: create acquires its own, so a foreign one cannot reach it
 group{...}.create(ctx, sg::lifetime_scope::transient)  // a group rebuilt every frame belongs here, not in persistent
 group::bind(scope, *handle)        // void; binds at group_index, so no call site writes the number
 // one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
@@ -204,8 +209,11 @@ namespace frame_bindings
 // `#pragma sc push_constants space=<n>` before a ConstantBuffer makes it inline constants: register(b0,
 //   space<n>) on DXIL, [[vk::push_constant]] on SPIR-V. At most one per translation unit; block_size still
 //   comes from reflection.
+//   the space may NOT equal a group's number: b0 there is the group's first `b` binding.
 // `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
 //   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
+//   ONE counter across every annotated struct in the file, since a location is flat per stage.
+//   a member's type must have a vertex attribute format, so `bool` is refused here (it has none).
 // `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
 //   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
 //   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.

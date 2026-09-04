@@ -122,7 +122,8 @@ Both number a namespace's bindings by declaration order within its single block.
 A group of a texture then a sampler becomes `register(t0, space0)` and `register(s1, space0)`, matching `[[vk::binding(0, 0)]]` and `[[vk::binding(1, 0)]]`.
 That leaves gaps in each DXIL class's number line, which costs nothing: a register number is a name, not a position.
 What it buys is that the same declaration has the same address on both targets.
-Slot, declaration order and `sg::binding::index` are then one number, which is what lets a test compare addresses instead of only names.
+Slot, declaration order and `sg::binding::index` are then one number in a group with no arrays, which is what lets a test compare addresses instead of only names.
+An array binding consumes `count` indices, since DXIL numbers each element while SPIR-V numbers the array once, so past one the slot and the index part company.
 
 ### `static`
 
@@ -262,7 +263,8 @@ The generated `acquire_layout` compares its constant table against the compiled 
 The comparison is one-directional, because reflection reports only what the entry point referenced and its set is therefore a subset.
 
 One comparison, two reactions.
-At first acquire the table and the shader come from the same build, so a mismatch means the generator is wrong and `CC_ASSERT` is right.
+At first acquire the table and the shader come from the same build, so a mismatch means the generator is wrong.
+That is what the per-package self-check below establishes, from a test rather than from `acquire_layout`.
 After a hot reload the shader is legitimately newer than the table, so the same mismatch produces a failed shader.
 That is an error on the async node naming the binding that moved and what changed about it, the way a broken edit already does.
 So the comparison returns its difference rather than asserting internally, and each caller reacts.
@@ -341,6 +343,14 @@ So the tokenizer exists twice — once in Python for the generator, once in C++ 
   So the generator emits, beside the constant table, a check the C++ side runs.
   Parse the embedded source with `parse_binding_groups`, compare against the table Python produced from the same bytes, and fail with the first difference.
   Its corpus is every shader anyone declares, and it grows without anyone remembering to extend it.
+
+  **It runs from a test rather than from `acquire_layout`.**
+  Parsing every embedded source is a build-time property to establish once, not something a frame should pay for.
+  An assert on the render path only ever ran in a checked build anyway, so it could not fail a build either.
+  `<NAMESPACE>::self_check()` folds every group in the package into one message, beside the per-group `group::self_check()`.
+  A package declared by a *library* generates a header only that library can see.
+  So `sc_finalize_shader_packages` hands the generated include dir to the sibling `<target>-test` where there is one, and that test calls it.
+  A generated `TEST` in the package's own `.cc` would be the shorter answer and is the one thing ruled out: nexus is a leaf nothing in shaped-core links but test binaries.
 - **A shared corpus file.**
   One data file of HLSL snippets and their expected parse, covering the supported subset and every construct the pass must reject **with the exact error it must report**.
   Both sides read it, so a grammar case is added once rather than twice.
@@ -391,9 +401,12 @@ struct group
     [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(sg::context& ctx,
                                                                        cc::span<sg::named_sampler const> samplers);
 
-    /// Builds a group from the fields above, reporting any left unset.
+    /// Builds a group from the fields above, against the layout acquire_layout gives.
     /// The scope is the caller's because the lifetime is: a group rebuilt every frame belongs in `transient`.
-    [[nodiscard]] cc::result<sg::binding_group_handle> create(
+    /// Throws, since what can fail is the descriptor allocation and the device; try_create is the result twin.
+    [[nodiscard]] sg::binding_group_handle create(
+        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create(
         sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;
 
     /// Binds at the group index the annotation gave, so no call site writes the number.
@@ -490,7 +503,9 @@ Every other layout in the tree is built from reflected bindings, where position 
 
 `binding_slot` widens with it, from "meaningful only inside a `staging_binding_group`" to "a position in the layout's `bindings()`", and that doc change lands in the same commit.
 A slot from the wrong layout would otherwise be in range, wrong and silent, where a wrong *name* is an error message today.
-So the generated `create()` asserts the layout's `structural_hash` matches the one it was generated against.
+The generated `create()` closes that by construction rather than by a check.
+It calls its own `acquire_layout`, so the layout is built from the same constant table the slots came from and no foreign one can reach it.
+A caller that does hold a layout from elsewhere compares `binding_group_layout::structural_hash`.
 
 **The one piece of genuine work here** is dx12's split layout.
 It keeps separate `view_slots` and `sampler_slots` vectors, so a position in `bindings()` is not a position in `view_slots` once samplers interleave.

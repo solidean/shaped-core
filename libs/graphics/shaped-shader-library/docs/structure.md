@@ -46,13 +46,17 @@ src/shaped-shader-library/
     impl/watch_backend_windows.cc [done]        ReadDirectoryChangesW over one IOCP + one thread
     impl/watch_backend_none.cc    [in progress] the fallback everywhere else — Linux/macOS still to come
   binding/
-    binding_groups.hh/.cc         [in progress] parse_binding_groups + rewrite_binding_groups: the annotated
+    binding_groups.hh/.cc         [done]        parse_binding_groups + rewrite_binding_groups: the annotated
                                                 namespaces a source declares, and the same source with every
-                                                address written; group only, the other attributes still to come
+                                                address written; all five attributes
     impl/hlsl_tokens.hh/.cc       [done]        the tokenizer, plus the `#pragma sc name key=value` grammar
                                                 and `#line` tracking, so an error names a file the author wrote
     impl/hlsl_binding_types.hh/.cc [done]       HLSL type -> register class + sg::binding_type + dimension;
                                                 the table the rewriter and the generator must share exactly
+    impl/hlsl_value_types.hh/.cc  [done]        HLSL scalar/vector -> what a mirror declares, its size, and the
+                                                vertex attribute format it has (`bool` has none)
+    impl/hlsl_sampler_state.hh/.cc [done]       a `#pragma sc static` attribute -> sg::sampler, over sg's own
+                                                field and enumerator names
   compiler/
     shader_compiler.hh            [done]        the seam: one edge, language -> format
     dxc_compiler.hh/.cc           [done]        hlsl -> dxil via ssc::dxc; only when SLIB_HAS_DXC
@@ -61,7 +65,7 @@ src/shaped-shader-library/
                                                 filesystem wake it, else polls; stages + drives recompiles
 tests/data/
   binding-corpus.txt              [done]        HLSL snippets and their expected parse, or the exact error;
-                                                shared with the build-time generator once it exists
+                                                read by both halves of the pass, so a case is added once
 cmake/
   ShaderPackage.cmake             [done]        sc_add_shader_package + sc_finalize_shader_packages
   generate_shader_package.py      [done]        build-time codegen: symbols, table, embedded include closure,

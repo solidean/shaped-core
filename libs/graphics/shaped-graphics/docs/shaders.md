@@ -183,7 +183,7 @@ Two of them are still said by hand today, and the third is what the binding prep
 - **Bindings.**
   SPIR-V needs a set and a binding number on every resource.
   DXIL only looks like it needs neither: DXC numbers what an entry point references, so two stages of one pipeline can disagree about a resource neither of them numbered.
-  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) takes this over, and the group half of it has landed:
+  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) takes this over, and it has landed:
 
   ```hlsl
   #pragma sc group 0

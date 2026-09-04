@@ -65,8 +65,9 @@ struct sg::named_view
 /// bindings each.
 ///
 /// A slot from the wrong layout is in range, wrong and silent, where a wrong *name* is an error message.
-/// So a caller holding slots is expected to check it is talking to the layout it was built against, which a
-/// generated group does with `binding_group_layout::structural_hash`.
+/// So a caller holding slots owes it to itself to know which layout they came from, and the cheapest way is to
+/// acquire that layout from the same place the slots came from — which is what a generated group does.
+/// Where the layout arrives from elsewhere, `binding_group_layout::structural_hash` is what compares the two.
 ///
 /// `create_binding_group` is overloaded on which of the two a call passes, so a bare `{}` for "no views" is
 /// ambiguous and has to name the span type it means.
