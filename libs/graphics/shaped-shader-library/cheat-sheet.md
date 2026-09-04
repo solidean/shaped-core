@@ -155,7 +155,10 @@ group::acquire_layout(ctx, samplers)  // + static samplers for the ones the shad
                                    //   a declared one WINS, and supplying it again asserts
 group::self_check()                // -> cc::string; empty while the table still describes its own shader
 group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
-                                   // -> cc::result<sg::binding_group_handle>
+                                   // -> cc::result<sg::binding_group_handle>; binds by SLOT, no name lookup
+                                   //   asserts the layout's structural_hash matches the one it was generated against
+group{...}.create(ctx, sg::lifetime_scope::transient)  // a group rebuilt every frame belongs here, not in persistent
+group::bind(scope, *handle)        // void; binds at group_index, so no call site writes the number
 // one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
 // a `static` sampler has NO member -- it is baked into the layout, though it still takes its slot.
 // the layout is built from the full DECLARED table, not from whatever subset one stage reflected.

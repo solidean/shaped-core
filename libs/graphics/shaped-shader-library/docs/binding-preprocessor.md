@@ -392,7 +392,9 @@ struct group
                                                                        cc::span<sg::named_sampler const> samplers);
 
     /// Builds a group from the fields above, reporting any left unset.
-    [[nodiscard]] cc::result<sg::binding_group_handle> create(sg::context& ctx) const;
+    /// The scope is the caller's because the lifetime is: a group rebuilt every frame belongs in `transient`.
+    [[nodiscard]] cc::result<sg::binding_group_handle> create(
+        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;
 
     /// Binds at the group index the annotation gave, so no call site writes the number.
     static void bind(auto& scope, sg::binding_group const& g);
@@ -516,10 +518,19 @@ Error messages recover the name from `layout->bindings()[slot].name`, so nothing
 5. **[done] The mirror structs**, and the `push_constants`, `payload` and `vertex_input` attributes, after the spike pins the payload's packing.
    The generated vertex layout lands here too, since it is the same parse and the same packing engine.
    The constant-block subset is scalars, vectors and `bool`; an array, a matrix or a nested struct is refused rather than mirrored, each for a reason Q14 measured.
-6. **`sg::slotted_view`**, the `binding_slot` doc widening, the dx12 remap, and the resolve-then-delegate refactor in both backends.
-7. **Port a real shader.**
+6. **[done] `sg::slotted_view`**, the `binding_slot` doc widening, the dx12 remap, and the resolve-then-delegate refactor in both backends.
+7. **[done] Port a real shader.**
    `imgui.hlsl` is the best first target: it has a texture, a static sampler and an inline-constants block, and its group is rebuilt whenever the bound texture changes.
    So it exercises the layout, the sampler declaration and the indexed path at once.
+   `imgui-routine-test.cc` already draws that shader on a WARP device and reads the pixels back, so the port is proven end to end rather than by a build.
+
+The port asked for two things the sketch above had and the generator did not, and left one gap open.
+
+- **`create` takes a lifetime scope.** imgui rebuilds its group on every texture switch, so `persistent` would leak a descriptor allocation per frame.
+- **`bind` is generated.** It was in the sketch from the start and simply had not been emitted.
+- **An inline-constants block still reaches `pipeline_layout_description` through reflection.**
+  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `uniform_buffer`.
+  Worth closing, and not in the way of anything: the address is already a constant the pass wrote.
 
 Steps 2 and 3 are worth landing before the rest is designed in detail.
 The parse is what everything else is built on, and its subset will move once real shaders meet it.

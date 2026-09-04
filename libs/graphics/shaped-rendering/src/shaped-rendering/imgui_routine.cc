@@ -17,6 +17,14 @@
 #include <shaped-rendering/window.hh>
 #include <sr_shaders.hh>
 
+// imgui.hlsl's constant block reaches C++ as a generated mirror, so what the routine sends is checked against
+// the shader rather than against a comment.
+// impl::imgui_ortho_constants stays: the arithmetic wants tg::vec2f, and the mirror is plain floats.
+static_assert(sizeof(sr::impl::imgui_ortho_constants) == sizeof(sr::shaders::imgui_constants),
+              "the ortho constants are not the size imgui.hlsl's block states");
+static_assert(offsetof(sr::shaders::imgui_constants, scale) == 0, "scale moved in imgui.hlsl");
+static_assert(offsetof(sr::shaders::imgui_constants, translate) == sizeof(tg::vec2f), "translate moved in imgui.hlsl");
+
 // ImDrawVert is {ImVec2 pos; ImVec2 uv; ImU32 col;} — 20 bytes, matching imgui.hlsl's vs_input.
 // Kept in the .cc: this is the routine's private wiring, not a layout to impose on a consumer that might reasonably want a different one.
 // rgba8_unorm is what decodes the packed ImU32 to [0,1] with no transfer function applied, which is exactly right for imgui's already-sRGB-encoded colors.
@@ -160,15 +168,10 @@ void imgui_routine::init_declare(sg::context& ctx)
         return;
     }
 
-    // Group 0 is built from the *fragment* bindings alone.
-    // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).
-    // gSampler is name-matched here as a static sampler, so it is baked into the layout and costs no per-group descriptor;
-    // clamp-to-edge stops the atlas bleeding across glyph edges.
-    _group_layout = ctx.cached.acquire_binding_group_layout(
-        compiled_ps->bindings, {sg::named_sampler{.name = "gSampler",
-                                                  .sampler = {.address_u = sg::sampler_address_mode::clamp_edge,
-                                                              .address_v = sg::sampler_address_mode::clamp_edge,
-                                                              .address_w = sg::sampler_address_mode::clamp_edge}}});
+    // The group is what the shader declared, not what a stage happened to reference, so nothing here consults
+    // reflection and nothing has to keep the sampler's name or its state in step with the HLSL.
+    // The inline constants stay out of it by construction: a push_constants block is not a group member.
+    _group_layout = shaders::imgui_bindings::group::acquire_layout(ctx);
 
     // The vertex stage's only binding is the 16-byte ortho block, which rides as root constants.
     auto const* const constants_binding = [&]() -> sg::binding const*
@@ -307,10 +310,13 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 
                 // Transient: one descriptor allocation per texture switch, recycled with the epoch.
                 // With a single font atlas that is one group for the whole frame.
-                bound_group = ctx.transient.create_binding_group(
-                    self->_group_layout,
-                    {sg::named_view{.name = "gTexture", .view = texture.value().as_readonly_view()}});
-                scope.bind_group(0, *bound_group);
+                auto group = shaders::imgui_bindings::group{.texture = texture.value().as_readonly_view()}.create(
+                    ctx, sg::lifetime_scope::transient);
+                if (group.has_error())
+                    continue; // the layout moved under us; skip rather than bind garbage
+
+                bound_group = cc::move(group.value());
+                shaders::imgui_bindings::group::bind(scope, *bound_group);
                 bound_texture = dc.GetTexID();
             }
 
