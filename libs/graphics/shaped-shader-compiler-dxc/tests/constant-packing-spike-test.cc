@@ -18,9 +18,8 @@ using namespace cc::primitive_defines;
 // Both targets are checked, because the SPIR-V arm compiles with -fvk-use-dx-layout precisely so that one
 // CPU-side struct can serve both — and that flag is only worth having if it actually holds.
 //
-// Three of these came out other than the folklore says, which is the whole reason for measuring:
+// Two of these came out other than the folklore says, which is the whole reason for measuring:
 //   - an array's stride is 16, but its LAST element does not claim the rest of its row;
-//   - a nested struct is NOT row-aligned and NOT rounded up to a row;
 //   - `row_major float3x3` followed by anything is not portable at all — SPIR-V rejects the module.
 
 #ifdef CC_OS_WINDOWS
@@ -129,14 +128,31 @@ TEST("portable-hlsl spike - Q14c a matrix is rows, and float3x3 is not portable 
     CHECK(block_size_of("    row_major float3x3 m;\n    float probe;", ssc::dxc::compile_target::spirv) == -1);
 }
 
-TEST("portable-hlsl spike - Q14d a nested struct is neither row-aligned nor rounded up")
+TEST("portable-hlsl spike - Q14d a nested struct starts a row, but does not round up to one")
 {
-    // The folklore says a nested struct starts a row and occupies whole rows.
-    // It does not, on either target: the inner float sits at 0 and `probe` follows at 4, for 8 -> 16.
-    check_rule("a nested struct packs inline", "    struct { float x; } s;\n    float probe;", 16);
+    // Two halves, and each needs a case where the two readings differ across a row boundary — a case that
+    // lands on the same total either way proves nothing, which is how the second half was got wrong first.
+    //
+    // The START is row-aligned: s cannot pack into x's row, so v lands at 16 and probe at 20, for 24 -> 32.
+    // Packed inline, v would land at 4 and probe at 8, for 12 -> 16.
+    check_rule("a nested struct starts a row", "    float x;\n    struct { float v; } s;\n    float probe;", 32);
 
-    // And a named struct type behaves the same, so it is not an artefact of declaring one inline.
+    // The END is not: probe packs against the struct's last member rather than being pushed to the next row.
+    // s at 0 either way, so this is only about what follows it: probe at 4 gives 8 -> 16, probe at 16 gives 32.
+    check_rule("a nested struct does not round up", "    struct { float x; } s;\n    float probe;", 16);
+
+    // And a named struct type behaves the same, so neither half is an artefact of declaring one inline.
     check_rule("a named nested struct too", "    inner s;\n    float probe;", 16, "struct inner { float x; };");
+}
+
+TEST("portable-hlsl spike - Q14f an array starts a row, and the total rounds up to one")
+{
+    // An array does start its own row: x at 0, a[0] at 16 rather than at 4, a[1] at 32, probe at 36 -> 48.
+    // If the array had packed against x, the total would be 32.
+    check_rule("an array starts a row", "    float x;\n    float a[2];\n    float probe;", 48);
+
+    // And the block's own total rounds up to a whole row, which is why every case above is a multiple of 16.
+    check_rule("the total rounds up to a row", "    float probe;", 16);
 }
 
 TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
