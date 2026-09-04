@@ -171,6 +171,8 @@ sc_add_shader_package(
         layout.hlsl:fragment:border_ps
         layout.hlsl:fragment:view_ps
         layout.hlsl:fragment:wipe_ps
+        layout.hlsl:binding:layout_bindings
+        layout.hlsl:constants:constants
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
