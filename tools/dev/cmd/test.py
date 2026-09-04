@@ -90,7 +90,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             auto_configure=not args.no_configure,
             mirror=args.mirror_output, verbose=args.verbose,
             emsdk_path=args.emsdk_path,
-            runtime=jsr.JsRuntimeRequest.from_args(args),
         )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
@@ -141,6 +140,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             mirror=args.mirror_output,
             verbose=args.verbose,
             emsdk_path=args.emsdk_path,
+            runtime=jsr.JsRuntimeRequest.from_args(args),
         )
 
         if any(r["returncode"] != 0 for r in records):
