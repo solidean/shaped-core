@@ -41,13 +41,15 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
-| WebAssembly + threads | wasm32 | Emscripten (Clang) | 3 | `-pthread`; planned |
-| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 3 | emdawnwebgpu; planned |
+| WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
+| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | No CI — emdawnwebgpu; `emscripten-webgpu-*` presets, and `emscripten-threads-webgpu-*` for both |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
 | Consoles | — | vendor toolchains | 3 | planned |
 
-The Tier-3 WebAssembly variants have configure knobs already: `SC_THREADS`, `SC_WASM_WEBGPU` and `SC_WASM_EXCEPTIONS`.
-They fail configure today with a clear "not yet supported" message rather than building — [requirements.md](requirements.md#emscripten--wasm) owns those knobs.
+Threads and WebGPU are independent knobs — `SC_THREADS` and `SC_WASM_WEBGPU` — so the wasm presets span all four of their combinations.
+All four build and run their suites; only the plain one is gated in CI, which is what keeps the other three at Tier 2.
+They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
 
 ### SteamOS
 

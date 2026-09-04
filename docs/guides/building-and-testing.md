@@ -180,7 +180,20 @@ Reach for `--build-suffix` only when you want a name the auto-redirect would not
 
 ### WebAssembly (Emscripten)
 
-The `emscripten-{debug,relwithdebinfo,release}` presets cross-compile to WASM, single-threaded.
+The `emscripten-*` presets cross-compile to WASM.
+Two features are optional and independent of each other, so there are four cells, each in `debug` / `relwithdebinfo` / `release`:
+
+| Preset | Threads | WebGPU | What it is for |
+|--------|---------|--------|----------------|
+| `emscripten-<type>` | no | no | the lightweight build, and the only cell CI gates |
+| `emscripten-threads-<type>` | yes | no | high-performance compute that needs no graphics |
+| `emscripten-webgpu-<type>` | no | yes | graphics on a host that serves no special headers |
+| `emscripten-threads-webgpu-<type>` | yes | yes | the full browser-graphics tier |
+
+The two middle rows are deployment tiers rather than points on a performance gradient.
+Threads mean `SharedArrayBuffer`, which means the page must be cross-origin isolated and therefore served with COOP/COEP headers; WebGPU on its own requires neither.
+So a no-threads WebGPU build drops onto any static host, and a threaded one does not.
+
 They need the [emsdk](https://github.com/emscripten-core/emsdk); point dev.py at it with `--emsdk-path`, `SC_EMSDK_PATH`, or an activated `EMSDK`.
 dev.py applies the emsdk environment itself, so no permanent activation is required:
 
@@ -190,6 +203,26 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 
 The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node and parses the same JUnit report as native runs.
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
+
+#### Which runtime executes the artifact
+
+A preset says what to compile; `--runtime` says what runs the result.
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo                          # node, the default
+uv run dev.py test --preset emscripten-webgpu-relwithdebinfo --runtime deno
+```
+
+node and deno carry different WebGPU implementations: node's binding is Dawn, which Chrome ships, and deno's is wgpu, which Firefox ships.
+Running a graphics build under both is therefore how both browser engines get covered from the CLI, with no browser involved.
+
+node is the default because it is what CI runs and what the emsdk bundles, so a bare `dev.py test` means the same thing on every machine.
+deno is opt-in rather than picked up when present.
+A default that followed whatever happened to be installed would let two machines silently exercise two different WebGPU implementations, which is the divergence the pair exists to catch.
+
+`--node-path` and `--deno-path` name a specific install, and selecting one of them selects that runtime.
+`SC_JS_RUNTIME`, `SC_NODE_PATH` and `SC_DENO_PATH` are the environment-variable equivalents.
+The same three flags are on `run`, `example` and `benchmark`.
 
 **Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.

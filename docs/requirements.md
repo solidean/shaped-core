@@ -64,13 +64,14 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 ```
 
 Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`.
-Tests run under Node: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
-Only the single-threaded, no-WebGPU, `-fexceptions` combination is wired today.
-The `SC_THREADS=ON` / `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear "not yet supported" message — Tier 3 in [platforms.md](platforms.md).
+Tests run under Node by default: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
+Deno runs the same artifacts unchanged; `--runtime` picks between them, and [guides/building-and-testing.md](guides/building-and-testing.md#which-runtime-executes-the-artifact) is how.
+Threads and WebGPU are both wired, as the `emscripten-threads-*`, `emscripten-webgpu-*` and `emscripten-threads-webgpu-*` presets.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one remaining knob that fails configure as not-yet-supported.
 
-Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and the `wasm-emscripten-*` presets set it `OFF`.
-A hand-rolled wasm configure must too: leaving the `ON` default fails rather than silently building single-threaded.
-To develop that mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
+Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and each wasm preset sets it explicitly.
+`-pthread` is what predefines `__EMSCRIPTEN_PTHREADS__`, which is what clean-core's `CC_HAS_THREADS` reads, so the flag is the whole of the wiring.
+To develop the single-threaded mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
 
 ### WebGPU test runtimes
 
