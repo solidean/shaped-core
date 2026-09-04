@@ -505,6 +505,18 @@ public:
     /// Greater-than-or-equal comparison between two string_views.
     [[nodiscard]] friend constexpr bool operator>=(string_view lhs, string_view rhs) { return lhs.compare(rhs) >= 0; }
 
+    // case
+public:
+    /// An ASCII-lowercased copy; every byte outside `A`-`Z` is left exactly as it is.
+    ///
+    /// `_ascii` because that is the whole promise: a string_view is UTF-8, and `Ä` and every other non-ASCII letter
+    /// comes back unchanged.
+    /// Defined out of line so this header keeps knowing nothing about cc::string beyond its forward declaration.
+    [[nodiscard]] cc::string to_lower_ascii() const;
+
+    /// An ASCII-uppercased copy, on the same terms.
+    [[nodiscard]] cc::string to_upper_ascii() const;
+
     // hashing
 public:
     /// Structural hash over the viewed bytes via cc::make_hash_of_bytes (XXH3-64).

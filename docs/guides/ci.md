@@ -33,7 +33,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-windows-msvc-vs2026.yml](../../.github/workflows/ci-windows-msvc-vs2026.yml) | `windows-2025-vs2026` | `relwithdebinfo-msvc`, `--toolset 14.51` (VS 2026) |
 | [ci-windows-arm-msvc.yml](../../.github/workflows/ci-windows-arm-msvc.yml) | `windows-11-arm` | `relwithdebinfo-arm64-windows-msvc`, `--toolset 14.44` (VS 2022, native arm64) |
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
-| [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert clang 22) |
+| [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert the `llvm@22` formula) |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
@@ -125,9 +125,11 @@ Per-platform specifics:
 - **Windows clang** (`windows-latest`) uses the preinstalled **LLVM (clang 20)** `clang-cl`, with `dev.py` injecting the MSVC environment via `vswhere`.
   `clang-cl` is a single unversioned binary with no `clang++-N` to swap to, so `--toolset 20` here *asserts* it is clang 20 rather than selecting it — a hard error if the base image moves on.
   Riding clang 20, a touch behind the 21 target, is fine because the clang-format and clang-tidy gates run on Linux clang 21, so Windows clang only needs to *compile* clean.
-- **macOS** (`macos-latest`, arm64) needs Homebrew LLVM: the `macos-arm-llvm-*` presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm/bin/clang++` and link Homebrew `libc++`.
-  So the job runs `brew install llvm ninja` — CMake ships on the runner, and this is a distinct toolchain from the image's system Apple clang.
-  Homebrew's `clang++` is unversioned, so `--toolset 22` *asserts* it is clang 22 rather than selecting it, which is loud if a Homebrew bump changes it.
+- **macOS** (`macos-latest`, arm64) needs Homebrew LLVM: the `macos-arm-llvm-*` presets point `CMAKE_CXX_COMPILER` at `/opt/homebrew/opt/llvm@22/bin/clang++` and link Homebrew `libc++`.
+  So the job runs `brew install llvm@22 ninja` — CMake ships on the runner, and this is a distinct toolchain from the image's system Apple clang.
+  **The formula is versioned on purpose.**
+  The unversioned `llvm` is whatever Homebrew ships today, so a build pinned to it breaks the day upstream moves — which it did, from 22 to 23, with nothing in the repo having changed.
+  `--toolset 22` stays as the assertion that the formula is the version we think it is.
 - **WASM** uses the official `emscripten-core/setup-emsdk` action, pinned to a fixed Emscripten version (`EMSCRIPTEN_VERSION`) with the emsdk cached across runs.
   `dev.py` gets `--emsdk-path "$EMSDK"` on doctor, build and test; tests run under Node.
 - **Windows ARM** (`windows-11-arm`, native arm64) uses VS 2022's MSVC pinned with `--toolset 14.44`, like the x64 job.

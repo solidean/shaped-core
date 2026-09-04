@@ -38,6 +38,14 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
+# Mbed TLS, committed in-source: the TLS handshake and record layer behind clean-net's TLS connections.
+# Vendored rather than fetched because a build that cannot do HTTPS is not a working build of clean-net -- the same
+# always-present argument zstd and zlib make, and the reason there is no configuration in which this may be absent.
+# It is the largest thing vendored in source here (~8 MB across 272 files), which is the price of that guarantee.
+# Mbed TLS rather than OpenSSL or BoringSSL: plain CMake, no external toolchain, and it builds unchanged on all eight
+# platform/compiler combinations CI covers -- three of which (Linux, Android, wasm) have no system TLS API at all.
+option(SC_USE_VENDORED_MBEDTLS "Build the in-tree vendored Mbed TLS (OFF expects an external `mbedtls` target)" ON)
+
 # SPIRV-Reflect, committed in-source (three files).
 # Backs shaped-shader-compiler-dxc's SPIR-V reflection: a module carries its bindings in its own instruction stream, so
 # reading them back is a parser rather than a query, and DXC emits no reflection container for a -spirv compile.
@@ -104,6 +112,10 @@ endif()
 
 if(SC_USE_VENDORED_SPNG)
     add_subdirectory(libspng)
+endif()
+
+if(SC_USE_VENDORED_MBEDTLS)
+    add_subdirectory(mbedtls)
 endif()
 
 if(SC_USE_VENDORED_SPIRV_REFLECT)

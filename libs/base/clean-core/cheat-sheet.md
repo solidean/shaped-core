@@ -1296,6 +1296,9 @@ auto const g = cc::leak_scope();                    // ...and this for what it O
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
                                                     // + EVERY other thread's stack (Windows; where a hang lives)
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
+cc::report_all_thread_stacks("why");                // the SAME report with nothing having crashed — for a wait that
+                                                    // never finished, where the thread that noticed is never the one
+                                                    // that matters. Suspends the others while it walks them.
 ```
 
 ### System info & resource metrics (see [systems/system-info](docs/systems/system-info.md))
