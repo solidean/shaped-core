@@ -6,14 +6,6 @@ namespace cnet
 {
 namespace
 {
-[[nodiscard]] cc::string to_lower(cc::string_view text)
-{
-    auto out = cc::string();
-    for (auto const c : text)
-        out += c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c;
-    return out;
-}
-
 [[nodiscard]] error refused(cc::string_view why, cc::string_view what)
 {
     return {.code = error_code::invalid_argument, .native_code = 0, .message = cc::format("{}: {}", why, what)};
@@ -36,7 +28,7 @@ cc::result<http_target, error> http_target::from_uri(cc::uri url)
     if (!view.is_absolute())
         return cc::error(refused("a relative URL has nothing to connect to", view.text()));
 
-    auto const scheme = to_lower(view.scheme());
+    auto const scheme = view.scheme().to_lower_ascii();
     if (scheme != "http" && scheme != "https")
         return cc::error(refused("not an http or https URL", view.text()));
 
@@ -62,7 +54,7 @@ cc::result<http_target, error> http_target::from_uri(cc::uri url)
         return cc::error(refused("a percent-escape in the host is not accepted", view.text()));
 
     auto target = http_target();
-    target.host = to_lower(host_text);
+    target.host = host_text.to_lower_ascii();
     target.secure = scheme == "https";
 
     if (view.has_port())
@@ -98,7 +90,7 @@ cc::string http_target::request_target() const
 
 cc::string http_target::origin() const
 {
-    auto const scheme = to_lower(url.view().scheme());
+    auto const scheme = url.view().scheme().to_lower_ascii();
     auto const bracketed = host.contains(':') ? cc::format("[{}]", host) : host;
 
     auto const default_port = secure ? 443 : 80;

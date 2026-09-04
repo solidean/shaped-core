@@ -197,7 +197,7 @@ struct cc::uri
     /// Parse and own a copy of `text`; the same grammar as uri_view::parse.
     [[nodiscard]] static cc::optional<uri> parse(cc::string_view text);
 
-    /// Take ownership of already-parsed text.
+    /// Take ownership of already-parsed text; `text` must be byte-identical to what produced `parts`.
     [[nodiscard]] static uri from_parsed(cc::string text, cc::impl::uri_parts const& parts);
 
     /// A view over this object's text.
@@ -208,18 +208,24 @@ struct cc::uri
     [[nodiscard]] cc::string_view text() const { return _text; }
     [[nodiscard]] cc::string const& owned_text() const { return _text; }
 
+    /// The whole of uri_view's surface, forwarded.
+    /// All of it rather than a useful subset: a gap here sends a caller to view() once and then always.
     [[nodiscard]] cc::string_view scheme() const { return view().scheme(); }
     [[nodiscard]] bool is_absolute() const { return view().is_absolute(); }
     [[nodiscard]] bool has_authority() const { return view().has_authority(); }
     [[nodiscard]] cc::string_view authority() const { return view().authority(); }
+    [[nodiscard]] bool has_userinfo() const { return view().has_userinfo(); }
     [[nodiscard]] cc::string_view userinfo() const { return view().userinfo(); }
     [[nodiscard]] cc::string_view host() const { return view().host(); }
+    [[nodiscard]] bool has_port() const { return view().has_port(); }
+    [[nodiscard]] cc::string_view port_text() const { return view().port_text(); }
     [[nodiscard]] cc::optional<i32> port() const { return view().port(); }
     [[nodiscard]] cc::string_view path() const { return view().path(); }
     [[nodiscard]] bool has_query() const { return view().has_query(); }
     [[nodiscard]] cc::string_view query() const { return view().query(); }
     [[nodiscard]] bool has_fragment() const { return view().has_fragment(); }
     [[nodiscard]] cc::string_view fragment() const { return view().fragment(); }
+    [[nodiscard]] cc::impl::uri_parts const& parts() const { return _parts; }
 
     /// Resolve a relative reference against this URI as the base (RFC 3986 section 5.2).
     ///

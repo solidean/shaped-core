@@ -608,14 +608,6 @@ string normalize_escapes(string_view s)
     return out;
 }
 
-string to_lower_ascii(string_view s)
-{
-    auto out = string();
-    out.reserve_back(s.size());
-    for (auto const c : s)
-        out.push_back(cc::to_lower(c));
-    return out;
-}
 } // namespace
 
 uri uri::normalized() const
@@ -625,7 +617,7 @@ uri uri::normalized() const
 
     if (v.is_absolute())
     {
-        out += to_lower_ascii(v.scheme());
+        out += v.scheme().to_lower_ascii();
         out.push_back(':');
     }
 
@@ -637,7 +629,7 @@ uri uri::normalized() const
             out += normalize_escapes(v.userinfo());
             out.push_back('@');
         }
-        out += to_lower_ascii(normalize_escapes(v.host()));
+        out += cc::string_view(normalize_escapes(v.host())).to_lower_ascii();
         if (v.has_port())
         {
             out.push_back(':');
