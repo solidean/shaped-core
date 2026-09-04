@@ -1,6 +1,6 @@
-# babel-serializer structure (babel::)
+# babel structure (babel::)
 
-The living roadmap for babel-serializer.
+The living roadmap for babel — both libraries, babel-data and babel-serializer, since the namespace and the format set are one.
 Section headers carry a status tag:
 
 - **[done]** — implemented and tested
@@ -16,12 +16,17 @@ The design of a format that already exists lives in that format's own header, wh
 
 ## Top-level structure
 
+A format's folder says what it parses; which of the two libraries it lives in says what it needs to link.
+
 ```text
-src/babel-serializer/
-  data/        [in progress]   text / structured data formats
+babel-data/src/babel-data/
+  data/        [in progress]   text / structured data formats over clean-core alone
     base64     [done]          codec (both alphabets; optional padding)
     json       [done]          reader
     markdown   [done]          block-level reader (no inline parsing)
+
+babel-serializer/src/babel-serializer/
+  data/        [in progress]   text / structured data formats needing more than clean-core
     sqlite     [done]          live database engine (read/write, transactions, incremental blob reads; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
@@ -39,13 +44,13 @@ src/babel-serializer/
 ### base64 [done]
 
 A plain codec, not a format reader — no `data` structure and no `read`, just four functions.
-Design and tolerances: [base64.hh](../src/babel-serializer/data/base64.hh).
+Design and tolerances: [base64.hh](../../babel-data/src/babel-data/data/base64.hh).
 
 No refinements planned.
 
 ### json [done]
 
-Reader only, into the flat document shape [json.hh](../src/babel-serializer/data/json.hh) describes.
+Reader only, into the flat document shape [json.hh](../../babel-data/src/babel-data/data/json.hh) describes.
 
 - `[planned]` **writer** — a separate `babel::json::write` API with its own builder type, not the reader's `document`.
 - `[planned]` **richer errors** — a `parse_error` with line/column; today a `cc::result` message carrying the byte offset.
@@ -56,7 +61,7 @@ Reader only, into the flat document shape [json.hh](../src/babel-serializer/data
 ### markdown [done]
 
 Reader only, and **block level only** — the deliberate cut that makes a first version tractable.
-It shares json's flat document shape exactly, so knowing one reader is knowing the other; see [markdown.hh](../src/babel-serializer/data/markdown.hh).
+It shares json's flat document shape exactly, so knowing one reader is knowing the other; see [markdown.hh](../../babel-data/src/babel-data/data/markdown.hh).
 
 - `[planned]` **inline parsing** — emphasis, links, code spans and images as child nodes under a paragraph.
   This is the single biggest cut, and it is why there is no `emphasis` / `link` / `code_span` node kind.

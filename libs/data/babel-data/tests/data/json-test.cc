@@ -1,4 +1,4 @@
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/common/assert.hh>  // CC_ASSERT_ENABLED
 #include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/span.hh>

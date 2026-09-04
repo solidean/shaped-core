@@ -1,6 +1,6 @@
 #include "html_export.hh"
 
-#include <babel-serializer/data/json.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/string/format.hh>
 #include <instruction-tracer/report/source_view.hh>

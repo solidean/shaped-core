@@ -1,4 +1,4 @@
-#include <babel-serializer/data/markdown.hh>
+#include <babel-data/data/markdown.hh>
 #include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/span.hh>
 #include <clean-core/streams/stream.hh>

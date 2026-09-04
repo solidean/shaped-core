@@ -1,4 +1,4 @@
-#include <babel-serializer/image/image.hh>
+#include <babel-data/data/json.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/listener.hh>
@@ -10,11 +10,11 @@
 
 using namespace cc::primitive_defines;
 
-// What babel records about its own work.
+// What babel-data records about its own work.
 //
 // A scope nobody can find is a scope that will be deleted by the next person who touches the function, so the ones
 // that earn their keep are pinned here — as is the sub-domain each is attributed to, which is what makes
-// "show me only the image decoder" possible at all.
+// "show me only the JSON reader" possible at all.
 
 namespace
 {
@@ -61,38 +61,31 @@ scope_probe probe_scopes(cc::rec::recording const& r, cc::string_view name)
 }
 } // namespace
 
-TEST("babel/recording - an image decode is scoped and counts its bytes", nx::config::exclusive(), nx::config::owns_recorder)
+TEST("babel/recording - a json parse is scoped only once it is big enough",
+     nx::config::exclusive(),
+     nx::config::owns_recorder)
 {
-    // A 1x1 PNG, so the test needs no fixture on disk.
-    // Bytes rather than a generated image: encoding one first would put an image.encode span in the recording too.
-    constexpr u8 png_1x1[] = {
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
-        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00,
-        0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18,
-        0xDD, 0x8D, 0xB0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    };
-
     rec_fixture const fixture;
 
     cc::rec::recording_listener rl;
     auto const handle = cc::rec::register_listener(rl);
 
-    auto const decoded
-        = babel::image::read(cc::span<byte const>(reinterpret_cast<byte const*>(png_1x1), sizeof(png_1x1)));
+    // Small: a value rather than a document, and gating it is the whole point of CC_RECORD_SCOPE_IF.
+    (void)babel::json::read(cc::string_view("{\"a\":1}"));
+
+    // Big: comfortably past the threshold, so it earns a span.
+    auto big = cc::string("[");
+    while (big.size() < 200 * 1024)
+        big += "1,";
+    big += "1]";
+    (void)babel::json::read(cc::string_view(big));
 
     cc::rec::flush_blocking();
     cc::rec::unregister_listener(handle);
 
     auto const r = rl.take();
+    auto const json = probe_scopes(r, "json.read");
 
-    CHECK(decoded.has_value());
-
-    // The aggregator's span, and the codec's underneath it — which is what makes a trace read as "load an image".
-    auto const image_scope = probe_scopes(r, "image.read");
-    auto const png_scope = probe_scopes(r, "png.read");
-
-    CHECK(image_scope.count == 1);
-    CHECK(image_scope.domain == "babel.image");
-    CHECK(png_scope.count == 1);
-    CHECK(png_scope.domain == "babel.png");
+    CHECK(json.count == 1);
+    CHECK(json.domain == "babel.json"); // its own sub-domain, so it silences separately from the mesh readers
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <babel-serializer/fwd.hh>
+#include <babel-data/fwd.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
@@ -19,7 +19,7 @@
 // nested bullet and ordered lists, block quotes, and thematic breaks.
 // Inline spans (emphasis, links, code spans) are NOT parsed — a paragraph's or heading's text() is the raw
 // source text, so `**bold**` comes back with its asterisks.
-// See ../../../docs/structure.md for what else is deliberately out of v1.
+// See ../../../../babel-serializer/docs/structure.md for what else is deliberately out of v1.
 //
 // Every input is valid markdown — there is no such thing as a parse error here.
 // The cc::result exists for I/O failure on the stream and for API consistency with the other readers.

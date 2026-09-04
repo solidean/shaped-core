@@ -120,7 +120,7 @@ Two consequences worth knowing:
 
 * **Adding a corpus file needs no CMake change** — only a re-run.
   The directory is scanned at run time.
-* **`shaped-linter-test` links `babel-serializer`**, purely to read the corpus.
+* **`shaped-linter-test` links `babel-data`**, purely to read the corpus.
   A tool depending on a library is the allowed direction, and `shaped-linter-core` itself still depends on clean-core alone — the linter binary you ship carries no babel.
 
 ## Rules own no scope logic

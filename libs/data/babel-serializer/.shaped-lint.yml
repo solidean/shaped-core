@@ -25,6 +25,5 @@ rules:
     value: <charconv>
     reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
     files:
-      - src/babel-serializer/data/json.cc
       - src/babel-serializer/geometry/obj.cc
       - src/babel-serializer/geometry/stl.cc

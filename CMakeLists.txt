@@ -146,10 +146,11 @@ include(libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake)
 add_subdirectory(libs/base/clean-core)
 add_subdirectory(libs/base/typed-geometry)
 
-# data stack: babel-serializer (babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
+# data stack: babel-data + babel-serializer (both namespace babel) for the format codecs, then versioned-document (vdoc) -> versioned-document-file,
 # plus blob-cache (bcache) beside them.
-# Added in dependency order, babel-serializer first because both persisting libraries store through babel::sqlite.
+# Added in dependency order, the two babel libraries first because both persisting libraries store through babel::sqlite.
 # The model library itself depends on clean-core alone, so an in-memory document never links a database engine.
+add_subdirectory(libs/data/babel-data)
 add_subdirectory(libs/data/babel-serializer)
 add_subdirectory(libs/data/versioned-document)
 add_subdirectory(libs/data/versioned-document-file)

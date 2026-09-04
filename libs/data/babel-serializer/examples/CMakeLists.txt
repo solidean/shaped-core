@@ -3,7 +3,6 @@
 sc_add_single_file_examples(babel-serializer
     FILES
     chrome-trace.cc
-    json.cc
     LINK babel-serializer
     PCH CC_ALL NEXUS
 )

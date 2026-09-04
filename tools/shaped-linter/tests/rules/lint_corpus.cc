@@ -1,6 +1,6 @@
 #include "lint_corpus.hh"
 
-#include <babel-serializer/data/markdown.hh>
+#include <babel-data/data/markdown.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/streams/file_stream.hh>

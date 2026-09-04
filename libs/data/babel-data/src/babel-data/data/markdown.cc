@@ -1,4 +1,4 @@
-#include <babel-serializer/data/markdown.hh>
+#include <babel-data/data/markdown.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/streams/span_stream.hh>
