@@ -43,7 +43,11 @@ class JsRuntime:
             # Deno denies filesystem and env access by default, and a nexus binary needs both.
             # NODERAWFS reads and writes real paths, and the JUnit report is a file write.
             # `run` is also required before the script path.
-            return [str(self.exe), "run", "--allow-all"]
+            #
+            # --unstable-detect-cjs because Emscripten's pthread builds emit a top-level require("node:worker_threads")
+            # into a `.js`, which Deno reads as ESM and rejects before the module runs at all.
+            # Single-threaded output emits no require and does not need it, but the flag is harmless there.
+            return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs"]
         return [str(self.exe)]
 
     def describe(self) -> str:
