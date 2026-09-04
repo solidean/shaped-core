@@ -37,11 +37,12 @@ struct cnet::host_policy
     ///
     /// **Only idempotent methods by default**: sending GET twice is what the caller asked for, and sending POST
     /// twice is a second order.
-    i32 max_retries = 3;
-
     /// Only ever retried before a single response byte reached the caller's sink -- after that, repeating the
     /// request would deliver the body twice rather than once.
-    f32 backoff_base_ms = 250;
+    i32 max_retries = 3;
+
+    /// What the exponential backoff starts at; each further attempt doubles it.
+    i32 backoff_base_ms = 250;
 
     /// How much the backoff varies, as a fraction.
     /// Without it a hundred clients that failed together retry together, which is the thundering herd the backoff

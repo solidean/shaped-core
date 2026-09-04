@@ -273,9 +273,9 @@ void send_now(cc::shared_ptr<polite_request> const& rq)
 
     auto sent = rq->owner->under.send_streaming(
         rq->request,
-        [sink, flag](cc::span<byte const> chunk) -> isize
+        [sink, flag](cc::span<byte const> chunk, resume_body const& flow) -> isize
         {
-            auto const taken = (*sink)(chunk);
+            auto const taken = (*sink)(chunk, flow);
             if (taken > 0)
                 *flag = true;
             return taken;

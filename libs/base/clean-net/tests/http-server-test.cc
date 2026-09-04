@@ -1,3 +1,4 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -65,6 +66,12 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
     return cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size());
 }
 
+/// A request body over borrowed bytes: the caller keeps `text` alive, which a test's local string does.
+[[nodiscard]] cc::pinned_data<byte const> borrowed_body(cc::string_view text)
+{
+    return cc::pinned_data<byte const>::create_from_pin(bytes_of(text), nullptr);
+}
+
 /// A virtual network with our server on it and our client pointed at it.
 struct server_fixture
 {
@@ -114,7 +121,7 @@ TEST("cnet - a server answers a route")
 
     // The length is written for the handler, so a keep-alive connection has an end the client can find.
     CHECK(response->value().head.headers.get("Content-Length").value() == "12");
-    CHECK(fixture.server->requests_handled() == 1);
+    CHECK(fixture.server->routed_requests() == 1);
 }
 
 TEST("cnet - a path nothing serves is a 404, and a method nothing serves is a 405")
@@ -161,7 +168,7 @@ TEST("cnet - a handler sees the request it was sent")
     request.target = http_target::parse(fixture.url_for("/echo?a=1&b=2")).value();
     request.headers.add("Content-Length", cc::format("{}", payload.size()));
     request.headers.add("X-Custom", "kept");
-    request.body = bytes_of(payload);
+    request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
     CHECK(pump_until([&] { return response->is_ready(); }));
@@ -231,7 +238,7 @@ TEST("cnet - two requests share one connection")
 
     // Both ends kept it: the client pooled it, and the server did not close it after answering.
     CHECK(fixture.server->open_connections() == 1);
-    CHECK(fixture.server->requests_handled() == 2);
+    CHECK(fixture.server->routed_requests() == 2);
 }
 
 TEST("cnet - a body over the limit is refused rather than buffered")
@@ -247,7 +254,7 @@ TEST("cnet - a body over the limit is refused rather than buffered")
     request.method = http_method::post;
     request.target = http_target::parse(fixture.url_for("/upload")).value();
     request.headers.add("Content-Length", cc::format("{}", payload.size()));
-    request.body = bytes_of(payload);
+    request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
     CHECK(pump_until([&] { return response->is_ready(); }));
@@ -255,7 +262,7 @@ TEST("cnet - a body over the limit is refused rather than buffered")
 
     // Read to the end and thrown away rather than buffered: the answer is a 413, and the handler never runs.
     CHECK(response->value().status() == 413);
-    CHECK(fixture.server->requests_handled() == 0);
+    CHECK(fixture.server->routed_requests() == 0);
 }
 
 TEST("cnet - a request nothing can parse gets a 400 and the connection ends")
@@ -591,7 +598,7 @@ TEST("cnet - a request body arrives, and the connection is still usable afterwar
     auto const payload = cc::string_view("some body bytes");
     auto request
         = http_request{.method = http_method::post, .target = http_target::parse(fixture.url_for("/echo")).value()};
-    request.body = bytes_of(payload);
+    request.body = borrowed_body(payload);
 
     auto posted = http_send(*fixture.client, cc::move(request));
     CHECK(pump_until([&] { return posted->is_ready(); }));

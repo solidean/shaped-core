@@ -32,7 +32,14 @@ struct cnet::request_options
     /// hundred MiB on wasm32, whose entire linear memory is capped at 4 GiB and whose browsers fail well below that.
     /// The point of a cap is that exceeding it is a clean error a caller can handle, and a number the platform
     /// cannot honour delivers an out-of-memory abort instead.
+    ///
+    /// 0 takes that platform default.
+    /// `unlimited` is the one value that means no cap at all, and it is spelled out at the call site for the same
+    /// reason `deadline::never()` is: it is never what you want by accident.
     i64 max_body_bytes = 0;
+
+    /// No cap at all, for `max_body_bytes`.
+    static constexpr i64 unlimited = -1;
 
     /// Follow 3xx responses, up to `max_redirects`.
     bool follow_redirects = true;
@@ -72,8 +79,10 @@ public:
     /// A redirect that is followed never reaches the sink: its body is discarded, and only the final response's
     /// bytes are delivered.
     ///
-    /// **The sink runs on the reactor thread**, and taking fewer bytes than it was offered is how a slow consumer
-    /// pushes back all the way down to the socket.
+    /// **The sink runs on the reactor thread.**
+    /// Taking fewer bytes than it was offered stops this request reading, and the `cnet::resume_body` it was handed
+    /// alongside the chunk is what starts it again -- which is how a slow consumer pushes back as far as TCP's own
+    /// receive window rather than into a buffer of ours.
     [[nodiscard]] virtual cc::shared_async<http_response_head> send_streaming(http_request request,
                                                                               body_sink sink,
                                                                               request_options const& options,

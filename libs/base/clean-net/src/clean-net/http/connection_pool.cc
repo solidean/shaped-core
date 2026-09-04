@@ -54,7 +54,11 @@ cc::shared_ptr<stream_connection> connection_pool::try_take(cc::string_view orig
 {
     auto const now = _state->io.time_source().now_ns();
 
-    return _state->origins.lock(
+    // Whatever this walk discards, closed after the lock is out of the way, for the same reason `give_back` and
+    // `clear` do it: a close can run a completion, and nothing else should be waiting on this lock while it does.
+    auto stale = cc::vector<cc::shared_ptr<stream_connection>>();
+
+    auto taken = _state->origins.lock(
         [&](cc::vector<origin_entry>& all) -> cc::shared_ptr<stream_connection>
         {
             for (auto& entry : all)
@@ -72,7 +76,7 @@ cc::shared_ptr<stream_connection> connection_pool::try_take(cc::string_view orig
                         || !candidate.connection->is_open())
                     {
                         if (candidate.connection.is_valid())
-                            candidate.connection->close();
+                            stale.push_back(cc::move(candidate.connection));
                         continue;
                     }
 
@@ -82,6 +86,11 @@ cc::shared_ptr<stream_connection> connection_pool::try_take(cc::string_view orig
             }
             return {};
         });
+
+    for (auto& connection : stale)
+        connection->close();
+
+    return taken;
 }
 
 void connection_pool::give_back(cc::string_view origin, cc::shared_ptr<stream_connection> connection, bool reusable)

@@ -1,3 +1,4 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -35,6 +36,12 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
 [[nodiscard]] cc::span<byte const> bytes_of(cc::string_view text)
 {
     return cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size());
+}
+
+/// A request body over borrowed bytes: the caller keeps `text` alive, which a test's local string does.
+[[nodiscard]] cc::pinned_data<byte const> borrowed_body(cc::string_view text)
+{
+    return cc::pinned_data<byte const>::create_from_pin(bytes_of(text), nullptr);
 }
 
 /// A server that reads a request and answers with whatever it was told to.
@@ -263,7 +270,7 @@ TEST("cnet - a POST carries its body and its headers")
     request.target = http_target::parse("http://example.test/items").value();
     request.headers.add("Content-Type", "application/json");
     request.headers.add("Content-Length", cc::format("{}", payload.size()));
-    request.body = bytes_of(payload);
+    request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
     CHECK(fixture.run_until([&] { return response->is_ready(); }));
@@ -293,7 +300,7 @@ TEST("cnet - a redirect is followed, and the second request is a GET")
     request.method = http_method::post;
     request.target = http_target::parse("http://example.test/start").value();
     request.headers.add("Content-Length", cc::format("{}", payload.size()));
-    request.body = bytes_of(payload);
+    request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
     CHECK(fixture.run_until([&] { return response->is_ready(); }));
@@ -344,6 +351,74 @@ TEST("cnet - a body over the cap is refused rather than buffered")
     CHECK(response->try_error() != nullptr);
 }
 
+TEST("cnet - a sink that pushes back stops the reading and is charged only what it took")
+{
+    // Long enough that it cannot arrive in one chunk, and a cap barely above its real length: if the cap counted what
+    // the sink was OFFERED rather than what it took, re-offering the same bytes would blow it long before the end.
+    auto body = cc::string();
+    for (auto i = 0; i < 400; ++i)
+        body += "0123456789";
+
+    auto fixture = client_fixture({cc::format("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.size(), body)});
+
+    // A sink that takes a fixed bite and then refuses, so it genuinely pushes back rather than draining the buffer a
+    // half at a time -- which a sink taking a FRACTION would do, geometrically, inside one parse.
+    struct slow_consumer
+    {
+        cc::string taken;
+        bool may_take = true;
+        i32 offers = 0;
+        resume_body flow;
+    };
+
+    auto consumer = cc::make_shared<slow_consumer>();
+
+    auto request
+        = http_request{.method = http_method::get, .target = http_target::parse("http://example.test/slow").value()};
+
+    auto head = fixture.client->send_streaming(cc::move(request),
+                                               [consumer](cc::span<byte const> chunk, resume_body const& f) -> isize
+                                               {
+                                                   ++consumer->offers;
+                                                   consumer->flow = f;
+
+                                                   if (!consumer->may_take)
+                                                       return 0;
+
+                                                   consumer->may_take = false;
+                                                   auto const n = chunk.size() < isize(64) ? chunk.size() : isize(64);
+                                                   for (isize i = 0; i < n; ++i)
+                                                       consumer->taken.push_back(char(chunk[i]));
+                                                   return n;
+                                               },
+                                               {.max_body_bytes = isize(body.size()) + 16}, {});
+
+    // Nothing more is read while the sink is refusing, which is the backpressure: without it the request would keep
+    // pulling bytes off the connection and pile them up in a buffer of ours.
+    // `run_briefly` rather than a budget: nothing is being waited FOR, so a turn count is the whole answer.
+    fixture.run_briefly(200);
+    CHECK(!head->is_ready());
+
+    auto const stalled_at = consumer->offers;
+    fixture.run_briefly(200);
+    CHECK(consumer->offers == stalled_at);
+    CHECK(isize(consumer->taken.size()) < isize(body.size()));
+
+    // Resuming carries it to the end, sixty-four bytes at a time -- and the cap counts what the sink TOOK, so the
+    // bytes re-offered after every refusal are not charged again.
+    CHECK(fixture.run_until(
+        [&]
+        {
+            consumer->may_take = true;
+            consumer->flow.resume();
+            return head->is_ready();
+        }));
+
+    REQUIRE(head->try_error() == nullptr);
+    CHECK(head->value().status == 200);
+    CHECK(cc::string_view(consumer->taken) == cc::string_view(body));
+}
+
 TEST("cnet - a streaming response reaches the sink as it arrives")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
@@ -360,7 +435,7 @@ TEST("cnet - a streaming response reaches the sink as it arrives")
 
     auto head = fixture.client->send_streaming(
         cc::move(request),
-        [chunks](cc::span<byte const> chunk) -> isize
+        [chunks](cc::span<byte const> chunk, resume_body const&) -> isize
         {
             chunks->push_back(cc::string(cc::string_view(reinterpret_cast<char const*>(chunk.data()), chunk.size())));
             return chunk.size();

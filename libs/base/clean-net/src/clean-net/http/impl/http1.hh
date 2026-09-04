@@ -77,7 +77,9 @@ struct http1_request_head
 ///
 /// Fed whatever bytes turned up; it tells you how many it took.
 /// Body bytes go straight to the sink, and a sink that takes fewer than it was offered stops the parser at exactly
-/// that point -- which is how backpressure reaches all the way down to the socket.
+/// that point.
+/// Carrying that the rest of the way -- not reading more until the sink asks -- belongs to whoever owns the
+/// connection; `cnet::resume_body` is how the client does it.
 class http1_parser
 {
 public:

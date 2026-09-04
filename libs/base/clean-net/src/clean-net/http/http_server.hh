@@ -38,12 +38,20 @@ struct cnet::http_server_description
     /// 0 asks the OS for a free one, and `local()` says which it got.
     i32 port = 0;
 
-    /// Bind every interface rather than loopback.
+    /// Bind every interface of `family` rather than that family's loopback.
     ///
     /// **This server is not hardened for hostile input.**
     /// A distinct field rather than a bind address, because the point is that the choice is visible; setting it logs
     /// a warning through `cc::rec` at startup.
     bool bind_all_interfaces = false;
+
+    /// Which family to bind, since a listening socket binds exactly one.
+    ///
+    /// IPv4 by default, which is what a browser reaches on `127.0.0.1`.
+    /// It matters because `localhost` resolves to both and a browser may try `::1` first: the fallback costs a
+    /// refused connect, and a machine whose `localhost` is `::1` alone reaches nothing at all.
+    /// `v6` binds `::1`, or `::` with `bind_all_interfaces`.
+    ip_family family = ip_family::v4;
 
     /// All of one request's headers together.
     isize max_header_bytes = 16 * 1024;
@@ -200,13 +208,13 @@ public:
     /// Listen on the platform's own sockets.
     /// Fails with `unsupported` on wasm, where a program cannot listen at all.
     [[nodiscard]] static cc::result<cc::unique_ptr<http_server>, error> try_create(io_system& io,
-                                                                                   http_server_description const& desc);
-    [[nodiscard]] static cc::result<cc::unique_ptr<http_server>, error> try_create(io_system& io);
+                                                                                   http_server_description const& desc
+                                                                                   = {});
 
     /// Listen on a given transport, which is how a test puts a virtual network underneath.
     [[nodiscard]] static cc::result<cc::unique_ptr<http_server>, error> try_create(transport& t,
-                                                                                   http_server_description const& desc);
-    [[nodiscard]] static cc::result<cc::unique_ptr<http_server>, error> try_create(transport& t);
+                                                                                   http_server_description const& desc
+                                                                                   = {});
 
     /// What it actually bound to, port included.
     [[nodiscard]] endpoint local() const;
@@ -243,8 +251,10 @@ public:
     /// catch it with.
     /// On a loopback dev server that is a link the same user made; anywhere else it is a hole.
     ///
-    /// A directory resolves to its `index.html`, a missing file is a 404, and a file over
-    /// `max_static_file_bytes` is a 500.
+    /// The prefix root resolves to its `index.html` -- a request for `<url_prefix>/` and nothing beyond it.
+    /// A subdirectory does not: only the empty relative path is substituted, so `<url_prefix>/sub/` is a 404 rather
+    /// than `<root>/sub/index.html`.
+    /// A missing file is a 404, and a file over `max_static_file_bytes` is a 500.
     void serve_directory(cc::string_view url_prefix, cc::string_view root);
 
     /// Stop accepting and close what is open.
@@ -256,8 +266,10 @@ public:
     /// How many connections are open, for a test and for diagnostics.
     [[nodiscard]] i32 open_connections() const;
 
-    /// How many requests have been answered.
-    [[nodiscard]] i64 requests_handled() const;
+    /// How many requests reached a route handler.
+    ///
+    /// A 404, a 405, a 400 and a 413 are all answered and none of them counts, because none of them reached a route.
+    [[nodiscard]] i64 routed_requests() const;
 
     explicit http_server(cc::unique_ptr<struct http_server_state> state);
     http_server(http_server const&) = delete;

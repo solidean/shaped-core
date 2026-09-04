@@ -70,7 +70,7 @@ struct http_server_state
     cc::mutex<cc::vector<websocket_route_entry>> websocket_routes;
 
     cc::atomic<i32> open_connections = 0;
-    cc::atomic<i64> requests_handled = 0;
+    cc::atomic<i64> routed_requests = 0;
     cc::atomic<bool> stopped = false;
 
     http_server_state(cc::unique_ptr<native_transport> owned, transport& transport_ref, http_server_description const& d)
@@ -223,7 +223,7 @@ struct route_match
 
     auto request = make_request(s);
 
-    s->server->requests_handled.fetch_add(1);
+    s->server->routed_requests.fetch_add(1);
     return (*found.handler)(request);
 }
 
@@ -318,7 +318,7 @@ struct route_match
     s->head_bytes += "\r\n\r\n";
 
     auto request = make_request(s);
-    s->server->requests_handled.fetch_add(1);
+    s->server->routed_requests.fetch_add(1);
 
     auto const span = cc::span<byte const>(reinterpret_cast<byte const*>(s->head_bytes.data()), s->head_bytes.size());
     impl::when_ready(s->connection->send(span, deadline::after_ms(s->server->desc.request_timeout_ms), s->server->token),
@@ -814,11 +814,15 @@ void accept_one(http_server_state* server)
                                                                        transport& t,
                                                                        http_server_description const& desc)
 {
-    if (desc.bind_all_interfaces)
-        CC_LOG_WARNING("binding every interface: this server is not hardened for hostile input");
+    // A listening socket binds one family, so the description names which rather than the server assuming.
+    auto const family = desc.family == ip_family::none ? ip_family::v4 : desc.family;
 
-    auto const where = endpoint(
-        desc.bind_all_interfaces ? ip_address::any(ip_family::v4) : ip_address::loopback(ip_family::v4), desc.port);
+    if (desc.bind_all_interfaces)
+        CC_LOG_WARNING("binding every {} interface: this server is not hardened for hostile input",
+                       family == ip_family::v6 ? "IPv6" : "IPv4");
+
+    auto const where
+        = endpoint(desc.bind_all_interfaces ? ip_address::any(family) : ip_address::loopback(family), desc.port);
 
     auto listener = stream_listener::try_create(t, where);
     if (listener.has_error())
@@ -969,11 +973,6 @@ cc::result<cc::unique_ptr<http_server>, error> http_server::try_create(transport
     return create_on({}, t, desc);
 }
 
-cc::result<cc::unique_ptr<http_server>, error> http_server::try_create(transport& t)
-{
-    return try_create(t, http_server_description());
-}
-
 cc::result<cc::unique_ptr<http_server>, error> http_server::try_create(io_system& io, http_server_description const& desc)
 {
     // Owned rather than a temporary: the server outlives this call, and a transport reference into a dead temporary
@@ -981,11 +980,6 @@ cc::result<cc::unique_ptr<http_server>, error> http_server::try_create(io_system
     auto owned = cc::make_unique<native_transport>(io);
     auto& t = *owned;
     return create_on(cc::move(owned), t, desc);
-}
-
-cc::result<cc::unique_ptr<http_server>, error> http_server::try_create(io_system& io)
-{
-    return try_create(io, http_server_description());
 }
 
 endpoint http_server::local() const
@@ -1050,8 +1044,8 @@ i32 http_server::open_connections() const
     return _state->open_connections.load();
 }
 
-i64 http_server::requests_handled() const
+i64 http_server::routed_requests() const
 {
-    return _state->requests_handled.load();
+    return _state->routed_requests.load();
 }
 } // namespace cnet

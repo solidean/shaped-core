@@ -5,6 +5,8 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-net/fwd.hh>
 #include <clean-net/http/impl/http1.hh>
 #include <clean-net/impl/async_glue.hh>
@@ -39,6 +41,93 @@ constexpr isize k_read_chunk = 16 * 1024;
         return i64(256) * 1024 * 1024;
 }
 
+/// What `request_options::max_body_bytes` means, once: a cap, the platform default, or no cap at all.
+[[nodiscard]] i64 resolve_body_cap(i64 requested)
+{
+    if (requested == request_options::unlimited)
+        return i64(0x7FFF'FFFF'FFFF'FFFF);
+    return requested > 0 ? requested : default_max_body_bytes();
+}
+
+} // namespace
+
+/// What a `cnet::resume_body` holds.
+///
+/// Shared with the exchange rather than owned by it, so a sink that kept its `resume_body` past the end of the
+/// request finds a gate that has been disarmed rather than a freed exchange.
+struct impl::body_gate
+{
+    cc::atomic<i32> references = 1;
+
+    struct data
+    {
+        /// Null once the request has settled, which is what makes a late `resume()` harmless.
+        io_system* io = nullptr;
+
+        /// The manual operation the paused request waits on, or null when it is not paused.
+        impl::io_operation* waiting = nullptr;
+
+        /// A resume that arrived before the pause had published its operation.
+        ///
+        /// The sink returns on the reactor thread and may hand its `resume_body` to a consumer on another one, so
+        /// the two genuinely race -- and a signal posted ahead of the operation it means to wake is dropped.
+        /// The pause re-reads this after publishing, which is the same shape `cancel_registration::attach` uses.
+        bool resume_pending = false;
+    };
+
+    cc::mutex<data> state;
+};
+
+namespace impl
+{
+void body_gate_retain(body_gate* g)
+{
+    if (g != nullptr)
+        g->references.fetch_add(1);
+}
+
+void body_gate_release(body_gate* g)
+{
+    if (g != nullptr && g->references.fetch_sub(1) == 1)
+        delete g;
+}
+
+void body_gate_resume(body_gate* g)
+{
+    if (g == nullptr)
+        return;
+
+    struct wake
+    {
+        io_system* io = nullptr;
+        io_operation* op = nullptr;
+    };
+
+    auto const w = g->state.lock(
+        [](body_gate::data& d) -> wake
+        {
+            if (d.io == nullptr)
+                return {}; // the request is over; a sink holding this past the end is not an error
+
+            if (d.waiting == nullptr)
+            {
+                // The pause has not published its operation yet, so leave the answer where it will look.
+                d.resume_pending = true;
+                return {};
+            }
+
+            auto const out = wake{.io = d.io, .op = d.waiting};
+            d.waiting = nullptr;
+            return out;
+        });
+
+    if (w.op != nullptr)
+        w.io->signal(w.op);
+}
+} // namespace impl
+
+namespace
+{
 /// Everything one request needs, from the first connect to the last byte.
 struct exchange
 {
@@ -80,10 +169,18 @@ struct exchange
     /// True while a redirect's body is being read and thrown away.
     bool discarding_body = false;
 
-    i64 body_bytes = 0;
+    /// Shared with every `resume_body` this request handed to its sink; released in the destructor.
+    impl::body_gate* gate = nullptr;
+
+    /// True while the sink has taken nothing and nothing more is being read.
+    bool paused = false;
+
     bool settled = false;
 
     exchange(transport& transport_ref, resolver& resolver_ref) : t(transport_ref), r(resolver_ref) {}
+    exchange(exchange const&) = delete;
+    exchange& operator=(exchange const&) = delete;
+    ~exchange() { impl::body_gate_release(gate); }
 
     /// What is left of the budget, as a deadline the next step can be given.
     [[nodiscard]] deadline remaining() const
@@ -100,12 +197,15 @@ void start_attempt(cc::shared_ptr<exchange> const& ex);
 void release_connection(cc::shared_ptr<exchange> const& ex, bool reusable);
 void write_head(cc::shared_ptr<exchange> const& ex);
 
+void close_gate(cc::shared_ptr<exchange> const& ex);
+
 void fail(cc::shared_ptr<exchange> const& ex, error e)
 {
     if (ex->settled)
         return;
     ex->settled = true;
 
+    close_gate(ex);
     release_connection(ex, false);
     ex->promise->push_error(to_async_error(cc::move(e)));
 }
@@ -118,8 +218,8 @@ void fail(cc::shared_ptr<exchange> const& ex, error e)
 {
     // Not while the io_system is stopping: a retry starts a fresh connect on `ex->t`, which is the caller's
     // transport and may already be gone by the time teardown settles this request.
-    return ex->connection_was_pooled && !ex->retried_stale && !ex->parser.head_complete() && ex->body_bytes == 0
-        && !ex->token.is_cancelled() && !ex->t.io().is_stopping();
+    return ex->connection_was_pooled && !ex->retried_stale && !ex->parser.head_complete()
+        && ex->parser.body_bytes() == 0 && !ex->token.is_cancelled() && !ex->t.io().is_stopping();
 }
 
 void retry_on_fresh_connection(cc::shared_ptr<exchange> const& ex)
@@ -149,6 +249,7 @@ void fail_from(cc::shared_ptr<exchange> const& ex, cc::shared_async<T> const& fa
     }
 
     ex->settled = true;
+    close_gate(ex);
     release_connection(ex, false);
     ex->promise->push_error(failed->propagate_error());
 }
@@ -175,6 +276,8 @@ void succeed(cc::shared_ptr<exchange> const& ex)
     if (ex->settled)
         return;
     ex->settled = true;
+
+    close_gate(ex);
 
     // Leftover bytes mean the server said something this client did not ask for, and a stream nobody understands is
     // not one to hand to the next request.
@@ -264,9 +367,12 @@ void on_message_complete(cc::shared_ptr<exchange> const& ex)
 void read_more(cc::shared_ptr<exchange> const& ex);
 
 /// Feed everything that has arrived, and act on what the parser says.
+void pause_for_sink(cc::shared_ptr<exchange> const& ex);
+
 void parse_available(cc::shared_ptr<exchange> const& ex)
 {
     auto cursor = isize(0);
+    auto over_cap = false;
 
     while (cursor < ex->unparsed.size() && !ex->parser.message_complete())
     {
@@ -274,16 +380,20 @@ void parse_available(cc::shared_ptr<exchange> const& ex)
 
         auto const fed
             = ex->parser.feed(cc::span<byte const>(ex->unparsed.data() + cursor, ex->unparsed.size() - cursor),
-                              [&ex](cc::span<byte const> chunk) -> isize
+                              [&ex, &over_cap](cc::span<byte const> chunk) -> isize
                               {
                                   if (ex->discarding_body)
                                       return chunk.size();
 
-                                  ex->body_bytes += chunk.size();
-                                  if (ex->body_bytes > ex->max_body_bytes)
+                                  // The parser's count is what ACTUALLY reached the sink; counting what was offered
+                                  // charges the same bytes again every time a pushing-back sink is re-offered them.
+                                  if (ex->parser.body_bytes() + chunk.size() > ex->max_body_bytes)
+                                  {
+                                      over_cap = true;
                                       return 0; // refused below, where it can fail the request rather than stall it
+                                  }
 
-                                  return ex->sink(chunk);
+                                  return ex->sink(chunk, resume_body(ex->gate));
                               });
 
         if (fed.has_error())
@@ -314,9 +424,9 @@ void parse_available(cc::shared_ptr<exchange> const& ex)
 
         if (fed.value() == 0)
         {
-            // The sink took nothing and the parser made no progress.
-            // Either the body is over the cap, or a sink is pushing back with nowhere for the pressure to go.
-            if (ex->body_bytes > ex->max_body_bytes)
+            // The sink took nothing and the parser made no progress: either the body is over the cap, or the sink is
+            // pushing back and this request stops reading until it says otherwise.
+            if (over_cap)
             {
                 fail(ex, {.code = error_code::body_too_large,
                           .native_code = 0,
@@ -343,7 +453,78 @@ void parse_available(cc::shared_ptr<exchange> const& ex)
         return;
     }
 
+    // A sink that took nothing leaves those bytes here, and reading more would put the pressure in this vector
+    // instead of in TCP's receive window -- which is the whole point of the return value.
+    // So the request stops until `resume_body::resume` says the sink can take them.
+    if (!ex->unparsed.empty() && ex->parser.head_complete() && !ex->discarding_body && !ex->paused)
+    {
+        pause_for_sink(ex);
+        return;
+    }
+
     read_more(ex);
+}
+
+/// Stop reading until the sink asks for the rest, and fail on the request's own deadline if it never does.
+///
+/// A `manual` operation rather than a flag: the request's budget then bounds a stalled consumer exactly as it bounds
+/// a slow server, and the caller's token ends it the same way.
+void pause_for_sink(cc::shared_ptr<exchange> const& ex)
+{
+    struct resume_op final : impl::io_operation
+    {
+        cc::unique_ptr<resume_op> self;
+        impl::cancel_registration registration;
+        cc::shared_ptr<exchange> ex;
+
+        void on_complete(cc::optional<error> failure) override
+        {
+            auto const keep_alive_until_return = cc::move(self);
+            registration.detach();
+
+            ex->gate->state.lock(
+                [this](impl::body_gate::data& d)
+                {
+                    if (d.waiting == this)
+                        d.waiting = nullptr;
+                });
+            ex->paused = false;
+
+            if (failure.has_value())
+            {
+                fail(ex, cc::move(failure.value()));
+                return;
+            }
+
+            parse_available(ex);
+        }
+    };
+
+    auto op = cc::make_unique<resume_op>();
+    op->kind = impl::io_op_kind::manual;
+    op->deadline_ns = ex->deadline_ns;
+    op->ex = ex;
+
+    auto* const raw = op.get();
+    raw->self = cc::move(op);
+    ex->paused = true;
+
+    // Submitted BEFORE the operation is published, so a resume can never be posted ahead of what it wakes.
+    ex->r.io().submit(raw);
+
+    auto const already_resumed = ex->gate->state.lock(
+        [raw](impl::body_gate::data& d)
+        {
+            d.waiting = raw;
+            auto const pending = d.resume_pending;
+            d.resume_pending = false;
+            return pending;
+        });
+
+    if (already_resumed)
+        ex->r.io().signal(raw);
+
+    raw->registration.attach(ex->token, ex->r.io(), raw);
 }
 
 void read_more(cc::shared_ptr<exchange> const& ex)
@@ -485,7 +666,43 @@ void start_attempt(cc::shared_ptr<exchange> const& ex)
                 });
         });
 }
+/// Disarm the gate, so a `resume_body` the sink kept can never reach a request that is over.
+void close_gate(cc::shared_ptr<exchange> const& ex)
+{
+    if (ex->gate == nullptr)
+        return;
+
+    ex->gate->state.lock(
+        [](impl::body_gate::data& d)
+        {
+            d.io = nullptr;
+            d.waiting = nullptr;
+            d.resume_pending = false;
+        });
+}
 } // namespace
+
+resume_body& resume_body::operator=(resume_body const& o)
+{
+    if (this == &o)
+        return *this;
+
+    impl::body_gate_retain(o._gate);
+    impl::body_gate_release(_gate);
+    _gate = o._gate;
+    return *this;
+}
+
+resume_body& resume_body::operator=(resume_body&& o) noexcept
+{
+    if (this == &o)
+        return *this;
+
+    impl::body_gate_release(_gate);
+    _gate = o._gate;
+    o._gate = nullptr;
+    return *this;
+}
 
 cc::shared_async<http_response_head> native_http_client::send_streaming(http_request request,
                                                                         body_sink sink,
@@ -504,7 +721,11 @@ cc::shared_async<http_response_head> native_http_client::send_streaming(http_req
     ex->promise = cc::make_async_manual<http_response_head>();
     ex->deadline_ns = deadline_to_absolute(_resolver.io(), options.timeout);
     ex->redirects_left = options.max_redirects;
-    ex->max_body_bytes = options.max_body_bytes > 0 ? options.max_body_bytes : default_max_body_bytes();
+    // 0 is the platform default and `request_options::unlimited` is the one value that means no cap; anything else
+    // is the cap itself.
+    ex->max_body_bytes = resolve_body_cap(options.max_body_bytes);
+    ex->gate = new impl::body_gate();
+    ex->gate->state.lock([&](impl::body_gate::data& d) { d.io = &_resolver.io(); });
     ex->pool = options.reuse_connections ? &_pool : nullptr;
     ex->read_buffer.resize_to_defaulted(k_read_chunk);
 
@@ -549,8 +770,9 @@ cc::shared_async<http_response> http_send(http_client& client,
 
     auto head = client.send_streaming(
         cc::move(request),
-        [body](cc::span<byte const> chunk) -> isize
+        [body](cc::span<byte const> chunk, resume_body const&) -> isize
         {
+            // Buffering takes everything every time, so it never pushes back and never needs the flow.
             for (auto const b : chunk)
                 body->push_back(b);
             return chunk.size();

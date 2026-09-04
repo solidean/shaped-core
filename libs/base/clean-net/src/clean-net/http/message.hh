@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -14,6 +15,21 @@
 ///
 /// Nothing here touches a connection: these are the values a backend takes and returns, and they are the same values
 /// whether the request goes out over our own transport or over a browser's `fetch`.
+
+namespace cnet::impl
+{
+/// What a `cnet::resume_body` holds: the one thing a paused request needs to be told to carry on.
+///
+/// Opaque on purpose, and refcounted intrusively for the same reason `cnet::cancel_token`'s control block is: it
+/// holds a `cc::mutex`, whose header reaches MSVC's <xutility> and the whole AVX-512 intrinsic surface behind it.
+/// A `cc::shared_ptr` member would need the complete type at every copy and destruction, and would drag all of that
+/// into every translation unit that includes this header.
+struct body_gate;
+
+void body_gate_retain(body_gate* g);
+void body_gate_release(body_gate* g);
+void body_gate_resume(body_gate* g);
+} // namespace cnet::impl
 
 /// The methods this client can send.
 ///
@@ -99,22 +115,55 @@ namespace cnet
 [[nodiscard]] bool header_names_equal(cc::string_view a, cc::string_view b);
 } // namespace cnet
 
+/// How a sink that is not ready for more says so, and asks to be offered the rest.
+///
+/// **Calling `resume()` is what restarts the transport.** A sink that takes fewer bytes than it was offered stops the
+/// request reading: nothing further is pulled off the connection, so the receive window closes and the sender slows
+/// down, which is backpressure reaching all the way to TCP rather than into a buffer of ours.
+/// A request that is never resumed ends on its own deadline, since a stalled consumer is not a reason to wait
+/// forever.
+///
+/// Copyable and safe from any thread; the bytes are re-offered on the reactor thread rather than on the caller's.
+/// Calling it on a request that has already finished, or more than once, is harmless.
+class cnet::resume_body
+{
+public:
+    void resume() const { impl::body_gate_resume(_gate); }
+
+    /// A flow nothing is behind, which every `resume()` on it ignores.
+    resume_body() = default;
+
+    /// **For the client layer**, which is the only thing that has a gate to hand over.
+    explicit resume_body(impl::body_gate* gate) : _gate(gate) { impl::body_gate_retain(_gate); }
+
+    resume_body(resume_body const& o) : _gate(o._gate) { impl::body_gate_retain(_gate); }
+    resume_body(resume_body&& o) noexcept : _gate(o._gate) { o._gate = nullptr; }
+    resume_body& operator=(resume_body const& o);
+    resume_body& operator=(resume_body&& o) noexcept;
+    ~resume_body() { impl::body_gate_release(_gate); }
+
+private:
+    impl::body_gate* _gate = nullptr;
+};
+
 namespace cnet
 {
+
 /// Where a response body is handed to, chunk by chunk.
 ///
-/// **The return value is the backpressure**: a sink that consumes less than it was offered stops the transport from
-/// reading more, and TCP's own window does the rest.
+/// **The return value is the backpressure**: a sink that consumes less than it was offered stops the request reading
+/// more, and `flow.resume()` is what starts it again.
 /// That is why this is the primitive and the buffered response is written over it -- an unbounded buffer on a
 /// download of unknown size is a real failure rather than a theoretical one, and backpressure is the one part of this
 /// that cannot be added afterwards.
+/// A sink that always takes everything never needs `flow` and can ignore it.
 ///
 /// **It runs on the reactor thread.** Do no work here; hand the bytes on.
 ///
 /// Owning rather than a `cc::function_ref`, because a request outlives the call that started it: a reference to a
 /// lambda the caller wrote at the call site would dangle before the first byte arrived.
 /// The parser underneath takes a reference instead, since it is synchronous and cannot outlive anything.
-using body_sink = cc::unique_function<isize(cc::span<byte const> chunk)>;
+using body_sink = cc::unique_function<isize(cc::span<byte const> chunk, resume_body const& flow)>;
 } // namespace cnet
 
 /// What a caller sends.
@@ -127,9 +176,16 @@ struct cnet::http_request
 
     http_headers headers;
 
-    /// The bytes to send, which must stay alive until the request completes.
+    /// The bytes to send, held WITH their owner.
+    ///
+    /// A request outlives the call that started it, so a bare span here would be a lifetime the caller has to keep
+    /// straight on their own -- and one that compiles, passes on loopback, and corrupts a body on a slow link.
+    /// `cc::make_pinned_data(cc::move(bytes))` moves an owned buffer in without copying it, and
+    /// `cc::pinned_data<byte const>::create_from_pin(span, nullptr)` is the escape for memory the caller knows
+    /// outlives the request.
+    ///
     /// Empty for a method that carries no body.
-    cc::span<byte const> body;
+    cc::pinned_data<byte const> body;
 };
 
 /// The head of a response: everything but the bytes.

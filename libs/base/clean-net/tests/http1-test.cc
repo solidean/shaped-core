@@ -1,3 +1,4 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-net/http/impl/http1.hh>
 #include <nexus/test.hh>
@@ -400,7 +401,8 @@ TEST("cnet - a request body is framed, because an unframed one is a smuggled one
 
     auto const payload = cc::string_view("hello");
     auto request = http_request{.method = http_method::post, .target = target};
-    request.body = cc::span<byte const>(reinterpret_cast<byte const*>(payload.data()), payload.size());
+    request.body = cc::pinned_data<byte const>::create_from_pin(
+        cc::span<byte const>(reinterpret_cast<byte const*>(payload.data()), payload.size()), nullptr);
 
     auto const head = impl::write_request_head(request, true);
     REQUIRE(head.has_value());

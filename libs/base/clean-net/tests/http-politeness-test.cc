@@ -116,7 +116,7 @@ struct scripted_client final : http_client
         {
             auto const bytes
                 = cc::span<byte const>(reinterpret_cast<byte const*>(answer.body.data()), answer.body.size());
-            (void)sink(bytes);
+            (void)sink(bytes, resume_body());
         }
 
         auto head = http_response_head();
@@ -185,7 +185,8 @@ struct politeness_fixture
 
     [[nodiscard]] cc::shared_async<http_response_head> send(cc::string_view url, http_method method = http_method::get)
     {
-        return client->send_streaming(request_for(url, method), [](cc::span<byte const> c) { return c.size(); }, {}, {});
+        return client->send_streaming(request_for(url, method),
+                                      [](cc::span<byte const> c, resume_body const&) { return c.size(); }, {}, {});
     }
 };
 } // namespace
@@ -378,8 +379,9 @@ TEST("cnet - a request that spends its budget waiting fails rather than being se
     auto first = fixture.send("http://example.test/a");
     CHECK(pump_for([&] { return first->is_ready(); }));
 
-    auto queued = fixture.client->send_streaming(fixture.request_for("http://example.test/b"), [](cc::span<byte const> c)
-                                                 { return c.size(); }, {.timeout = deadline::after_secs(1)}, {});
+    auto queued = fixture.client->send_streaming(fixture.request_for("http://example.test/b"),
+                                                 [](cc::span<byte const> c, resume_body const&) { return c.size(); },
+                                                 {.timeout = deadline::after_secs(1)}, {});
 
     // A second of budget against a token that takes a second to arrive: the deadline covers the queueing, so this
     // fails rather than being sent to a server that stopped waiting for it.
