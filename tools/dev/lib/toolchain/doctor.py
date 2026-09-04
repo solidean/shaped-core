@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import clangd, graphics
+from . import clangd, graphics, network
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
 from ..core.process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
@@ -378,6 +378,9 @@ def doctor(
 
     # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
     checks.extend(graphics.checks(root, cxx))
+
+    # The networking environment cnet's TLS and HTTP backends resolve to — advisory throughout, for the same reason.
+    checks.extend(network.checks(root, preset is not None and preset.family == "emscripten"))
 
     checks.extend(_clangd_checks(root))
 

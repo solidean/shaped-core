@@ -129,6 +129,15 @@ struct format_string;
 
 enum class glob_option;           // what glob_matches does beyond a byte-for-byte match (string/glob.hh)
 enum class float_notation : char; // how cc::to_chars renders a float (string/to_string.hh)
+enum class uri_component;         // which escaping set percent_encode applies (string/uri.hh)
+
+struct uri_view;            // a parsed URI reference over borrowed text (string/uri.hh)
+struct uri;                 // the owning counterpart, one allocation
+struct uri_query_parameter; // one name=value of a query string, still percent-encoded
+namespace impl
+{
+struct uri_parts; // where each component sits inside the parsed text
+}
 
 class interned_string; // a handle to one canonical copy of a byte sequence (string/interned_string.hh)
 class string_interner; // a table of them, for tests that want isolation from the process-wide one

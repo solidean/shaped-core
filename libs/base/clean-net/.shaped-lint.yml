@@ -1,0 +1,78 @@
+# clean-net's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Every platform header below is scoped to the one file that owns it.
+# That is the shape to keep: a socket header reaching a second file means the platform layer has leaked.
+
+rules:
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: the Windows socket API. winsock2.h must precede ws2tcpip.h, which is declared in terms of it, so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/native_socket.cc
+
+  - kind: allow-include
+    value: [<sys/socket.h>, <netinet/in.h>, <netinet/tcp.h>, <arpa/inet.h>, <unistd.h>, <fcntl.h>, <errno.h>]
+    reason: the POSIX socket API, plus fcntl for the non-blocking flag and errno for the failure code.
+    files:
+      - src/clean-net/impl/native_socket.cc
+
+  - kind: allow-include
+    value: [<netdb.h>, <netinet/in.h>, <sys/socket.h>]
+    reason: getaddrinfo and the sockaddr types its answers arrive in. The Windows half of the same file takes it from ws2tcpip.h, blessed below.
+    files:
+      - src/clean-net/impl/native_resolve.cc
+
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: getaddrinfo on Windows, which ws2tcpip declares in terms of winsock2 -- so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/native_resolve.cc
+
+  - kind: allow-include
+    value: [<poll.h>, <sys/socket.h>, <errno.h>]
+    reason: the POSIX poller and the error number behind a readiness result. The Windows half of the same file uses select, out of winsock2.h, blessed above.
+    files:
+      - src/clean-net/impl/reactor_poll.cc
+
+  - kind: allow-include
+    value: [<winsock2.h>, <ws2tcpip.h>]
+    reason: select and its fd_set, which is the Windows poller. FD_SETSIZE is defined ahead of the include because winsock2.h sizes fd_set from it.
+    files:
+      - src/clean-net/impl/reactor_poll.cc
+
+  - kind: allow-include
+    value: [<mbedtls/ctr_drbg.h>, <mbedtls/ecp.h>, <mbedtls/entropy.h>, <mbedtls/error.h>, <mbedtls/pk.h>, <mbedtls/ssl.h>, <mbedtls/threading.h>, <mbedtls/x509_crt.h>]
+    reason: the vendored Mbed TLS, which is the handshake and record layer. It reaches exactly one file, and no mbedtls type appears in a public clean-net header.
+    files:
+      - src/clean-net/tls/tls_mbedtls.cc
+
+  - kind: allow-include
+    value: [<CoreFoundation/CoreFoundation.h>, <Security/Security.h>, <TargetConditionals.h>]
+    reason: the Apple trust store. TargetConditionals is what separates macOS, which can enumerate its anchors, from iOS, which has no public API for it.
+    files:
+      - src/clean-net/impl/trust_store.cc
+
+  - kind: allow-include
+    value: [<windows.h>, <wincrypt.h>]
+    reason: the Windows trust store -- CertOpenSystemStore and its neighbours. windows.h must precede wincrypt.h, which is declared in terms of it, so the include block is clang-format-off.
+    files:
+      - src/clean-net/impl/trust_store.cc
+
+  - kind: allow-include
+    value: [<mutex>]
+    reason: std::mutex, as the lock implementation Mbed TLS is handed through MBEDTLS_THREADING_ALT. cc::mutex owns its data and locks through a callback, so it cannot be the separate lock/unlock pair a C API asks for.
+    files:
+      - src/clean-net/tls/impl/mbedtls_threading.cc
+
+  - kind: allow-include
+    value: [<memory>]
+    reason: std::unique_ptr, to OWN a connection_backend through its interface. Neither cc smart pointer has a derived-to-base conversion, and cc::shared_ptr's default traits place the control block at an offset computed from sizeof(T), so an upcast would be unsound rather than merely absent. The same choice slib::impl::watch_backend, sg's backends and cc::threaded_actor's own impl make.
+    files:
+      - src/clean-net/transport/stream.hh
+      - src/clean-net/transport/tcp.cc
+      - src/clean-net/transport/virtual_transport.cc
+      - src/clean-net/transport/simulated_transport.cc
+      - src/clean-net/tls/tls_mbedtls.cc

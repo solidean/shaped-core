@@ -223,12 +223,12 @@ void report_other_thread_stacks() noexcept
 
 #endif
 
-// Shared best-effort reporter: fault description, registered context, then a stacktrace of this thread
-// and of every other one.
+// Shared best-effort reporter: a banner, the reason, registered context, then a stacktrace of this thread and of
+// every other one.
 // Uses stdio (not std::cerr) to keep the crash path as small as possible.
-void report_crash(char const* reason) noexcept
+void report_stacks(char const* banner, char const* reason) noexcept
 {
-    std::fputs("\n===================== fatal crash =====================\n", stderr);
+    std::fputs(banner, stderr);
     std::fputs("reason: ", stderr);
     std::fputs(reason, stderr);
     std::fputc('\n', stderr);
@@ -250,6 +250,11 @@ void report_crash(char const* reason) noexcept
 
     std::fputs("=======================================================\n", stderr);
     std::fflush(stderr);
+}
+
+void report_crash(char const* reason) noexcept
+{
+    report_stacks("\n===================== fatal crash =====================\n", reason);
 }
 
 #ifdef CC_OS_WINDOWS
@@ -357,6 +362,16 @@ void cc::install_crash_handler()
     g_installed = true;
 #if !CC_CRASH_HANDLER_SANITIZED
     install_platform_handlers();
+#endif
+}
+
+void cc::report_all_thread_stacks(char const* reason) noexcept
+{
+#if CC_CRASH_HANDLER_SANITIZED
+    (void)reason;
+#else
+    report_stacks("\n===================== all thread stacks =====================\n",
+                  reason == nullptr ? "not given" : reason);
 #endif
 }
 
