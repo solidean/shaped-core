@@ -128,6 +128,13 @@ public:
     /// A pending deadline shortens the wait, so a timeout fires on time even when no socket ever becomes ready.
     [[nodiscard]] i32 wait(i32 timeout_ms);
 
+    /// Finish every outstanding operation with `failure`, now.
+    ///
+    /// For teardown, and the reason a caller is never left holding an async that will not settle.
+    /// **Callers run inline**, as they do from `wait`, so this must be called with nothing else driving the reactor:
+    /// the io_system shuts its actor down first, which is what makes that true.
+    void fail_all_pending(error const& failure);
+
     /// Make a thread blocked in `wait` return promptly.
     /// **The only method here callable from another thread.**
     void wake();

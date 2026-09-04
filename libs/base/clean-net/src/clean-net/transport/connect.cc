@@ -183,12 +183,25 @@ void on_attempt_settled(cc::shared_ptr<race_state> const& state, cc::shared_asyn
         return;
     }
 
+    // Unless everything is going away, in which case the answer is this failure rather than another address.
+    if (state->io.is_stopping())
+    {
+        auto const first = state->data.lock([](race_data const& d) { return d.first_failed; });
+        finish_with_failure(state, first.is_valid() ? first : attempt);
+        return;
+    }
+
     // A failed attempt does not wait for the stagger: the next address is worth trying now.
     start_next_attempt(state);
 }
 
 void start_next_attempt(cc::shared_ptr<race_state> const& state)
 {
+    // Nothing new is started once the io_system is stopping: `state->t` is the caller's transport, and by teardown
+    // it may already be gone.
+    if (state->io.is_stopping())
+        return;
+
     auto const index = state->data.lock(
         [&](race_data& d) -> isize
         {

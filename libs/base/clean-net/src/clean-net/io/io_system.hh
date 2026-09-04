@@ -42,9 +42,10 @@ struct cnet::io_system_description
 /// Until it is gone, any thread in the process can drive it through `cc::thread_pump_all()`, and a completion calls
 /// back into whatever started the operation -- so a transport, resolver or server destroyed while an operation is
 /// still in flight is one a completion can still find.
-/// Its own teardown abandons what is pending rather than completing it, which is what makes going first safe.
 ///
-/// Nothing enforces this, and it only bites when something is actually outstanding at teardown.
+/// **Everything cnet builds on top of this honours `is_stopping()`**, so nothing the library itself starts survives
+/// `stop()` -- the rule above is about a continuation YOU wrote that captured a transport, which is the ordinary
+/// don't-destroy-what-a-pending-callback-holds rule rather than anything special to this type.
 ///
 /// With threads, this owns one and nothing is asked of the caller.
 /// Without them, it registers a pump with `cc::register_thread_pump`, so every blocking wait anywhere in the process
@@ -66,6 +67,25 @@ public:
 
     /// Throwing counterpart of try_create.
     [[nodiscard]] static cc::unique_ptr<io_system> create(io_system_description const& desc = {});
+
+    /// Stop, and finish everything outstanding as `cancelled`.
+    ///
+    /// **Every pending operation is settled rather than abandoned**, so no caller is left holding an async that will
+    /// never answer -- which is what `submit` already does for an operation that arrives too late, and what makes the
+    /// two consistent.
+    ///
+    /// Idempotent, and the destructor calls it.
+    /// Call it yourself when you want the completions to run at a moment you choose rather than from a destructor:
+    /// they run inline, on this thread, and they are the last thing the library does with your callbacks.
+    void stop();
+
+    /// Whether `stop()` has begun.
+    ///
+    /// **What the library's own continuations check before starting new work.**
+    /// A failed operation often wants to start another -- the next address in a race, a retry on a fresh connection,
+    /// the next accept -- and during teardown that would reach for a transport the caller may already have destroyed.
+    /// Settling instead is what makes teardown safe rather than merely tidy.
+    [[nodiscard]] bool is_stopping() const;
 
     /// Whether this system has a thread of its own.
     ///

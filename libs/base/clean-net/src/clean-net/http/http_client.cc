@@ -116,8 +116,10 @@ void fail(cc::shared_ptr<exchange> const& ex, error e)
 /// be a second request rather than a retry.
 [[nodiscard]] bool can_retry_stale(cc::shared_ptr<exchange> const& ex)
 {
+    // Not while the io_system is stopping: a retry starts a fresh connect on `ex->t`, which is the caller's
+    // transport and may already be gone by the time teardown settles this request.
     return ex->connection_was_pooled && !ex->retried_stale && !ex->parser.head_complete() && ex->body_bytes == 0
-        && !ex->token.is_cancelled();
+        && !ex->token.is_cancelled() && !ex->t.io().is_stopping();
 }
 
 void retry_on_fresh_connection(cc::shared_ptr<exchange> const& ex)

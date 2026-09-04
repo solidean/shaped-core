@@ -127,6 +127,23 @@ i32 reactor::clamp_timeout(i32 timeout_ms) const
     return shortest;
 }
 
+void reactor::fail_all_pending(error const& failure)
+{
+    // Emptied before anything is called, for the same reason `complete_ready` does it: a handler is free to submit
+    // again, and what it submits must not land back in a list this loop is walking.
+    // What it does submit is refused by the actor, which is already shut down by the time this runs.
+    auto completions = cc::vector<completion>();
+    completions.reserve_back(_pending.size());
+
+    for (auto& e : _pending)
+        completions.push_back({.op = e.op, .failure = cc::optional<error>(failure)});
+
+    _pending.clear();
+
+    for (auto& c : completions)
+        c.op->on_complete(cc::move(c.failure));
+}
+
 cc::optional<cc::optional<error>> reactor::drive(entry& e)
 {
     switch (e.op->kind)

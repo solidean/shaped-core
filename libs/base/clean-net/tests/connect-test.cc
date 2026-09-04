@@ -247,7 +247,7 @@ TEST("cnet - the stagger starts another attempt, and the losers stop when the ra
     CHECK(sent->try_error() == nullptr);
 }
 
-TEST("cnet - tearing down an io_system abandons what is still in flight")
+TEST("cnet - stopping an io_system settles what is still in flight")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = cc::make_unique<virtual_network>(*io);
@@ -258,16 +258,33 @@ TEST("cnet - tearing down an io_system abandons what is still in flight")
     auto connecting = connect_to_host(*net, *res, "example.test", 80);
     CHECK(!connecting->is_ready());
 
-    // THE IO_SYSTEM GOES FIRST, which is the order that makes this safe and the reason it is asserted here.
-    // Until it is gone, any thread in the process can drive it through `cc::thread_pump_all()`, and a completion
-    // reaches back into whatever started the operation -- so a transport destroyed before it is a transport a
-    // completion can still find.
-    // Its own teardown then abandons what is pending rather than completing it, which is what `~reactor` has always
-    // said and what the actor's drain used to violate.
-    io = {};
+    // Everything outstanding is ANSWERED rather than dropped, so nobody is left holding an async that will not
+    // settle -- and the continuations that run to answer it find `is_stopping()` true, so none of them reaches for
+    // the transport to start another attempt.
+    io->stop();
+
+    CHECK(io->is_stopping());
+    REQUIRE(connecting->is_ready());
+    REQUIRE(connecting->try_error() != nullptr);
+    CHECK(connecting->try_error()->is_cancelled());
+
+    // And the transport outlived the answer, which is what the ordering rule is really about.
     net = {};
     res = {};
+    io = {};
+}
 
-    // Never settled, which is the abandonment being asserted rather than a leak.
-    CHECK(!connecting->is_ready());
+TEST("cnet - stopping twice is the same as stopping once")
+{
+    auto io = io_system::create({.unthreaded = true});
+    auto net = cc::make_unique<virtual_network>(*io);
+    auto res = resolver::create(*io, {.lookup = [](cc::string_view) -> cc::result<cc::vector<ip_address>, error>
+                                      { return cc::vector<ip_address>{addr("127.0.0.1")}; }});
+
+    auto connecting = connect_to_host(*net, *res, "example.test", 80);
+    io->stop();
+    io->stop();
+
+    // The destructor calls it too, so a caller who stopped by hand must not pay for it twice.
+    CHECK(connecting->is_ready());
 }

@@ -117,21 +117,33 @@ public:
     {
     }
 
-    ~io_actor()
+    ~io_actor() { stop(); }
+
+    void stop()
     {
-        if (!_handle.is_valid())
+        if (!_handle.is_valid() || _stopping.exchange(true))
             return;
 
+        // The actor goes down FIRST, so that by the time anything is settled below, no other thread is inside the
+        // reactor: the thread is joined, or the unthreaded drain has run and the pump registration is gone.
+        // That drain completes nothing, because `_stopping` is already set.
+        //
         // The reactor is parked in a wait rather than on the actor's condition variable, so the actor's own shutdown
         // notification cannot reach it.
         // Waking it first turns a shutdown that takes one full wait into one that takes no time at all.
-        // Set before waking: the actor's drain runs one more round of `on_process`, and this is what stops that
-        // round from completing operations into a program that is already being torn down.
-        _stopping.store(true);
-
         _reactor->wake();
         _handle->shutdown();
+
+        // Then answer everything outstanding, rather than leaving a caller holding an async that never settles --
+        // which is what `submit` already does for an operation that arrives too late.
+        // The continuations run inline from here, and every one of them finds `is_stopping()` true.
+        _reactor->fail_all_pending(error{.code = error_code::cancelled,
+                                         .native_code = 0,
+                                         .message = cc::string("the io_system is shutting down")});
+        _pending.store(0);
     }
+
+    [[nodiscard]] bool is_stopping() const { return _stopping.load(); }
 
     void start(i32 max_wait_ms)
     {
@@ -217,6 +229,16 @@ cc::unique_ptr<io_system> io_system::create(io_system_description const& desc)
 }
 
 io_system::~io_system() = default;
+
+void io_system::stop()
+{
+    _actor->stop();
+}
+
+bool io_system::is_stopping() const
+{
+    return _actor->is_stopping();
+}
 
 bool io_system::has_reactor_thread() const
 {

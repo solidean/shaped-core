@@ -90,6 +90,23 @@ on the way through to another one.
 1. the `fetch` and browser-`WebSocket` backends for wasm, and a `dlopen`ed system libcurl where one is present;
 2. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
 
+## Teardown settles rather than abandons
+
+`io_system::stop()` finishes every outstanding operation as `cancelled`, and the destructor calls it.
+
+**Nothing is dropped**, because an async that never answers is worse than one that answers no: a caller blocked on
+`cc::async_blocking_get` would wait forever, and `submit` already answers an operation that arrives too late.
+The two now say the same thing.
+
+**The continuations run inline, on the stopping thread**, which is what makes the second half necessary.
+A failure often wants to start something -- the next address in a race, a retry on a fresh connection -- and during
+teardown that reaches for a transport the caller may already have destroyed.
+So every such place asks `io_system::is_stopping()` first and settles instead.
+
+What is left is the ordinary rule every callback API has: do not destroy an object one of your own pending
+continuations captured.
+`stop()` is how a caller picks the moment that happens, rather than inheriting it from a destructor.
+
 ## What clean-core is missing that this library wants
 
 **Path resolution and directory metadata.**
