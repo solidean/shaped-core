@@ -52,16 +52,27 @@ def _summary_html(change) -> str:
 
 
 def _change_card(change, body: str, *, open_by_default: bool) -> str:
+    """One change, with its diff inline when the block asked to show it and on demand when it did not.
+
+    A collapsed diff used to ship anyway, and it is by far the largest thing a review sends: one entry here
+    carried 704 KB of highlighted HTML and 14k text nodes behind a `<details>` nobody had opened.
+    That cost is paid three times over — transferred, parsed into DOM, and then walked by the annotator, which
+    visits every text node whether or not it is on screen.
+
+    So a collapsed card carries its id and nothing else, and the page fetches the diff the first time it is
+    opened.
+    `show: visible` still renders inline, because there the reader has already said they want it.
+    """
     summary = _summary_html(change)
     reason = f'<div class="change-reason">{_esc(change.reason)}</div>' if change.reason else ""
     if not body:
         return (f'<div class="change"><div class="change-head"><code>{_esc(change.id)}</code>'
                 f'{summary}</div>{reason}</div>')
-    return (
-        f'<details class="change"{" open" if open_by_default else ""}><summary class="change-head"><code>{_esc(change.id)}</code>'
-        f'{summary}</summary>{reason}'
-        f'{highlight_diff(body, path=change.path)}</details>'
-    )
+    head = (f'<summary class="change-head"><code>{_esc(change.id)}</code>{summary}</summary>{reason}')
+    if open_by_default:
+        return f'<details class="change" open>{head}{highlight_diff(body, path=change.path)}</details>'
+    return (f'<details class="change" data-change="{_esc(change.id)}">{head}'
+            f'<div class="change-body"><span class="change-pending">loading the diff…</span></div></details>')
 
 
 def _comment_card(comment: Comment) -> str:

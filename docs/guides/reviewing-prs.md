@@ -34,6 +34,55 @@ They cost attention and return nothing.
 - **Public API docs written in the intended tense.** See "Docs are for users first" below.
 - **Restating the PR body.** The author wrote it.
 
+## What a review owes before it finds anything
+
+Two things, and a review that skips them can be entirely correct and still leave the maintainer unable to judge the change.
+Both were asked for out loud, on pr-164, against a review that had nineteen entries and neither of these.
+
+### A tour per feature cluster, with annotated examples as the vehicle
+
+**A review of a change that adds a feature owes an entry that teaches the feature.**
+Not the bird's-eye overview the orientation entry already carries — a tour, in the shape a good tutorial takes: the smallest real example, what it produces, and what it replaced.
+
+- **One entry per cluster**, and the count is the judgement.
+  Several small features that share a story take one entry between them; a large change with genuinely separate clusters takes one each.
+  **One or two is the common case and four is a lot** — past that the clusters are probably one cluster.
+- **Annotated code examples are the main vehicle**, not prose about the code.
+  The before, the after, and the generated or derived artifact, each as itself.
+- **Produce the examples rather than describing them.**
+  Run the generator, run the example, paste what came back.
+  A tour whose code samples were written by the reviewer from memory is the same claim as a quoted `///` retyped from memory, and it fails the same way.
+
+The reason this is not optional: the maintainer is reading a diff of someone else's design, and the fastest possible explanation of what a branch *is* is one worked example of using it.
+pr-164 is the worked case — a branch whose entire subject is a new way to write HLSL, reviewed across nineteen entries, none of which showed a shader written the new way.
+The tour that fixed it was five annotations, each with the committed shader, the address the pass writes into it, and the C++ the generator emits.
+All of it was produced by running the branch's own generator over the branch's own test shaders, rather than written out by the reviewer.
+
+### An argument that the solution is right, not just that it is correct
+
+**Correctness review answers "does this work". It does not answer "should this exist in this shape", and that is the more expensive question.**
+So a review owes a section that names the alternatives and prices them.
+
+- **Enumerate the alternatives, including the ones nobody would pick**, because the boring ones are what establish the frontier.
+  Doing nothing structural is always one of them, and it is often the one that reveals which slice of a large branch carries which part of the value.
+- **Pro, con and verdict for each**, short.
+  The maintainer is checking your reasoning, not reading an essay.
+- **Mark which ones the branch already recorded**, and cite where.
+  For those the question is whether the recorded reasoning *holds*, never whether the option was seen.
+  See [A finding the diff already documents is not a finding](#a-finding-the-diff-already-documents-is-not-a-finding).
+- **Then judge the chosen point against what this repo actually values**: API elegance, efficiency, KISS, moving forward, and keeping designs deliberately open to refine later.
+  Name the dimension where the change is weakest, and say whether it was knowingly traded.
+- **The goal is pareto-optimality, not perfection.**
+  Perfectionism is inefficient, and a review that pushes toward completeness nobody asked for costs more than it returns.
+  What is being checked is that the solution is good, the shape is right, and the avenues for later growth are open — not that nothing was left undone.
+
+**The highest-value output of this pass is usually an alternative that is not closed in writing anywhere.**
+An option ruled out in someone's head is one a future session re-proposes and re-implements.
+On pr-164 two of six were in that state.
+Rewriting at build time only is refuted by hot reload, and by a location counter that is flat per stage rather than per file.
+Generating from reflection is refuted by the same DXC behaviour that motivates the whole branch.
+Neither was written down, and the recommendation was to write them into the design doc rather than to change any code.
+
 ## Ranked by what it costs to get wrong
 
 ### 1. API shape
@@ -403,6 +452,29 @@ The check is cheap and specific: grep the constructor of the value, not the type
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
 
+### A doc's statement of its own limits is a claim, not a boundary
+
+The rules above say the author's prose is evidence you can trust, and that a test's comment about itself is a claim to check.
+There is a third position, and it is the one that bites hardest: **a design doc's account of what the design cannot do yet.**
+
+That sentence is written early, by someone reasoning about a case they deliberately did not build, and nothing ever rechecks it.
+Accepting it is worse than accepting a wrong finding, because it propagates into the review's own recommendations as a constraint.
+The reviewer starts scoping advice around an obstacle that is not there.
+
+So read a "what this does not address" section the way you read a claim about a mechanism: **go and look at the thing it says is not served.**
+
+pr-164 is the worked case.
+Its design doc closed with sv's bindless tables, saying they "need a register space per table, and nothing here assigns a space other than one per group".
+The review repeated that and built a recommendation on it — reject hand-written addresses, but not until bindless is served.
+The maintainer pushed back, and the code settled it in two greps.
+Bindless in this tree is a fixed-size array in a space of its own, `sv::space_of` numbers one space per table from 1, and one space per group is exactly one space per table.
+The pass already emitted precisely those bytes.
+There was no obstacle, the migration was ten files rather than a blocked feature, and the doc's own sentence was the only thing standing in the way.
+
+**The tell is a limitation stated in terms of the design's vocabulary rather than in terms of the blocked thing.**
+"Nothing here assigns a space other than one per group" describes the pass.
+It never says what a bindless table actually needs, which is the fact that decides it.
+
 ### A UB claim is checked against the standard the repo compiles as
 
 C++20 redefined signed left shift as modular rather than undefined, so `255 << 24` is well-defined in this repo's C++23 and yields a negative number.
@@ -416,6 +488,44 @@ The wrong claim was less severe than the truth.
 **Say which construct is undefined and why, and check the version.**
 Shifts, signed overflow, `char` signedness and aggregate init all changed under recent standards.
 
+### A count is a claim, and it is checked by enumerating
+
+A number in a review reads as evidence, which is exactly why a wrong one is expensive.
+"Twenty declarations across ten files" is a stronger sentence than "several files", and a reader who checks it and finds nineteen stops trusting the rest of the item.
+
+**The failure is counting from a grep's output rather than from the set the claim is about.**
+A grep hits comments, hits files outside the population, and hits the same file twice.
+Every one of those is a plausible off-by-one that survives re-reading, because re-reading the sentence does not re-count anything.
+
+pr-164's comment carried three wrong counts in one draft, all from that reflex.
+"`sg::vertex_attribute_format` has 16 members and the pass can produce 14" — it declares 14 and the pass produces 12.
+"Twenty hand-written `register()` declarations across ten files" — nineteen across nine, because the twentieth was in a backend test that never reaches the pass and one more hit was inside a comment.
+"Four single-binding compute test shaders" — three.
+The argument each number supported was correct in all three cases, which is what makes this worth a rule rather than a proofread: the finding survives, and the credibility does not.
+
+**So either enumerate the set in the comment, or drop the number.**
+A list of nine paths is longer than "nine files" and it is checkable, self-correcting while you write it, and more useful to the person doing the work.
+Where a count really is the point — a coverage claim, a before/after — produce it with a command whose output you paste, rather than by reading a list and counting.
+
+### Check whether the code already does the thing you are asking for
+
+A finding that asks for an assertion, a check or a guard is a claim that it is absent.
+That claim is checked by grepping the code paths it would live in, and it is the check most often skipped.
+The reason is that the reviewer arrived at the request by reasoning about what *should* exist rather than by reading what does.
+
+The cost is worse than a wasted item.
+The author reads an instruction to add something that is already there, and has to work out whether the reviewer means something subtler or simply did not look.
+The honest answer is usually the second.
+
+pr-164 is the worked case.
+The review asked that a generated `bind<G>` "check `G::group_index` against the bound pipeline layout's groups", because the group index had disappeared from the call site.
+Both backends already assert exactly that, at `dx12_command_list.cc:255` and `vulkan_command_list.compute.cc:56`, each beside a layout-identity assert.
+The concern was real and the request was already satisfied.
+What the item needed to say was that the existing asserts cover it, so the templated version must keep passing the index rather than reaching past it.
+
+**The tell is an instruction phrased as "make X check Y".**
+Before writing one, grep for the check in the two or three places it would have to live.
+
 ### Verbatim means pasted
 
 A quoted `///`, doc line or comment is a claim about a file, and it is checked the same way a line number is.
@@ -427,6 +537,12 @@ The file has two lines, and the second ends `..., and reading it must never depe
 The truncation landed exactly where the quote stopped supporting the point being made, which is the shape a reader notices.
 
 Paste it, keep its line breaks, and cite the line the paste starts at.
+
+**And cite where it is actually from.**
+A quote attributed to the wrong source is wrong twice: the sentence is unfindable where the review says it is, and the authority the attribution borrowed was never lent.
+pr-164's comment introduced a sentence with "Q14 measured it as portable" and then quoted `binding-preprocessor.md`.
+Q14 is a test; the sentence was the author's own doc, on the branch under review.
+That also made it the second failure below — quoting someone's documentation back at them to establish a point they wrote — where a pointer to the line would have carried the whole argument.
 
 ### A rename's call-site list comes from a grep of the name
 

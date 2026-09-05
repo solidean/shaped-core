@@ -17,10 +17,14 @@ Run it directly with `uv run tools/review/review-self-test.py [-v]`.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1607,6 +1611,130 @@ def test_design_review_refuses_a_range(root: Path) -> None:
     )
     assert result.returncode != 0, "a design review must refuse --range rather than ignore it"
     assert "--range" in (result.stderr + result.stdout), result.stderr + result.stdout
+
+
+# ---- the server's routes ----------------------------------------------------
+#
+# The render path had no coverage at all until a `@property` was called as a method and every route that
+# touches the nav returned 500 — a dead page, with the suite green at 93/93.
+# Nothing here asserts what a route *renders*; that is the entry-view tests' job.
+# These assert that each one answers at all, and that the few fields the page cannot work without are present.
+
+
+def serve_fixture(root: Path):
+    """A real review over a real repository, served by a real server on an ephemeral port.
+
+    In-process rather than through `review.py serve`, so a failure surfaces as a traceback in the test rather
+    than as an exit code from a subprocess that has already gone.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.serve.app import ReviewApp, Server
+    from tools.review.lib.serve.watch import Watcher
+
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": numbered(3)})
+    commit(repo, "second", {"a.txt": numbered(6)})
+
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+    for argv in (["init", "r", "--goal", "pr-comment", "--range", "HEAD~1..HEAD"], ["ingest", "r"], ["generate", "r"]):
+        done = subprocess.run(cli + argv, cwd=repo, capture_output=True, text=True)
+        assert done.returncode == 0, f"{argv}: {done.stderr or done.stdout}"
+
+    paths = ReviewPaths(repo / ".tmp" / "reviews" / "r")
+    app = ReviewApp(repo, paths, Watcher(paths))
+    # Port 0 lets the OS pick, so two suites running at once cannot collide.
+    server = Server(("127.0.0.1", 0), app)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}", app
+
+
+def get(base: str, route: str):
+    """One GET, as (status, body) — body parsed when it is JSON and raw otherwise."""
+    request = urllib.request.Request(base + route)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read()
+            status = response.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read(), e.code
+    if raw[:1] in (b"{", b"["):
+        return status, json.loads(raw)
+    return status, raw
+
+
+def test_every_route_answers(root: Path) -> None:
+    server, base, _ = serve_fixture(root)
+    try:
+        for route in ("/", "/assets/app.js", "/assets/app.css", "/assets/highlight.css", "/favicon.svg",
+                      "/api/state", "/api/summary", "/api/timings"):
+            status, _ = get(base, route)
+            assert status == 200, f"{route} answered {status}"
+
+        status, _ = get(base, "/api/nonsense")
+        assert status == 404, "an unknown route must 404 rather than 500"
+    finally:
+        server.shutdown()
+
+
+def test_state_carries_what_the_nav_reads(root: Path) -> None:
+    """The exact shape a 500 hid: every field `renderNav` indexes, on every row."""
+    server, base, _ = serve_fixture(root)
+    try:
+        status, state = get(base, "/api/state")
+        assert status == 200, state
+        assert state["entries"], "a generated review has entries"
+        for row in state["entries"]:
+            for field_name in ("slug", "id", "title", "group", "state", "asks", "answered", "error", "round"):
+                assert field_name in row, f"{row.get('slug')} is missing {field_name}"
+            assert isinstance(row["round"], int), f"{row['slug']}: round must be an int, not {row['round']!r}"
+    finally:
+        server.shutdown()
+
+
+def test_every_entry_renders(root: Path) -> None:
+    server, base, _ = serve_fixture(root)
+    try:
+        _, state = get(base, "/api/state")
+        for row in state["entries"]:
+            status, payload = get(base, "/api/entry/" + row["slug"])
+            assert status == 200, f"{row['slug']} answered {status}: {payload}"
+            assert payload["html"], f"{row['slug']} rendered empty"
+            assert "tokens" in payload or payload.get("broken"), f"{row['slug']} carries no tokens"
+
+        status, _ = get(base, "/api/entry/no-such-entry")
+        assert status == 404, "an unknown slug must 404"
+    finally:
+        server.shutdown()
+
+
+def test_a_collapsed_diff_is_fetched_rather_than_embedded(root: Path) -> None:
+    """The lazy-diff contract, from both ends: not in the entry, and served by id."""
+    server, base, app = serve_fixture(root)
+    try:
+        changes = app.ledger().live()
+        assert changes, "the fixture ingests at least one change"
+        with_body = [c for c in changes if c.has_body]
+        assert with_body, "the fixture has a change with a diff"
+
+        status, payload = get(base, "/api/change?id=" + with_body[0].id)
+        assert status == 200, payload
+        assert payload["html"], "a change with a body serves one"
+
+        status, _ = get(base, "/api/change?id=CHANGE-NOPE")
+        assert status == 404, "a change outside the ledger must 404"
+
+        # And the collapsed card in an entry carries the id rather than the diff.
+        _, state = get(base, "/api/state")
+        for row in state["entries"]:
+            _, entry = get(base, "/api/entry/" + row["slug"])
+            html = entry.get("html", "")
+            if 'class="change" data-change=' in html:
+                assert "difflines" not in html.split('data-change=')[1][:400], \
+                    f"{row['slug']}: a collapsed card must not embed its diff"
+    finally:
+        server.shutdown()
 
 
 # ---- harness ----------------------------------------------------------------

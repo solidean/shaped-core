@@ -94,11 +94,23 @@ code, pre, kbd, .difflines {
 .nav-entry.obsolete .nav-title { text-decoration: line-through; opacity: 0.6; }
 .nav-entry.broken { color: var(--bad); }
 
-.nav-id { color: var(--text-dim); font-size: 0.75rem; min-width: 2.2rem; }
-.nav-title { flex: 1; font-size: 0.87rem; }
+.nav-id { color: var(--text-dim); font-size: 0.75rem; min-width: 2.2rem; flex: none; }
+
+/* One line, always. An entry's title is a sentence and the nav is a list you scan by position, so a title that
+   wraps moves every row below it and the list stops being scannable at a glance.
+   `min-width: 0` is what actually lets it shrink — a flex item's default floor is its content width, so without
+   it the row grows instead of the text ellipsing. */
+.nav-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.87rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* The group rides on the row rather than heading a section, so the navigation can keep the agent's reading order. */
-.nav-group-tag { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
-.nav-mark { font-size: 0.8rem; }
+.nav-group-tag { color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; flex: none; }
+.nav-mark { font-size: 0.8rem; flex: none; }
 .nav-mark.ok { color: var(--good); }
 .nav-mark.partial { color: var(--warn); }
 
@@ -698,3 +710,50 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
 .example-missing { margin-top: 8px; color: var(--bad); font-size: 0.85rem; }
 .example-note { margin-top: 6px; color: var(--text-dim); font-size: 0.8rem; }
 .example-note.stale { color: var(--warn); }
+
+/* The full title of a nav row whose text is ellipsed, opened to the RIGHT so the list stays readable behind it.
+   Deliberately just the title: a preview of the whole entry was tried and is off (see PREVIEW_ENTRIES), because
+   what a reader wants mid-scan is the name they cannot finish reading. */
+.pop-navtitle {
+  max-width: 46ch;
+  font-size: 0.87rem;
+  line-height: 1.35;
+}
+.pop-navtitle .pop-navid {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  margin-right: 0.5rem;
+}
+
+/* The nav's own round divider, matching `.tier-delta-rule` inside an entry because it answers the same question.
+   Sticky, so scrolling away from the new material still says where it starts — the list is long and the rule is
+   the only thing that says which part of it the reader has not seen. */
+.nav-round-rule {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.35rem;
+  padding: 0.15rem 0.45rem;
+  background: var(--bg-sunken);
+  color: var(--accent);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.nav-round-rule::after {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.45;
+}
+
+/* The placeholder a collapsed change shows until its diff arrives.
+   Deliberately quiet: it is on screen for a few milliseconds against a warm cache, and a spinner would be more
+   noticeable than the wait it describes. */
+.change-pending { color: var(--text-dim); font-size: 0.82rem; font-style: italic; }
+.change-body:empty { display: none; }
