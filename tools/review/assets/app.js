@@ -123,8 +123,10 @@ function renderNav() {
     item.append(id, title, group, flag);
     item.addEventListener("click", () => selectEntry(row.slug));
     if (PREVIEW_ENTRIES && !row.error) {
-      item.addEventListener("mouseenter", () => peekEntry(item, row.slug));
-      item.addEventListener("mouseleave", schedulePopoverClose);
+      hoverPopover(item, () => peekEntry(item, row.slug));
+    } else {
+      // The title only. Opened beside the row rather than under it, so the list you are scanning stays visible.
+      hoverPopover(item, () => peekNavTitle(item, title, row));
     }
     list.appendChild(item);
   }
@@ -132,9 +134,27 @@ function renderNav() {
 
 // ---- entry ------------------------------------------------------------------
 
+// Where a navigation's time went, printed when `?timings` is in the URL.
+//
+// The server reports its own halves at /api/timings; this is the other side of the same question, because a
+// click that feels slow is fetch + inject + annotate and only the first of those is the server's.
+// `annotate` is the one worth watching: it walks every text node in the entry against every token, so it
+// grows with the entry rather than with the change.
+const SHOW_TIMINGS = new URLSearchParams(location.search).has("timings");
+
+function timed(label, fn) {
+  if (!SHOW_TIMINGS) return fn();
+  const started = performance.now();
+  const out = fn();
+  console.log(`[timing] ${label.padEnd(18)} ${(performance.now() - started).toFixed(1)} ms`);
+  return out;
+}
+
 async function selectEntry(slug, { push = true } = {}) {
   if (!slug) return;
+  const fetchStarted = performance.now();
   const result = await getJSON("/api/entry/" + encodeURIComponent(slug));
+  if (SHOW_TIMINGS) console.log(`[timing] ${"fetch".padEnd(18)} ${(performance.now() - fetchStarted).toFixed(1)} ms`);
   if (!result.ok) {
     // Returning silently here makes a server-side render failure look like a nav item that does not respond to clicks.
     setSaveState(`${slug}: ${result.body.error || "could not be rendered"}`, "bad");
@@ -148,12 +168,11 @@ async function selectEntry(slug, { push = true } = {}) {
 
   state.current = slug;
   state.staleContent = false;
-  el("content").innerHTML = result.body.html;
+  timed("inject", () => { el("content").innerHTML = result.body.html; });
   if (push) history.replaceState(null, "", "#" + slug);
-  annotate(el("content"), result.body.tokens);
-  wireForms();
-  wireComments();
-  renderNav();
+  timed("annotate", () => annotate(el("content"), result.body.tokens));
+  timed("wire", () => { wireForms(); wireComments(); });
+  timed("nav", () => renderNav());
 
   window.scrollTo(0, scroll);
   if (focused) {
@@ -368,8 +387,7 @@ function annotate(root, tokens) {
   // The overview's tree emits its own links: a row shows a basename while the link needs the whole path, so the
   // pass has no literal to match on. They still want the same peek.
   for (const el of root.querySelectorAll("a.annot[data-path]")) {
-    el.addEventListener("mouseenter", () => peek(el));
-    el.addEventListener("mouseleave", schedulePopoverClose);
+    hoverPopover(el, () => peek(el));
   }
   if (!tokens || !tokens.length) return;
   const live = tokens.filter((t) => ANNOTATE[t.kind] !== false);
@@ -465,23 +483,19 @@ function decorate(token) {
   if (token.path) {
     el.dataset.path = token.path;
     el.dataset.line = String(token.line || 0);
-    el.addEventListener("mouseenter", () => peek(el));
-    el.addEventListener("mouseleave", schedulePopoverClose);
+    hoverPopover(el, () => peek(el));
   }
   if (token.kind === "dir") {
     el.dataset.dir = token.path;
-    el.addEventListener("mouseenter", () => peekTree(el));
-    el.addEventListener("mouseleave", schedulePopoverClose);
+    hoverPopover(el, () => peekTree(el));
   }
   if (token.kind === "commit") {
     el.dataset.sha = token.text;
-    el.addEventListener("mouseenter", () => peekCommit(el));
-    el.addEventListener("mouseleave", schedulePopoverClose);
+    hoverPopover(el, () => peekCommit(el));
   }
   if (token.note) {
     el.title = "";
-    el.addEventListener("mouseenter", () => showPopover(el, `<div class="pop-def">${mdInline(token.note)}</div>`));
-    el.addEventListener("mouseleave", schedulePopoverClose);
+    hoverPopover(el, () => showPopover(el, `<div class="pop-def">${mdInline(token.note)}</div>`));
   }
   // Clicking a term goes to the entry that defines it, for the reader who wants more than a sentence.
   if (token.target) {
@@ -499,8 +513,47 @@ function mdInline(text) {
 // ---- the popover ------------------------------------------------------------
 //
 // One popover shared by every provider. A second one would be a second set of positioning bugs.
+//
+// The box is driven by an OWNER rather than by a pair of enter/leave events, and that is the whole design.
+// `popoverOwner` is the element the box belongs to, and every open re-checks it before painting.
+//
+// Three things go wrong without it, and all three were visible as a box that stuck to the screen:
+//
+//   - **A peek is asynchronous.** `mouseleave` schedules the close, the fetch resolves after it has run, and
+//     the box reopens for an element the pointer left — now with no close scheduled behind it. Nothing but
+//     hovering some other reference took it down again, which is exactly the report.
+//   - **`mouseleave` is a hint, not the authority.** An element re-rendered under the cursor never sends one,
+//     and a pointer leaving through a corner or out of the window can miss it too. A capture-phase
+//     `pointermove` is what actually decides whether the pointer is still over the anchor or the box.
+//   - **A sweep is not a hover.** Crossing a paragraph passes over a dozen references without meaning any of
+//     them. Opening waits for the pointer to settle, and nothing is fetched until it has.
+//
+// The box is `position: fixed` and placed from a `getBoundingClientRect`, so any scroll leaves it pointing at
+// nothing. It closes rather than trying to follow.
 
-let popoverTimer = 0;
+// Popover timing, in milliseconds. Change them here; nothing else reads a literal.
+//
+// Not exposed in the UI, deliberately — for now. They are a pair rather than two settings: `close` must stay
+// above `open` (see below), so a control for one without the other would let a reader build a configuration
+// that blinks. Worth exposing both together if it ever comes up.
+const POPOVER_TIMING = {
+  // Hover intent. Nothing opens and nothing is fetched until the pointer has settled this long on a
+  // reference, so sweeping across a paragraph costs no requests and opens no boxes.
+  open: 110,
+
+  // How long you have to reach the box after leaving the anchor.
+  //
+  // **Armed once, when the pointer leaves, and never restarted by further movement.** Restarting it on each
+  // move is the obvious reading of "close when the pointer is elsewhere" and it is wrong: a reader who keeps
+  // the mouse moving never reaches the deadline, so the box stays up for as long as they keep moving.
+  //
+  // Must stay above `open`, so moving to a neighbouring reference hands the box over before this fires.
+  close: 300,
+};
+
+let popoverOwner = null;
+let openTimer = 0;
+let closeTimer = 0;
 
 function popover() {
   let box = document.getElementById("popover");
@@ -508,11 +561,34 @@ function popover() {
     box = document.createElement("div");
     box.id = "popover";
     box.hidden = true;
-    box.addEventListener("mouseenter", () => clearTimeout(popoverTimer));
+    box.addEventListener("mouseenter", cancelPopoverClose);
     box.addEventListener("mouseleave", schedulePopoverClose);
     document.body.appendChild(box);
   }
   return box;
+}
+
+// Wires one reference: hover intent in, ownership taken at the moment the box is actually wanted.
+//
+// `open` may be asynchronous and is only ever called once the pointer has settled, so a peek's fetch is work
+// the reader asked for rather than work a sweep triggered.
+function hoverPopover(el, open) {
+  el.addEventListener("mouseenter", () => {
+    clearTimeout(openTimer);
+    openTimer = setTimeout(() => {
+      openTimer = 0;
+      popoverOwner = el;
+      // The close armed by leaving the previous anchor is not about this one, and an `open` that fetches can
+      // easily outlive it — which would close the box the reader is now pointing at.
+      cancelPopoverClose();
+      open();
+    }, POPOVER_TIMING.open);
+  });
+  el.addEventListener("mouseleave", () => {
+    clearTimeout(openTimer);
+    openTimer = 0;
+    schedulePopoverClose();
+  });
 }
 
 // `beside` puts the box past the anchor's right edge instead of under it, and aligns its top with the anchor.
@@ -520,8 +596,15 @@ function popover() {
 // A nav row is the case: opening downwards covers the rows below the one being hovered, so the list you are
 // scanning disappears under the preview of the thing you were scanning it for.
 function showPopover(anchor, html, { beside = false } = {}) {
+  // An open that lost its anchor while it was fetching paints nothing, and says so.
+  //
+  // Strict equality rather than "not somebody else's": `closePopover` clears the owner, so a fetch that
+  // resolves after the pointer left everything would otherwise still find a vacant box and fill it. That is
+  // the same stuck box by a slower route, and it is the one this whole owner is for.
+  if (popoverOwner !== anchor) return false;
+
   const box = popover();
-  clearTimeout(popoverTimer);
+  cancelPopoverClose();
   box.innerHTML = html;
   box.hidden = false;
   const rect = anchor.getBoundingClientRect();
@@ -531,19 +614,71 @@ function showPopover(anchor, html, { beside = false } = {}) {
     box.style.maxWidth = Math.max(320, room) + "px";
     box.style.left = Math.min(rect.right + 10, window.innerWidth - box.offsetWidth - 8) + "px";
     box.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - box.offsetHeight - 8)) + "px";
-    return;
+    return true;
   }
 
   box.style.maxWidth = "";
   box.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - box.offsetWidth - 8)) + "px";
   const below = rect.bottom + 6;
   box.style.top = (below + box.offsetHeight > window.innerHeight ? rect.top - box.offsetHeight - 6 : below) + "px";
+  return true;
 }
 
-function schedulePopoverClose() {
-  clearTimeout(popoverTimer);
-  popoverTimer = setTimeout(() => { popover().hidden = true; }, 180);
+function closePopover() {
+  clearTimeout(openTimer);
+  openTimer = 0;
+  cancelPopoverClose();
+  popoverOwner = null;
+  const box = document.getElementById("popover");
+  if (box) box.hidden = true;
 }
+
+// Every cancellation goes through here, because clearing the handle without zeroing it would leave the guard
+// in `schedulePopoverClose` believing a close is still armed, and no later one would ever be.
+function cancelPopoverClose() {
+  clearTimeout(closeTimer);
+  closeTimer = 0;
+}
+
+// Arms the deadline, or leaves the running one alone.
+//
+// The idempotence is the point rather than an optimization: the deadline runs from the moment the pointer
+// LEFT the anchor, not from its last twitch, so a reader still moving is still on the clock.
+function schedulePopoverClose() {
+  if (closeTimer) return;
+  closeTimer = setTimeout(closePopover, POPOVER_TIMING.close);
+}
+
+// The safety net, and what actually fixes a box that stuck.
+//
+// Capture phase, so it sees the move wherever it lands — inside a diff, inside the box, over an element that
+// stops propagation. It only does work while a box is open.
+document.addEventListener("pointermove", (event) => {
+  const box = document.getElementById("popover");
+  if (!box || box.hidden) return;
+  if (box.contains(event.target)) {
+    cancelPopoverClose();
+    return;
+  }
+  // `contains` on an owner that a re-render detached is false for every live target, which is the case a
+  // `mouseleave` never arrived for.
+  if (popoverOwner && popoverOwner.isConnected && popoverOwner.contains(event.target)) {
+    cancelPopoverClose();
+    return;
+  }
+  schedulePopoverClose();
+}, true);
+
+// A fixed box placed from a rect is wrong the moment anything scrolls, and the pointer leaving the window
+// never sends a move at all. Both close immediately rather than after the travel grace.
+document.addEventListener("scroll", (event) => {
+  const box = document.getElementById("popover");
+  if (!box || box.hidden || box.contains(event.target)) return;
+  closePopover();
+}, true);
+window.addEventListener("blur", closePopover);
+document.addEventListener("pointerleave", closePopover);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closePopover(); });
 
 // Line numbers are added here rather than server-side: the highlighter emits one blob, and a gutter is a
 // reading aid rather than part of the content.
@@ -576,7 +711,9 @@ async function peek(el) {
     peekCache.set(path, result.body);
   }
   const body = peekCache.get(path);
-  showPopover(el, `<div class="pop-head">${_esc(body.path)}<span>${peekMeta(body, line)}</span></div>` + peekBody(body));
+  // The fetch may have outlived the hover, in which case the box is someone else's and the scroll below
+  // would drag it to a line from a file the reader is no longer pointing at.
+  if (!showPopover(el, `<div class="pop-head">${_esc(body.path)}<span>${peekMeta(body, line)}</span></div>` + peekBody(body))) return;
   if (body.kind === "text") focusPopoverLine(line);
 }
 
@@ -617,6 +754,18 @@ function focusPopoverLine(line) {
   scroller.scrollTop = Math.max(0, target.offsetTop - scroller.clientHeight / 3);
 }
 
+// The full title of a row the nav had to cut short.
+//
+// Nothing opens when the title fits: a popover repeating a line the reader can already read in full is noise,
+// and the nav is where noise costs the most, since the pointer crosses every row on the way to one of them.
+// `scrollWidth > clientWidth` is the browser's own answer to "did this ellipse", which beats measuring text.
+function peekNavTitle(anchor, titleEl, row) {
+  if (titleEl.scrollWidth <= titleEl.clientWidth) return;
+  showPopover(anchor,
+    `<div class="pop-navtitle"><span class="pop-navid">${_esc(row.id)}</span>${_esc(row.title)}</div>`,
+    { beside: true });
+}
+
 // The whole entry, in the popover the nav row opens.
 //
 // Reading is what the nav is for, and until now the only way to see whether an entry was the one you meant
@@ -630,9 +779,9 @@ async function peekEntry(anchor, slug) {
     if (!result.ok || result.body.broken) return;
     entryPeekCache.set(slug, result.body.html);
   }
-  showPopover(anchor,
+  if (!showPopover(anchor,
     `<div class="pop-entry pop-scroll" aria-hidden="true">${entryPeekCache.get(slug)}</div>`,
-    { beside: true });
+    { beside: true })) return;
   const scroller = popover().querySelector(".pop-scroll");
   if (scroller) scroller.scrollTop = 0;
 }

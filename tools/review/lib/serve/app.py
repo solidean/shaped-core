@@ -38,6 +38,7 @@ from ..goals.skeleton import describe, groups_for
 from ..render.entryview import render_entry
 from ..render.highlight import css as highlight_css, highlight_code
 from ..render.media import BINARY, IMAGE, classify, human_bytes
+from . import timing
 from .watch import Watcher, compute_digest
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
@@ -64,6 +65,13 @@ class ReviewApp:
         self._terms: list | None = None
         self._terms_digest: str = ""
         self._head_sha: str = ""
+
+        # Rendered entry payloads, keyed on the watcher's digest plus that entry's answers file.
+        # An entry's HTML depends on exactly those two — its own text, and what has been answered on it — so a
+        # digest that has not moved means every cached payload is still the folder's own view.
+        self._rendered: dict[str, dict] = {}
+        self._rendered_digest: str = ""
+        self._rendered_guard = threading.Lock()
 
     def config(self):
         return config_module.load(self.paths.config)
@@ -166,22 +174,81 @@ class ReviewApp:
         return self._head_sha
 
     def entry_html(self, slug: str) -> tuple[int, dict]:
-        for file, entry, error in self.entries():
+        """One entry's rendered payload, from the cache when the folder has not moved under it.
+
+        The render is pure in the two inputs the key covers, so a hit is not an optimization that risks
+        staleness — it is the same computation, skipped.
+        A miss costs what it always did, so a cold click is never slower than it was.
+        """
+        digest = self.watcher.digest
+        with self._rendered_guard:
+            if self._rendered_digest != digest:
+                self._rendered.clear()
+                self._rendered_digest = digest
+            hit = self._rendered.get(slug)
+        if hit is not None:
+            timing.note("/api/entry/", "cache-hit", 0.0)
+            return 200, hit
+
+        with timing.span("/api/entry/", "parse-all"):
+            found = self.entries()
+        for file, entry, error in found:
             if file.stem != slug:
                 continue
             if error is not None:
-                return 200, {"slug": slug, "html": _error_panel(error), "broken": True}
-            answers = self.answers_for(entry)
-            html = render_entry(
-                entry, answers,
-                repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
-                head=self.head_sha(),
-            )
-            tokens = build_tokens(entry, self.index(), answers=answers,
-                                  confirm_shas=Git(self.repo).which_are_commits,
-                                  terms=self.terms())
-            return 200, {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
+                return 200, self._remember(slug, digest, {"slug": slug, "html": _error_panel(error), "broken": True})
+            with timing.span("/api/entry/", "answers"):
+                answers = self.answers_for(entry)
+            with timing.span("/api/entry/", "render"):
+                html = render_entry(
+                    entry, answers,
+                    repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
+                    head=self.head_sha(),
+                )
+            with timing.span("/api/entry/", "tokens"):
+                tokens = build_tokens(entry, self.index(), answers=answers,
+                                      confirm_shas=Git(self.repo).which_are_commits,
+                                      terms=self.terms())
+            payload = {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
+            return 200, self._remember(slug, digest, payload)
         return 404, {"error": f"no entry {slug!r}"}
+
+    def _remember(self, slug: str, digest: str, payload: dict) -> dict:
+        """Files the payload, unless the folder moved while it was being rendered.
+
+        Dropping it in that case rather than storing it is the whole of the invalidation: a render that raced an
+        edit is not wrong to return — the reader asked before the edit — but it must not be handed to the next
+        reader, who asked after.
+        """
+        with self._rendered_guard:
+            if self._rendered_digest == digest:
+                self._rendered[slug] = payload
+        return payload
+
+    def invalidate(self) -> None:
+        """Drops the rendered cache, for a write that has not reached the watcher yet.
+
+        The digest is polled, so a save and the re-fetch the page fires immediately after it can both land
+        inside one poll interval — and the cache would then hand back the payload from before the save.
+        Every write path calls this, which makes the digest key a staleness guard for edits made *outside*
+        the server rather than the only thing keeping the cache honest.
+        """
+        with self._rendered_guard:
+            self._rendered.clear()
+
+    def prebuild(self) -> None:
+        """Renders every entry into the cache, so the first click on each is a hit too.
+
+        Called off the request path, on a background thread: the point is to spend the cost while the reader is
+        still looking at the page they are on, and a prebuild that blocked startup would just move the wait.
+        Failures are swallowed on purpose — a broken entry renders as a panel through the normal path, and a
+        prebuild that raised would take down a thread nobody is watching.
+        """
+        for file in self.paths.entry_files():
+            try:
+                self.entry_html(file.stem)
+            except Exception:  # noqa: BLE001 — a warm cache is an optimization, never a correctness input.
+                pass
 
     def file_view(self, path: str) -> tuple[int, dict]:
         """One whole file, highlighted — for the peek popover and for the page a click opens alike.
@@ -275,6 +342,7 @@ class ReviewApp:
         return 200, details
 
     def save_answer(self, payload: dict) -> tuple[int, dict]:
+        self.invalidate()
         slug = str(payload.get("entry", ""))
         ask_name = str(payload.get("ask", ""))
         client_hash = str(payload.get("hash", ""))
@@ -339,6 +407,7 @@ class ReviewApp:
         A comment is maintainer-authored, so it is server-owned and never spliced into an entry file —
         it lives in the answers file, which is the half of the split the server already writes.
         """
+        self.invalidate()
         slug = str(payload.get("entry", ""))
         target = next((f for f in self.paths.entry_files() if f.stem == slug), None)
         if target is None:
@@ -404,6 +473,7 @@ class ReviewApp:
         return 200, {"stopped": True}
 
     def signal(self, payload: dict) -> tuple[int, dict]:
+        self.invalidate()
         action = str(payload.get("action", "send"))
         if action not in ("send", "pause"):
             return 400, {"error": f"unknown action {action!r}"}
@@ -528,6 +598,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 — the base class names it.
         route = urlparse(self.path).path
+        started = time.perf_counter()
         try:
             if route in ("/", "/index.html"):
                 self._asset("page.html")
@@ -542,6 +613,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, self.app.state())
             elif route == "/api/summary":
                 self._json(200, self.app.summary())
+            elif route == "/api/timings":
+                self._json(200, timing.report())
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))
                 self._json(code, payload)
@@ -573,6 +646,12 @@ class Handler(BaseHTTPRequestHandler):
             pass
         except Exception as e:  # noqa: BLE001 — a handler that raises would take the tab down with it.
             self._json(500, {"error": f"{type(e).__name__}: {e}"})
+        finally:
+            # The whole request, including the send.
+            # An entry route is bucketed under its prefix rather than per slug, since the question is
+            # "is opening an entry slow" and not "is entry 045 slow".
+            bucket = "/api/entry/" if route.startswith("/api/entry/") else route
+            timing.note(bucket, "total", (time.perf_counter() - started) * 1000.0)
 
     def do_POST(self) -> None:  # noqa: N802 — the base class names it.
         route = urlparse(self.path).path

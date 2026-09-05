@@ -48,6 +48,10 @@ class Watcher:
     def __init__(self, paths: ReviewPaths) -> None:
         self.paths = paths
         self.digest = compute_digest(paths)
+        # Called on the poll thread after a change is published, for anything that wants to warm itself again.
+        # A plain attribute rather than a constructor argument, because the app is built from the watcher and
+        # so cannot be passed to it.
+        self.on_change = None
         self._clients: list[queue.Queue] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -95,6 +99,12 @@ class Watcher:
                 self.digest = current
                 self._publish(f"event: reload\ndata: {current}\n\n")
                 last_beat = time.monotonic()
+                if self.on_change is not None:
+                    try:
+                        self.on_change()
+                    except Exception:
+                        # Same reason as the digest read above: a warm-up failing must not stop the polling.
+                        pass
             elif time.monotonic() - last_beat > HEARTBEAT_SECONDS:
                 self._publish(": ping\n\n")
                 last_beat = time.monotonic()

@@ -17,6 +17,7 @@ import webbrowser
 import tools.review as review
 
 from . import args as a
+from ..lib.serve import timing
 from .context import Context
 
 NAME = "serve"
@@ -31,6 +32,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=_DEFAULT_PORT, help=f"port to bind (default {_DEFAULT_PORT})")
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default 127.0.0.1, local only)")
     p.add_argument("--no-open", action="store_true", help="do not open a browser")
+    p.add_argument("--no-prebuild", action="store_true",
+                   help="do not warm the entry cache at startup; every entry then pays its own first render")
+    p.add_argument("--timings", action="store_true",
+                   help="print per-request timings to stderr; /api/timings always carries the aggregate")
     return p
 
 
@@ -51,8 +56,14 @@ def is_up(url: str) -> bool:
         return False
 
 
-def start(ctx: Context, name: str, *, host: str, port: int) -> tuple[object, int]:
-    """Bind and start a server for `name`, returning it and the port it actually took."""
+def start(ctx: Context, name: str, *, host: str, port: int, prebuild: bool = True) -> tuple[object, int]:
+    """Bind and start a server for `name`, returning it and the port it actually took.
+
+    `prebuild` renders every entry into the app's cache on a background thread once the port is bound, so the
+    first click on each entry is a cache hit rather than the one request that pays for it.
+    It is on by default because a review is opened to be read: the work happens anyway, and doing it up front
+    trades a second of idle startup for every later click being instant.
+    """
     from tools.review.lib.serve.app import ReviewApp, Server
     from tools.review.lib.serve.watch import Watcher
 
@@ -68,6 +79,11 @@ def start(ctx: Context, name: str, *, host: str, port: int) -> tuple[object, int
             last_error = e
             continue
         watcher.start()
+        if prebuild:
+            # And again after every change, so an edited review is warm by the time the tab has reloaded.
+            watcher.on_change = app.prebuild
+            # Daemon, so a prebuild still running does not hold up a shutdown the reader asked for.
+            threading.Thread(target=app.prebuild, daemon=True, name="review-prebuild").start()
         return server, port + offset
 
     ctx.die(f"no free port in {port}..{port + _PORT_ATTEMPTS - 1} ({last_error})")
@@ -101,7 +117,9 @@ def _served_elsewhere(ctx: Context, name: str) -> list:
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
-    server, port = start(ctx, args.name, host=args.host, port=args.port)
+    timing.set_echo(bool(getattr(args, "timings", False)))
+    server, port = start(ctx, args.name, host=args.host, port=args.port,
+                        prebuild=not getattr(args, "no_prebuild", False))
     url = f"http://{args.host}:{port}/"
 
     review.write_json(paths.served_marker, {"url": url, "pid": os.getpid(), "at": review.now()})
