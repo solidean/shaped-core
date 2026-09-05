@@ -98,7 +98,26 @@ function renderNav() {
   const list = el("nav-list");
   list.textContent = "";
 
-  for (const row of navRows()) {
+  // Where the newest material starts, so the nav answers "what have I not read yet" the way an entry already
+  // does with its own divider.
+  // Anchored on the highest round any entry actually carries, NOT on the config's next round: the config
+  // counts the round being written, which nothing is stamped with until an entry gains a block in it. Using it
+  // would leave the rule invisible for exactly as long as a round is open, which is the whole time it matters.
+  // The first row at that round rather than a badge on each: entries are numbered in reading order, so the new
+  // material is a tail, and one rule above it says more.
+  const rows = navRows();
+  const newestRound = rows.reduce((top, r) => (r.error ? top : Math.max(top, r.round || 0)), 0);
+  const firstNew = newestRound > 1 ? rows.findIndex((r) => !r.error && r.round === newestRound) : -1;
+  let newMarker = null;
+
+  rows.forEach((row, at) => {
+    if (at === firstNew) {
+      const rule = document.createElement("div");
+      rule.className = "nav-round-rule";
+      rule.textContent = `new in round ${newestRound}`;
+      list.appendChild(rule);
+      newMarker = rule;
+    }
     const item = document.createElement("div");
     item.className = "nav-entry";
     if (row.slug === state.current) item.classList.add("current");
@@ -125,10 +144,22 @@ function renderNav() {
     if (PREVIEW_ENTRIES && !row.error) {
       hoverPopover(item, () => peekEntry(item, row.slug));
     } else {
-      // The title only. Opened beside the row rather than under it, so the list you are scanning stays visible.
-      hoverPopover(item, () => peekNavTitle(item, title, row));
+      // The title only, and instantly: both timings above exist for a box that costs something to open — a
+      // fetch, a render, a reader's attention crossing a paragraph of references.
+      // This one is a string already in hand, opened over a list the reader is scanning *by* moving across it,
+      // so a delay is felt as lag rather than read as intent, and a close grace leaves it trailing the cursor.
+      hoverPopover(item, () => peekNavTitle(item, title, row), { immediate: true });
     }
     list.appendChild(item);
+  });
+
+  // Scrolled once per round, not once per render.
+  // renderNav runs on every entry selection, so scrolling unconditionally would yank the list out from under a
+  // reader who had deliberately scrolled somewhere else.
+  if (newMarker !== null && state.scrolledForRound !== newestRound) {
+    state.scrolledForRound = newestRound;
+    // `nearest` rather than `center`: when the new material is the whole tail, centring it hides the rule.
+    newMarker.scrollIntoView({ block: "nearest" });
   }
 }
 
@@ -170,7 +201,9 @@ async function selectEntry(slug, { push = true } = {}) {
   state.staleContent = false;
   timed("inject", () => { el("content").innerHTML = result.body.html; });
   if (push) history.replaceState(null, "", "#" + slug);
+  state.tokens = result.body.tokens;
   timed("annotate", () => annotate(el("content"), result.body.tokens));
+  timed("lazy-diffs", () => wireLazyDiffs(el("content")));
   timed("wire", () => { wireForms(); wireComments(); });
   timed("nav", () => renderNav());
 
@@ -510,6 +543,53 @@ function mdInline(text) {
   return _esc(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
+// ---- lazily fetched diffs ---------------------------------------------------
+//
+// A collapsed change card carries its id and no diff, because a review's diffs dwarf everything else it sends
+// and most are never opened — one entry here was 704 KB of highlighted HTML and 14k text nodes behind a
+// `<details>` nobody had clicked.
+//
+// The cost that removes is threefold: the bytes, the DOM the browser builds out of them, and the annotator's
+// walk, which visits every text node whether or not it is on screen.
+
+const diffCache = new Map();
+
+function wireLazyDiffs(root) {
+  for (const card of root.querySelectorAll("details.change[data-change]")) {
+    // `toggle` rather than a click on the summary: the disclosure can also be opened by keyboard, by find-in-page
+    // and by a script, and a handler on the summary misses all three.
+    card.addEventListener("toggle", () => {
+      if (card.open) loadDiff(card);
+    });
+  }
+}
+
+async function loadDiff(card) {
+  const id = card.dataset.change;
+  const slot = card.querySelector(".change-body");
+  if (!slot || slot.dataset.loaded === "1") return;
+  // Marked before the await, so a reader who toggles twice quickly does not start two fetches.
+  slot.dataset.loaded = "1";
+
+  const cached = diffCache.get(id);
+  const html = cached !== undefined ? cached : await (async () => {
+    const result = await getJSON("/api/change?id=" + encodeURIComponent(id));
+    if (!result.ok) return null;
+    diffCache.set(id, result.body.html);
+    return result.body.html;
+  })();
+
+  if (html === null) {
+    slot.innerHTML = '<span class="change-pending">the diff could not be loaded</span>';
+    slot.dataset.loaded = "";
+    return;
+  }
+  slot.innerHTML = html;
+  // The annotator ran before this existed, so the tokens have to reach it now — a path reference inside a diff
+  // is a link there exactly as it is anywhere else.
+  annotate(slot, state.tokens);
+}
+
 // ---- the popover ------------------------------------------------------------
 //
 // One popover shared by every provider. A second one would be a second set of positioning bugs.
@@ -572,9 +652,16 @@ function popover() {
 //
 // `open` may be asynchronous and is only ever called once the pointer has settled, so a peek's fetch is work
 // the reader asked for rather than work a sweep triggered.
-function hoverPopover(el, open) {
+function hoverPopover(el, open, { immediate = false } = {}) {
   el.addEventListener("mouseenter", () => {
     clearTimeout(openTimer);
+    openTimer = 0;
+    if (immediate) {
+      popoverOwner = el;
+      cancelPopoverClose();
+      open();
+      return;
+    }
     openTimer = setTimeout(() => {
       openTimer = 0;
       popoverOwner = el;
@@ -587,6 +674,10 @@ function hoverPopover(el, open) {
   el.addEventListener("mouseleave", () => {
     clearTimeout(openTimer);
     openTimer = 0;
+    if (immediate) {
+      closePopover();
+      return;
+    }
     schedulePopoverClose();
   });
 }
