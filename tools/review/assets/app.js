@@ -207,11 +207,52 @@ async function selectEntry(slug, { push = true } = {}) {
   timed("wire", () => { wireForms(); wireComments(); });
   timed("nav", () => renderNav());
 
-  window.scrollTo(0, scroll);
+  if (staying) window.scrollTo(0, scroll);
+  else scrollToNewestRound();
   if (focused) {
     // The focus class is what `1`-`9` aims at, so losing it across a refresh silently retargets the number keys.
     const ask = document.getElementById(focused);
     if (ask) ask.classList.add("focus");
+  }
+}
+
+// Opening an entry lands on its newest round rather than on its title.
+//
+// A `.round-divider` is emitted only *between* rounds, so an entry written in one round has none and opens at
+// the top, which is right — there is nothing older to skip past.
+// For everything else the last divider is where the material the reader has not seen begins, and that is what
+// they opened the entry for.
+//
+// Offset above the rule rather than flush with it, so the tail of the previous round is on screen: what is new
+// is usually a reply to what is directly above it, and a divider pinned to the top edge hides the question.
+const NEWEST_ROUND_MARGIN = 90;
+
+function scrollToNewestRound() {
+  const dividers = el("content").querySelectorAll(".round-divider");
+  if (!dividers.length) {
+    window.scrollTo(0, 0);
+    return;
+  }
+  const land = () => {
+    const last = dividers[dividers.length - 1];
+    const top = window.scrollY + last.getBoundingClientRect().top - NEWEST_ROUND_MARGIN;
+    window.scrollTo(0, Math.max(0, top));
+  };
+  land();
+
+  // An image that has not loaded yet has no height, so everything below it moves once it does — and an
+  // example entry is mostly images. Landing again after the last one settles is cheaper than reserving space
+  // we do not know, and it is a no-op for the entries that carry none.
+  const pending = [...el("content").querySelectorAll("img")].filter((img) => !img.complete);
+  if (!pending.length) return;
+  let left = pending.length;
+  for (const img of pending) {
+    const settled = () => {
+      // Only the last one re-lands, so a gallery does not scroll once per image while the reader is reading.
+      if (--left === 0 && state.current === el("content").querySelector(".entry")?.dataset.slug) land();
+    };
+    img.addEventListener("load", settled, { once: true });
+    img.addEventListener("error", settled, { once: true });
   }
 }
 
