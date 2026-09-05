@@ -170,11 +170,6 @@ rules:
     files: src/clean-core/error/crash_handler.cc
 
   - kind: allow-include
-    value: <string>
-    reason: std::to_string(std::stacktrace) is the only renderer that produces frame text, and it returns a std::string
-    files: src/clean-core/error/crash_handler.cc
-
-  - kind: allow-include
     value: <cerrno>
     reason: errno is how the POSIX file API reports failure
     files:
@@ -194,8 +189,8 @@ rules:
 
   - kind: allow-include
     value: <string>
-    reason: std::to_string(std::stacktrace) is the only renderer that produces frame text, and it returns a std::string
-    files: src/clean-core/common/assert.cc
+    reason: std::to_string(std::stacktrace) is what cc::to_string(cc::stacktrace) wraps on the std backend, and it returns a std::string
+    files: src/clean-core/platform/stacktrace.cc
 
   # =========================================================================================================
   # Platform APIs, each in the one TU that speaks to that OS

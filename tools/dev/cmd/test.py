@@ -8,6 +8,8 @@ from pathlib import Path
 
 from tools import dev
 
+from tools.dev.lib.toolchain import jsruntime as jsr
+
 from . import args as a
 from .context import Context
 
@@ -19,6 +21,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.jsruntime(p)
     a.profile(p)
     p.add_argument("--target", "-t", action="append",
                    help="Test binary target(s): comma-list, repeatable, wildcards")
@@ -137,6 +140,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             mirror=args.mirror_output,
             verbose=args.verbose,
             emsdk_path=args.emsdk_path,
+            runtime=jsr.JsRuntimeRequest.from_args(args),
         )
 
         if any(r["returncode"] != 0 for r in records):

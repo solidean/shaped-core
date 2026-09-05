@@ -34,6 +34,7 @@ add_library(clean-core
     src/clean-core/platform/environment.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
+    src/clean-core/platform/stacktrace.cc
     src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/platform/impl/text_file.cc
@@ -359,6 +360,14 @@ target_compile_definitions(clean-core
 # only because the header believed itself. When the probe finds nothing (Emscripten / WASI ship no such header
 # at all) this is not fatal: the header falls back to an empty stub. Only the GCC paths need a link library.
 # PUBLIC because consumers include stacktrace.hh and must reach the same verdict.
+# Emscripten is decided before the probe and against it: it ships no <stacktrace>, so the probe says NOTFOUND, but it
+# can still produce frame text through emscripten_get_callstack -- which is the only thing the stub cannot do.
+# platform/stacktrace.cc is that backend; see stacktrace.hh for why it reports text rather than addresses.
+if(EMSCRIPTEN)
+    message(STATUS "[clean-core] std::stacktrace unavailable - using the Emscripten callstack backend")
+    target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
+else()
+
 include(DetectStacktraceLib)
 cc_detect_stacktrace_link(_CC_STACKTRACE_LIB)
 
@@ -372,6 +381,8 @@ else()
         target_link_libraries(clean-core PRIVATE ${_CC_STACKTRACE_LIB})
     endif()
 endif()
+
+endif() # EMSCRIPTEN
 
 # DbgHelp backs the crash handler's per-thread stack walk (crash_handler.cc). std::stacktrace only ever
 # captures the calling thread, so reporting the OTHER threads — the ones that matter in a deadlock — needs
@@ -487,6 +498,7 @@ if(SC_BUILD_TESTS)
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
+        tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
         tests/platform/system_info-test.cc
         tests/platform/system_identifier-test.cc

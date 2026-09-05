@@ -64,13 +64,45 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 ```
 
 Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an already-activated `EMSDK` → `emcc` on `PATH`.
-Tests run under Node: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
-Only the single-threaded, no-WebGPU, `-fexceptions` combination is wired today.
-The `SC_THREADS=ON` / `SC_WASM_WEBGPU` / `SC_WASM_EXCEPTIONS=wasm-exceptions` knobs exist but fail configure with a clear "not yet supported" message — Tier 3 in [platforms.md](platforms.md).
+Tests run under Node by default: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
+Deno runs the same artifacts unchanged; `--runtime` picks between them, and [guides/building-and-testing.md](guides/building-and-testing.md#which-runtime-executes-the-artifact) is how.
+Threads and WebGPU are both wired, as the `emscripten-threads-*`, `emscripten-webgpu-*` and `emscripten-threads-webgpu-*` presets.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one remaining knob that fails configure as not-yet-supported.
 
-Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and the `wasm-emscripten-*` presets set it `OFF`.
-A hand-rolled wasm configure must too: leaving the `ON` default fails rather than silently building single-threaded.
-To develop that mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
+Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and each wasm preset sets it explicitly.
+`-pthread` is what predefines `__EMSCRIPTEN_PTHREADS__`, which is what clean-core's `CC_HAS_THREADS` reads, so the flag is the whole of the wiring.
+To develop the single-threaded mode natively, use a `singlethreaded-*` preset instead of a wasm build — the knob itself is [platforms.md](platforms.md#threading-sc_threads)'s.
+
+### WebGPU test runtimes
+
+None of this is needed for the wasm tier as it stands, which has no WebGPU.
+These are the runtimes the Tier-3 `SC_WASM_WEBGPU` work will test against, written down here so a machine can be prepared before that lands.
+
+What they buy is that **WebGPU is reachable from the CLI**, so a wasm graphics build need not be driven through a browser to be tested.
+They are also two different implementations of the same spec.
+Node's binding is Google's Dawn, which is what Chrome ships; Deno's is wgpu, which is what Firefox ships.
+Running both from the CLI therefore covers the quirks of both browser engines, which is the class of bug that otherwise appears only after deploying.
+
+**Deno** has WebGPU built in, with no native module to compile.
+
+```bash
+winget install DenoLand.Deno                    # Windows
+curl -fsSL https://deno.land/install.sh | sh    # Linux / macOS
+deno --version
+```
+
+WebGPU is on by default as of Deno 2.9.6, which is what this was verified against; `--unstable-webgpu` is still accepted but no longer required.
+It needs no permission flag either, which is worth knowing because Deno gates most of its capabilities by default: a plain `deno run` on a WebGPU script works.
+Deno can also present to a real OS window through `Deno.UnsafeWindowSurface`, which binds a surface to a window handle an FFI windowing library supplies rather than opening one itself.
+
+**Node** gets WebGPU from the `webgpu` package, which ships prebuilt Dawn bindings and needs no build step.
+
+```bash
+npm install webgpu
+```
+
+Node is the runtime `dev.py test` already drives for wasm, so it is the shorter path of the two.
+A wasm module reaches the binding through `globalThis.navigator.gpu`, which the harness must install before the module loads.
 
 ### `std::stacktrace`
 

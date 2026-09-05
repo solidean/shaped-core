@@ -12,6 +12,14 @@
 // Everything here uses a deliberately tiny budget — a few milliseconds rather than the half second the defaults ask
 // for — because what is under test is the engine's bookkeeping, not any particular body's speed.
 // A test that asserted a duration would be flaky by construction, so none of these do.
+//
+// They all hold nx::config::exclusive("bench") on top of that, because not asserting a duration is not enough on its
+// own: these tests still measure the machine, and nexus' own `benchmark` bucket sets exclusive_global for exactly that
+// reason -- a timing taken while another test runs is a timing of the pair.
+// These are ordinary TESTs that happen to call nx::bench::run, so none of that came for free, and the batching,
+// convergence and warmup assertions here read the same shared caches and cores as anything scheduled beside them.
+// The tag rather than a bare exclusive() serializes them against each other only, which is where the contention is,
+// instead of making each one a whole-suite barrier.
 
 using namespace cc::primitive_defines;
 
@@ -53,7 +61,7 @@ u64 work(u64 x)
 }
 } // namespace
 
-TEST("bench - run accepts a void() body")
+TEST("bench - run accepts a void() body", nx::config::exclusive("bench"))
 {
     auto acc = u64(0);
     auto const r = nx::bench::run("void", quick(), [&] { acc = work(acc); });
@@ -70,7 +78,7 @@ TEST("bench - run accepts a void() body")
     CHECK(r.items_per_second == 0);
 }
 
-TEST("bench - run accepts a void(iteration&) body")
+TEST("bench - run accepts a void(iteration&) body", nx::config::exclusive("bench"))
 {
     auto acc = u64(0);
     auto seen_indices = isize(0);
@@ -93,7 +101,7 @@ TEST("bench - run accepts a void(iteration&) body")
     CHECK(r.items_per_second > 0);
 }
 
-TEST("bench - run accepts a void(isize) body and reports one sample per batch")
+TEST("bench - run accepts a void(isize) body and reports one sample per batch", nx::config::exclusive("bench"))
 {
     auto acc = u64(0);
     auto const r = nx::bench::run("batched", quick(),
@@ -108,7 +116,7 @@ TEST("bench - run accepts a void(isize) body and reports one sample per batch")
     CHECK(r.measured_iterations == r.batch_size * isize(r.samples.size()));
 }
 
-TEST("bench - a cheap body gets batched, an expensive one does not")
+TEST("bench - a cheap body gets batched, an expensive one does not", nx::config::exclusive("bench"))
 {
     auto acc = u64(0);
     auto const cheap = nx::bench::run("cheap", quick(), [&] { acc = work(acc); });
@@ -123,7 +131,7 @@ TEST("bench - a cheap body gets batched, an expensive one does not")
     CHECK(unbatched.measured_iterations == isize(unbatched.samples.size()));
 }
 
-TEST("bench - single_shot measures one iteration per sample and warms up once")
+TEST("bench - single_shot measures one iteration per sample and warms up once", nx::config::exclusive("bench"))
 {
     auto cfg = nx::bench::run_config::single_shot();
     cfg.min_samples = 4;
@@ -144,7 +152,7 @@ TEST("bench - single_shot measures one iteration per sample and warms up once")
     CHECK(r.find_warning(nx::bench::warning_kind::overhead_significant) == nullptr);
 }
 
-TEST("bench - pause excludes its span from the measurement")
+TEST("bench - pause excludes its span from the measurement", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.batch = false;
@@ -168,7 +176,18 @@ TEST("bench - pause excludes its span from the measurement")
                                   });
 
     // Most of the wall time went into the paused span, which is reported.
-    CHECK(r.paused_fraction > 0.5);
+    //
+    // The bound on that fraction is the clock pair, which lands inside the measured span and cannot be paused away.
+    // Where the cycle counter is cheap the pair is ~15 ns against a ~16 us paused span, so the fraction is ~0.999.
+    // Where it is not, the clock is a call -- ~275 ns on wasm, ~430 ns once threads are on -- which is the same order
+    // as the paused span here, so the fraction sits near 0.5 and a fixed threshold falls on either side of it.
+    // has_cheap_counter is the right discriminator because the cost of reading the clock is the actual cause.
+    //
+    // Paying for more paused work is not the alternative: warmup budgets on MEASURED time, which the pause excludes,
+    // so it doubles to 131071 iterations here and the body's wall cost multiplies straight through -- 20x the loop
+    // took this test from 2.4 s to 43 s on x86.
+    auto const& cal = nx::bench::calibrated();
+    CHECK(r.paused_fraction > (cal.has_cheap_counter ? 0.5 : 0.3));
 
     // But it is NOT what the warning fires on.
     // The warning is about the pair's cost against what was MEASURED, and those are different numbers — so it tracks
@@ -176,7 +195,7 @@ TEST("bench - pause excludes its span from the measurement")
     CHECK((r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr) == pause_warning_is_earned(r));
 }
 
-TEST("bench - recorded quantities aggregate by their unit")
+TEST("bench - recorded quantities aggregate by their unit", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
 
@@ -212,7 +231,7 @@ TEST("bench - recorded quantities aggregate by their unit")
     CHECK(ratio->per_second == 0.0);
 }
 
-TEST("bench - warmup iterations contribute no items and no quantities")
+TEST("bench - warmup iterations contribute no items and no quantities", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.warmup_iterations = 7;
@@ -229,7 +248,7 @@ TEST("bench - warmup iterations contribute no items and no quantities")
     CHECK(r.items == r.measured_iterations); // the seven warmup iterations declared items and were ignored
 }
 
-TEST("bench - a run that cannot converge says so rather than pretending")
+TEST("bench - a run that cannot converge says so rather than pretending", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.target_relative_error = 1e-9; // unreachable
@@ -242,7 +261,7 @@ TEST("bench - a run that cannot converge says so rather than pretending")
     CHECK(r.find_warning(nx::bench::warning_kind::did_not_converge) != nullptr);
 }
 
-TEST("bench - a sample cap that cannot satisfy min_time is not a convergence failure")
+TEST("bench - a sample cap that cannot satisfy min_time is not a convergence failure", nx::config::exclusive("bench"))
 {
     // The regression: with 1 ms batches, min_time_secs of 0.5 needs about 500 samples.
     // A max_samples below that means elapsed never reaches min_time, so a run that had long since hit its target
@@ -260,7 +279,7 @@ TEST("bench - a sample cap that cannot satisfy min_time is not a convergence fai
     CHECK(r.find_warning(nx::bench::warning_kind::did_not_converge) == nullptr);
 }
 
-TEST("bench - an unnamed run and a default-config run both work")
+TEST("bench - an unnamed run and a default-config run both work", nx::config::exclusive("bench"))
 {
     auto acc = u64(0);
 
@@ -275,7 +294,7 @@ TEST("bench - an unnamed run and a default-config run both work")
 // suite happens to run on.
 // Manual and print-only for that reason: run it by exact name when a number looks wrong and you want to know whether
 // the harness or the body is responsible.
-TEST("bench - calibration report", nx::config::manual)
+TEST("bench - calibration report", nx::config::manual, nx::config::exclusive("bench"))
 {
     auto const& cal = nx::bench::calibrated();
 
@@ -325,7 +344,7 @@ TEST("bench - calibration report", nx::config::manual)
     cc::print(nx::bench::format_report("the same, markdown-safe", loops, md));
 }
 
-TEST("bench - counters are measured in their own passes, and can be turned off")
+TEST("bench - counters are measured in their own passes, and can be turned off", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.measure_counters = false;
@@ -350,7 +369,7 @@ TEST("bench - counters are measured in their own passes, and can be turned off")
     }
 }
 
-TEST("bench - a counter pass does not double-count items or quantities")
+TEST("bench - a counter pass does not double-count items or quantities", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.measure_counters = true;
@@ -367,13 +386,16 @@ TEST("bench - a counter pass does not double-count items or quantities")
     CHECK(r.items == r.measured_iterations);
 }
 
-TEST("bench - single_shot leaves counters off, since a pass is another whole run of the body")
+TEST("bench - single_shot leaves counters off, since a pass is another whole run of the body",
+     nx::config::exclusive("bench"))
 {
     auto const cfg = nx::bench::run_config::single_shot();
     CHECK(!cfg.measure_counters);
 }
 
-TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sample", nx::config::recorded)
+TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sample",
+     nx::config::recorded,
+     nx::config::exclusive("bench"))
 {
     auto rec = nx::test_recording();
     if (!rec.is_attached())
@@ -401,7 +423,7 @@ TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sa
     CHECK(rec.all().count("bench/median seconds") == 1);
 }
 
-TEST("bench - a pause around expensive setup is not warned about")
+TEST("bench - a pause around expensive setup is not warned about", nx::config::exclusive("bench"))
 {
     auto cfg = quick();
     cfg.batch = false;

@@ -641,6 +641,105 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
+        },
+        {
+            "name": "wasm-emscripten-threads-debug",
+            "displayName": "Debug Emscripten (WASM, threads)",
+            "description": "Debug WebAssembly build via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-release",
+            "displayName": "Release Emscripten (WASM, threads)",
+            "description": "Optimized WebAssembly build via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, threads)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-debug",
+            "displayName": "Debug Emscripten (WASM, WebGPU)",
+            "description": "Debug WebAssembly build via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-release",
+            "displayName": "Release Emscripten (WASM, WebGPU)",
+            "description": "Optimized WebAssembly build via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, WebGPU)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-debug",
+            "displayName": "Debug Emscripten (WASM, threads + WebGPU)",
+            "description": "Debug WebAssembly build via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-release",
+            "displayName": "Release Emscripten (WASM, threads + WebGPU)",
+            "description": "Optimized WebAssembly build via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, threads + WebGPU)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -835,6 +934,42 @@
         {
             "name": "emscripten-relwithdebinfo",
             "configurePreset": "wasm-emscripten-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-threads-debug",
+            "configurePreset": "wasm-emscripten-threads-debug"
+        },
+        {
+            "name": "emscripten-threads-release",
+            "configurePreset": "wasm-emscripten-threads-release"
+        },
+        {
+            "name": "emscripten-threads-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-threads-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-webgpu-debug",
+            "configurePreset": "wasm-emscripten-webgpu-debug"
+        },
+        {
+            "name": "emscripten-webgpu-release",
+            "configurePreset": "wasm-emscripten-webgpu-release"
+        },
+        {
+            "name": "emscripten-webgpu-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-webgpu-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-threads-webgpu-debug",
+            "configurePreset": "wasm-emscripten-threads-webgpu-debug"
+        },
+        {
+            "name": "emscripten-threads-webgpu-release",
+            "configurePreset": "wasm-emscripten-threads-webgpu-release"
+        },
+        {
+            "name": "emscripten-threads-webgpu-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-threads-webgpu-relwithdebinfo"
         }
     ]
 }

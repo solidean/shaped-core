@@ -28,6 +28,8 @@ from tools import dev
 from tools.dev import console
 from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, select_benchmarks
 
+from tools.dev.lib.toolchain import jsruntime as jsr
+
 from . import args as a
 from .context import Context
 
@@ -37,6 +39,7 @@ NAME = "benchmark"
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run benchmarks, or list them all (defaults to a release preset)")
     a.preset(p)
+    a.jsruntime(p)
     a.build_overrides(p)
     a.profile(p)
     p.add_argument("--target", "-t", action="append",
@@ -96,7 +99,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, None)
-    benchmarks = collect_benchmarks(preset, targets, root=ctx.root, binary_names=wanted)
+    benchmarks = collect_benchmarks(preset, targets, root=ctx.root, binary_names=wanted,
+                                    launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args)))
 
     if args.match is None:
         _print_listing(ctx, benchmarks, preset)

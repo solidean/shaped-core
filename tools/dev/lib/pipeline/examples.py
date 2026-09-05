@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import Preset, Target
+from ..toolchain import jsruntime as jsr
 from .eligibility import _suggest, query_listing
 
 _CACHE_FILE = "example-listings.json"
@@ -89,6 +90,7 @@ def collect_examples(
     *,
     root: Path,
     binary_names: list[str] | None = None,
+    launcher: jsr.LazyLauncher | None = None,
 ) -> list[Example]:
     """Every example in the selected `*-example` binaries, sorted by name.
 
@@ -111,7 +113,7 @@ def collect_examples(
         if stamp is not None and cached is not None and cached.get("stamp") == stamp:
             records = cached.get("tests", [])
         else:
-            listing = query_listing(preset, target, test_name=None, extra_args=["--examples"], root=root)
+            listing = query_listing(preset, target, test_name=None, extra_args=["--examples"], root=root, launcher=launcher)
             if listing is None:
                 continue
             records = [t for t in listing.tests if t.get("bucket") == "example"]
