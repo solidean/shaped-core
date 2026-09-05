@@ -22,6 +22,15 @@ class embedded_filesystem;
 class real_filesystem;
 class mount_table;
 
+// binding groups
+struct declared_sampler;
+struct shader_binding_group;
+struct shader_inline_constants;
+struct shader_struct_member;
+struct shader_vertex_input;
+struct shader_payload;
+struct shader_bindings;
+
 // shader packages
 enum class shader_language;
 struct shader_source_description;

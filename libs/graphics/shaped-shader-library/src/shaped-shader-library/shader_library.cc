@@ -5,6 +5,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
+#include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -308,5 +309,19 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value());
+
+    // Between the flatten and the compile, because a group's numbering is defined over one flattened translation
+    // unit, and because a decorating compiler could be displaced by any later add_compiler for the same edge.
+    // It also keeps the compiler's cache key honest: everything the rewrite depends on is folded into the source
+    // it hashes.
+    auto rewritten = rewrite_binding_groups(desc.source, format);
+    if (rewritten.has_error())
+    {
+        outcome.shader = make_failed_shader(
+            cc::format("rewriting the bindings of '{}' failed: {}", label, rewritten.error().to_string()));
+        return;
+    }
+
+    desc.source = cc::move(rewritten.value());
     outcome.shader = compiler->compile(desc);
 }

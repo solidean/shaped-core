@@ -177,6 +177,15 @@ public:
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
+    /// The same pair, keyed by layout slot rather than by binding name — see sg::slotted_view.
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle layout,
+                                                            cc::span<slotted_view const> views,
+                                                            cc::span<named_sampler const> samplers = {});
+
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<slotted_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
+
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
     /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
     /// The change takes effect at the next advance_epoch, which drains in-flight work and resizes the transient heap; until then the current budget stays in force.

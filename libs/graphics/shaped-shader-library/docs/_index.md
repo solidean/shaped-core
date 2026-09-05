@@ -10,6 +10,10 @@ It is the front door — sg's vocabulary, this library's packages and reload, an
 
 - [structure](structure.md) — the roadmap with `[done]`/`[in progress]`/`[planned]` status, and the source-tree layout.
   The living design document; update it as the API lands.
+- [portable-hlsl](portable-hlsl.md) — the design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
+  The compile flags have landed; the DXC behaviour the rest rests on is pinned by a test.
+- [binding-preprocessor](binding-preprocessor.md) — the HLSL-aware rewriting pass that owns binding addresses, and the typed C++ symbols it makes possible.
+  The answer to the binding half of portable HLSL; every phase has landed, and the doc is the design behind it.
 - [coding-guidelines](coding-guidelines.md) — the rules this library rests on that the code cannot enforce itself.
   Short, and worth reading before changing anything here.
 

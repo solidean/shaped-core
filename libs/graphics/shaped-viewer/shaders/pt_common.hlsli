@@ -1,6 +1,8 @@
 #pragma once
 
+#include "background.hlsli" // Background + the SH evaluation the miss and the hits use
 #include "camera.hlsli"
+#include "instance.hlsli" // sv::instance — the per-item table the group below declares
 #include "light.hlsli"
 
 // Shared state for the path tracer's ray-tracing shaders: the per-frame constants, the ray payload, and the
@@ -19,6 +21,46 @@ static const int pt_roulette_after = 16;
 // A guard against a dispatch that never ends rather than a quality control — see the roulette in pathtrace.hlsl.
 static const int pt_scatter_cap = 4096;
 
+// Every resource this pipeline's stages share, declared once for all of them.
+//
+// A closest-hit is GENERATED per material permutation and compiled at runtime, so `scene` used to be written
+// twice by hand — here and in pt_material_hit.hlsli — with a comment asserting the two matched.
+// One declaration is what makes them match; slib's binding pass writes the addresses into each stage.
+// See shaped-shader-library/docs/binding-preprocessor.md.
+//
+// The pass assigns no `s` register here, which is what leaves `s0`.. free for the `sv_sampler_i` a material
+// permutation emits at runtime.
+#pragma sc group 0
+namespace pt_bindings
+{
+    RaytracingAccelerationStructure scene;
+
+    // The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into.
+    //
+    // Read-modify-write at the dispatch's OWN pixel, which is what lets one texture do the job of a ping-pong pair.
+    // `accum_frame` is the number of frames already folded in, so a frame's weight is 1 / (accum_frame + 1) — the
+    // estimate is per view rather than per pixel, and the CPU restarts it by sending 0.
+    RWTexture2D<float4> Output;
+
+    /// The per-item table, indexed by `InstanceID()` — mirrors `sv::instance_gpu`.
+    /// An ordinary binding rather than a bindless one: there is exactly one table, and what varies per instance is
+    /// what it *points* at.
+    StructuredBuffer<sv::instance> Instances;
+
+    ConstantBuffer<Background> background;
+}
+
+// Still a hand-written address, and the last one in this pipeline.
+//
+// A group namespace holds declarations, and this is a `cbuffer` block whose members are read unqualified in some
+// seventy places across the integrator. Moving it means a ConstantBuffer and seventy call sites, which is a change
+// to the integrator rather than to who owns an address.
+//
+// b0 in space 0 is free only because `background` is not the group's FIRST declaration — the pass numbers one
+// counter across register classes, so it lands on b3.
+// Reordering pt_bindings to put a ConstantBuffer first would put it here, and the pass cannot see this
+// hand-written register to refuse it.
+// So the constraint is on the declaration order above, until this block moves into the group too.
 cbuffer FrameConstants : register(b0)
 {
     Camera camera; // pinhole camera basis (see sv::camera_gpu::from)

@@ -11,6 +11,7 @@ namespace
 constexpr u32 k_shader_stage_count = u32(shader_stage::callable) + 1;
 constexpr u32 k_shader_format_count = u32(shader_format::metal_lib) + 1;
 constexpr u32 k_binding_type_count = u32(binding_type::acceleration_structure) + 1;
+constexpr u32 k_texture_view_dimension_count = u32(texture_view_dimension::cube_array) + 1;
 
 void put_u32(cc::vector<byte>& out, u32 value)
 {
@@ -64,6 +65,12 @@ void put_binding(cc::vector<byte>& out, binding const& b)
     put_u32(out, u32(b.type));
     put_bool(out, b.block_size.has_value());
     put_i64(out, b.block_size.has_value() ? i64(b.block_size.value()) : 0);
+
+    // A texture's shader-declared dimension is what lets a backend synthesize a dimension-correct null
+    // descriptor for a vacant array element, so a cached shader that dropped it would bind differently
+    // from the one that was compiled.
+    put_bool(out, b.texture_dimension.has_value());
+    put_u32(out, b.texture_dimension.has_value() ? u32(b.texture_dimension.value()) : 0);
 }
 
 /// A cursor that goes sour on the first bad read and stays that way.
@@ -175,6 +182,13 @@ struct reader
         auto const block_size = get_i64();
         if (has_block_size)
             b.block_size = isize(block_size);
+
+        auto const has_dimension = get_bool();
+        auto const dimension = get_u32();
+        if (has_dimension && dimension < k_texture_view_dimension_count)
+            b.texture_dimension = texture_view_dimension(dimension);
+        else if (has_dimension)
+            ok = false;
         return b;
     }
 };
@@ -234,9 +248,9 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
         shader.bytecode = owned;
     }
 
-    // A binding is at least its five fixed fields plus two length prefixes, so a claimed count far past what the
+    // A binding is at least its fixed fields plus two length prefixes, so a claimed count far past what the
     // remaining bytes could hold is rejected before anything is allocated for it.
-    auto const binding_count = r.get_count(29);
+    auto const binding_count = r.get_count(34);
     for (auto i = isize(0); r.ok && i < binding_count; ++i)
         shader.bindings.push_back(r.get_binding());
 

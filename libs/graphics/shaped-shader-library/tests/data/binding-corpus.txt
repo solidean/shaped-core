@@ -1,0 +1,998 @@
+# The binding pass's shared corpus: HLSL snippets and the parse each one must produce.
+#
+# The pass exists twice -- once in C++ for the runtime rewriter, once in Python for the build-time generator --
+# and this file is what keeps the two agreeing on a grammar case rather than on two separate readings of it.
+# So a case is added here once, and both sides pick it up.
+#
+# It does not prove the two parsers are the same function. It proves they agree on what we thought of; the
+# per-package self-check covers what we ship, and the reflection cross-check is the only leg that asks DXC.
+#
+# Format, line-oriented, with every marker at column 0:
+#
+#   --- case <what this pins>
+#   --- hlsl            the snippet, verbatim, its first line being line 1 of every error message below
+#   --- groups          the expected parse, or nothing at all when the snippet declares no group
+#   <namespace> group=<n>
+#     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
+#     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
+#                                                      in the order sg::sampler declares them
+#   inline_constants <name> space=<n> type=<T> size=<bytes>   unindented, since it belongs to no group,
+#     <member> <type> @<offset>                               with one line per member of the block's struct
+#   vertex_input <name> slot=<n> [per_instance]        unindented too, and one line per member follows
+#     <member> <type> <SEMANTIC><index>
+#   payload <name> size=<bytes>                        unindented, with one `<member> <type>` line per member
+#   --- error           instead of `groups`: the message the pass must report, exactly
+#
+# A `#` comment is only a comment outside an `--- hlsl` block; inside one it is HLSL text like any other --
+# which matters here, because the attribute itself is a `#pragma sc` line.
+
+
+--- case a texture and a sampler share one counter, across register classes
+--- hlsl
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;
+    SamplerState linear_sampler;
+}
+--- groups
+frame_bindings group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  linear_sampler index=1 type=sampler count=1
+
+
+--- case two groups, each numbered by its own attribute rather than by order
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    ConstantBuffer<frame_constants> constants;
+}
+
+#pragma sc group 2
+namespace material
+{
+    Texture2D<float4> base_color;
+    RWStructuredBuffer<uint> counters;
+}
+--- groups
+frame group=0
+  constants index=0 type=uniform_buffer count=1
+material group=2
+  base_color index=0 type=readonly_texture count=1 dim=tex_2d
+  counters index=1 type=readwrite_structured_buffer count=1
+
+
+--- case the attribute's own spacing does not matter, since the flatten reprints its tokens
+--- hlsl
+#pragma   sc   group   1
+namespace shadow
+{
+    Texture2DArray<float> maps;
+    SamplerComparisonState compare_sampler;
+}
+--- groups
+shadow group=1
+  maps index=0 type=readonly_texture count=1 dim=tex_2d_array
+  compare_sampler index=1 type=sampler count=1
+
+
+--- case an array consumes one index per element, since DXIL numbers every element
+--- hlsl
+#pragma sc group 3
+namespace bindless
+{
+    Texture2D<float4> textures[8];
+    SamplerState samp;
+}
+--- groups
+bindless group=3
+  textures index=0 type=readonly_texture count=8 dim=tex_2d
+  samp index=8 type=sampler count=1
+
+
+--- case a template argument list may carry a comma of its own
+--- hlsl
+#pragma sc group 0
+namespace ms
+{
+    Texture2DMS<float4, 4> color;
+}
+--- groups
+ms group=0
+  color index=0 type=readonly_texture count=1 dim=tex_2d_ms
+
+
+--- case everything carrying no attribute is left alone, including a hand-written register
+--- hlsl
+#pragma pack_matrix(row_major)
+
+Texture2D<float4> hand_written : register(t0, space5);
+
+/* a block comment holding #pragma sc group 9, which is text and not a directive */
+
+namespace helpers
+{
+    float3 tonemap(float3 c) { return c / (1.0f + c); }
+}
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+
+
+--- case the marker ends at a word boundary, so `sc` is not a prefix of another pragma
+--- hlsl
+#pragma scope_something 9
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+
+
+--- case a string literal is skipped whole, so a marker inside one is not a directive
+--- hlsl
+void debug()
+{
+    printf("a // that opens nothing, and a #pragma sc group 9 that applies to nothing");
+}
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+
+
+--- case a file with no attribute anywhere declares no group
+--- hlsl
+Texture2D<float4> albedo : register(t0, space0);
+SamplerState samp : register(s0, space0);
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {}
+--- groups
+
+
+--- case every type in the table, in one group
+--- hlsl
+#pragma sc group 7
+namespace everything
+{
+    Texture1D<float4> t1d;
+    Texture1DArray<float4> t1da;
+    Texture2D<float4> t2d;
+    Texture2DArray<float4> t2da;
+    Texture2DMS<float4, 4> t2dms;
+    Texture2DMSArray<float4, 4> t2dmsa;
+    Texture3D<float4> t3d;
+    TextureCube<float4> tcube;
+    TextureCubeArray<float4> tcubea;
+    RWTexture1D<float4> u1d;
+    RWTexture1DArray<float4> u1da;
+    RWTexture2D<float4> u2d;
+    RWTexture2DArray<float4> u2da;
+    RWTexture3D<float4> u3d;
+    Buffer<float4> buf;
+    StructuredBuffer<vertex> sbuf;
+    RWStructuredBuffer<vertex> rwsbuf;
+    ByteAddressBuffer rawbuf;
+    RWByteAddressBuffer rwrawbuf;
+    ConstantBuffer<constants> cbuf;
+    SamplerState samp;
+    SamplerComparisonState samp_cmp;
+    RaytracingAccelerationStructure scene;
+}
+--- groups
+everything group=7
+  t1d index=0 type=readonly_texture count=1 dim=tex_1d
+  t1da index=1 type=readonly_texture count=1 dim=tex_1d_array
+  t2d index=2 type=readonly_texture count=1 dim=tex_2d
+  t2da index=3 type=readonly_texture count=1 dim=tex_2d_array
+  t2dms index=4 type=readonly_texture count=1 dim=tex_2d_ms
+  t2dmsa index=5 type=readonly_texture count=1 dim=tex_2d_ms_array
+  t3d index=6 type=readonly_texture count=1 dim=tex_3d
+  tcube index=7 type=readonly_texture count=1 dim=cube
+  tcubea index=8 type=readonly_texture count=1 dim=cube_array
+  u1d index=9 type=readwrite_texture count=1 dim=tex_1d
+  u1da index=10 type=readwrite_texture count=1 dim=tex_1d_array
+  u2d index=11 type=readwrite_texture count=1 dim=tex_2d
+  u2da index=12 type=readwrite_texture count=1 dim=tex_2d_array
+  u3d index=13 type=readwrite_texture count=1 dim=tex_3d
+  buf index=14 type=readonly_structured_buffer count=1
+  sbuf index=15 type=readonly_structured_buffer count=1
+  rwsbuf index=16 type=readwrite_structured_buffer count=1
+  rawbuf index=17 type=readonly_raw_buffer count=1
+  rwrawbuf index=18 type=readwrite_raw_buffer count=1
+  cbuf index=19 type=uniform_buffer count=1
+  samp index=20 type=sampler count=1
+  samp_cmp index=21 type=sampler count=1
+  scene index=22 type=acceleration_structure count=1
+
+
+--- case a misspelled attribute is an error, never a directive nobody reads
+--- hlsl
+#pragma sc gruop 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 1: 'gruop' is not an attribute this pass knows
+
+
+--- case the flatten's #line is what an error names, not an offset into the flatten
+--- hlsl
+#line 40 "shaders/frame_bindings.hlsli"
+#pragma sc gruop 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+shaders/frame_bindings.hlsli:40: 'gruop' is not an attribute this pass knows
+
+
+--- case a `static` sampler is baked into the layout, and still takes its slot
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+#pragma sc static address=clamp_edge
+    SamplerState linear_sampler;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  linear_sampler index=1 type=sampler count=1
+  static linear_sampler address_u=clamp_edge address_v=clamp_edge address_w=clamp_edge
+
+
+--- case a tuple addresses the shorthand's fields individually, in sg::sampler's own order
+--- hlsl
+#pragma sc group 0
+namespace shadow
+{
+#pragma sc static filter=(linear, linear, nearest) address=(clamp_edge, clamp_border, repeat) compare=less
+    SamplerComparisonState compare_sampler;
+}
+--- groups
+shadow group=0
+  compare_sampler index=0 type=sampler count=1
+  static compare_sampler mip_filter=nearest address_u=clamp_edge address_v=clamp_border compare=less
+
+
+--- case everything omitted takes sg::sampler's default, which is a trilinear repeating sampler
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+  static samp
+
+
+--- case the numeric fields are sg::sampler's too
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static max_anisotropy=4 mip_lod_bias=0.5 border_color=opaque_white
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+  static samp mip_lod_bias=0.5 max_anisotropy=4 border_color=opaque_white
+
+
+--- case a sampler the shader did not mark `static` stays dynamic
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    SamplerState samp;
+}
+--- groups
+frame group=0
+  samp index=0 type=sampler count=1
+
+
+--- case `static` describes a sampler and nothing else
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static address=clamp_edge
+    Texture2D<float4> albedo;
+}
+--- error
+line 4: 'static' describes a sampler, and 'albedo' is not one
+
+
+--- case a `static` attribute standing before nothing is an error
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    SamplerState samp;
+#pragma sc static address=clamp_edge
+}
+--- error
+line 5: a 'static' attribute must stand before a sampler declaration
+
+
+--- case a key outside sg::sampler is an error rather than something ignored
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static wrap=clamp_edge
+    SamplerState samp;
+}
+--- error
+line 4: 'wrap' is not a field of sg::sampler
+
+
+--- case a value outside the enumerator set is an error
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static address=clamp_to_border
+    SamplerState samp;
+}
+--- error
+line 4: 'clamp_to_border' is not a value of 'address'
+
+
+--- case a shorthand takes one value or a tuple of three
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static filter=(linear, nearest)
+    SamplerState samp;
+}
+--- error
+line 4: 'filter' takes one value or a tuple of three
+
+
+--- case an inline-constants block states its space, since its register is always b0
+--- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
+#pragma sc push_constants space=9
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=16
+  exposure float @0
+
+
+--- case a constant block's members carry DXC's offsets, which Q14 measured
+--- hlsl
+struct frame_constants
+{
+    float2 a;
+    float3 b;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=32
+  a float2 @0
+  b float3 @16
+
+
+--- case a row is filled before it is left, so nothing is padded that need not be
+--- hlsl
+struct frame_constants
+{
+    float a;
+    float3 b;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=16
+  a float @0
+  b float3 @4
+
+
+--- case a bool takes four bytes in a constant block
+--- hlsl
+struct frame_constants
+{
+    bool flag;
+    float3 tint;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=0 type=frame_constants size=16
+  flag bool @0
+  tint float3 @4
+
+
+--- case the block's struct may be declared after the block that names it
+--- hlsl
+#pragma sc push_constants space=1
+ConstantBuffer<frame_constants> frame;
+
+struct frame_constants
+{
+    float4 tint;
+};
+--- groups
+inline_constants frame space=1 type=frame_constants size=16
+  tint float4 @0
+
+
+--- case a block naming a struct the file does not declare is an error
+--- hlsl
+#pragma sc push_constants space=9
+ConstantBuffer<nowhere_constants> frame;
+--- error
+the inline-constants block 'frame' names a struct 'nowhere_constants' this file does not declare
+
+
+--- case an array in a constant block is refused, since the next member packs into its last row
+--- hlsl
+struct frame_constants
+{
+    float weights[4];
+    float probe;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: an array is not supported in a constant block, because the member after it packs into its last row
+
+
+--- case a matrix is refused for the same reason, and float3x3 is not portable at all
+--- hlsl
+struct frame_constants
+{
+    float4x4 transform;
+};
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: 'float4x4' is not a constant block type this pass knows
+
+
+--- case a block and a group live in one file, in different spaces
+--- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc push_constants space=9
+ConstantBuffer<frame_constants> constants;
+--- groups
+frame_bindings group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+inline_constants constants space=9 type=frame_constants size=16
+  exposure float @0
+
+
+--- case `push_constants` describes a ConstantBuffer and nothing else
+--- hlsl
+#pragma sc push_constants space=9
+Texture2D<float4> albedo;
+--- error
+line 2: 'push_constants' describes a ConstantBuffer, and 'albedo' is not one
+
+
+--- case a pipeline layout carries at most one inline-constants block
+--- hlsl
+#pragma sc push_constants space=9
+ConstantBuffer<a> first;
+
+#pragma sc push_constants space=10
+ConstantBuffer<b> second;
+--- error
+line 4: a second 'push_constants' block, and a pipeline layout carries at most one
+
+
+--- case `push_constants` carries its space explicitly
+--- hlsl
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- error
+line 1: 'push_constants' takes exactly one space=<n>
+
+
+--- case a `push_constants` attribute standing before nothing is an error
+--- hlsl
+#pragma sc push_constants space=9
+--- error
+line 1: a 'push_constants' attribute must stand before a ConstantBuffer declaration
+
+
+--- case a payload packs at natural alignment, which the spike's Q13 measured
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float2 a;
+    float3 b;
+    uint tag;
+};
+--- groups
+payload pt_payload size=24
+  a float2
+  b float3
+  tag uint
+
+
+--- case the same members would be 32 bytes under a constant buffer's row rules
+--- hlsl
+#pragma sc payload
+struct one_scalar
+{
+    uint value;
+};
+--- groups
+payload one_scalar size=4
+  value uint
+
+
+--- case a payload member carries no semantic, since nothing matches it by one
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float3 radiance : COLOR;
+};
+--- groups
+payload pt_payload size=12
+  radiance float3
+
+
+--- case `payload` takes no arguments
+--- hlsl
+#pragma sc payload size=104
+struct pt_payload
+{
+    uint value;
+};
+--- error
+line 1: 'payload' takes no arguments
+
+
+--- case an empty payload is an error rather than a zero-byte one
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+};
+--- error
+line 2: payload 'pt_payload' declares no members
+
+
+--- case a payload member's type comes from the same table a vertex attribute's does
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float4x4 transform;
+};
+--- error
+line 4: 'float4x4' is not a payload type this pass knows
+
+
+--- case a `payload` attribute standing before nothing is an error
+--- hlsl
+#pragma sc payload
+Texture2D<float4> albedo;
+--- error
+line 1: a 'payload' attribute must stand before a struct declaration
+
+
+--- case a vertex input struct's members are numbered by declaration order
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float4 color : COLOR;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+  normal float3 NORMAL0
+  color float4 COLOR0
+
+
+--- case a semantic's trailing integer is its index, the way HLSL reads it
+--- hlsl
+#pragma sc vertex_input slot=1 per_instance
+struct cube_instance_input
+{
+    float3 center : TEXCOORD0;
+    float3 half_extent : TEXCOORD1;
+    uint flags : TEXCOORD2;
+};
+--- groups
+vertex_input cube_instance_input slot=1 per_instance
+  center float3 TEXCOORD0
+  half_extent float3 TEXCOORD1
+  flags uint TEXCOORD2
+
+
+--- case two vertex input structs feed two slots of one pipeline
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=1 per_instance
+struct instance_input
+{
+    float4 transform : TEXCOORD0;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+vertex_input instance_input slot=1 per_instance
+  transform float4 TEXCOORD0
+
+
+--- case a vertex input member carries a semantic, since that is what HLSL matches on
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position;
+};
+--- error
+line 4: vertex input member 'position' must carry a semantic
+
+
+--- case a type outside the vertex attribute table is an error
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3x3 basis : NORMAL;
+};
+--- error
+line 4: 'float3x3' is not a vertex attribute type this pass knows
+
+
+--- case `vertex_input` takes slot and per_instance and nothing else
+--- hlsl
+#pragma sc vertex_input stride=32
+struct vs_input
+{
+    float3 position : POSITION;
+};
+--- error
+line 1: 'vertex_input' takes slot=<n> and per_instance, not 'stride'
+
+
+--- case a `vertex_input` attribute standing before nothing is an error
+--- hlsl
+#pragma sc vertex_input
+Texture2D<float4> albedo;
+--- error
+line 1: a 'vertex_input' attribute must stand before a struct declaration
+
+
+--- case two attributes cannot stack before one declaration
+--- hlsl
+#pragma sc group 0
+#pragma sc group 1
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 2: two attributes stand before one declaration
+
+
+--- case a nested namespace opens a scope the pass cannot number
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    namespace inner
+    {
+        Texture2D<float4> albedo;
+    }
+}
+--- error
+line 4: 'namespace' is not supported inside an annotated namespace
+
+
+--- case a struct body is not a binding declaration
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    struct vertex { float3 position; };
+}
+--- error
+line 4: 'struct' is not supported inside an annotated namespace
+
+
+--- case a typedef is not a binding declaration
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    typedef float4 color;
+}
+--- error
+line 4: 'typedef' is not supported inside an annotated namespace
+
+
+--- case a function is not a binding declaration
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> sample_it(float2 uv);
+}
+--- error
+line 4: a function definition is not supported inside an annotated namespace
+
+
+--- case a preprocessor directive has already run by the time the pass sees the text
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma pack_matrix(row_major)
+    Texture2D<float4> albedo;
+}
+--- error
+line 4: a preprocessor directive is not supported inside an annotated namespace
+
+
+--- case an array length must be a literal, since nothing here evaluates an expression
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> textures[TEXTURE_COUNT];
+}
+--- error
+line 4: the length of 'textures' must be a decimal literal
+
+
+--- case a type outside the table is an error rather than a guess
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    MysteryBuffer<float> thing;
+}
+--- error
+line 4: 'MysteryBuffer' is not a resource type this pass knows
+
+
+--- case a binding inside a group does not write its own address
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo : register(t0);
+}
+--- error
+line 4: 'albedo' must not write its own register — the pass owns the address
+
+
+--- case a missing semicolon is named where it is missing
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo
+}
+--- error
+line 4: expected ';' after 'albedo'
+
+
+--- case one name in two groups would reach sg as one binding at two addresses
+--- hlsl
+#pragma sc group 0
+namespace a
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc group 1
+namespace b
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 10: 'albedo' is declared twice
+
+
+--- case an annotated namespace is declared exactly once
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc group 1
+namespace frame
+{
+    Texture2D<float4> normal;
+}
+--- error
+line 8: namespace 'frame' is declared twice
+
+
+--- case one group owns its number alone, since the number is also its space
+--- hlsl
+#pragma sc group 0
+namespace a
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc group 0
+namespace b
+{
+    Texture2D<float4> normal;
+}
+--- error
+line 8: group 0 is declared twice, by namespace 'b'
+
+
+--- case an unclosed namespace is reported rather than parsed to the end of the file
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+--- error
+line 4: namespace 'frame' is never closed
+
+
+--- case a `group` attribute belongs before a namespace and nowhere else
+--- hlsl
+#pragma sc group 0
+Texture2D<float4> albedo;
+--- error
+line 1: a 'group' attribute must stand before a namespace declaration
+
+
+--- case `group` carries its number explicitly
+--- hlsl
+#pragma sc group
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 1: 'group' takes exactly one number
+
+
+--- case an attribute inside a group applies to a binding, not to a brace
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+#pragma sc group 1
+}
+--- error
+line 5: 'group' is not an attribute of a binding
+
+
+--- case an unterminated block comment is a lexing failure, not a silent truncation
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo; /* never closed
+}
+--- error
+line 4: unterminated block comment
+
+
+--- case an unterminated literal is a lexing failure too
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+void debug() { printf("never closed
+}
+--- error
+line 6: unterminated literal
+
+
+--- case an inline-constants block may not take a space a group owns
+--- hlsl
+struct frame_constants
+{
+    float exposure;
+};
+
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;
+}
+
+#pragma sc push_constants space=0
+ConstantBuffer<frame_constants> constants;
+--- error
+the inline-constants block 'constants' takes space 0, which group 0 ('frame_bindings') already owns
+
+
+--- case a vertex input member needs a type an input assembler can fetch
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+    bool visible : TEXCOORD0;
+};
+--- error
+line 5: 'bool' has no vertex attribute format, so it cannot feed a vertex input
+
+
+--- case one location counter runs across every vertex input struct
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=1 per_instance
+struct instance_input
+{
+    float3 center : TEXCOORD0;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float3 POSITION0
+vertex_input instance_input slot=1 per_instance
+  center float3 TEXCOORD0

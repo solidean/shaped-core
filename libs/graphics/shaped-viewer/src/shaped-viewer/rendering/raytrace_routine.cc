@@ -28,10 +28,9 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_ch == nullptr)
         return; // a broken edit, or a context accepting no format we can produce — execute no-ops
 
-    // The global root signature must cover every binding *any* stage uses
-    // (raygen: scene/Output/frame; miss: background; hit: frame/Materials/Vertices/Indices).
-    _group_layout = ctx.cached.acquire_binding_group_layout(
-        sg::merge_bindings({compiled_rg->bindings, compiled_ms->bindings, compiled_ch->bindings}));
+    // The global root signature must cover every binding *any* stage uses, which is exactly what common.hlsli
+    // declares — so there is nothing to merge and no stage to remember to include in the merge.
+    _group_layout = shaders::flat_bindings::group::acquire_layout(ctx);
     // Not a member: the pipeline holds it to keep the root signature alive.
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
 
@@ -64,17 +63,17 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
-    auto const group = ctx.transient.create_binding_group(
-        self._group_layout, {{.name = "scene", .view = tlas->as_view()},
-                             {.name = "Output", .view = d.output.as_readwrite_view()},
-                             {.name = "frame", .view = d.frame.as_uniform_buffer()},
-                             {.name = "background", .view = d.background.as_uniform_buffer()},
-                             {.name = "Materials", .view = d.materials.as_readonly_buffer()},
-                             {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
-                             {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
+    auto const group = shaders::flat_bindings::group{.scene = tlas->as_view(),
+                                                     .Output = d.output.as_readwrite_view(),
+                                                     .frame = d.frame.as_uniform_buffer(),
+                                                     .background = d.background.as_uniform_buffer(),
+                                                     .Materials = d.materials.as_readonly_buffer(),
+                                                     .Vertices = d.vertices.as_readonly_buffer(),
+                                                     .Indices = d.indices.as_readonly_buffer()}
+                           .create(ctx, sg::lifetime_scope::transient);
 
     cmd.raytracing.bind_pipeline(*self._pipeline);
-    cmd.raytracing.bind_group(0, *group);
+    shaders::flat_bindings::group::bind(cmd.raytracing, *group);
     cmd.raytracing.dispatch_rays(*self._table, self._raygen, d.size[0], d.size[1]);
 }
 } // namespace sv

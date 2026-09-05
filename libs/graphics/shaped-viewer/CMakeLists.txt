@@ -171,9 +171,12 @@ sc_add_shader_package(
         layout.hlsl:fragment:border_ps
         layout.hlsl:fragment:view_ps
         layout.hlsl:fragment:wipe_ps
+        layout.hlsl:binding:layout_bindings
+        layout.hlsl:constants:constants
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
+        common.hlsli:binding:flat_bindings
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
@@ -201,6 +204,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
+        tests/shader-package-test.cc
     )
 
     target_link_libraries(shaped-viewer-test
@@ -244,6 +248,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 bsdf_probe.hlsl:compute:BsdfProbe
+                bsdf_probe.hlsl:binding:probe_bindings
         )
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the

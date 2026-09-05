@@ -26,11 +26,17 @@ sc_add_shader_package(
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
-        blit.hlsl:fragment:main_ps)
+        blit.hlsl:fragment:main_ps
+        frame.hlsli:binding:frame_bindings  # path:binding:namespace -> a typed binding-group struct
+        mesh.hlsl:vertex_input:vs_input     # path:vertex_input:struct -> a C++ mirror + vertex_layout_of
+        rt.hlsl:payload:pt_payload          # path:payload:struct -> a C++ mirror + max_payload_size
+        shade.hlsl:constants:gConstants)    # path:constants:name -> a C++ mirror with HLSL's padding
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
+# a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a
+#   group is registered on its own -- otherwise every shader including it would generate the struct again.
 # validates: the file exists, the stage is real, no duplicate entries, no two files colliding on one C++ id.
 # call sc_finalize_shader_packages() ONCE at the bottom of the root CMakeLists: it turns "slib was never
 #   added" into a clear message instead of a missing header inside generated code at build time.
@@ -117,6 +123,102 @@ slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compi
 slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere DXC does
                                    //   register BOTH: a shader_asset picks by what the context accepts
                                    //   content-keyed cache inside: an identical recompile is free
+```
+
+## binding groups
+
+```cpp
+#include <shaped-shader-library/binding/binding_groups.hh>
+slib::shader_binding_group         // { name; u32 group; vector<sg::binding> bindings; vector<declared_sampler> static_samplers }
+                                   //   bindings are in declaration order -> position IS the layout slot
+slib::declared_sampler             // { cc::string name; sg::sampler sampler } -- one marked `static`
+slib::shader_vertex_input          // { name; u32 slot; bool per_instance; vector<shader_struct_member> }
+slib::shader_payload               // { name; vector<shader_struct_member> members; isize size }
+slib::shader_inline_constants      // { name; u32 space; type; members (with offsets); isize size }
+slib::shader_bindings              // { groups; optional<inline_constants>; vertex_inputs; payloads }
+slib::parse_binding_groups(hlsl)   // -> cc::result<shader_bindings>; the error names file:line
+                                   //   (recovered from the flatten's #line directives)
+slib::rewrite_binding_groups(hlsl, format)
+                                   // -> cc::result<cc::string>; writes register()/[[vk::binding]] and strips
+                                   //   the pragmas. Runs in _compile_text, between preprocess and compile.
+```
+
+A `path:binding:namespace` entry generates a typed struct for one group, in `<NAMESPACE>::<namespace>`:
+
+```cpp
+using group = my::shaders::frame_bindings::group;
+group::group_index                 // -> constexpr sg::u32; the number the attribute gave
+group::declared_bindings()         // -> cc::span<sg::binding const>; the WHOLE table, in slot order
+group::declared_samplers()         // -> cc::span<sg::named_sampler const>; the ones marked `static`
+group::acquire_layout(ctx)         // -> sg::binding_group_layout_handle; constant, no reflection consulted
+group::acquire_layout(ctx, samplers)  // + static samplers for the ones the shader left undeclared;
+                                   //   a declared one WINS, and supplying it again asserts
+group::self_check()                // -> cc::string; empty while the table still describes its own shader
+<NAMESPACE>::self_check()          // -> cc::string; every group in the package, for the owning target's test
+                                   //   NOT called on the render path: it re-parses the embedded source
+                                   //   a LIBRARY's generated header reaches its sibling <target>-test, which is what calls this
+                                   //   (sc_finalize_shader_packages hands it the include dir)
+group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
+                                   // -> sg::binding_group_handle; binds by SLOT, no name lookup
+                                   //   throws sg::binding_group_exception / device_lost_exception; try_create is the result twin
+                                   //   no layout check: create acquires its own, so a foreign one cannot reach it
+group{...}.create(ctx, sg::lifetime_scope::transient)  // a group rebuilt every frame belongs here, not in persistent
+group::bind(scope, *handle)        // void; binds at group_index, so no call site writes the number
+// one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
+// a `static` sampler has NO member -- it is baked into the layout, though it still takes its slot.
+// the layout is built from the full DECLARED table, not from whatever subset one stage reflected.
+```
+
+A `path:vertex_input:struct` entry generates the C++ struct the buffer holds, plus its `sg::vertex_layout_of`:
+
+```cpp
+my::shaders::vs_input              // struct { float position[3]; float normal[3]; ... }
+sg::vertex_input_layout::create<my::shaders::vs_input, my::shaders::instance_input>()
+// the mirror DEFINES the byte layout and the specialization states that same layout, so the two cannot
+//   disagree; generated static_asserts pin the stride and every member's offsetof.
+// members are naturally packed -- a vertex buffer is a byte stream the IA decodes per attribute offset,
+//   so HLSL's constant-buffer packing never enters into it.
+
+my::shaders::pt_payload::max_payload_size   // constexpr cc::isize; what the pipeline must declare
+// a payload mirror is naturally packed too, for a different reason: a payload is registers, not a buffer.
+
+my::shaders::frame_constants               // the inline-constants mirror, with HLSL's padding
+// a constant block REPRODUCES a layout rather than defining one: an element may not straddle a 16-byte row,
+//   a row is filled before it is left, and the total rounds up to a row (spike Q14).
+// the block's struct must be declared in the same file, and the subset is scalars, vectors and bool --
+//   an array or a matrix is refused, because the member after one packs into its last row.
+```
+
+```hlsl
+#pragma sc group 0                        // the group number is both the SPIR-V set and the HLSL space
+namespace frame_bindings
+{
+    Texture2D<float4> albedo;             // index 0 -> t0/space0 and binding(0, 0)
+    SamplerState linear_sampler;          // index 1 -> s1/space0 and binding(1, 0): ONE counter per group
+}
+// an attribute stands on its own line and applies to the declaration after it.
+// a PRAGMA, not a comment: DXC's include flatten erases comments and keeps pragmas verbatim (spike Q11/Q12),
+//   and the pass reads the FLATTENED source. The rewrite then strips the pragmas, since -Wall would reject them.
+// a `#pragma sc` name the pass does not know is an ERROR naming the line, never a directive nobody reads.
+// a pragma whose first word is not `sc` is passed through untouched.
+// an array consumes `count` indices — DXIL numbers every element, SPIR-V numbers the array once.
+// inside a group only `Type name;` / `Type name[N];` with N a literal; anything else is an error.
+// `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
+//   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
+//   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
+// `#pragma sc push_constants space=<n>` before a ConstantBuffer makes it inline constants: register(b0,
+//   space<n>) on DXIL, [[vk::push_constant]] on SPIR-V. At most one per translation unit; block_size still
+//   comes from reflection.
+//   the space may NOT equal a group's number: b0 there is the group's first `b` binding.
+// `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
+//   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
+//   ONE counter across every annotated struct in the file, since a location is flat per stage.
+//   a member's type must have a vertex attribute format, so `bool` is refused here (it has none).
+// `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
+//   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
+//   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.
+// `#pragma sc push_constants` also generates the block's mirror now, from the struct the ConstantBuffer names.
+// text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
 ```
 
 ## include resolution

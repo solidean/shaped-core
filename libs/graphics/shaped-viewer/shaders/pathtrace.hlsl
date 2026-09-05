@@ -13,15 +13,6 @@
 // The weight for the second is applied here, because only the caller knows where the bounce went — escaping to the
 // environment, or crossing the area light's rect, which is analytic and so is intersected rather than traced.
 
-RaytracingAccelerationStructure scene : register(t0);
-
-// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into.
-//
-// Read-modify-write at the dispatch's OWN pixel, which is what lets one texture do the job of a ping-pong pair.
-// `accum_frame` is the number of frames already folded in, so a frame's weight is 1 / (accum_frame + 1) — the
-// estimate is per view rather than per pixel, and the CPU restarts it by sending 0.
-RWTexture2D<float4> Output : register(u0);
-
 [shader("raygeneration")]
 void PathTraceRayGen()
 {
@@ -77,7 +68,7 @@ void PathTraceRayGen()
             ray.Direction = dir;
             ray.TMin = 1e-3;
             ray.TMax = 1e4;
-            TraceRay(scene, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, p);
+            TraceRay(pt_bindings::scene, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, p);
 
             // Read every payload field into locals right away, so the payload-access analyzer sees them consumed,
             // then branch on the hit. The random state comes back advanced by whatever the hit drew from it.
@@ -266,8 +257,8 @@ void PathTraceRayGen()
     if (accum_frame > 0)
     {
         float n = float(accum_frame);
-        color = (Output[px].rgb * n + color) / (n + 1.0);
+        color = (pt_bindings::Output[px].rgb * n + color) / (n + 1.0);
     }
 
-    Output[px] = float4(color, 1.0);
+    pt_bindings::Output[px] = float4(color, 1.0);
 }

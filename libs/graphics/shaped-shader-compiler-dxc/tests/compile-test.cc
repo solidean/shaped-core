@@ -122,6 +122,39 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
 
 #endif // CC_OS_WINDOWS
 
+TEST("ssc::dxc compile - the SPIR-V flag set applies to every stage")
+{
+    // The SPIR-V arm carries four -fvk-* flags that align it with DXIL's behaviour (see build_compile_args).
+    // Some of DXC's -fvk-* flags are stage-restricted — `-fvk-invert-y` is VS/DS/GS/MS/Lib only — so a flag added for
+    // one stage can reject another, and compute alone would not notice.
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+    auto& c = comp.value();
+
+    auto const raster_src = cc::string(R"(
+        struct vs_out { float4 pos : SV_Position; float4 color : COLOR; };
+        vs_out main_vs(float2 p : POSITION) { vs_out o; o.pos = float4(p, 0, 1); o.color = 1; return o; }
+        float4 main_ps(vs_out i) : SV_Target { return i.color / i.pos.w; }
+    )");
+
+    // main_ps reads SV_Position.w, which is what -fvk-use-dx-position-w exists for.
+    auto vs = c.compile({.source = raster_src, .entry_point = "main_vs", .stage = sg::shader_stage::vertex},
+                        {.target = ssc::dxc::compile_target::spirv});
+    auto ps = c.compile({.source = raster_src, .entry_point = "main_ps", .stage = sg::shader_stage::fragment},
+                        {.target = ssc::dxc::compile_target::spirv});
+    CHECK(vs.has_value());
+    CHECK(ps.has_value());
+
+    auto const rt_src = cc::string(R"(
+        RWTexture2D<float4> Output;
+        [shader("raygeneration")]
+        void main_rg() { Output[DispatchRaysIndex().xy] = float4(1, 0, 0, 1); }
+    )");
+    auto rg = c.compile({.source = rt_src, .entry_point = "main_rg", .stage = sg::shader_stage::raygen},
+                        {.target = ssc::dxc::compile_target::spirv});
+    CHECK(rg.has_value());
+}
+
 TEST("ssc::dxc compile - a syntax error surfaces a diagnostic")
 {
     auto comp = ssc::dxc::compiler::create();

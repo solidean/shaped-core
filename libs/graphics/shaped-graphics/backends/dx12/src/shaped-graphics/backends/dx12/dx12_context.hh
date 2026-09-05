@@ -252,6 +252,11 @@ public:
         sg::raytracing_shader_table_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                                cc::span<sg::slotted_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
+                                                                                sg::lifetime_scope scope) override;
+
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
                                                                                 cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;

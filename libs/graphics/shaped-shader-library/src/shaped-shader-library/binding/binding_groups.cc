@@ -1,0 +1,1073 @@
+#include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/assert.hh>
+#include <clean-core/container/set.hh>
+#include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/string/from_string.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-shader-library/binding/binding_groups.hh>
+#include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
+#include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
+#include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
+#include <shaped-shader-library/binding/impl/hlsl_value_types.hh>
+
+using namespace cc::primitive_defines;
+
+namespace
+{
+using slib::impl::annotation;
+using slib::impl::hlsl_location;
+using slib::impl::hlsl_token;
+using slib::impl::hlsl_token_kind;
+using slib::impl::to_string;
+
+/// The attribute names the grammar knows.
+/// A name outside this set is an error rather than a directive nobody reads — which is exactly what DXC makes of
+/// it, since it ignores a pragma it does not know.
+constexpr cc::string_view k_attribute_names[] = {"group", "static", "push_constants", "payload", "vertex_input"};
+
+/// HLSL constructs the pass cannot number, so they may not appear inside a group.
+/// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
+/// not on what a shader may contain.
+constexpr cc::string_view k_rejected_keywords[]
+    = {"namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface"};
+
+/// What a source must carry before any of this can apply.
+/// Deliberately only `#pragma` rather than `#pragma sc`: the flatten reprints a directive's tokens and nothing
+/// promises it reprints the spacing between them, so which pragma it is, is the lexer's to decide.
+/// A source with no pragma at all is passed through untouched, which is what makes "everything unannotated is byte
+/// for byte" a property of the code rather than a claim about it.
+constexpr cc::string_view k_pragma_marker = "#pragma";
+
+[[nodiscard]] bool contains(cc::span<cc::string_view const> haystack, cc::string_view needle)
+{
+    for (auto const& candidate : haystack)
+        if (candidate == needle)
+            return true;
+    return false;
+}
+
+/// A run of source bytes.
+struct source_span
+{
+    isize offset = 0;
+    isize length = 0;
+};
+
+/// One binding, plus where in the source its address has to be written.
+/// The two arms write in different places — HLSL puts the address after the declared name and Vulkan before the
+/// declaration — so both offsets are kept rather than one.
+struct parsed_binding
+{
+    sg::binding binding;
+    cc::string_view template_argument; ///< the single `<...>` identifier, empty when there is none
+    char register_class = 't';
+    isize type_offset = 0;      ///< where the declaration's type token begins
+    isize semicolon_offset = 0; ///< where its ';' is
+};
+
+struct parsed_group
+{
+    cc::string_view name;
+    u32 group = 0;
+    cc::vector<parsed_binding> bindings;
+    cc::vector<slib::declared_sampler> static_samplers;
+};
+
+/// The inline-constants block, plus where its address has to be written.
+struct parsed_inline_constants
+{
+    slib::shader_inline_constants constants;
+    isize type_offset = 0;
+    isize semicolon_offset = 0;
+};
+
+/// A vertex input struct, plus where each member's location has to be written.
+struct parsed_vertex_input
+{
+    slib::shader_vertex_input input;
+    cc::vector<isize> member_offsets; ///< where each member's type token begins, in declaration order
+};
+
+struct parsed_source
+{
+    cc::vector<parsed_group> groups;
+    cc::optional<parsed_inline_constants> inline_constants;
+    cc::vector<parsed_vertex_input> vertex_inputs;
+    cc::vector<slib::shader_payload> payloads;
+
+    /// Every `#pragma sc` directive the parse consumed.
+    /// The rewrite deletes them: DXC ignores an unknown pragma today, but `-Wall` promotes it to
+    /// `-Wunknown-pragmas` and `-WX` makes that an error, so the compiler is never given the chance.
+    cc::vector<source_span> annotations;
+};
+
+/// The parse of one translation unit.
+/// Cursor state rather than a pure function, because an attribute stands on the line before the declaration it
+/// applies to, so the parser has to carry one across.
+struct parser
+{
+    cc::span<hlsl_token const> tokens;
+    isize at = 0;
+
+    cc::vector<source_span> annotations;
+    cc::optional<parsed_inline_constants> inline_constants;
+    cc::vector<parsed_vertex_input> vertex_inputs;
+    cc::vector<slib::shader_payload> payloads;
+
+    /// Where one file-scope `struct <name> { ... }` body sits, as token indices.
+    ///
+    /// Recorded rather than parsed, because most of them are none of the pass's business: a shader is full of
+    /// structs whose members it does not understand, and reading one is only necessary when a `push_constants`
+    /// block names it.
+    struct struct_body
+    {
+        cc::string_view name;
+        isize first = 0; ///< the token after the '{'
+        isize last = 0;  ///< the '}' token
+    };
+    cc::vector<struct_body> struct_bodies;
+
+    // What has been declared so far, for the collisions a namespace does not catch on its own.
+    cc::set<cc::string_view> group_names;
+    cc::set<u32> group_numbers;
+    cc::set<cc::string_view> binding_names;
+
+    [[nodiscard]] bool at_end() const { return at >= tokens.size(); }
+    [[nodiscard]] hlsl_token const& current() const { return tokens[at]; }
+
+    [[nodiscard]] bool is_punctuation(char c) const
+    {
+        return !at_end() && current().kind == hlsl_token_kind::punctuation && current().text[0] == c;
+    }
+
+    [[nodiscard]] bool is_identifier(cc::string_view text) const
+    {
+        return !at_end() && current().kind == hlsl_token_kind::identifier && current().text == text;
+    }
+
+    /// The location to blame when the source ran out, which is the last one there was.
+    [[nodiscard]] hlsl_location location_here() const
+    {
+        if (!at_end())
+            return current().location;
+        return tokens.empty() ? hlsl_location() : tokens.back().location;
+    }
+
+    /// Consumes the annotation at the cursor, rejecting a name the pass cannot honour.
+    [[nodiscard]] cc::result<annotation> read_annotation()
+    {
+        auto const& token = current();
+        auto parsed = slib::impl::parse_annotation(token.text, token.location);
+        CC_RETURN_IF_ERROR(parsed);
+        annotations.push_back({.offset = token.offset, .length = token.length});
+        ++at;
+
+        auto const& name = parsed.value().name;
+        if (!contains(k_attribute_names, name))
+            return cc::error(cc::format("{}: '{}' is not an attribute this pass knows", to_string(token.location), name));
+
+        return parsed;
+    }
+
+    [[nodiscard]] cc::result<cc::vector<parsed_group>> run()
+    {
+        cc::vector<parsed_group> groups;
+
+        // An attribute stands on its own line, so it waits here for the declaration it applies to.
+        cc::optional<annotation> pending;
+
+        while (!at_end())
+        {
+            if (current().kind == hlsl_token_kind::annotation)
+            {
+                auto const location = current().location;
+
+                auto parsed = read_annotation();
+                CC_RETURN_IF_ERROR(parsed);
+
+                if (pending.has_value())
+                    return cc::error(cc::format("{}: two attributes stand before one declaration", to_string(location)));
+
+                pending = cc::move(parsed.value());
+                continue;
+            }
+
+            if (is_identifier("namespace"))
+            {
+                auto group = parse_namespace(pending);
+                CC_RETURN_IF_ERROR(group);
+                pending = cc::nullopt;
+
+                if (group.value().has_value())
+                    groups.push_back(cc::move(group.value().value()));
+                continue;
+            }
+
+            // A `push_constants` attribute attaches to an ordinary file-scope declaration rather than to a
+            // namespace, so it is the one attribute that reads a declaration out here.
+            if (pending.has_value() && pending.value().name == "push_constants"
+                && current().kind == hlsl_token_kind::identifier)
+            {
+                CC_RETURN_IF_ERROR(parse_inline_constants(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
+            if (pending.has_value() && pending.value().name == "vertex_input" && is_identifier("struct"))
+            {
+                CC_RETURN_IF_ERROR(parse_vertex_input(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
+            if (pending.has_value() && pending.value().name == "payload" && is_identifier("struct"))
+            {
+                CC_RETURN_IF_ERROR(parse_payload(pending.value()));
+                pending = cc::nullopt;
+                continue;
+            }
+
+            CC_RETURN_IF_ERROR(reject_unclaimed(pending));
+
+            if (is_identifier("struct") && record_struct_body())
+                continue;
+
+            ++at;
+        }
+
+        CC_RETURN_IF_ERROR(reject_unclaimed(pending));
+        return groups;
+    }
+
+    [[nodiscard]] static cc::result<cc::unit> reject_unclaimed_static(cc::optional<annotation> const& pending)
+    {
+        if (pending.has_value())
+            return cc::error(cc::format("{}: a 'static' attribute must stand before a sampler declaration",
+                                        to_string(pending.value().location)));
+        return cc::unit();
+    }
+
+    /// Notes where an unannotated `struct <name> { ... }` body is and skips it, or reports that this was not
+    /// one and leaves the cursor alone.
+    [[nodiscard]] bool record_struct_body()
+    {
+        auto const start = at;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+        {
+            at = start;
+            return false;
+        }
+
+        auto const name = current().text;
+        ++at;
+
+        if (!is_punctuation('{'))
+        {
+            at = start;
+            return false;
+        }
+        ++at;
+
+        auto const first = at;
+        auto depth = 1;
+        while (!at_end() && depth > 0)
+        {
+            if (is_punctuation('{'))
+                ++depth;
+            else if (is_punctuation('}'))
+                --depth;
+            ++at;
+        }
+
+        if (depth != 0)
+        {
+            at = start;
+            return false;
+        }
+
+        struct_bodies.push_back({.name = name, .first = first, .last = at - 1});
+        return true;
+    }
+
+    [[nodiscard]] static cc::result<cc::unit> reject_unclaimed(cc::optional<annotation> const& pending)
+    {
+        if (!pending.has_value())
+            return cc::unit();
+
+        if (pending.value().name == "push_constants")
+            return cc::error(cc::format("{}: a 'push_constants' attribute must stand before a ConstantBuffer "
+                                        "declaration",
+                                        to_string(pending.value().location)));
+
+        if (pending.value().name == "vertex_input" || pending.value().name == "payload")
+            return cc::error(cc::format("{}: a '{}' attribute must stand before a struct declaration",
+                                        to_string(pending.value().location), pending.value().name));
+
+        return cc::error(cc::format("{}: a '{}' attribute must stand before a namespace declaration",
+                                    to_string(pending.value().location), pending.value().name));
+    }
+
+    /// The one `ConstantBuffer<T> name;` a `push_constants` attribute stands before.
+    ///
+    /// The register is always `b0`, so the attribute's only argument is the space; the declaration itself is
+    /// read with the same walk a group's binding gets, which is what keeps the two subsets identical.
+    [[nodiscard]] cc::result<cc::unit> parse_inline_constants(annotation const& attribute)
+    {
+        auto space = space_of(attribute);
+        CC_RETURN_IF_ERROR(space);
+
+        if (inline_constants.has_value())
+            return cc::error(cc::format("{}: a second 'push_constants' block, and a pipeline layout carries "
+                                        "at most one",
+                                        to_string(attribute.location)));
+
+        auto const location = current().location;
+        auto binding = parse_binding(0);
+        CC_RETURN_IF_ERROR(binding);
+
+        if (binding.value().binding.type != sg::binding_type::uniform_buffer)
+            return cc::error(cc::format("{}: 'push_constants' describes a ConstantBuffer, and '{}' is not one",
+                                        to_string(location), binding.value().binding.name));
+        if (binding.value().binding.count != 1)
+            return cc::error(cc::format("{}: an inline-constants block is one buffer, not an array", to_string(location)));
+
+        if (binding.value().template_argument.empty())
+            return cc::error(
+                cc::format("{}: an inline-constants block must name the struct it holds", to_string(location)));
+
+        inline_constants = parsed_inline_constants{
+            .constants = {.name = cc::move(binding.value().binding.name),
+                          .space = space.value(),
+                          .type = cc::string::create_copy_of(binding.value().template_argument)},
+            .type_offset = binding.value().type_offset,
+            .semicolon_offset = binding.value().semicolon_offset};
+        return cc::unit();
+    }
+
+    /// The `struct <name> { <type> <member> : <SEMANTIC>; ... };` a `vertex_input` attribute stands before.
+    ///
+    /// Members are numbered by declaration order, and that number is what the SPIR-V arm writes as a location:
+    /// HLSL matches a vertex input by its semantic and SPIR-V has no semantics at all.
+    [[nodiscard]] cc::result<cc::unit> parse_vertex_input(annotation const& attribute)
+    {
+        auto input = slib::shader_vertex_input();
+        CC_RETURN_IF_ERROR(read_vertex_input_arguments(attribute, input));
+
+        auto const keyword_location = current().location;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: a 'vertex_input' struct must be named", to_string(keyword_location)));
+
+        input.name = cc::string::create_copy_of(current().text);
+        ++at;
+
+        for (auto const& other : vertex_inputs)
+            if (other.input.name == input.name)
+                return cc::error(cc::format("{}: struct '{}' is declared twice", to_string(keyword_location), input.name));
+
+        if (!is_punctuation('{'))
+            return cc::error(
+                cc::format("{}: struct '{}' must open its block right away", to_string(keyword_location), input.name));
+        ++at;
+
+        cc::vector<isize> offsets;
+        while (!is_punctuation('}'))
+        {
+            if (at_end())
+                return cc::error(cc::format("{}: struct '{}' is never closed", to_string(location_here()), input.name));
+
+            auto member = parse_struct_member(true);
+            CC_RETURN_IF_ERROR(member);
+
+            offsets.push_back(member.value().type_offset);
+            input.members.push_back(cc::move(member.value().member));
+        }
+        ++at; // the '}'
+
+        // The declaration's own `;`, which HLSL requires and the pass does not otherwise care about.
+        if (is_punctuation(';'))
+            ++at;
+
+        vertex_inputs.push_back({.input = cc::move(input), .member_offsets = cc::move(offsets)});
+        return cc::unit();
+    }
+
+    /// The `struct <name> { <type> <member>; ... };` a `payload` attribute stands before.
+    ///
+    /// A payload is registers rather than a buffer, so its members pack at natural alignment and its size is
+    /// their plain sum — see the spike's Q13, which measured that rather than assuming it.
+    [[nodiscard]] cc::result<cc::unit> parse_payload(annotation const& attribute)
+    {
+        if (!attribute.arguments.empty())
+            return cc::error(cc::format("{}: 'payload' takes no arguments", to_string(attribute.location)));
+
+        auto const keyword_location = current().location;
+        ++at; // `struct`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: a 'payload' struct must be named", to_string(keyword_location)));
+
+        auto payload = slib::shader_payload{.name = cc::string::create_copy_of(current().text)};
+        ++at;
+
+        for (auto const& other : payloads)
+            if (other.name == payload.name)
+                return cc::error(
+                    cc::format("{}: struct '{}' is declared twice", to_string(keyword_location), payload.name));
+
+        if (!is_punctuation('{'))
+            return cc::error(cc::format("{}: struct '{}' must open its block right away", to_string(keyword_location),
+                                        payload.name));
+        ++at;
+
+        while (!is_punctuation('}'))
+        {
+            if (at_end())
+                return cc::error(cc::format("{}: struct '{}' is never closed", to_string(location_here()), payload.name));
+
+            auto member = parse_struct_member(false);
+            CC_RETURN_IF_ERROR(member);
+
+            payload.size += slib::impl::value_type_of(member.value().member.type).value().size;
+            payload.members.push_back(cc::move(member.value().member));
+        }
+        ++at; // the '}'
+
+        if (is_punctuation(';'))
+            ++at;
+
+        if (payload.members.empty())
+            return cc::error(
+                cc::format("{}: payload '{}' declares no members", to_string(keyword_location), payload.name));
+
+        payloads.push_back(cc::move(payload));
+        return cc::unit();
+    }
+
+    /// `slot=<n>` and the bare `per_instance` flag, both optional.
+    [[nodiscard]] static cc::result<cc::unit> read_vertex_input_arguments(annotation const& attribute,
+                                                                          slib::shader_vertex_input& input)
+    {
+        for (auto const& argument : attribute.arguments)
+        {
+            if (argument.key.empty() && argument.values.size() == 1 && argument.values[0] == "per_instance")
+            {
+                input.per_instance = true;
+                continue;
+            }
+
+            if (argument.key == "slot" && argument.values.size() == 1)
+            {
+                auto const number = cc::from_string<u32>(argument.values[0]);
+                if (!number.has_value())
+                    return cc::error(
+                        cc::format("{}: '{}' is not a slot", to_string(attribute.location), argument.values[0]));
+                input.slot = number.value();
+                continue;
+            }
+
+            return cc::error(cc::format("{}: 'vertex_input' takes slot=<n> and per_instance, not '{}'",
+                                        to_string(attribute.location),
+                                        argument.key.empty() ? argument.values[0] : argument.key));
+        }
+        return cc::unit();
+    }
+
+    struct parsed_member
+    {
+        slib::shader_struct_member member;
+        isize type_offset = 0;
+    };
+
+    /// One `<type> <name>[ : <SEMANTIC>];`.
+    /// A vertex input requires the semantic, since that is what HLSL matches an input by; a payload has none.
+    [[nodiscard]] cc::result<parsed_member> parse_struct_member(bool requires_semantic)
+    {
+        auto const& type_token = current();
+        if (type_token.kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a member declaration, found '{}'", to_string(type_token.location),
+                                        type_token.text));
+
+        auto const type_name = type_token.text;
+        auto const location = type_token.location;
+        auto const type_offset = type_token.offset;
+        ++at;
+
+        auto const value_type = slib::impl::value_type_of(type_name);
+        if (!value_type.has_value())
+            return cc::error(cc::format("{}: '{}' is not a {} type this pass knows", to_string(location), type_name,
+                                        requires_semantic ? "vertex attribute" : "payload"));
+
+        // `bool` is the case: four bytes in a constant block, and no vertex attribute format on any API.
+        // Refused here rather than generated, since the generator would otherwise emit a format that is not one.
+        if (requires_semantic && !value_type.value().format.has_value())
+            return cc::error(cc::format("{}: '{}' has no vertex attribute format, so it cannot feed a vertex input",
+                                        to_string(location), type_name));
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
+
+        auto member = slib::shader_struct_member{.name = cc::string::create_copy_of(current().text),
+                                                 .type = cc::string::create_copy_of(type_name)};
+        ++at;
+
+        // The semantic, which is what HLSL matches a vertex input by, and what the mirror carries into sg.
+        if (requires_semantic && !is_punctuation(':'))
+            return cc::error(
+                cc::format("{}: vertex input member '{}' must carry a semantic", to_string(location), member.name));
+
+        if (is_punctuation(':'))
+        {
+            ++at;
+            if (at_end() || current().kind != hlsl_token_kind::identifier)
+                return cc::error(cc::format("{}: expected a semantic after '{}'", to_string(location), member.name));
+
+            // HLSL splits a trailing integer off the semantic, so TEXCOORD0 is TEXCOORD index 0.
+            auto semantic = current().text;
+            isize digits = semantic.size();
+            while (digits > 0 && semantic[digits - 1] >= '0' && semantic[digits - 1] <= '9')
+                --digits;
+
+            member.semantic = cc::string::create_copy_of(semantic.subview({.start = 0, .end = digits}));
+            if (digits < semantic.size())
+            {
+                auto const index = cc::from_string<u32>(semantic.subview(digits));
+                if (!index.has_value())
+                    return cc::error(cc::format("{}: '{}' is not a semantic", to_string(location), semantic));
+                member.semantic_index = index.value();
+            }
+            ++at;
+        }
+
+        if (!is_punctuation(';'))
+            return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), member.name));
+        ++at;
+
+        return parsed_member{.member = cc::move(member), .type_offset = type_offset};
+    }
+
+    /// Reads the struct an inline-constants block names, and lays it out the way a constant buffer does.
+    ///
+    /// Run after the whole file is walked, so the struct may be declared on either side of the block.
+    /// The rules are the spike's Q14, measured against DXC on both targets rather than restated:
+    /// a scalar or vector may not straddle a 16-byte row but a row is filled before it is left, and the
+    /// block's own total rounds up to a whole row.
+    [[nodiscard]] cc::result<cc::unit> layout_inline_constants()
+    {
+        if (!inline_constants.has_value())
+            return cc::unit();
+
+        auto& constants = inline_constants.value().constants;
+        struct_body const* body = nullptr;
+        for (auto const& candidate : struct_bodies)
+            if (candidate.name == constants.type)
+                body = &candidate;
+
+        if (body == nullptr)
+            return cc::error(cc::format("the inline-constants block '{}' names a struct '{}' this file does not "
+                                        "declare",
+                                        constants.name, constants.type));
+
+        auto const saved = at;
+        at = body->first;
+
+        isize offset = 0;
+        while (at < body->last)
+        {
+            auto member = parse_constant_member();
+            CC_RETURN_IF_ERROR(member);
+
+            auto const size = slib::impl::value_type_of(member.value().type).value().size;
+
+            // A scalar or vector may not straddle a row, and a row is filled before it is left.
+            if (offset % 16 + size > 16)
+                offset += 16 - offset % 16;
+
+            member.value().offset = offset;
+            offset += size;
+            constants.members.push_back(cc::move(member.value()));
+        }
+
+        at = saved;
+
+        if (constants.members.empty())
+            return cc::error(cc::format("the inline-constants block '{}' declares no members", constants.name));
+
+        // The block's own total rounds up to a whole row.
+        constants.size = offset % 16 == 0 ? offset : offset + (16 - offset % 16);
+        return cc::unit();
+    }
+
+    /// One `<type> <name>;` of a constant block.
+    ///
+    /// The subset is scalars, vectors and `bool`, which is what the blocks in the tree actually hold.
+    /// An array or a matrix is refused rather than mirrored, and Q14 is why: in a constant block the member
+    /// after one packs into its last row's tail, which C++ cannot express, and for a matrix whose rows are not
+    /// full float4s SPIR-V rejects the module outright.
+    [[nodiscard]] cc::result<slib::shader_struct_member> parse_constant_member()
+    {
+        auto const& token = current();
+        if (token.kind != hlsl_token_kind::identifier)
+            return cc::error(
+                cc::format("{}: expected a member declaration, found '{}'", to_string(token.location), token.text));
+
+        auto const type_name = token.text;
+        auto const location = token.location;
+        ++at;
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
+
+        auto member = slib::shader_struct_member{.name = cc::string::create_copy_of(current().text),
+                                                 .type = cc::string::create_copy_of(type_name)};
+        ++at;
+
+        if (is_punctuation('['))
+            return cc::error(cc::format("{}: an array is not supported in a constant block, because the member "
+                                        "after it packs into its last row",
+                                        to_string(location)));
+
+        if (!is_punctuation(';'))
+            return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), member.name));
+        ++at;
+
+        if (!slib::impl::value_type_of(type_name).has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a constant block type this pass knows", to_string(location), type_name));
+
+        return member;
+    }
+
+    /// The one argument `push_constants` takes: `space=<n>`.
+    [[nodiscard]] static cc::result<u32> space_of(annotation const& attribute)
+    {
+        if (attribute.arguments.size() != 1 || attribute.arguments[0].key != "space"
+            || attribute.arguments[0].values.size() != 1)
+            return cc::error(
+                cc::format("{}: 'push_constants' takes exactly one space=<n>", to_string(attribute.location)));
+
+        auto const number = cc::from_string<u32>(attribute.arguments[0].values[0]);
+        if (!number.has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a space", to_string(attribute.location), attribute.arguments[0].values[0]));
+        return number.value();
+    }
+
+    /// Consumes one `namespace` declaration, returning the group when a `group` attribute stands before it.
+    /// An unannotated namespace is walked into rather than skipped, so an attribute inside one is still found.
+    [[nodiscard]] cc::result<cc::optional<parsed_group>> parse_namespace(cc::optional<annotation> const& pending)
+    {
+        auto const keyword_location = current().location;
+        ++at; // `namespace`
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+        {
+            CC_RETURN_IF_ERROR(reject_unclaimed(pending));
+            return cc::optional<parsed_group>();
+        }
+
+        auto const name = current().text;
+        auto const name_location = current().location;
+        ++at;
+
+        if (!pending.has_value())
+            return cc::optional<parsed_group>();
+
+        auto const& attribute = pending.value();
+        if (attribute.name != "group")
+            return cc::error(cc::format("{}: '{}' is not an attribute of a namespace", to_string(attribute.location),
+                                        attribute.name));
+
+        auto number = group_number_of(attribute);
+        CC_RETURN_IF_ERROR(number);
+
+        // One annotated namespace is declared exactly once, in one block, and owns its number alone — that is the
+        // invariant that lets the build-time generator and the runtime rewriter agree without ever talking.
+        if (!group_names.insert(name))
+            return cc::error(cc::format("{}: namespace '{}' is declared twice", to_string(name_location), name));
+        if (!group_numbers.insert(number.value()))
+            return cc::error(cc::format("{}: group {} is declared twice, by namespace '{}'", to_string(name_location),
+                                        number.value(), name));
+
+        if (!is_punctuation('{'))
+            return cc::error(
+                cc::format("{}: namespace '{}' must open its block right away", to_string(keyword_location), name));
+        ++at;
+
+        auto bindings = parse_bindings(name);
+        CC_RETURN_IF_ERROR(bindings);
+
+        return cc::optional<parsed_group>(parsed_group{.name = name,
+                                                       .group = number.value(),
+                                                       .bindings = cc::move(bindings.value().bindings),
+                                                       .static_samplers = cc::move(bindings.value().statics)});
+    }
+
+    /// The one argument `group` takes: the number, positional.
+    [[nodiscard]] static cc::result<u32> group_number_of(annotation const& attribute)
+    {
+        if (attribute.arguments.size() != 1 || !attribute.arguments[0].key.empty()
+            || attribute.arguments[0].values.size() != 1)
+            return cc::error(cc::format("{}: 'group' takes exactly one number", to_string(attribute.location)));
+
+        auto const number = cc::from_string<u32>(attribute.arguments[0].values[0]);
+        if (!number.has_value())
+            return cc::error(cc::format("{}: '{}' is not a group number", to_string(attribute.location),
+                                        attribute.arguments[0].values[0]));
+        return number.value();
+    }
+
+    /// A group's body, as the two lists it produces.
+    struct group_body
+    {
+        cc::vector<parsed_binding> bindings;
+        cc::vector<slib::declared_sampler> statics;
+    };
+
+    /// The body of an annotated namespace, up to and including its closing brace.
+    [[nodiscard]] cc::result<group_body> parse_bindings(cc::string_view group_name)
+    {
+        group_body body;
+        u32 next_index = 0;
+
+        // A `static` attribute stands on the line before the sampler it describes.
+        cc::optional<annotation> pending;
+
+        while (true)
+        {
+            if (at_end())
+                return cc::error(cc::format("{}: namespace '{}' is never closed", to_string(location_here()), group_name));
+
+            if (is_punctuation('}'))
+            {
+                CC_RETURN_IF_ERROR(reject_unclaimed_static(pending));
+                ++at;
+                return body;
+            }
+
+            auto const& token = current();
+
+            if (token.kind == hlsl_token_kind::annotation)
+            {
+                auto parsed = read_annotation();
+                CC_RETURN_IF_ERROR(parsed);
+                if (parsed.value().name != "static")
+                    return cc::error(cc::format("{}: '{}' is not an attribute of a binding", to_string(token.location),
+                                                parsed.value().name));
+                if (pending.has_value())
+                    return cc::error(
+                        cc::format("{}: two attributes stand before one declaration", to_string(token.location)));
+
+                pending = cc::move(parsed.value());
+                continue;
+            }
+
+            if (token.kind == hlsl_token_kind::punctuation && token.text[0] == '#')
+                return cc::error(cc::format("{}: a preprocessor directive is not supported inside an annotated "
+                                            "namespace",
+                                            to_string(token.location)));
+
+            if (token.kind != hlsl_token_kind::identifier)
+                return cc::error(cc::format("{}: expected a binding declaration, found '{}'", to_string(token.location),
+                                            token.text));
+
+            if (contains(k_rejected_keywords, token.text))
+                return cc::error(cc::format("{}: '{}' is not supported inside an annotated namespace",
+                                            to_string(token.location), token.text));
+
+            auto binding = parse_binding(next_index);
+            CC_RETURN_IF_ERROR(binding);
+
+            if (pending.has_value())
+            {
+                if (binding.value().binding.type != sg::binding_type::sampler)
+                    return cc::error(cc::format("{}: 'static' describes a sampler, and '{}' is not one",
+                                                to_string(pending.value().location), binding.value().binding.name));
+
+                auto state = slib::impl::parse_sampler_state(pending.value());
+                CC_RETURN_IF_ERROR(state);
+                body.statics.push_back(
+                    {.name = cc::string::create_copy_of(binding.value().binding.name), .sampler = state.value()});
+                pending = cc::nullopt;
+            }
+
+            // An array consumes one index per element, because DXIL numbers every element while SPIR-V numbers the
+            // array once — advancing by one would put the next binding at an address the two targets disagree on.
+            next_index += binding.value().binding.count;
+            body.bindings.push_back(cc::move(binding.value()));
+        }
+    }
+
+    /// One `Type name;` or `Type name[N];`, at `index`.
+    /// The declarator's shape is checked before the type is looked up, so a construct the subset excludes is named
+    /// as what it is rather than as an unknown resource type.
+    [[nodiscard]] cc::result<parsed_binding> parse_binding(u32 index)
+    {
+        auto const type_name = current().text;
+        auto const type_offset = current().offset;
+        auto const location = current().location;
+        ++at;
+
+        // The template arguments say what the resource holds, never where it is bound, so they are checked for
+        // shape and dropped — except the one a `push_constants` block needs, which is the struct it mirrors.
+        cc::string_view template_argument;
+        if (is_punctuation('<'))
+        {
+            ++at;
+            if (!at_end() && current().kind == hlsl_token_kind::identifier)
+                template_argument = current().text;
+
+            while (!is_punctuation('>'))
+            {
+                if (at_end() || is_punctuation(';') || is_punctuation('{'))
+                    return cc::error(
+                        cc::format("{}: '{}' opens an argument list it never closes", to_string(location), type_name));
+                if (is_punctuation('<'))
+                    return cc::error(cc::format("{}: a nested template argument list is not supported",
+                                                to_string(current().location)));
+                ++at;
+            }
+            ++at; // the '>'
+        }
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
+
+        auto const name = current().text;
+        ++at;
+
+        u32 count = 1;
+        if (is_punctuation('['))
+        {
+            ++at;
+            if (at_end() || current().kind != hlsl_token_kind::number)
+                return cc::error(
+                    cc::format("{}: the length of '{}' must be a decimal literal", to_string(location), name));
+
+            auto const length = cc::from_string<u32>(current().text);
+            if (!length.has_value() || length.value() == 0)
+                return cc::error(cc::format("{}: '{}' is not an array length", to_string(location), current().text));
+            count = length.value();
+            ++at;
+
+            if (!is_punctuation(']'))
+                return cc::error(cc::format("{}: '{}' never closes its array length", to_string(location), name));
+            ++at;
+        }
+
+        if (is_punctuation('('))
+            return cc::error(cc::format("{}: a function definition is not supported inside an annotated namespace",
+                                        to_string(location)));
+        if (is_punctuation(':'))
+            return cc::error(cc::format("{}: '{}' must not write its own register — the pass owns the address",
+                                        to_string(location), name));
+        if (!is_punctuation(';'))
+            return cc::error(cc::format("{}: expected ';' after '{}'", to_string(location), name));
+
+        auto const semicolon_offset = current().offset;
+        ++at;
+
+        auto const type = slib::impl::binding_type_of(type_name);
+        if (!type.has_value())
+            return cc::error(
+                cc::format("{}: '{}' is not a resource type this pass knows", to_string(location), type_name));
+
+        // Reflection reports the bare name, so one name declared in two groups would reach sg as one binding at
+        // two addresses — which a namespace does nothing to prevent.
+        if (!binding_names.insert(name))
+            return cc::error(cc::format("{}: '{}' is declared twice", to_string(location), name));
+
+        return parsed_binding{.binding = {.name = cc::string::create_copy_of(name),
+                                          .index = index,
+                                          .count = count,
+                                          .type = type.value().type,
+                                          .texture_dimension = type.value().dimension},
+                              .template_argument = template_argument,
+                              .register_class = type.value().register_class,
+                              .type_offset = type_offset,
+                              .semicolon_offset = semicolon_offset};
+    }
+};
+
+/// Every annotated namespace `hlsl` declares, with the group's number stamped onto each of its bindings.
+[[nodiscard]] cc::result<parsed_source> parse_source(cc::string_view hlsl)
+{
+    if (!hlsl.contains(k_pragma_marker))
+        return parsed_source();
+
+    auto tokens = slib::impl::lex_hlsl(hlsl);
+    CC_RETURN_IF_ERROR(tokens);
+
+    parser p;
+    p.tokens = tokens.value();
+
+    auto groups = p.run();
+    CC_RETURN_IF_ERROR(groups);
+
+    // After the walk, so the struct an inline-constants block names may be declared on either side of it.
+    CC_RETURN_IF_ERROR(p.layout_inline_constants());
+
+    // A group owns its number as a space, and an inline-constants block is always b0 — so a block sharing a
+    // space with a group would land on the group's first `b` binding the moment one is declared.
+    // Refused whether or not that binding exists yet: the alternative is a shader that breaks on a reorder.
+    if (p.inline_constants.has_value())
+    {
+        auto const& constants = p.inline_constants.value().constants;
+        for (auto const& group : groups.value())
+            if (group.group == constants.space)
+                return cc::error(cc::format("the inline-constants block '{}' takes space {}, which group {} "
+                                            "('{}') already owns",
+                                            constants.name, constants.space, group.group, group.name));
+    }
+
+    // The group number is both the SPIR-V set and the HLSL space, which is what makes one address serve both targets.
+    for (auto& group : groups.value())
+        for (auto& binding : group.bindings)
+        {
+            binding.binding.group_index = group.group;
+            binding.binding.space = group.group;
+        }
+
+    return parsed_source{.groups = cc::move(groups.value()),
+                         .inline_constants = cc::move(p.inline_constants),
+                         .vertex_inputs = cc::move(p.vertex_inputs),
+                         .payloads = cc::move(p.payloads),
+                         .annotations = cc::move(p.annotations)};
+}
+
+/// One replacement of `length` source bytes at `offset`.
+/// The rewrite is a list of these rather than a rebuilt string, so every byte no edit names is provably the byte
+/// that was there.
+struct source_edit
+{
+    isize offset = 0;
+    isize length = 0;
+    cc::string text;
+};
+
+/// Applies edits that do not overlap, in offset order.
+[[nodiscard]] cc::string apply_edits(cc::string_view source, cc::span<source_edit const> edits)
+{
+    cc::string result;
+    result.reserve_back(source.size());
+
+    isize copied = 0;
+    for (auto const& edit : edits)
+    {
+        CC_ASSERT(edit.offset >= copied && edit.offset + edit.length <= source.size(),
+                  "edits must be ordered by offset and lie inside the source");
+        result += source.subview({.start = copied, .end = edit.offset});
+        result += edit.text;
+        copied = edit.offset + edit.length;
+    }
+    result += source.subview(copied);
+
+    return result;
+}
+} // namespace
+
+cc::result<slib::shader_bindings> slib::parse_binding_groups(cc::string_view hlsl)
+{
+    auto parsed = parse_source(hlsl);
+    CC_RETURN_IF_ERROR(parsed);
+
+    shader_bindings result_bindings;
+    auto& groups = result_bindings.groups;
+    groups.reserve(parsed.value().groups.size());
+
+    for (auto& group : parsed.value().groups)
+    {
+        shader_binding_group result;
+        result.name = cc::string::create_copy_of(group.name);
+        result.group = group.group;
+        result.bindings.reserve(group.bindings.size());
+        for (auto& binding : group.bindings)
+            result.bindings.push_back(cc::move(binding.binding));
+        result.static_samplers = cc::move(group.static_samplers);
+
+        groups.push_back(cc::move(result));
+    }
+
+    if (parsed.value().inline_constants.has_value())
+        result_bindings.inline_constants = cc::move(parsed.value().inline_constants.value().constants);
+
+    result_bindings.vertex_inputs.reserve(parsed.value().vertex_inputs.size());
+    for (auto& input : parsed.value().vertex_inputs)
+        result_bindings.vertex_inputs.push_back(cc::move(input.input));
+
+    result_bindings.payloads = cc::move(parsed.value().payloads);
+
+    return result_bindings;
+}
+
+cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::shader_format target)
+{
+    auto parsed = parse_source(hlsl);
+    CC_RETURN_IF_ERROR(parsed);
+
+    if (parsed.value().annotations.empty())
+        return cc::string::create_copy_of(hlsl);
+
+    // Only a source that carries an attribute needs an arm, so a target without one stays usable for every shader
+    // that writes its own addresses.
+    if (target != sg::shader_format::dxil && target != sg::shader_format::spirv)
+        return cc::error("the binding preprocessor has no arm for this shader format");
+
+    cc::vector<source_edit> edits;
+
+    // The directives are removed, so nothing downstream meets a pragma it does not know.
+    // Only their own bytes go and never the newline, which keeps every later line where the compiler's own
+    // diagnostics will say it is.
+    for (auto const& annotation : parsed.value().annotations)
+        edits.push_back({.offset = annotation.offset, .length = annotation.length});
+
+    for (auto const& group : parsed.value().groups)
+        for (auto const& binding : group.bindings)
+        {
+            // HLSL puts the address after the declared name and Vulkan puts it before the declaration, which is
+            // the asymmetry no prefix macro could bridge and the reason this is a rewriting pass at all.
+            if (target == sg::shader_format::dxil)
+                edits.push_back({.offset = binding.semicolon_offset,
+                                 .text = cc::format(" : register({}{}, space{})", binding.register_class,
+                                                    binding.binding.index, group.group)});
+            else
+                edits.push_back({.offset = binding.type_offset,
+                                 .text = cc::format("[[vk::binding({}, {})]] ", binding.binding.index, group.group)});
+        }
+
+    // The inline-constants block, which is a register on one arm and an attribute on the other.
+    // Q8 applies here too: a constants block referenced by one stage of a two-stage pipeline would otherwise get
+    // a register only in that stage.
+    if (parsed.value().inline_constants.has_value())
+    {
+        auto const& constants = parsed.value().inline_constants.value();
+        if (target == sg::shader_format::dxil)
+            edits.push_back({.offset = constants.semicolon_offset,
+                             .text = cc::format(" : register(b0, space{})", constants.constants.space)});
+        else
+            edits.push_back({.offset = constants.type_offset, .text = cc::string("[[vk::push_constant]] ")});
+    }
+
+    // Vertex input locations, which only the SPIR-V arm needs: HLSL matches an input by its semantic, and the
+    // semantic is already in the source.
+    //
+    // One counter across every annotated struct, not one per struct: a location is a position in the stage's own
+    // flat namespace, so two structs feeding one entry point — the per-vertex slot and the per-instance one —
+    // would otherwise both claim location 0.
+    // Declaration order is what decides it, which is the same rule the slots themselves follow.
+    if (target == sg::shader_format::spirv)
+    {
+        u32 next_location = 0;
+        for (auto const& input : parsed.value().vertex_inputs)
+            for (auto const offset : input.member_offsets)
+                edits.push_back({.offset = offset, .text = cc::format("[[vk::location({})]] ", next_location++)});
+    }
+
+    cc::sort_by(edits, &source_edit::offset);
+    return apply_edits(hlsl, edits);
+}

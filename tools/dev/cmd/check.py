@@ -85,6 +85,19 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         )
         return result.ok
 
+    def check_shader_grammar(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The binding pass exists twice -- in C++ for the runtime rewriter, in Python for the shader-package
+        # generator -- and one shared corpus is what keeps the two agreeing.
+        # The C++ half runs it as a test; this is the Python half, and it needs no build at all.
+        # Not fixable and not scopable, so fix and scope are ignored.
+        runner = ctx.root / "libs" / "graphics" / "shaped-shader-library" / "cmake" / "binding-grammar-self-test.py"
+        result = dev.run_step(
+            ["uv", "run", str(runner)],
+            step_type="lint", name="binding-grammar-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        return result.ok
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -132,6 +145,9 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   False, check_deps_licenses),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),
+        dev.Check("shader-grammar",
+                  "run the shared binding corpus against the Python half of the binding pass",
+                  False, check_shader_grammar),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "
                   "(and where supported, sanitizer) presets",

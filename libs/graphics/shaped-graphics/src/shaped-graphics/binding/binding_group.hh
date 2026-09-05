@@ -53,6 +53,30 @@ struct sg::named_view
     bound_view view;
 };
 
+/// A layout slot paired with what is bound to it — the index-keyed twin of `named_view`.
+///
+/// Named for what it carries rather than for what it is: `sg::binding` is a *declaration* and `named_view` a
+/// *supply*, so calling this `indexed_binding` would read as a `binding` carrying an index, which every
+/// `binding` already has — and `binding::index` is the register number, a different integer from the slot.
+///
+/// The reason to key by slot is a caller that already knows it, which today means a generated binding group:
+/// the same parse that produced the shader's address produced the slot, so `create` has no name to rediscover.
+/// The string compare it saves is real but small — the groups built per frame in this tree carry one to four
+/// bindings each.
+///
+/// A slot from the wrong layout is in range, wrong and silent, where a wrong *name* is an error message.
+/// So a caller holding slots owes it to itself to know which layout they came from, and the cheapest way is to
+/// acquire that layout from the same place the slots came from — which is what a generated group does.
+/// Where the layout arrives from elsewhere, `binding_group_layout::structural_hash` is what compares the two.
+///
+/// `create_binding_group` is overloaded on which of the two a call passes, so a bare `{}` for "no views" is
+/// ambiguous and has to name the span type it means.
+struct sg::slotted_view
+{
+    binding_slot slot = binding_slot::invalid;
+    bound_view view;
+};
+
 /// A binding name paired with a sampler state.
 /// As a `create_binding_group_layout` argument it declares a *static* sampler, baked into the pipeline layout's root signature.
 /// As a `create_binding_group` argument it supplies a *dynamic* sampler for a sampler binding of that name.

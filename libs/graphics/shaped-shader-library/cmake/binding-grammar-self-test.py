@@ -1,0 +1,238 @@
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
+
+"""Run the shared binding corpus against the Python half of the binding pass.
+
+tests/data/binding-corpus.txt is one file of HLSL snippets and the parse each must produce.
+Both halves of the pass read it -- this script, and shaped-shader-library-test's own corpus test.
+So a grammar case is added once rather than twice, and the two halves cannot drift on a case anybody thought of.
+
+Run by hand as `uv run libs/graphics/shaped-shader-library/cmake/binding-grammar-self-test.py`, and by
+`uv run dev.py check` as the `shader-grammar` gate.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+
+from binding_grammar import BindingError, parse_binding_groups  # noqa: E402
+
+CORPUS = Path(__file__).parent.parent / "tests" / "data" / "binding-corpus.txt"
+
+
+# sg::sampler's own field order, and its defaults -- what a `static` line is rendered against.
+SAMPLER_FIELD_ORDER = ("min_filter", "mag_filter", "mip_filter", "address_u", "address_v", "address_w",
+                       "mip_lod_bias", "max_anisotropy", "min_lod", "max_lod", "compare", "border_color")
+
+SAMPLER_DEFAULTS = {
+    "min_filter": "linear", "mag_filter": "linear", "mip_filter": "linear",
+    "address_u": "repeat", "address_v": "repeat", "address_w": "repeat",
+    "mip_lod_bias": "0", "max_anisotropy": "1", "min_lod": "0", "max_lod": "",
+}
+
+
+def render_sampler(fields: dict[str, str]) -> str:
+    """Every field that differs from sg::sampler's default, in sg::sampler's own order.
+
+    One canonical rendering both halves of the corpus compare as text, so neither has to model the other's
+    value types.
+    """
+    out = []
+    for key in SAMPLER_FIELD_ORDER:
+        value = fields.get(key)
+        if value is None:
+            continue
+        if key in SAMPLER_DEFAULTS and _same_number_or_text(value, SAMPLER_DEFAULTS[key]):
+            continue
+        out.append(f"{key}={value}")
+    return " ".join(out)
+
+
+def _same_number_or_text(a: str, b: str) -> bool:
+    try:
+        return float(a) == float(b)
+    except ValueError:
+        return a == b
+
+
+class Case:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.hlsl: list[str] = []
+        self.groups: list[tuple[str, int, list[dict]]] = []
+        self.statics: dict[str, str] = {}
+        self.inline_constants: tuple[str, list[str]] | None = None
+        # Which unindented line opened the block the next indented lines belong to.
+        self.open_block: str = ""
+        self.vertex_inputs: list[tuple[str, list[str]]] = []
+        self.payloads: list[tuple[str, list[str]]] = []
+        self.error: str | None = None
+
+    @property
+    def source(self) -> str:
+        return "".join(line + "\n" for line in self.hlsl)
+
+
+def read_corpus(text: str) -> list[Case]:
+    cases: list[Case] = []
+    section = ""
+
+    for line in text.splitlines():
+        if line.startswith("--- case "):
+            cases.append(Case(line[len("--- case "):]))
+            section = ""
+            continue
+        if line in ("--- hlsl", "--- groups", "--- error"):
+            section = line[4:]
+            continue
+        if not cases:
+            continue
+
+        current = cases[-1]
+        if section == "hlsl":
+            current.hlsl.append(line)
+        elif section == "groups":
+            words = line.split()
+            if not words or line.startswith("#"):
+                continue
+            if not line.startswith("  "):
+                if words[0] == "inline_constants":
+                    current.open_block = "inline_constants"
+                    current.inline_constants = (" ".join(words[1:]), [])
+                    continue
+                if words[0] == "vertex_input":
+                    current.open_block = "vertex_input"
+                    current.vertex_inputs.append((" ".join(words[1:]), []))
+                    continue
+                if words[0] == "payload":
+                    current.open_block = "payload"
+                    current.payloads.append((" ".join(words[1:]), []))
+                    continue
+                current.open_block = "group"
+                current.groups.append((words[0], int(words[1].removeprefix("group=")), []))
+                continue
+            if words[0] == "static":
+                current.statics[words[1]] = " ".join(words[2:])
+                continue
+            if current.open_block == "inline_constants":
+                current.inline_constants[1].append(" ".join(words))
+                continue
+            if current.open_block == "payload":
+                current.payloads[-1][1].append(" ".join(words))
+                continue
+            if current.open_block == "vertex_input":
+                current.vertex_inputs[-1][1].append(" ".join(words))
+                continue
+            binding = {"name": words[0], "count": 1, "dim": None}
+            for word in words[1:]:
+                key, _, value = word.partition("=")
+                binding["index" if key == "index" else key] = int(value) if key in ("index", "count") else value
+            current.groups[-1][2].append(binding)
+        elif section == "error" and line and not line.startswith("#"):
+            current.error = line
+
+    return cases
+
+
+def check(case: Case) -> list[str]:
+    """The differences between what the case pins and what the parse produced."""
+    try:
+        parsed = parse_binding_groups(case.source)
+        groups = parsed.groups
+    except BindingError as e:
+        if case.error is None:
+            return [f"was rejected: {e}"]
+        return [] if str(e) == case.error else [f"reported\n    {e}\n  but must report\n    {case.error}"]
+
+    if case.error is not None:
+        return [f"was accepted, but must be rejected with: {case.error}"]
+
+    if len(groups) != len(case.groups):
+        return [f"found {len(groups)} group(s), expected {len(case.groups)}"]
+
+    problems: list[str] = []
+    for group, (name, number, expected) in zip(groups, case.groups):
+        if group.name != name or group.group != number:
+            problems.append(f"group '{group.name}' group={group.group}, expected '{name}' group={number}")
+            continue
+        if len(group.bindings) != len(expected):
+            problems.append(f"group '{name}' has {len(group.bindings)} binding(s), expected {len(expected)}")
+            continue
+        for binding, want in zip(group.bindings, expected):
+            got = (binding.name, binding.index, binding.count, binding.type, binding.dimension)
+            wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"])
+            if got != wanted:
+                problems.append(f"binding {got}, expected {wanted}")
+
+    constants = parsed.inline_constants
+    rendered = None
+    if constants is not None:
+        header = f"{constants.name} space={constants.space} type={constants.type} size={constants.size}"
+        rendered = (header, [f"{m.name} {m.type} @{m.offset}" for m in constants.members])
+    if rendered != case.inline_constants:
+        problems.append(f"inline constants are {rendered}, expected {case.inline_constants}")
+
+    rendered_inputs = []
+    for vertex_input in parsed.vertex_inputs:
+        header = f"{vertex_input.name} slot={vertex_input.slot}"
+        if vertex_input.per_instance:
+            header += " per_instance"
+        members = [f"{m.name} {m.type} {m.semantic}{m.semantic_index}" for m in vertex_input.members]
+        rendered_inputs.append((header, members))
+
+    if rendered_inputs != case.vertex_inputs:
+        problems.append(f"vertex inputs are {rendered_inputs}, expected {case.vertex_inputs}")
+
+    rendered_payloads = [(f"{p.name} size={p.size}", [f"{m.name} {m.type}" for m in p.members])
+                         for p in parsed.payloads]
+    if rendered_payloads != case.payloads:
+        problems.append(f"payloads are {rendered_payloads}, expected {case.payloads}")
+
+    declared = {s.name: render_sampler(s.fields) for group in groups for s in group.static_samplers}
+    for name, expected in case.statics.items():
+        if name not in declared:
+            problems.append(f"'{name}' is not declared static")
+        elif declared[name] != expected:
+            problems.append(f"static '{name}' is [{declared[name]}], expected [{expected}]")
+    for name in declared:
+        if name not in case.statics:
+            problems.append(f"'{name}' is declared static, and the case names no static sampler for it")
+
+    return problems
+
+
+def main() -> int:
+    if not CORPUS.is_file():
+        print(f"binding corpus not found at {CORPUS}", file=sys.stderr)
+        return 1
+
+    cases = read_corpus(CORPUS.read_text(encoding="utf-8"))
+    if len(cases) < 20:
+        print(f"only {len(cases)} corpus case(s) read from {CORPUS} — the reader is broken", file=sys.stderr)
+        return 1
+
+    failed = 0
+    for case in cases:
+        problems = check(case)
+        if problems:
+            failed += 1
+            print(f"[corpus] '{case.name}'", file=sys.stderr)
+            for problem in problems:
+                print(f"  {problem}", file=sys.stderr)
+
+    if failed:
+        print(f"\n{failed} of {len(cases)} corpus case(s) failed", file=sys.stderr)
+        return 1
+
+    print(f"binding grammar: {len(cases)} corpus case(s) OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

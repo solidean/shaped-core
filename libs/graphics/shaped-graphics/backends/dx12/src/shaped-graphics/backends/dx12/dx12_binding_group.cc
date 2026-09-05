@@ -11,6 +11,54 @@
 
 namespace sg::backend::dx12
 {
+namespace
+{
+[[nodiscard]] cc::result<cc::vector<dx12_resolved_view>> resolve_by_name(dx12_binding_group_layout const& layout,
+                                                                         cc::span<sg::named_view const> views)
+{
+    cc::vector<dx12_resolved_view> resolved;
+    resolved.reserve(views.size());
+
+    for (auto const& nv : views)
+    {
+        isize slot_index = -1;
+        for (isize i = 0; i < layout.view_slots.size(); ++i)
+            if (layout.view_slots[i].binding.name == nv.name)
+            {
+                slot_index = i;
+                break;
+            }
+        if (slot_index < 0)
+            return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
+
+        resolved.push_back({.slot_index = slot_index, .name = nv.name, .view = &nv.view});
+    }
+    return resolved;
+}
+
+[[nodiscard]] cc::result<cc::vector<dx12_resolved_view>> resolve_by_slot(dx12_binding_group_layout const& layout,
+                                                                         cc::span<sg::slotted_view const> views)
+{
+    cc::vector<dx12_resolved_view> resolved;
+    resolved.reserve(views.size());
+
+    auto const bindings = layout.bindings();
+    for (auto const& sv : views)
+    {
+        auto const position = isize(u32(sv.slot));
+        if (sv.slot == sg::binding_slot::invalid || position >= bindings.size())
+            return cc::error(cc::format("binding_group: slot {} is not a position in this layout's bindings()", position));
+
+        auto const slot_index = layout.slot_by_binding[position];
+        if (slot_index < 0 || sg::is_sampler(bindings[position].type))
+            return cc::error(cc::format("binding_group: '{}' is a sampler, not a view", bindings[position].name));
+
+        resolved.push_back({.slot_index = slot_index, .name = bindings[position].name, .view = &sv.view});
+    }
+    return resolved;
+}
+} // namespace
+
 dx12_binding_group::~dx12_binding_group()
 {
     // A persistent group returns its descriptor ranges to their heaps' free lists, deferred until its
@@ -38,6 +86,32 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
                                                                  cc::span<sg::named_view const> views,
                                                                  cc::span<sg::named_sampler const> samplers,
                                                                  sg::lifetime_scope scope)
+{
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+
+    auto resolved = resolve_by_name(*layout, views);
+    CC_RETURN_IF_ERROR(resolved);
+    return create_resolved(ctx, layout, resolved.value(), samplers, scope);
+}
+
+cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& ctx,
+                                                                 dx12_binding_group_layout_handle const& layout,
+                                                                 cc::span<sg::slotted_view const> views,
+                                                                 cc::span<sg::named_sampler const> samplers,
+                                                                 sg::lifetime_scope scope)
+{
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+
+    auto resolved = resolve_by_slot(*layout, views);
+    CC_RETURN_IF_ERROR(resolved);
+    return create_resolved(ctx, layout, resolved.value(), samplers, scope);
+}
+
+cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_context& ctx,
+                                                                          dx12_binding_group_layout_handle const& layout,
+                                                                          cc::span<dx12_resolved_view const> views,
+                                                                          cc::span<sg::named_sampler const> samplers,
+                                                                          sg::lifetime_scope scope)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
 
@@ -88,19 +162,10 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create(dx12_context& c
     int const view_base = group->table.offset;
     for (auto const& nv : views)
     {
-        isize slot_index = -1;
-        for (isize i = 0; i < layout->view_slots.size(); ++i)
-            if (layout->view_slots[i].binding.name == nv.name)
-            {
-                slot_index = i;
-                break;
-            }
-        if (slot_index < 0)
-            return cc::error(cc::format("binding_group: no view binding named '{}' in the layout", nv.name));
-
+        auto const slot_index = nv.slot_index;
         auto const& s = layout->view_slots[slot_index];
         bool const is_array = s.binding.is_array();
-        auto const element_views = nv.view.span();
+        auto const element_views = nv.view->span();
         if (element_views.size() != isize(s.binding.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",

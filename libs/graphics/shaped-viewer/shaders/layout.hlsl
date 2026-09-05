@@ -7,11 +7,14 @@
 // Every sv view target holds PREMULTIPLIED alpha: straight alpha is not associative across a nesting chain, and a
 // three-level composite would visibly darken edges.
 //
+// Every address below is written by slib's binding pass; see shaped-shader-library/docs/binding-preprocessor.md.
+//
 // The constants block is declared in the vertex stage only, and everything the pixel stages need arrives as a varying.
-// Declaring it in a pixel stage too would put it back into the reflected group layout, which pipeline_layout.hh forbids
-// for inline constants.
+// That was forced by the reflected group layout, which the declared group no longer is — a push_constants block is
+// not a group member whatever reads it, so the three nointerpolation varyings could now be dropped.
+// Left alone here: it is a change to what the stages interpolate, not to who owns an address.
 
-cbuffer layout_constants : register(b0)
+struct layout_constants
 {
     float4 uv_scale_bias_0; // xy scale, zw bias — the primary source's sub-rect
     float4 uv_scale_bias_1; // the wipe's second source
@@ -19,6 +22,9 @@ cbuffer layout_constants : register(b0)
     float4 wipe;            // x split in [0,1], y axis (0 = horizontal), z separator half-width in uv, w unused
     float4 separator_color; // the wipe's seam band
 };
+
+#pragma sc push_constants space=9
+ConstantBuffer<layout_constants> constants;
 
 struct vs_output
 {
@@ -36,9 +42,14 @@ struct vs_output
     nointerpolation float4 separator : TEXCOORD5;
 };
 
-Texture2D<float4> source_0 : register(t0);
-Texture2D<float4> source_1 : register(t1);
-SamplerState source_sampler : register(s0);
+// The sampler is dynamic rather than `static`: a draw picks nearest or linear, so its state is the caller's.
+#pragma sc group 0
+namespace layout_bindings
+{
+    Texture2D<float4> source_0;
+    Texture2D<float4> source_1;
+    SamplerState source_sampler;
+}
 
 vs_output main_vs(uint vid : SV_VertexID)
 {
@@ -47,12 +58,12 @@ vs_output main_vs(uint vid : SV_VertexID)
 
     vs_output o;
     o.pos = float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
-    o.uv0 = t * uv_scale_bias_0.xy + uv_scale_bias_0.zw;
-    o.uv1 = t * uv_scale_bias_1.xy + uv_scale_bias_1.zw;
+    o.uv0 = t * constants.uv_scale_bias_0.xy + constants.uv_scale_bias_0.zw;
+    o.uv1 = t * constants.uv_scale_bias_1.xy + constants.uv_scale_bias_1.zw;
     o.local = t;
-    o.tint = tint;
-    o.wipe = wipe;
-    o.separator = separator_color;
+    o.tint = constants.tint;
+    o.wipe = constants.wipe;
+    o.separator = constants.separator_color;
     return o;
 }
 
@@ -65,7 +76,7 @@ float4 border_ps(vs_output i) : SV_Target
 // One view across its rect.
 float4 view_ps(vs_output i) : SV_Target
 {
-    return source_0.SampleLevel(source_sampler, i.uv0, 0) * i.tint;
+    return layout_bindings::source_0.SampleLevel(layout_bindings::source_sampler, i.uv0, 0) * i.tint;
 }
 
 // Two views split along an axis, with an optional separator band on the split itself.
@@ -74,8 +85,8 @@ float4 wipe_ps(vs_output i) : SV_Target
     float along = i.wipe.y < 0.5 ? i.local.x : i.local.y;
 
     float split = i.wipe.x;
-    float4 a = source_0.SampleLevel(source_sampler, i.uv0, 0);
-    float4 b = source_1.SampleLevel(source_sampler, i.uv1, 0);
+    float4 a = layout_bindings::source_0.SampleLevel(layout_bindings::source_sampler, i.uv0, 0);
+    float4 b = layout_bindings::source_1.SampleLevel(layout_bindings::source_sampler, i.uv1, 0);
     float4 c = along < split ? a : b;
 
     // The separator is drawn opaque over the seam; a zero half-width draws none.

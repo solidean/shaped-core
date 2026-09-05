@@ -15,6 +15,7 @@ struct dx12_hazard_view;
 struct dx12_texture_hazard_view;
 struct dx12_array_element;
 struct dx12_array_binding;
+struct dx12_resolved_view;
 struct dx12_array_buffer_declare;
 struct dx12_array_texture_declare;
 struct dx12_upload_allocation;

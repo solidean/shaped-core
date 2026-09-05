@@ -24,6 +24,13 @@ sg::compiled_shader make_shader()
         {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
     shader.bindings.push_back(
         {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
+    shader.bindings.push_back({.name = "Albedo",
+                               .group_index = 0,
+                               .space = 0,
+                               .index = 2,
+                               .count = 1,
+                               .type = sg::binding_type::readonly_texture,
+                               .texture_dimension = sg::texture_view_dimension::cube_array});
 
     shader.compiler = {.name = "dxc", .version = "1.8", .signature = "-T cs_6_8 -E main"};
     return shader;
@@ -50,6 +57,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         if (x.block_size.has_value() != y.block_size.has_value())
             return false;
         if (x.block_size.has_value() && x.block_size.value() != y.block_size.value())
+            return false;
+        if (x.texture_dimension != y.texture_dimension)
             return false;
     }
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())

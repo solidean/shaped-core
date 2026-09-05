@@ -226,6 +226,15 @@ public:
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
+    /// The same pair, keyed by layout slot rather than by binding name — see sg::slotted_view.
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle layout,
+                                                            cc::span<slotted_view const> views,
+                                                            cc::span<named_sampler const> samplers = {});
+
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<slotted_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
+
     /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
     /// It starts fully vacant, so every scalar view binding must be set before the first snapshot.
     /// Throws sg::binding_group_exception if the staging descriptors cannot be allocated.

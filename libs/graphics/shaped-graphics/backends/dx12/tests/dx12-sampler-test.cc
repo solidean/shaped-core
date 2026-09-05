@@ -9,6 +9,8 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/sampler.hh>
 
+using namespace cc::primitive_defines;
+
 // dx12 samplers: the sampler -> D3D12 translation, which is pure.
 // Plus, on WARP, that a root signature with a static + a dynamic sampler, and a binding group with a dynamic sampler, are accepted by the debug layer.
 // No sampling shader is dispatched, so this covers the descriptor / root-signature wiring only.
@@ -128,12 +130,13 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
     REQUIRE(layout != nullptr);
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
-    auto group = c.persistent.try_create_binding_group(layout, {}, {});
+    // The empty view list is spelled out because create_binding_group is overloaded on how it keys them.
+    auto group = c.persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(), {});
     CHECK(!group.has_value());
 
     // A sampler named for a binding that does not exist is also rejected.
     sg::named_sampler const wrong[] = {{.name = "Ghost", .sampler = {}}};
-    auto group2 = c.persistent.try_create_binding_group(layout, {}, wrong);
+    auto group2 = c.persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(), wrong);
     CHECK(!group2.has_value());
 }
 
@@ -161,4 +164,46 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
     auto pipeline_layout = c.create_dx12_pipeline_layout(pld, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value()); // root sig: the group's SRV table + one baked static sampler
     CHECK(pipeline_layout.value()->groups.size() == 1);
+}
+
+INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved with its views",
+               (dx12::dx12_context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // The shape the split table gets wrong if nothing remaps it: a sampler BETWEEN two views, so `Buf` is
+    // position 2 in bindings() and position 1 in view_slots.
+    // A slot is defined as the former, so binding by slot has to cross that gap.
+    sg::binding const bindings[] = {
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Static", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+        {.name = "Buf", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+    };
+    sg::named_sampler const statics[] = {{.name = "Static", .sampler = {}}};
+
+    auto layout = c.cached.acquire_binding_group_layout(bindings, statics);
+    REQUIRE(layout != nullptr);
+
+    auto tex = c.create_dx12_texture(sampled_tex(), sg::allocation_info{});
+    REQUIRE(tex.has_value());
+    auto const typed = sg::texture_2d::from_raw(tex.value());
+
+    auto const buf = c.persistent.create_buffer<u32>(4, sg::buffer_usage::readwrite_buffer);
+
+    sg::slotted_view const views[] = {
+        {.slot = sg::binding_slot(0), .view = typed.as_readonly_view()},
+        {.slot = sg::binding_slot(2), .view = buf.as_readwrite_buffer()},
+    };
+
+    auto group = c.persistent.try_create_binding_group(layout, views);
+    REQUIRE(group.has_value());
+
+    // And the failure the type is meant to make loud: a slot naming the sampler is not a view.
+    sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_readonly_view()}};
+    CHECK(!c.persistent.try_create_binding_group(layout, wrong).has_value());
+
+    // A slot past the end of bindings() is refused rather than read.
+    sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_readonly_view()}};
+    CHECK(!c.persistent.try_create_binding_group(layout, out_of_range).has_value());
 }

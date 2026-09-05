@@ -59,6 +59,19 @@ struct sg::backend::vulkan::vulkan_array_binding
 ///
 /// A persistent group's range comes from the heap's free list and goes back to it, epoch-deferred, on release.
 /// A transient group's is ring-allocated and reclaimed collectively when its epoch retires.
+/// One view to bind, already resolved to its position in `bindings()`.
+///
+/// Both inputs reduce to this before anything is written: a `named_view` by looking the name up, a
+/// `slotted_view` by taking the slot as what it is — a position in `bindings()`, which is what vulkan's
+/// undivided descriptor set indexes anyway.
+/// `name` is carried for the error messages, which a slot-keyed caller would otherwise have lost.
+struct sg::backend::vulkan::vulkan_resolved_view
+{
+    isize slot = 0;
+    cc::string_view name;
+    sg::bound_view const* view = nullptr;
+};
+
 class sg::backend::vulkan::vulkan_binding_group final : public sg::binding_group
 {
 public:
@@ -67,6 +80,21 @@ public:
                                                                         cc::span<sg::named_view const> views,
                                                                         cc::span<sg::named_sampler const> samplers,
                                                                         sg::lifetime_scope scope);
+
+    /// The same, keyed by layout slot rather than by binding name.
+    [[nodiscard]] static cc::result<vulkan_binding_group_handle> create(vulkan_context& ctx,
+                                                                        vulkan_binding_group_layout_handle const& layout,
+                                                                        cc::span<sg::slotted_view const> views,
+                                                                        cc::span<sg::named_sampler const> samplers,
+                                                                        sg::lifetime_scope scope);
+
+    /// What both overloads run once their input is resolved to slots.
+    [[nodiscard]] static cc::result<vulkan_binding_group_handle> create_resolved(
+        vulkan_context& ctx,
+        vulkan_binding_group_layout_handle const& layout,
+        cc::span<vulkan_resolved_view const> views,
+        cc::span<sg::named_sampler const> samplers,
+        sg::lifetime_scope scope);
 
     /// Mints a persistent group whose descriptors are a copy of `image`, which must be one layout-sized descriptor
     /// image — what a staging group keeps and hands over unchanged.

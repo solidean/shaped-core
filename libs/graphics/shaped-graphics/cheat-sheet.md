@@ -561,6 +561,8 @@ sg::bound_view             // one raw_view (stored inline, `.view = tex.as_reado
                             //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
                             //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
                             //   consumers read both arms via .span() / .size()
+sg::slotted_view            // { binding_slot slot; bound_view view }  — the same input keyed by SLOT (a position in layout->bindings()), for generated code that already knows it
+                            //   `{}` is ambiguous under the two overloads: pass `cc::span<sg::named_view const>()` to mean "no views"
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `group_index`)
@@ -578,13 +580,15 @@ ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
-layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its staging slot index
+// both scopes take span<slotted_view const> as well — same validation, no name lookup; a slot naming a sampler or past the end is an error, never a wrong bind
+layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its binding_slot
 
 // staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.
 #include <shaped-graphics/binding/staging_binding_group.hh>
 ctx.persistent.create_staging_binding_group(group_layout)  // -> staging_binding_group_handle = shared_ptr<staging_binding_group> (MUTABLE handle); persistent only (+ try_ twin)
-sg::binding_slot            // enum class : u32 — opaque binding identity; NOT a descriptor position, it indexes an internal table (heap, first descriptor, element count)
+sg::binding_slot            // enum class : u32 — a position in layout->bindings(); NOT a descriptor position (dx12 splits views and samplers into two tables and remaps)
                             //   that indirection is where every set is resolved and bounds-checked; `invalid` is what an unknown name resolves to
+                            //   meaningful only for the layout it came from — a foreign slot is in range, wrong and silent, where a wrong NAME is an error message
 sbg->slot_of(name)                    // -> binding_slot  THE name lookup, done ONCE; invalid if the layout has no binding of that name
 sbg->is_array(slot) / array_size(slot) // -> bool / int — the binding's shape, which decides the setter family and bounds every element index (1 for a scalar)
 // the setters NAME the shape and never infer it — a scalar rejects the array family and vice versa; an element index is always an argument, never chosen for you

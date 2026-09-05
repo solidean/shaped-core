@@ -410,6 +410,18 @@ public:
     {
         return cc::result<sg::binding_group_handle>(create_vulkan_binding_group(layout, views, samplers, scope));
     }
+
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                                cc::span<sg::slotted_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
+                                                                                sg::lifetime_scope scope) override
+    {
+        CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+        auto vk_layout = std::dynamic_pointer_cast<vulkan_binding_group_layout const>(layout);
+        CC_ASSERT(vk_layout != nullptr, "binding_group_layout is not a vulkan one");
+        return cc::result<sg::binding_group_handle>(
+            vulkan_binding_group::create(*this, vk_layout, views, samplers, scope));
+    }
     [[nodiscard]] cc::result<vulkan_staging_binding_group_handle> create_vulkan_staging_binding_group(
         sg::binding_group_layout_handle const& layout,
         sg::lifetime_scope scope);
