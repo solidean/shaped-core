@@ -23,6 +23,8 @@ from tools.dev.lib.pipeline.captures import IMAGE_MECHANISMS, SIDECAR_NAME, Side
 from tools.dev.lib.pipeline.examples import (capture_directory, collect_examples, is_example_target,
                                              resolve_example, select_examples)
 
+from tools.dev.lib.toolchain import jsruntime as jsr
+
 from . import args as a
 from .context import Context
 
@@ -34,6 +36,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(p)
     a.build_overrides(p)
     a.emsdk(p)
+    a.jsruntime(p)
     a.profile(p)
     p.add_argument("--target", "-t", action="append",
                    help="Example binary target(s) to consider: comma-list, repeatable, wildcards")
@@ -117,7 +120,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, args.emsdk_path)
-    examples = collect_examples(preset, targets, root=ctx.root, binary_names=wanted)
+    examples = collect_examples(preset, targets, root=ctx.root, binary_names=wanted,
+                                launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
+                                                          dev.emsdk_env(args.emsdk_path)))
 
     if args.update_captures is not None:
         _sweep(ctx, preset, targets, examples, args)

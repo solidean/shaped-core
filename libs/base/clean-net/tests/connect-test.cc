@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -16,16 +17,25 @@ using namespace cnet;
 
 namespace
 {
-bool pump_until(cc::function_ref<bool()> done, i32 rounds = 4000)
+/// Pump until `done` holds, or until the budget elapses.
+///
+/// The budget is wall-clock rather than a count of rounds.
+/// A round is one pump-or-yield and says nothing about elapsed time, so counting them is only a proxy for waiting --
+/// and a poor one as soon as something outside the pump has to happen first.
+/// The resolver's worker is a real thread, and starting one on wasm means bringing up a Web Worker: that costs tens
+/// of milliseconds, while a tight spin burns thousands of rounds in well under one.
+bool pump_until(cc::function_ref<bool()> done, double max_ms = 5000)
 {
-    for (i32 i = 0; i < rounds; ++i)
+    auto const started = cc::current_time_steady_secs();
+    while (true)
     {
         if (done())
             return true;
         if (!cc::thread_pump_all())
             cc::this_thread_yield();
+        if ((cc::current_time_steady_secs() - started) * 1000.0 >= max_ms)
+            return done();
     }
-    return done();
 }
 
 [[nodiscard]] ip_address addr(cc::string_view text)

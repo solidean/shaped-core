@@ -3,6 +3,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/impl/native_socket.hh>
 #include <clean-net/impl/reactor.hh>
 #include <clean-net/io/io_system.hh>
 #include <nexus/test.hh>
@@ -160,8 +161,11 @@ TEST("cnet - an io_system comes up and reports which mode it got")
         SKIP("this platform has no sockets");
     }
 
-    // A build without threads is unthreaded whatever the description says.
-    CHECK(io.value()->has_reactor_thread() == (CC_HAS_THREADS != 0));
+    // A build without threads is unthreaded whatever the description says, and so is one with no sockets to poll:
+    // io_system::create gates on both, and a reactor thread with nothing pollable behind it would only spin.
+    // Both terms are needed because wasm separates them -- it has no sockets either way, but it does have threads
+    // once built with -pthread, so a threading-only expectation is right there for the wrong reason.
+    CHECK(io.value()->has_reactor_thread() == (CC_HAS_THREADS != 0 && impl::sockets_are_supported()));
     CHECK(io.value()->pending_count() == 0);
     CHECK(&io.value()->time_source() == &system_clock());
 }

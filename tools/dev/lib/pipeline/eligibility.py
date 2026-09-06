@@ -20,9 +20,7 @@ from pathlib import Path
 
 from ..core import profile
 from ..core.models import Preset, Target
-
-# Artifact suffixes that are not directly runnable and must be launched via node.
-_WASM_LAUNCH_SUFFIXES = {".js", ".mjs", ".wasm"}
+from ..toolchain import jsruntime as jsr
 
 # How a non-normal bucket is re-entered on the CLI, for the "wrong bucket" hint.
 _BUCKET_FLAG = {
@@ -44,10 +42,10 @@ class BinaryListing:
     tests: list[dict]  # raw per-test records: name, file, bucket, enabled, filter_matches, eligible, ...
 
 
-def _launcher(preset: Preset, artifact: Path) -> list[str]:
-    if preset.is_emscripten or artifact.suffix.lower() in _WASM_LAUNCH_SUFFIXES:
-        return ["node"]
-    return []
+def _launcher(preset: Preset, artifact: Path, launcher: jsr.LazyLauncher) -> list[str]:
+    if not jsr.needs_launcher(preset.is_emscripten, artifact):
+        return []
+    return launcher.prefix()
 
 
 def query_listing(
@@ -59,6 +57,7 @@ def query_listing(
     root: Path,
     env: dict[str, str] | None = None,
     timeout: float = 30.0,
+    launcher: jsr.LazyLauncher,
 ) -> BinaryListing | None:
     """Run the listing query for one binary; return its listing or None on any failure.
 
@@ -66,16 +65,18 @@ def query_listing(
     """
     if target.artifact is None:
         return None
-    cmd = [*_launcher(preset, target.artifact), str(target.artifact)]
-    if test_name:
-        cmd.append(test_name)
-    cmd += ["--list-tests-json", "-", *extra_args]
     try:
+        # Inside the try because resolving the JS runtime is part of launching: a wasm artifact with no runtime to
+        # run it is "could not determine" like any other launch failure, not a crash for the caller to handle.
+        cmd = [*_launcher(preset, target.artifact, launcher), str(target.artifact)]
+        if test_name:
+            cmd.append(test_name)
+        cmd += ["--list-tests-json", "-", *extra_args]
         with profile.span(target.name, type="probe", extra={"query": "--list-tests-json"}):
             proc = subprocess.run(
                 cmd, cwd=root, env=env, capture_output=True, text=True, timeout=timeout
             )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, jsr.NotFound):
         return None
     if proc.returncode != 0:
         return None
@@ -197,6 +198,7 @@ def select_eligible_binaries(
     extra_args: list[str] | None = None,
     root: Path,
     env: dict[str, str] | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> tuple[list[str], str | None]:
     """Narrow `binary_names` to those that contain a test matching `test_name`.
 
@@ -215,7 +217,7 @@ def select_eligible_binaries(
             runnable.append(name)  # unknown to this preset — let the run loop handle it
             continue
         listing = query_listing(
-            preset, target, test_name=test_name, extra_args=extra_args, root=root, env=env
+            preset, target, test_name=test_name, extra_args=extra_args, root=root, env=env, launcher=launcher
         )
         if listing is None:
             runnable.append(name)  # couldn't determine — keep it

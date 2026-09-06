@@ -166,9 +166,9 @@ def emsdk_toolchain_file(root: Path) -> Path:
 def _emsdk_path_additions(root: Path) -> list[Path]:
     """Directories emsdk prepends to PATH: the SDK root, the emscripten tools where emcc and em++ live, and emsdk's bundled node/python when present."""
     dirs = [root, root / "upstream" / "emscripten"]
-    node_bins = sorted((root / "node").glob("*/bin"))
-    if node_bins:
-        dirs.append(node_bins[-1])  # newest installed node
+    node = emsdk_node(root)
+    if node is not None:
+        dirs.append(node.parent)
     pythons = sorted((root / "python").glob("*"))
     if pythons:
         dirs.append(pythons[-1])
@@ -181,6 +181,16 @@ def _first_glob(root: Path, *patterns: str) -> Path | None:
         if hits:
             return hits[-1]
     return None
+
+
+def emsdk_node(root: Path) -> Path | None:
+    """emsdk's own bundled node, or None when the SDK carries none.
+
+    The layout differs by platform and the Windows one has no `bin`: node/<version>/bin/node on POSIX against
+    node/<version>/node.exe here.
+    Globbing only the POSIX shape is why this silently fell through to whatever node the machine had on PATH.
+    """
+    return _first_glob(root, "node/*/bin/node.exe", "node/*/bin/node", "node/*/node.exe", "node/*/node")
 
 
 def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
@@ -202,7 +212,7 @@ def emsdk_env(emsdk_path: str | None = None) -> dict[str, str] | None:
     env[path_key] = os.pathsep.join(additions + ([existing] if existing else []))
 
     env["EMSDK"] = str(root)
-    node_exe = _first_glob(root, "node/*/bin/node.exe", "node/*/bin/node")
+    node_exe = emsdk_node(root)
     if node_exe:
         env["EMSDK_NODE"] = str(node_exe)
     python_exe = _first_glob(root, "python/*/python.exe", "python/*/bin/python3", "python/*/python")

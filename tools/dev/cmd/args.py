@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 
 from tools import dev
+from tools.dev.lib.toolchain import jsruntime as jsr
 
 
 def preset(p: argparse.ArgumentParser) -> None:
@@ -68,6 +69,26 @@ def emsdk(p: argparse.ArgumentParser) -> None:
         help="Path to an emsdk install for the WASM (Emscripten) presets; dev.py applies its "
              "environment itself, so no permanent/--system activation is needed. Falls back to "
              "SC_EMSDK_PATH / EMSDK / emcc-on-PATH.",
+    )
+
+
+def jsruntime(p: argparse.ArgumentParser) -> None:
+    """The node-vs-deno flags: which runtime executes a WASM artifact, and optionally where it lives.
+
+    Orthogonal to --preset, which says what to compile rather than what runs it.
+    """
+    p.add_argument(
+        "--runtime", choices=jsr.KINDS, default=None,
+        help="JavaScript runtime that executes WASM artifacts (default: node). node carries Dawn and deno "
+             "carries wgpu, so the pair covers both browser WebGPU implementations. Falls back to SC_JS_RUNTIME.",
+    )
+    p.add_argument(
+        "--node-path", metavar="PATH", default=None,
+        help="node executable or its install dir; also selects node as the runtime. Falls back to SC_NODE_PATH.",
+    )
+    p.add_argument(
+        "--deno-path", metavar="PATH", default=None,
+        help="deno executable or its install dir; also selects deno as the runtime. Falls back to SC_DENO_PATH.",
     )
 
 

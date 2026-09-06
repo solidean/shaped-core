@@ -1,31 +1,49 @@
 # WebAssembly / Emscripten configuration (repo-wide). Included once from the root
 # CMakeLists before add_subdirectory; a no-op on native toolchains.
 #
-# Emscripten is treated as a platform with optional features (threads, WebGPU) and
-# a selectable exception mode; the knobs here are the single source of truth that
-# the wasm-emscripten-* presets set. Threads are the exception: they are the
-# repo-wide SC_THREADS option (root CMakeLists), since forcing single-threaded is
-# useful on every platform, not just this one. This file only enforces what wasm can
-# honor. Only the single-threaded, no-WebGPU, -fexceptions combination is implemented
-# today (Tier 2); the remaining combinations are reserved (Tier 3) and fail loudly so
-# a preset can never silently build something untested. See the platform-support
-# table in the README.
+# Emscripten is treated as a platform with two optional features -- threads and WebGPU -- and a selectable
+# exception mode. The knobs here are the single source of truth that the wasm-emscripten-* presets set.
+# Threads are the exception: they are the repo-wide SC_THREADS option (root CMakeLists), since forcing
+# single-threaded is useful on every platform, not just this one. This file only enforces what wasm can honor.
+#
+# All four threads x WebGPU combinations configure. They are genuinely different deployment tiers rather than
+# a build-type matrix: WebGPU needs no cross-origin isolation, so a no-threads WebGPU build is droppable on
+# any static host, while anything with threads needs SharedArrayBuffer and therefore COOP/COEP headers.
+# See the platform-support table in the README.
 
 if(EMSCRIPTEN)
     set(SC_WASM_EXCEPTIONS "fexceptions" CACHE STRING "WASM C++ exception mode: fexceptions | wasm-exceptions")
     option(SC_WASM_WEBGPU "Build the WebGPU (emdawnwebgpu) WASM variant" OFF)
 
-    # Threads are the repo-wide SC_THREADS knob (root CMakeLists), not a wasm-local one. Nothing here passes
-    # -pthread, so __EMSCRIPTEN_PTHREADS__ stays undefined and CC_HAS_THREADS would be 0 regardless -- but we
-    # refuse rather than silently demote, so SC_THREADS=ON never describes a build that hasn't got them. The
-    # wasm presets set it OFF explicitly; a hand-rolled configure has to say so too.
+    # Threads are the repo-wide SC_THREADS knob (root CMakeLists), not a wasm-local one.
+    # -pthread is what predefines __EMSCRIPTEN_PTHREADS__, which is what clean-core's CC_HAS_THREADS reads --
+    # so passing it here is the whole of the C++-side wiring (see common/macros.hh).
     if(SC_THREADS)
-        message(FATAL_ERROR
-                "SC_THREADS=ON on Emscripten: multithreaded WASM is planned (Tier 3) but not yet supported. "
-                "Configure with -DSC_THREADS=OFF (as the wasm-emscripten-* presets do).")
+        add_compile_options(-pthread)
+        add_link_options(-pthread)
+
+        # The pool must be warm before main() runs.
+        # A test that spawns a thread and joins it blocks the thread that spawned, and a worker created on demand
+        # is serviced by that same event loop -- which the join has stopped. That is a deadlock, not a slowdown.
+        # _STRICT=0 keeps exhausting the pool a warning plus an on-demand spawn rather than a hard error.
+        add_link_options("SHELL:-s PTHREAD_POOL_SIZE=8" "SHELL:-s PTHREAD_POOL_SIZE_STRICT=0")
     endif()
+
+    # emdawnwebgpu ships inside the emsdk, so WebGPU costs no vendored dependency -- which is the reason this
+    # tier is cheaper to reach than a native Dawn backend would be.
+    # Needed on compile and link both: the port supplies webgpu.h to one and its JS bindings to the other.
     if(SC_WASM_WEBGPU)
-        message(FATAL_ERROR "SC_WASM_WEBGPU=ON: WebGPU (emdawnwebgpu) WASM is planned (Tier 3) but not yet supported")
+        add_compile_options("SHELL:--use-port=emdawnwebgpu")
+        add_link_options("SHELL:--use-port=emdawnwebgpu")
+    endif()
+
+    # Keep the wasm name section, so a captured stack reads as function names rather than as bare indices.
+    # cc::stacktrace's Emscripten backend renders whatever emscripten_get_callstack can see, and without this it can
+    # see only numbers -- which is the difference between a usable assert and a useless one.
+    # Release is left stripped: those names are a large part of the size a release wasm build exists to avoid.
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_compile_options(--profiling-funcs)
+        add_link_options(--profiling-funcs)
     endif()
 
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they

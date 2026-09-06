@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import Preset, Target
+from ..toolchain import jsruntime as jsr
 from .eligibility import _suggest, query_listing
 
 _CACHE_FILE = "example-listings.json"
@@ -89,6 +90,7 @@ def collect_examples(
     *,
     root: Path,
     binary_names: list[str] | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> list[Example]:
     """Every example in the selected `*-example` binaries, sorted by name.
 
@@ -111,7 +113,7 @@ def collect_examples(
         if stamp is not None and cached is not None and cached.get("stamp") == stamp:
             records = cached.get("tests", [])
         else:
-            listing = query_listing(preset, target, test_name=None, extra_args=["--examples"], root=root)
+            listing = query_listing(preset, target, test_name=None, extra_args=["--examples"], root=root, launcher=launcher)
             if listing is None:
                 continue
             records = [t for t in listing.tests if t.get("bucket") == "example"]
@@ -193,6 +195,7 @@ def drop_testless_examples(
     test_name: str | None,
     root: Path,
     extra_args: list[str] | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> list[str]:
     """`binary_names` minus the example binaries that carry no ordinary test.
 
@@ -211,7 +214,7 @@ def drop_testless_examples(
             out.append(name)
             continue
         listing = query_listing(
-            preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root
+            preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root, launcher=launcher
         )
         if listing is None or listing.eligible_count > 0 or listing.eligible_alias_count > 0:
             out.append(name)

@@ -271,11 +271,14 @@ public:
     /// A 404, a 405, a 400 and a 413 are all answered and none of them counts, because none of them reached a route.
     [[nodiscard]] i64 routed_requests() const;
 
-    explicit http_server(cc::unique_ptr<struct http_server_state> state);
+    explicit http_server(cc::shared_ptr<struct http_server_state> state);
     http_server(http_server const&) = delete;
     http_server& operator=(http_server const&) = delete;
     ~http_server();
 
 private:
-    cc::unique_ptr<struct http_server_state> _state;
+    /// Shared rather than owned outright: a cancelled read completes AFTER stop() returns, and its callback still
+    /// reads the server's counters.
+    /// A unique_ptr freed here left those callbacks pointing at dead memory.
+    cc::shared_ptr<struct http_server_state> _state;
 };

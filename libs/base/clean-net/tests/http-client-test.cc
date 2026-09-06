@@ -368,6 +368,7 @@ TEST("cnet - a sink that pushes back stops the reading and is charged only what 
         cc::string taken;
         bool may_take = true;
         i32 offers = 0;
+        i32 refusals = 0; // counted, so a test can wait for the push-back rather than assume turns reached it
         resume_body flow;
     };
 
@@ -383,7 +384,10 @@ TEST("cnet - a sink that pushes back stops the reading and is charged only what 
                                                    consumer->flow = f;
 
                                                    if (!consumer->may_take)
+                                                   {
+                                                       ++consumer->refusals;
                                                        return 0;
+                                                   }
 
                                                    consumer->may_take = false;
                                                    auto const n = chunk.size() < isize(64) ? chunk.size() : isize(64);
@@ -395,8 +399,14 @@ TEST("cnet - a sink that pushes back stops the reading and is charged only what 
 
     // Nothing more is read while the sink is refusing, which is the backpressure: without it the request would keep
     // pulling bytes off the connection and pile them up in a buffer of ours.
-    // `run_briefly` rather than a budget: nothing is being waited FOR, so a turn count is the whole answer.
-    fixture.run_briefly(200);
+    // Something IS being waited for here: the sink has to have actually pushed back, or the "nothing more is read"
+    // check below samples a count that is still climbing and compares it against itself one offer later.
+    // The first offer is the one that TAKES its 64 bytes; the refusal is the second, and only after it has happened
+    // is the reader supposed to have stopped.
+    // A turn count cannot establish that -- on a host slower to get the request moving those turns pass before the
+    // sink is reached at all, which is what threaded wasm does, where starting the resolver's worker means bringing
+    // up a Web Worker and costs tens of milliseconds.
+    CHECK(fixture.run_until([&] { return consumer->refusals > 0; }));
     CHECK(!head->is_ready());
 
     auto const stalled_at = consumer->offers;
