@@ -395,7 +395,7 @@ endif()
 include(DetectLinker)
 cc_detect_linker(_CC_LINKER)
 
-if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc")
+if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc" AND NOT _CC_LINKER STREQUAL "wasm-ld")
     target_link_options(clean-core PUBLIC -fuse-ld=${_CC_LINKER})
 endif()
 
