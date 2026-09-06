@@ -16,7 +16,7 @@
 // Our CMake defines it from a link probe (clean-core/cmake/DetectStacktraceLib.cmake) and that verdict wins:
 // the header alone can only prove <stacktrace> exists, never that anything implements it — a libstdc++ without libstdc++exp has the header and none of the symbols.
 // The stub is a complete, allocatable value type that reports an empty trace, so storing or passing a cc::stacktrace needs no #ifdef.
-// Only code that *renders* a trace, by calling description() or to_string, must guard on CC_HAS_STACKTRACE — a real std::stacktrace is the only thing that can produce frame text.
+// Only code that *renders* a trace, by calling description() or to_string, must guard on CC_HAS_STACKTRACE.
 
 #ifndef CC_HAS_STACKTRACE
 #if defined(__EMSCRIPTEN__)

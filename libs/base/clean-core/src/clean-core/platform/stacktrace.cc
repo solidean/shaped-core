@@ -17,10 +17,16 @@ using namespace cc::primitive_defines;
 namespace
 {
 /// What emscripten_get_callstack is asked for.
-/// The C stack is the one worth reporting: the JS frames above it are the module loader and the host, and they push
-/// everything interesting past any sensible depth cap.
-/// Demangling is on because the alternative is reading mangled C++ by hand.
-constexpr int callstack_flags = EM_LOG_C_STACK | EM_LOG_DEMANGLE;
+///
+/// EM_LOG_C_STACK is what selects the compiled frames, and it is load-bearing rather than a filter: without it the
+/// call reports one JS frame and no wasm frames at all.
+/// It does NOT exclude the JS frames above them, so a trace ends with the module loader -- callMain, run, and the
+/// loader's own line.
+/// Those are kept rather than stripped, because in a wasm host they are a true account of who called us.
+///
+/// EM_LOG_DEMANGLE is deliberately absent: it is deprecated, and names come back demangled without it, since they
+/// are read from the wasm name section that emcc writes demangled and --profiling-funcs is what keeps.
+constexpr int callstack_flags = EM_LOG_C_STACK;
 
 /// The whole callstack as one string, or empty when the platform reports none.
 /// Its length is asked for first, since it is not knowable in advance and a short buffer truncates silently.

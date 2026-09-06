@@ -5,7 +5,7 @@
 
 // Capturing return addresses, as distinct from producing a readable stack trace.
 //
-// cc::stacktrace is std::stacktrace: it bundles capture with symbolization, and it allocates.
+// cc::stacktrace bundles capture with rendering, and it allocates.
 // Both are wrong for a recording site and for a crash handler, which want the addresses now and the names later —
 // symbolization is orders of magnitude more expensive than the event it would be attached to.
 //
