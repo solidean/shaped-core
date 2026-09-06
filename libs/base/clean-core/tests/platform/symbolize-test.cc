@@ -11,6 +11,21 @@
 
 using namespace cc::primitive_defines;
 
+// Every test here holds nx::config::exclusive("dbghelp"), because they share one process-global resource rather than
+// merely running near each other.
+// On Windows, symbolization IS DbgHelp, which is single-threaded and keyed on state that is process-wide rather than
+// per-session -- so clean-core funnels every call through one mutex, and two of these tests running at once do not
+// symbolize concurrently, they queue.
+//
+// That makes the wall-clock assertion below measure the queue instead of the work.
+// "a module on an unreachable path resolves without waiting for the network" wants microseconds and allows two
+// seconds against a network timeout of tens; sharing the lock with another test put it at 2.1.
+// The comparison tests have the same problem one step removed: what they check is that two sessions agree, and a
+// session that could not get in says nothing at all.
+//
+// The tag rather than a bare exclusive() serializes them against each other, which is where this contention is:
+// the holders of the DbgHelp lock are these tests and the stacktrace ones, which carry the same tag.
+
 // Symbolization is the half of a stack capture that costs money, so what is asserted here is that it resolves what it
 // should, admits what it cannot, and answers the same question twice the same way.
 //
@@ -63,7 +78,7 @@ CC_DONT_INLINE isize capture_here_for_symbolize_test(cc::span<void*> out)
 }
 } // namespace
 
-TEST("symbolize - every address renders as something, resolved or not")
+TEST("symbolize - every address renders as something, resolved or not", nx::config::exclusive("dbghelp"))
 {
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
@@ -80,7 +95,7 @@ TEST("symbolize - every address renders as something, resolved or not")
         CHECK(!sym.resolve(frames[i]).to_string().empty());
 }
 
-TEST("symbolize - a captured frame resolves to a function name")
+TEST("symbolize - a captured frame resolves to a function name", nx::config::exclusive("dbghelp"))
 {
     if (!build_has_symbols() || !cc::stack_capture_available())
         SKIP("this build has no symbols");
@@ -99,7 +114,7 @@ TEST("symbolize - a captured frame resolves to a function name")
     CHECK(resolved > 0);
 }
 
-TEST("symbolize - a captured frame resolves to a source location")
+TEST("symbolize - a captured frame resolves to a source location", nx::config::exclusive("dbghelp"))
 {
     if (!build_has_line_info() || !cc::stack_capture_available())
         SKIP("this build has no line info");
@@ -118,7 +133,7 @@ TEST("symbolize - a captured frame resolves to a source location")
     CHECK(with_line > 0);
 }
 
-TEST("symbolize - this test's own name is in its own stack", nx::config::recorded)
+TEST("symbolize - this test's own name is in its own stack", nx::config::recorded, nx::config::exclusive("dbghelp"))
 {
     if (!build_has_symbols() || !cc::stack_capture_available())
         SKIP("this build has no symbols");
@@ -159,7 +174,7 @@ TEST("symbolize - this test's own name is in its own stack", nx::config::recorde
     CHECK(found);
 }
 
-TEST("symbolize - an address in no module resolves to nothing, and says so")
+TEST("symbolize - an address in no module resolves to nothing, and says so", nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");
@@ -173,7 +188,7 @@ TEST("symbolize - an address in no module resolves to nothing, and says so")
     CHECK(info.to_string() == "<unknown>");
 }
 
-TEST("symbolize - the same address answers the same way, from the cache")
+TEST("symbolize - the same address answers the same way, from the cache", nx::config::exclusive("dbghelp"))
 {
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
@@ -195,7 +210,7 @@ TEST("symbolize - the same address answers the same way, from the cache")
     CHECK(first == second);
 }
 
-TEST("symbolize - a rendering always says something")
+TEST("symbolize - a rendering always says something", nx::config::exclusive("dbghelp"))
 {
     cc::symbol_info info;
     CHECK(info.to_string() == "<unknown>");
@@ -213,7 +228,7 @@ TEST("symbolize - a rendering always says something")
     CHECK(info.to_string() == "render_frame at renderer.cc:42");
 }
 
-TEST("module table - this process's modules are enumerable and contain its own code")
+TEST("module table - this process's modules are enumerable and contain its own code", nx::config::exclusive("dbghelp"))
 {
     if (!cc::module_enumeration_available())
         SKIP("no module enumeration on this platform");
@@ -237,7 +252,7 @@ TEST("module table - this process's modules are enumerable and contain its own c
     CHECK(found);
 }
 
-TEST("symbolize - a recorded module table resolves addresses this process did not produce")
+TEST("symbolize - a recorded module table resolves addresses this process did not produce", nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available() || !cc::module_enumeration_available() || !cc::stack_capture_available())
         SKIP("no symbolization or no module enumeration on this platform");
@@ -277,7 +292,7 @@ TEST("symbolize - a recorded module table resolves addresses this process did no
         CHECK(agreed > 0); // and where there are symbols, the two sessions say the same thing
 }
 
-TEST("symbolize - a module table with no usable binaries still names the module")
+TEST("symbolize - a module table with no usable binaries still names the module", nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");
@@ -305,7 +320,7 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     CHECK(info.to_string() == "ghost.exe+0x123");
 }
 
-TEST("symbolize - a module on an unreachable path resolves without waiting for the network")
+TEST("symbolize - a module on an unreachable path resolves without waiting for the network", nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");

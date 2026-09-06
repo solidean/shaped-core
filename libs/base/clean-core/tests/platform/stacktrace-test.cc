@@ -8,6 +8,11 @@
 // Emscripten callstack where it does not but the platform still renders frames, and the empty stub where neither.
 // CC_HAS_STACKTRACE is the only thing that separates them, so these assert against it rather than against a platform.
 
+// All three hold nx::config::exclusive("dbghelp"), shared with symbolize-test.cc.
+// Rendering a trace symbolizes: on Windows cc::to_string goes through std::to_string(std::stacktrace), which resolves
+// every frame through the same process-global DbgHelp the symbolizer uses, so these tests and those are one group
+// contending for one lock rather than two unrelated files.
+
 namespace
 {
 /// Named, and deliberately not inlined, so a trace taken inside it can be looked for by name.
@@ -17,7 +22,7 @@ CC_DONT_INLINE cc::stacktrace capture_here_for_stacktrace_test()
 }
 } // namespace
 
-TEST("stacktrace - current() reports frames wherever the toolchain can render them")
+TEST("stacktrace - current() reports frames wherever the toolchain can render them", nx::config::exclusive("dbghelp"))
 {
     auto const trace = capture_here_for_stacktrace_test();
 
@@ -36,7 +41,7 @@ TEST("stacktrace - current() reports frames wherever the toolchain can render th
 #endif
 }
 
-TEST("stacktrace - skip drops frames from the top")
+TEST("stacktrace - skip drops frames from the top", nx::config::exclusive("dbghelp"))
 {
 #if CC_HAS_STACKTRACE
     auto const all = cc::stacktrace::current();
@@ -51,7 +56,7 @@ TEST("stacktrace - skip drops frames from the top")
 #endif
 }
 
-TEST("stacktrace - max_depth caps what is kept")
+TEST("stacktrace - max_depth caps what is kept", nx::config::exclusive("dbghelp"))
 {
 #if CC_HAS_STACKTRACE
     auto const capped = cc::stacktrace::current(0, 2);
