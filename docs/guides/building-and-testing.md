@@ -201,7 +201,7 @@ dev.py applies the emsdk environment itself, so no permanent activation is requi
 uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
 ```
 
-The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node and parses the same JUnit report as native runs.
+The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node by default and parses the same JUnit report as native runs.
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
 
 #### Which runtime executes the artifact

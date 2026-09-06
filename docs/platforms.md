@@ -73,6 +73,10 @@ It is worth naming separately anyway, because its immutable base image ships a r
 - **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
   `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
 
+The one toolchain that is *easier* here than a native one is Emscripten.
+It is self-contained under its own checkout, so it needs no sysroot and nothing from `/usr` beyond `git` and a `python3` to bootstrap.
+[requirements.md](requirements.md#emscripten--wasm) has the install steps, and why its directories must stay off `PATH`.
+
 None of this is SteamOS-specific in principle — any Linux without `libstdc++exp`, or with a watchdog on a PMC, behaves the same way.
 
 ## Frame pointers (`SC_FRAME_POINTERS`)

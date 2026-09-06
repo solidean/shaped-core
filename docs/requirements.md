@@ -56,8 +56,31 @@ See [platforms.md](platforms.md) for the full tier matrix — which platforms ar
 WebAssembly builds use the [emsdk](https://github.com/emscripten-core/emsdk), which bundles `emcc`, the CMake toolchain file, and its own Node.js — so no separate Node install is needed.
 The `wasm-emscripten-*` configure presets reference the toolchain file via `$env{EMSDK}`.
 
-You do **not** need to activate emsdk permanently or with `--system`: `dev.py` locates it and applies its environment to each configure, build and test subprocess.
-Point it at a checkout with `--emsdk-path`:
+emsdk is a git checkout plus a downloader rather than a package, so installing it is the same three commands everywhere:
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git ~/tools/emsdk
+~/tools/emsdk/emsdk install 6.0.9      # or `latest`; this is what CI pins
+~/tools/emsdk/emsdk activate 6.0.9
+```
+
+It downloads its own clang, Node.js and Python into the checkout, so it needs nothing from the system beyond `git` and a Python to bootstrap with.
+`emsdk activate` writes the checkout's own config; it does **not** need `--permanent` or `--system`, because `dev.py` applies the environment to each configure, build and test subprocess itself.
+
+**Do not put emsdk's directories on `PATH`.**
+They carry a clang, a node and a python that would shadow the system ones for every other build on the machine.
+Export `EMSDK` instead — the variable emsdk's own activation sets, and the third step of the resolution order below:
+
+```bash
+export EMSDK=$HOME/tools/emsdk
+```
+
+**On SteamOS** this is the whole story, and it is easier than the rest of the toolchain there.
+`/usr` is read-only and replaced wholesale by every OS update, so anything `pacman` installs is temporary and `$HOME` is the only durable place.
+emsdk is self-contained under its checkout, and `git` and `python3` are both in the base image.
+So it needs no sysroot, no headers and no root, unlike a native clang.
+
+Point `dev.py` at a checkout explicitly with `--emsdk-path`:
 
 ```bash
 uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
@@ -75,8 +98,9 @@ To develop the single-threaded mode natively, use a `singlethreaded-*` preset in
 
 ### WebGPU test runtimes
 
-None of this is needed for the wasm tier as it stands, which has no WebGPU.
-These are the runtimes the Tier-3 `SC_WASM_WEBGPU` work will test against, written down here so a machine can be prepared before that lands.
+`SC_WASM_WEBGPU=ON` enables Emscripten's emdawnwebgpu port, and the `emscripten-webgpu-*` presets build and pass their suites.
+What is missing is an `sg` WebGPU backend, so nothing in the tree opens a device yet — the port is linked and uncalled.
+These two runtimes are how that backend gets tested from a CLI once it lands, written down here so a machine can be prepared first.
 
 What they buy is that **WebGPU is reachable from the CLI**, so a wasm graphics build need not be driven through a browser to be tested.
 They are also two different implementations of the same spec.
@@ -91,6 +115,15 @@ curl -fsSL https://deno.land/install.sh | sh    # Linux / macOS
 deno --version
 ```
 
+On SteamOS, or any Linux where writing outside `$HOME` is unwanted, skip the installer and take the release zip — it is a single self-contained binary with no unmet dependencies:
+
+```bash
+curl -fL -o /tmp/deno.zip \
+    https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip
+unzip -o /tmp/deno.zip -d ~/tools/deno-2.9.6
+ln -sfn ~/tools/deno-2.9.6/deno ~/.local/bin/deno
+```
+
 WebGPU is on by default as of Deno 2.9.6, which is what this was verified against; `--unstable-webgpu` is still accepted but no longer required.
 It needs no permission flag either, which is worth knowing because Deno gates most of its capabilities by default: a plain `deno run` on a WebGPU script works.
 Deno can also present to a real OS window through `Deno.UnsafeWindowSurface`, which binds a surface to a window handle an FFI windowing library supplies rather than opening one itself.
@@ -101,7 +134,7 @@ Deno can also present to a real OS window through `Deno.UnsafeWindowSurface`, wh
 npm install webgpu
 ```
 
-Node is the runtime `dev.py test` already drives for wasm, so it is the shorter path of the two.
+Node is the runtime `dev.py test` drives for wasm by default, so it is the shorter path of the two.
 A wasm module reaches the binding through `globalThis.navigator.gpu`, which the harness must install before the module loads.
 
 ### `std::stacktrace`
