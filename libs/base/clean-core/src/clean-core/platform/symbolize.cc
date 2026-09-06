@@ -301,3 +301,13 @@ bool cc::impl::with_dbghelp_if_free(cc::function_ref<void()> fn)
     return false;
 #endif
 }
+
+void cc::impl::with_dbghelp(cc::function_ref<void()> fn)
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    auto const guard = dbghelp_lock().lock_scoped();
+    fn();
+#else
+    fn();
+#endif
+}

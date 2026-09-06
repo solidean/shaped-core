@@ -2,6 +2,7 @@
 
 #if CC_HAS_STACKTRACE
 
+#include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp: rendering a trace symbolizes on Windows
 #include <clean-core/string/string.hh>
 
 #if defined(__EMSCRIPTEN__)
@@ -134,7 +135,15 @@ cc::string cc::to_string(cc::stacktrace const& trace)
     }
     return out;
 #else
-    return cc::string(std::to_string(trace));
+    // Under the DbgHelp lock, because on Windows this symbolizes: std::to_string(std::stacktrace) resolves every
+    // frame through the same process-wide DbgHelp state a cc::symbolizer uses, and the STL's own lock does not
+    // serialize against ours.
+    // Rendering a trace on one thread while another symbolizes is otherwise the documented single-threaded API being
+    // used from two threads, which loses names before it corrupts anything.
+    // A pass-through everywhere else, where the renderer touches no such global.
+    auto out = cc::string();
+    cc::impl::with_dbghelp([&] { out = cc::string(std::to_string(trace)); });
+    return out;
 #endif
 }
 
