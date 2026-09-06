@@ -151,7 +151,13 @@ def test(
             xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
 
             # Emscripten emits a non-executable .js/.wasm artifact; hand it to the JS runtime instead.
-            launcher = launcher_for_preset.prefix() if jsr.needs_launcher(preset.is_emscripten, target.artifact) else []
+            # A missing runtime is a setup problem rather than a bug, so it is reported as one line rather than as a
+            # traceback out of the middle of a test run.
+            try:
+                launcher = (launcher_for_preset.prefix()
+                            if jsr.needs_launcher(preset.is_emscripten, target.artifact) else [])
+            except jsr.NotFound as e:
+                raise SystemExit(f"error: {e}") from None
             cmd = [*launcher, str(target.artifact)]
             if test_name:
                 cmd.append(test_name)

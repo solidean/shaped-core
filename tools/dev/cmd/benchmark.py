@@ -39,8 +39,9 @@ NAME = "benchmark"
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run benchmarks, or list them all (defaults to a release preset)")
     a.preset(p)
-    a.jsruntime(p)
     a.build_overrides(p)
+    a.emsdk(p)
+    a.jsruntime(p)
     a.profile(p)
     p.add_argument("--target", "-t", action="append",
                    help="Test binary target(s) to consider: comma-list, repeatable, wildcards")
@@ -100,7 +101,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, None)
     benchmarks = collect_benchmarks(preset, targets, root=ctx.root, binary_names=wanted,
-                                    launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args)))
+                                    launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
+                                                              dev.emsdk_env(args.emsdk_path)))
 
     if args.match is None:
         _print_listing(ctx, benchmarks, preset)

@@ -106,10 +106,16 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if err:
         ctx.die(err)
 
+    # Both probes below launch the artifact, so on a wasm preset they need the same runtime the run itself will use.
+    # Resolved against the emsdk overlay rather than the inherited PATH, because emsdk's bundled node is usually the
+    # only one on the machine -- the setup docs say no separate Node install is needed.
+    probe_launcher = jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args), dev.emsdk_env(args.emsdk_path))
+
     # ...and then the example binaries that turn out to have none are dropped, so a sweep does not fail on them.
     binary_names = dev.drop_testless_examples(
         primary, all_targets, binary_names,
         is_example=ctx.is_example_target, test_name=test_name, root=ctx.root, extra_args=runner_args,
+        launcher=probe_launcher,
     )
 
     # With a filter, only the binaries that actually contain a matching test run, queried via nexus' --list-tests-json on the primary preset.
@@ -117,7 +123,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if test_name:
         binary_names, diag = dev.select_eligible_binaries(
             primary, all_targets, binary_names,
-            test_name=test_name, root=ctx.root, extra_args=runner_args,
+            test_name=test_name, root=ctx.root, extra_args=runner_args, launcher=probe_launcher,
         )
         if diag:
             ctx.die(diag)

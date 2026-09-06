@@ -72,7 +72,7 @@ def collect_benchmarks(
     *,
     root: Path,
     binary_names: list[str] | None = None,
-    launcher: jsr.LazyLauncher | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> list[Benchmark]:
     """Every benchmark in the selected `*-test` binaries, sorted by name.
 

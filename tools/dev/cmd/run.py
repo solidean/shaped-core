@@ -68,11 +68,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.die(f"target {name!r} has no built artifact for preset {preset.name!r}")
 
     # A wasm artifact is a .js loader plus a .wasm and cannot be executed directly.
-    launcher = (
-        jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args), dev.emsdk_env(args.emsdk_path)).prefix()
-        if jsr.needs_launcher(preset.is_emscripten, artifact)
-        else []
-    )
+    launcher: list[str] = []
+    if jsr.needs_launcher(preset.is_emscripten, artifact):
+        try:
+            launcher = jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
+                                        dev.emsdk_env(args.emsdk_path)).prefix()
+        except jsr.NotFound as e:
+            ctx.die(str(e))
 
     # Mirrored by default: seeing the program's output IS the point of this command.
     result = dev.run_step(

@@ -25,6 +25,14 @@ from pathlib import Path
 KINDS = ("node", "deno")
 DEFAULT_KIND = "node"
 
+
+class NotFound(RuntimeError):
+    """No runtime could be located for a launch that needs one.
+
+    Named rather than a bare RuntimeError because a listing probe has to tell this apart from a real bug: a probe
+    that cannot launch reports "could not determine" and keeps the binary, while anything else is not its to swallow.
+    """
+
 # Env fallbacks, mirroring SC_EMSDK_PATH's role for the emsdk.
 _PATH_ENV = {"node": "SC_NODE_PATH", "deno": "SC_DENO_PATH"}
 _KIND_ENV = "SC_JS_RUNTIME"
@@ -172,9 +180,15 @@ class LazyLauncher:
 
     Native runs must not pay for -- or fail on -- a runtime lookup they never use, which is why this is lazy
     rather than resolved up front alongside the preset.
+
+    **Both arguments are required, `env` included.**
+    `env` is what makes emsdk's own node reachable, and passing `None` for it silently falls back to whatever node
+    the machine happens to have on PATH -- which is the difference between a reproducible wasm run and a lottery.
+    Four of the six call sites written alongside this class omitted it, so it is spelled rather than defaulted.
+    Pass `None` deliberately where there is genuinely no overlay, as a native preset has.
     """
 
-    def __init__(self, request: "JsRuntimeRequest | None" = None, env: dict[str, str] | None = None):
+    def __init__(self, request: "JsRuntimeRequest | None", env: dict[str, str] | None):
         self._request = request or JsRuntimeRequest()
         self._env = env
         self._runtime: JsRuntime | None = None
@@ -191,7 +205,7 @@ class LazyLauncher:
         rt = self.runtime
         if rt is None:
             wanted = self._request.kind or DEFAULT_KIND
-            raise RuntimeError(
+            raise NotFound(
                 f"no {wanted} found to run the WASM artifact; pass --{wanted}-path or put {wanted} on PATH"
             )
         return rt.launch_prefix

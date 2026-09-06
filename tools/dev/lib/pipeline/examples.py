@@ -90,7 +90,7 @@ def collect_examples(
     *,
     root: Path,
     binary_names: list[str] | None = None,
-    launcher: jsr.LazyLauncher | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> list[Example]:
     """Every example in the selected `*-example` binaries, sorted by name.
 
@@ -195,6 +195,7 @@ def drop_testless_examples(
     test_name: str | None,
     root: Path,
     extra_args: list[str] | None = None,
+    launcher: jsr.LazyLauncher,
 ) -> list[str]:
     """`binary_names` minus the example binaries that carry no ordinary test.
 
@@ -213,7 +214,7 @@ def drop_testless_examples(
             out.append(name)
             continue
         listing = query_listing(
-            preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root
+            preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root, launcher=launcher
         )
         if listing is None or listing.eligible_count > 0 or listing.eligible_alias_count > 0:
             out.append(name)

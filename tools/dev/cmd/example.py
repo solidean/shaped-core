@@ -121,7 +121,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, args.emsdk_path)
     examples = collect_examples(preset, targets, root=ctx.root, binary_names=wanted,
-                                launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args)))
+                                launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
+                                                          dev.emsdk_env(args.emsdk_path)))
 
     if args.update_captures is not None:
         _sweep(ctx, preset, targets, examples, args)
