@@ -1,6 +1,8 @@
 #include "run.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/record/desc.hh>
 #include <clean-core/record/scope.hh>
 #include <clean-core/record/stat.hh>
@@ -30,6 +32,16 @@ constexpr auto paused_warn_fraction = f64(0.05);
 // A batch may not grow past this however cheap the body is, so a bad per-iteration estimate cannot produce a batch
 // that runs for minutes before the first sample arrives.
 constexpr auto max_batch_size = isize(1) << 24;
+
+// The largest share of a batch that reading the clock may account for.
+//
+// A batch is timed by one clock pair, so that pair's cost is charged to whatever the batch measured.
+// Where the counter is an instruction this is nothing.
+// Where it is a call -- hundreds of nanoseconds on WASM -- a batch that is too short measures the clock rather than
+// the body.
+// The per-iteration estimate alone cannot protect against this, because the estimate is exactly what a stall
+// corrupts, so the chosen batch is checked against a real timing before sampling starts.
+constexpr auto max_clock_share_of_batch = f64(0.01);
 } // namespace
 
 struct nx::bench::impl::run_state
@@ -172,14 +184,37 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
 
     if (cfg.warmup_iterations > 0)
     {
-        auto const secs = time_batch(cfg.warmup_iterations);
-        r.warmup_iterations = cfg.warmup_iterations;
-        per_iteration_estimate = secs / f64(cfg.warmup_iterations);
+        // Split into a few chunks so the estimate is a minimum over several timings rather than one.
+        // A single timing is one stall away from being useless, and the count is fixed here rather than derived, so
+        // there is nothing else to cross-check it against.
+        constexpr auto chunks = isize(4);
+        auto const per_chunk = cc::max(isize(1), cfg.warmup_iterations / chunks);
+        while (r.warmup_iterations < cfg.warmup_iterations)
+        {
+            auto const count = cc::min(per_chunk, cfg.warmup_iterations - r.warmup_iterations);
+            auto const secs = time_batch(count);
+            r.warmup_iterations += count;
+
+            auto const per_iteration = secs / f64(count);
+            if (per_iteration > 0 && (per_iteration_estimate <= 0 || per_iteration < per_iteration_estimate))
+                per_iteration_estimate = per_iteration;
+        }
     }
     else if (cfg.warmup_time_secs > 0)
     {
         // Doubling rather than a fixed count: the body's cost is unknown here, and a fixed count is either far too few
         // for a nanosecond body or far too many for a millisecond one.
+        //
+        // The estimate is the CHEAPEST step, never the last one.
+        // The loop ends as soon as the budget is met, so one descheduling stall both ends it early and lands in the
+        // step the estimate would have come from, at whatever tiny `count` the doubling had reached.
+        // A 2 ms stall at count == 1 yields an estimate of 2 ms per iteration for a two-nanosecond body.
+        // That collapses the batch size below to 1, and a batch of 1 times a single iteration against a clock that
+        // cannot resolve it.
+        // Every later number is downstream of that: the samples quantize, and convergence reports whatever the
+        // quantization happened to produce.
+        // Interference only ever inflates a timing, so the minimum is the one robust statistic here -- and it is
+        // naturally taken from a large `count`, where the clock pair is amortized rather than dominant.
         auto elapsed = f64(0);
         auto count = isize(1);
         while (elapsed < cfg.warmup_time_secs && r.warmup_iterations < max_batch_size)
@@ -187,28 +222,52 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
             auto const secs = time_batch(count);
             elapsed += secs;
             r.warmup_iterations += count;
-            per_iteration_estimate = secs / f64(count);
+
+            auto const per_iteration = secs / f64(count);
+            if (per_iteration > 0 && (per_iteration_estimate <= 0 || per_iteration < per_iteration_estimate))
+                per_iteration_estimate = per_iteration;
+
             count = cc::min(count * 2, max_batch_size);
         }
     }
     else
     {
         // No warmup was asked for, but the batch size still needs an estimate to be chosen from.
+        // Three probes and the cheapest of them, for the same reason the other two branches take a minimum: one
+        // timing that happened to be interrupted would otherwise decide the batch size for the whole run.
         auto const probe = isize(64);
-        per_iteration_estimate = time_batch(probe) / f64(probe);
+        for (auto i = 0; i < 3; ++i)
+        {
+            auto const per_iteration = time_batch(probe) / f64(probe);
+            if (per_iteration > 0 && (per_iteration_estimate <= 0 || per_iteration < per_iteration_estimate))
+                per_iteration_estimate = per_iteration;
+        }
     }
-
-    state.is_warmup = false;
 
     // ---------------------------------------------------------------------------------------------------------
     // Batch size, so that one timing boundary covers enough work to be worth reading a clock for.
+    //
+    // Still flagged as warmup: the sizing probes below run the body, and a batch that is not a sample must not
+    // contribute items or quantities to the result.
     // ---------------------------------------------------------------------------------------------------------
     r.batch_size = 1;
     if (cfg.batch && per_iteration_estimate > 0)
     {
         auto const wanted = cfg.target_batch_secs / per_iteration_estimate;
         r.batch_size = wanted <= 1 ? isize(1) : cc::min(isize(wanted) + 1, max_batch_size);
+
+        // The estimate can only ever be too HIGH -- interference inflates a timing and never shortens one -- and an
+        // inflated estimate produces a batch too short for the clock to resolve.
+        // So the batch is checked against a real timing rather than trusted, and doubled while one clock pair is
+        // more than max_clock_share_of_batch of what the batch measured.
+        // This is what makes a coarse or expensive clock a bounded error instead of a silent one: on WASM the pair
+        // costs hundreds of nanoseconds, and a batch of 1 would be timing the clock.
+        auto const floor_secs = cal.clock_pair_secs / max_clock_share_of_batch;
+        while (r.batch_size < max_batch_size && time_batch(r.batch_size) < floor_secs)
+            r.batch_size = cc::min(r.batch_size * 2, max_batch_size);
     }
+
+    state.is_warmup = false;
 
     // ---------------------------------------------------------------------------------------------------------
     // Sampling.
@@ -219,10 +278,17 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
     auto elapsed = f64(0);
     auto total_paused = f64(0);
 
+    // Per sample rather than only as a total, because the fraction below is a ratio and a ratio of sums is decided by
+    // its largest term: one descheduled sample inflates `elapsed` and drags the whole figure toward zero.
+    auto paused_ratios = cc::vector<f64>();
+
     while (true)
     {
         auto const secs = time_batch(r.batch_size);
-        total_paused += f64(state.paused_ticks) * cal.seconds_per_tick;
+        auto const paused = f64(state.paused_ticks) * cal.seconds_per_tick;
+        total_paused += paused;
+        if (secs + paused > 0)
+            paused_ratios.push_back(paused / (secs + paused));
 
         r.samples.push_back(secs / f64(r.batch_size));
         r.measured_iterations += r.batch_size;
@@ -258,7 +324,18 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
 
     r.measured_seconds = elapsed;
     r.time = bench::compute_statistics(r.samples);
-    r.paused_fraction = elapsed + total_paused > 0 ? total_paused / (elapsed + total_paused) : 0;
+    // The MEDIAN of the per-sample ratios, so a single interrupted sample cannot decide it.
+    // `total_paused` still feeds the derived seconds below, where a sum is the right thing; only the ratio needs to
+    // be robust.
+    r.paused_fraction = 0;
+    if (!paused_ratios.empty())
+    {
+        cc::sort(paused_ratios);
+        auto const n = paused_ratios.size();
+        r.paused_fraction = n % 2 == 1 ? paused_ratios[n / 2] : (paused_ratios[n / 2 - 1] + paused_ratios[n / 2]) * 0.5;
+    }
+    else if (elapsed + total_paused > 0)
+        r.paused_fraction = total_paused / (elapsed + total_paused);
 
     // ---------------------------------------------------------------------------------------------------------
     // Derived figures.

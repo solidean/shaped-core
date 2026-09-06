@@ -13,13 +13,19 @@
 // for — because what is under test is the engine's bookkeeping, not any particular body's speed.
 // A test that asserted a duration would be flaky by construction, so none of these do.
 //
-// They all hold nx::config::exclusive("bench") on top of that, because not asserting a duration is not enough on its
-// own: these tests still measure the machine, and nexus' own `benchmark` bucket sets exclusive_global for exactly that
-// reason -- a timing taken while another test runs is a timing of the pair.
-// These are ordinary TESTs that happen to call nx::bench::run, so none of that came for free, and the batching,
-// convergence and warmup assertions here read the same shared caches and cores as anything scheduled beside them.
-// The tag rather than a bare exclusive() serializes them against each other only, which is where the contention is,
-// instead of making each one a whole-suite barrier.
+// They all hold nx::config::exclusive("bench") on top of that, and the reason is what they are testing rather than
+// flakiness: nexus' own `benchmark` bucket sets exclusive_global, so a benchmark runs alone, and these tests exist to
+// check the engine that runs under it.
+// A test of the batching, convergence and warmup logic should see what a real benchmark sees, which means not
+// sharing cores with whatever else the schedule picked.
+// The tag rather than a bare exclusive() serializes them against each other instead of making each one a whole-suite
+// barrier, which is enough for that purpose.
+//
+// It is NOT what makes them reliable, and treating it as such hid a real bug for a while.
+// The warmup estimate in bench/run.cc was taken from whichever doubling step the loop happened to stop on, so one
+// descheduling stall became the per-iteration estimate, collapsed the batch size to 1, and left the engine timing a
+// two-nanosecond body with a clock that ticks in hundreds of nanoseconds.
+// run.cc now takes the cheapest step and checks the chosen batch against the clock before sampling.
 
 using namespace cc::primitive_defines;
 
