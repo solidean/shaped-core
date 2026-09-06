@@ -3,6 +3,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/stacktrace.hh>
+#include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
 
 #include <csignal>
 #include <cstdio>
@@ -162,49 +163,69 @@ void report_other_thread_stacks() noexcept
         return;
     }
 
-    // Symbols are initialized here rather than at install time: the handler must stay free of setup cost
-    // for the overwhelmingly common case where the process never crashes at all.
-    SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-    SymInitialize(GetCurrentProcess(), nullptr, TRUE);
-
     THREADENTRY32 entry;
     cc::memset(&entry, 0, sizeof(entry));
     entry.dwSize = sizeof(entry);
 
     bool any = false;
     int reported = 0;
-    for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry))
-    {
-        if (entry.th32OwnerProcessID != GetCurrentProcessId() || entry.th32ThreadID == self)
-            continue;
-        if (reported++ >= k_max_threads)
-        {
-            std::fprintf(stderr, "\n<more threads follow; stopped after %d>\n", k_max_threads);
-            break;
-        }
 
-        if (!any)
+    // Everything below calls DbgHelp, on threads this loop SUSPENDS.
+    //
+    // cc::symbolizer serializes its own DbgHelp calls behind a process-global lock, and this must not simply take it:
+    // a thread frozen while owning it never releases, so waiting would hang the crash report outright.
+    // So it asks.
+    // Holding the lock for the walk also keeps any other live thread out of DbgHelp meanwhile.
+    // If it is already held, someone is mid-symbolization and walking anyway risks the hang this exists to avoid, so
+    // the report says so and stops.
+    //
+    // A narrowing rather than a guarantee: DbgHelp entered by anything that is not cc::symbolizer is invisible here.
+    auto const walked = cc::impl::with_dbghelp_if_free(
+        [&]
         {
-            std::fputs("\nother threads:\n", stderr);
-            any = true;
-        }
-        std::fprintf(stderr, "  thread %lu:\n", entry.th32ThreadID);
+            // Inside the guard, because these are DbgHelp calls like any other.
+            // Symbols are initialized here rather than at install time: the handler must stay free of setup cost for
+            // the overwhelmingly common case where the process never crashes at all.
+            SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+            SymInitialize(GetCurrentProcess(), nullptr, TRUE);
 
-        auto const thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE,
-                                       entry.th32ThreadID);
-        if (thread == nullptr)
-        {
-            std::fputs("    <could not open this thread>\n", stderr);
-            continue;
-        }
-        walk_thread(thread);
-        CloseHandle(thread);
-    }
+            for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry))
+            {
+                if (entry.th32OwnerProcessID != GetCurrentProcessId() || entry.th32ThreadID == self)
+                    continue;
+                if (reported++ >= k_max_threads)
+                {
+                    std::fprintf(stderr, "\n<more threads follow; stopped after %d>\n", k_max_threads);
+                    break;
+                }
 
-    if (!any)
+                if (!any)
+                {
+                    std::fputs("\nother threads:\n", stderr);
+                    any = true;
+                }
+                std::fprintf(stderr, "  thread %lu:\n", entry.th32ThreadID);
+
+                auto const thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+                                               FALSE, entry.th32ThreadID);
+                if (thread == nullptr)
+                {
+                    std::fputs("    <could not open this thread>\n", stderr);
+                    continue;
+                }
+                walk_thread(thread);
+                CloseHandle(thread);
+            }
+
+            // Also inside: this tears down the session cc::symbolizer shares, so it must not race one.
+            SymCleanup(GetCurrentProcess());
+        });
+
+    if (!walked)
+        std::fputs("\nother threads: <not walked; another thread is inside the symbolizer>\n", stderr);
+    else if (!any)
         std::fputs("\nother threads: none\n", stderr);
 
-    SymCleanup(GetCurrentProcess());
     CloseHandle(snapshot);
 }
 

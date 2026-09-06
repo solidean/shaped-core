@@ -2,6 +2,7 @@
 
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/string/string.hh>
 
@@ -86,8 +87,10 @@ struct cc::symbol_info
 ///
 /// The platform underneath it IS serialized here, which is a different question and not a caller's to answer.
 /// Windows' DbgHelp is single-threaded and its state is process-wide rather than per-session, so two symbolizers on
-/// two threads share it however separate their sessions look; every call into it goes through one process-global
-/// mutex for that reason.
+/// two threads share it however separate their sessions look; every call **cc::symbolizer** makes goes through one
+/// process-global mutex for that reason.
+/// It does not reach DbgHelp calls made elsewhere -- the crash handler walks suspended threads and deliberately does
+/// not participate, see cc::impl::with_dbghelp_if_free.
 /// Leaving that to callers is not workable when an assertion can symbolize its own stack from any thread, and the
 /// failure mode is not a missing name but a corrupted heap that surfaces later somewhere unrelated.
 struct cc::symbolizer
@@ -136,3 +139,20 @@ private:
     /// Null for the process session, which is shared with the crash handler and never torn down.
     void* _session = nullptr;
 };
+
+namespace cc::impl
+{
+/// Runs `fn` holding the process-global DbgHelp lock, or returns false without running it.
+///
+/// **Never waits**, which is the whole point.
+/// The crash handler walks threads it has SUSPENDED, and a suspended thread that owned this lock would never release
+/// it -- so waiting here would turn an occasional race into a guaranteed hang, on the one path whose job is to
+/// report what went wrong.
+/// Asking instead means a crash report degrades to addresses when someone is mid-symbolization, which is a far better
+/// trade than not arriving.
+///
+/// **A narrowing, not a guarantee.** It only knows about DbgHelp calls cc::symbolizer makes; DbgHelp entered by
+/// anything else in the process is invisible to it.
+/// Always false where there is no DbgHelp to guard, so a caller needs no platform test of its own.
+[[nodiscard]] bool with_dbghelp_if_free(cc::function_ref<void()> fn);
+} // namespace cc::impl

@@ -18,7 +18,11 @@ namespace
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
 constexpr bool has_symbolization = true;
 
-/// Serializes every DbgHelp call this process makes.
+/// Serializes every DbgHelp call cc::symbolizer makes.
+///
+/// NOT every call the process makes: crash_handler.cc walks suspended threads and deliberately stays out, because
+/// waiting on a lock a suspended thread owns can never succeed.
+/// cc::impl::with_dbghelp_if_free is how it asks.
 ///
 /// DbgHelp is documented single-threaded, and its state is process-wide rather than per-session: two threads
 /// resolving through DIFFERENT session handles still land in the same library state, so a per-symbolizer lock would
@@ -286,4 +290,14 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 #endif
 
     return out;
+}
+
+bool cc::impl::with_dbghelp_if_free(cc::function_ref<void()> fn)
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    return dbghelp_lock().try_lock([&](dbghelp_access&) { fn(); });
+#else
+    (void)fn;
+    return false;
+#endif
 }
