@@ -11,7 +11,7 @@ struct shade_constants
     float exposure;
 };
 
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<shade_constants> gConstants;
 
 [numthreads(8, 8, 1)]

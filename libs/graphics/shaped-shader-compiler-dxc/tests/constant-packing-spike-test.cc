@@ -171,3 +171,67 @@ TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
     // Which is the reason sr::gpu_boolean exists.
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
+
+TEST("portable-hlsl spike - Q14g only float4x4 packs the same whichever orientation is in force")
+{
+    // The pass's value table may carry a matrix only if its layout is the same in BOTH orientations, because
+    // a shader sets the default either way (`#pragma pack_matrix`, `-Zpr`) while the generated mirror has one
+    // layout — and nothing in the flattened source tells the pass which is in force.
+    //
+    // 4x4 is the case that cannot differ: four vectors of four either way, 64 bytes, probe at 64 -> 80.
+    check_rule("float4x4, default orientation", "    float4x4 m;\n    float probe;", 80);
+    check_rule("float4x4, row_major", "    row_major float4x4 m;\n    float probe;", 80);
+    check_rule("float4x4, column_major", "    column_major float4x4 m;\n    float probe;", 80);
+
+    // float3x4 and float2x4 are the ones the folklore calls full-row, and they are only full-row row-major:
+    // the other way round the 4 is the column count, so the matrix is four vectors of three or two floats.
+    //
+    // float2x4 says so in the total outright — 48 row-major against 64 by default.
+    check_rule("float2x4 is 48 row_major", "    row_major float2x4 m;\n    float probe;", 48);
+    check_rule("float2x4 is 64 by default", "    float2x4 m;\n    float probe;", 64);
+
+    // float3x4 is the trap, and the reason this case exists: both orientations total 64, so a mirror built
+    // on the total alone would look right.
+    // Row-major it is three rows of 16 and `probe` sits at 48; column-major it is four rows of 12 and `probe`
+    // sits at 60, packed into the last row's tail.
+    // The member offsets differ, which is exactly what a mirror reproduces.
+    check_rule("float3x4 totals 64 row_major", "    row_major float3x4 m;\n    float probe;", 64);
+    check_rule("float3x4 totals 64 by default", "    float3x4 m;\n    float probe;", 64);
+
+    // So the table admits float4x4 and refuses every other matrix — and a matrix whose rows are partial in
+    // the orientation actually used is refused by the SPIR-V validator anyway, as Q14c found for float3x3.
+    CHECK(block_size_of("    row_major float4x3 m;\n    float probe;", ssc::dxc::compile_target::spirv) == -1);
+}
+
+TEST("portable-hlsl spike - Q14h half is 32-bit storage here, and it is a compile flag that says so")
+{
+    // `half` and `min16float` are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and
+    // nothing in ssc passes it — so the pass's mirror declares a `float` for both.
+    //
+    // These numbers are what makes that safe rather than lucky.
+    // The day anything adds that flag they go red, which is a failing test rather than a silently wrong
+    // number in a constant buffer — the failure this whole spike exists to prevent.
+    check_rule("half packs as float", "    half a;    float probe;", 16);
+    check_rule("half2 packs as float2", "    half2 a;    float probe;", 16);
+    check_rule("half3 packs as float3", "    half3 a;    float probe;", 16);
+    check_rule("half4 packs as float4", "    half4 a;    float probe;", 32);
+    check_rule("min16float too", "    float a;    min16float b;    float probe;", 16);
+}
+
+TEST("portable-hlsl spike - Q14i a 64-bit member aligns, and a 64-bit vector aligns to a whole row")
+{
+    // The 32-bit rules do not describe these, which is why they are measured separately.
+    // A scalar `double` / `int64_t` starts at an 8-byte boundary; a vector of them starts a row.
+    // Neither obeys the no-straddling rule: a `double3` is 24 bytes and crosses a row boundary outright.
+    check_rule("double is eight bytes", "    double a;    float b;    float probe;", 16);
+    check_rule("a double aligns to eight", "    float a;    double b;    float probe;", 32);
+    check_rule("and to eight, not to a row", "    float3 a;    double b;    float probe;", 32);
+    check_rule("a double2 starts a row", "    float a;    double2 b;    float probe;", 48);
+    check_rule("a double3 straddles one", "    double3 a;    float b;    float probe;", 32);
+    check_rule("a double4 is two rows", "    double4 a;    float probe;", 48);
+
+    // The 64-bit integers are the same type family to the layout rules.
+    check_rule("uint64_t aligns to eight", "    float a;    uint64_t b;    float probe;", 32);
+    check_rule("an int64_t2 starts a row", "    float a;    int64_t2 b;    float probe;", 48);
+    check_rule("an int64_t3 straddles one", "    int64_t3 a;    float b;    float probe;", 32);
+}

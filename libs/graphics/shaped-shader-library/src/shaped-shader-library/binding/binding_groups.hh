@@ -51,16 +51,25 @@ struct slib::shader_binding_group
     cc::vector<declared_sampler> static_samplers;
 };
 
+/// The register space an inline-constants block occupies, reserved for it across every package.
+///
+/// A pipeline layout carries at most one such block and its register is always `b0`, so the space was the only
+/// number left to choose — and every block in the tree chose 9, by hand and by convention.
+/// Reserving it deletes the argument, the collision it could name, and the class of mistake at once: a group
+/// numbered 9 is refused instead, which is the one way the two could still meet.
+namespace slib
+{
+inline constexpr u32 inline_constants_space = 9;
+}
+
 /// The inline-constants block a shader declares:
 ///
-///     #pragma sc push_constants space=9
+///     #pragma sc push_constants
 ///     ConstantBuffer<frame_constants> frame;
 ///
 /// Inline constants — dx12 root constants, Vulkan push constants — reach a shader through
 /// `pipeline_layout_description::inline_constants` rather than through a group.
-/// The register is always `b0`, since a pipeline layout carries at most one such binding, so the only number to
-/// state is the space — and stating it is the point, because a block sharing a space with a group's `b`
-/// registers is exactly the collision this pass exists to prevent.
+/// The attribute takes no arguments: the register is always `b0` and the space is `inline_constants_space`.
 ///
 /// The block's layout is here, because the generator emits a C++ mirror of it and `sizeof` is then simply true
 /// rather than asserted — which is what `sv::frame_constants_gpu` carries by hand and by comment today.
@@ -68,7 +77,7 @@ struct slib::shader_binding_group
 struct slib::shader_inline_constants
 {
     cc::string name;
-    u32 space = 0;
+    u32 space = inline_constants_space; ///< always the reserved space, kept as a field because the rewrite writes it
 
     cc::string type;                          ///< the ConstantBuffer's argument, and the mirror's name
     cc::vector<shader_struct_member> members; ///< in declaration order, each carrying its constant-block offset
@@ -82,6 +91,15 @@ struct slib::shader_struct_member
     cc::string type;     ///< the HLSL type, verbatim
     cc::string semantic; ///< the semantic without its trailing index, or empty when the member carries none
     u32 semantic_index = 0;
+
+    /// The `sg::vertex_attribute_format` enumerator a `#pragma sc attribute format=<name>` stated, or empty
+    /// when the format follows from the member's type.
+    ///
+    /// It exists because two formats cannot be reached any other way: HLSL has no spelling that tells a
+    /// `float4` fed by four floats from one fed by four normalized bytes, so `rgba8_unorm` and `rgba8_uint`
+    /// have to be stated rather than derived.
+    /// A vertex input is the only place it means anything.
+    cc::string format_override;
 
     /// The byte offset the member sits at.
     ///

@@ -512,7 +512,11 @@ TEST("slib - the binding corpus parses as it says it does")
                 rendered += " per_instance";
 
             for (auto const& member : input.members)
+            {
                 rendered += cc::format("\n{} {} {}{}", member.name, member.type, member.semantic, member.semantic_index);
+                if (!member.format_override.empty())
+                    rendered += cc::format(" format={}", member.format_override);
+            }
 
             rendered_inputs.push_back(cc::move(rendered));
         }
@@ -663,7 +667,7 @@ struct frame_constants
     float exposure;
 };
 
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<frame_constants> gConstants;
 )";
 } // namespace
@@ -689,7 +693,7 @@ struct vs_input
     float3 normal : NORMAL;
 };
 
-#pragma sc vertex_input slot=1 per_instance
+#pragma sc vertex_input per_instance
 struct instance_input
 {
     float3 center : TEXCOORD0;
@@ -733,7 +737,7 @@ TEST("slib - the DXIL arm leaves a vertex input alone, since the semantic alread
     CHECK(!rewritten.value().contains("#pragma sc"));
 }
 
-TEST("slib - the DXIL arm gives an inline-constants block b0 in the space it named")
+TEST("slib - the DXIL arm gives an inline-constants block b0 in the reserved space")
 {
     auto const rewritten = slib::rewrite_binding_groups(k_inline_constants_shader, sg::shader_format::dxil);
     REQUIRE(rewritten.has_value());

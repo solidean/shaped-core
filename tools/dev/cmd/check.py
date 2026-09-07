@@ -88,7 +88,11 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
     def check_shader_grammar(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The binding pass exists twice -- in C++ for the runtime rewriter, in Python for the shader-package
         # generator -- and one shared corpus is what keeps the two agreeing.
-        # The C++ half runs it as a test; this is the Python half, and it needs no build at all.
+        #
+        # BOTH halves run here, which is the point: a gate that ran only one would let a divergence through and
+        # leave it to the test suite, and the suite is the thing this gate runs ahead of.
+        # The C++ half costs a build of shaped-shader-library-test, so this step is no longer build-free -- it
+        # is placed after every static gate and before `test` for that reason.
         # Not fixable and not scopable, so fix and scope are ignored.
         runner = ctx.root / "libs" / "graphics" / "shaped-shader-library" / "cmake" / "binding-grammar-self-test.py"
         result = dev.run_step(
@@ -96,7 +100,22 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             step_type="lint", name="binding-grammar-self-test",
             build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
         )
-        return result.ok
+        if not result.ok:
+            return False
+
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        builds = dev.build(presets, ["shaped-shader-library-test"], root=ctx.root, auto_configure=True,
+                           mirror=mirror, verbose=verbose)
+        if not all(r.ok for r in builds):
+            dev.report.print_build_failure(builds, presets, ctx.root)
+            return False
+
+        records = dev.test(
+            presets, ["shaped-shader-library-test"], root=ctx.root,
+            test_name="the binding corpus parses as it says it does",
+            timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+        )
+        return dev.report.summarize_tests(records, presets, ctx.root)
 
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
@@ -146,7 +165,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),
         dev.Check("shader-grammar",
-                  "run the shared binding corpus against the Python half of the binding pass",
+                  "run the shared binding corpus against both halves of the binding pass",
                   False, check_shader_grammar),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "

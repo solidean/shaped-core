@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 # The attribute names the grammar knows.
 # A name outside this set is an error rather than a directive nobody reads -- which is exactly what DXC makes
 # of it, since it ignores a pragma it does not know.
-ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input")
+ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input", "attribute")
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -130,6 +130,14 @@ class StructMember:
     type_offset: int
     offset: int = 0  # the byte offset the layout puts it at; a constant block's is DXC's, not C++'s
 
+    # The sg::vertex_attribute_format enumerator a `#pragma sc attribute format=<name>` stated, or empty when the
+    # format follows from the member's type.
+    #
+    # It exists because two formats cannot be reached any other way: HLSL has no spelling that tells a `float4`
+    # fed by four floats from one fed by four normalized bytes, so `rgba8_unorm` and `rgba8_uint` have to be
+    # stated rather than derived.
+    format_override: str = ""
+
 
 @dataclass
 class VertexInput:
@@ -193,6 +201,7 @@ BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
     "RWTexture2DArray": ("u", "readwrite_texture", "tex_2d_array"),
     "RWTexture3D": ("u", "readwrite_texture", "tex_3d"),
     "Buffer": ("t", "readonly_structured_buffer", None),
+    "RWBuffer": ("u", "readwrite_structured_buffer", None),
     "StructuredBuffer": ("t", "readonly_structured_buffer", None),
     "RWStructuredBuffer": ("u", "readwrite_structured_buffer", None),
     "ByteAddressBuffer": ("t", "readonly_raw_buffer", None),
@@ -230,26 +239,100 @@ SAMPLER_ENUM_KEYS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 
 SAMPLER_FLOAT_KEYS = ("mip_lod_bias", "min_lod", "max_lod")
 
-# HLSL scalar/vector type -> (what the mirror declares, its size in bytes, its sg::vertex_attribute_format).
-# The mirror spells its members as plain `float` / `int` / `unsigned`, because generated package code sits below
-# anything that could define a vector type.
-# Keep in step with impl/hlsl_value_types.cc.
-VALUE_TYPES: dict[str, tuple[str, int, str]] = {
-    "float": ("float", 4, "f32"),
-    "float2": ("float[2]", 8, "vec2f"),
-    "float3": ("float[3]", 12, "vec3f"),
-    "float4": ("float[4]", 16, "vec4f"),
-    "int": ("int", 4, "i32"),
-    "int2": ("int[2]", 8, "vec2i"),
-    "int3": ("int[3]", 12, "vec3i"),
-    "int4": ("int[4]", 16, "vec4i"),
-    "uint": ("unsigned", 4, "u32"),
-    "uint2": ("unsigned[2]", 8, "vec2u"),
-    "uint3": ("unsigned[3]", 12, "vec3u"),
-    "uint4": ("unsigned[4]", 16, "vec4u"),
+# The register space an inline-constants block occupies, reserved for it across every package.
+#
+# A pipeline layout carries at most one such block and its register is always `b0`, so the space was the only
+# number left to choose -- and every block in the tree chose 9, by hand and by convention.
+# Reserving it deletes the argument, the collision it could name, and the class of mistake at once.
+# Keep in step with slib::inline_constants_space in binding/binding_groups.hh.
+INLINE_CONSTANTS_SPACE = 9
+
+# HLSL value type -> (what the mirror declares, size in bytes, constant-block alignment, C++ alignment,
+# sg::vertex_attribute_format or None).
+#
+# The mirror spells its members as plain `float` / `int` / `unsigned` and friends, because generated package code
+# sits below anything that could define a vector type.
+#
+# The two alignments are different numbers for a reason: a constant block starts a `double[2]` on a whole 16-byte
+# row where C++ aligns it to 8, so a payload (natural packing) and a constant block read different columns.
+# Keep in step with impl/hlsl_value_types.cc, the rejection reasons below included.
+VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
+    "float": ("float", 4, 4, 4, "f32"),
+    "float2": ("float[2]", 8, 4, 4, "vec2f"),
+    "float3": ("float[3]", 12, 4, 4, "vec3f"),
+    "float4": ("float[4]", 16, 4, 4, "vec4f"),
+    "int": ("int", 4, 4, 4, "i32"),
+    "int2": ("int[2]", 8, 4, 4, "vec2i"),
+    "int3": ("int[3]", 12, 4, 4, "vec3i"),
+    "int4": ("int[4]", 16, 4, 4, "vec4i"),
+    "uint": ("unsigned", 4, 4, 4, "u32"),
+    "uint2": ("unsigned[2]", 8, 4, 4, "vec2u"),
+    "uint3": ("unsigned[3]", 12, 4, 4, "vec3u"),
+    "uint4": ("unsigned[4]", 16, 4, 4, "vec4u"),
     # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
-    "bool": ("unsigned", 4, None),
+    "bool": ("unsigned", 4, 4, 4, None),
+    # The one matrix, and Q14g is why it is the only one: a float4x4 is four vectors of four whichever
+    # orientation is in force, where a float3x4 has different member offsets row-major and column-major at the
+    # same 64-byte total.
+    # The pass cannot see the orientation, so it admits only the matrix that does not have one.
+    "float4x4": ("float[16]", 64, 16, 4, None),
+    # `half` and `min16float` are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing
+    # in ssc passes it.
+    # Q14h pins that, so adding the flag is a failing test rather than a wrong number.
+    "half": ("float", 4, 4, 4, None),
+    "half2": ("float[2]", 8, 4, 4, None),
+    "half3": ("float[3]", 12, 4, 4, None),
+    "half4": ("float[4]", 16, 4, 4, None),
+    "min16float": ("float", 4, 4, 4, None),
+    "min16float2": ("float[2]", 8, 4, 4, None),
+    "min16float3": ("float[3]", 12, 4, 4, None),
+    "min16float4": ("float[4]", 16, 4, 4, None),
+    # The 64-bit types obey rules of their own, which Q14i measured: a scalar aligns to 8, a vector starts a whole
+    # row, and neither is kept off a row boundary -- a double3 is 24 bytes and crosses one outright.
+    "double": ("double", 8, 8, 8, None),
+    "double2": ("double[2]", 16, 16, 8, None),
+    "double3": ("double[3]", 24, 16, 8, None),
+    "double4": ("double[4]", 32, 16, 8, None),
+    "int64_t": ("long long", 8, 8, 8, None),
+    "int64_t2": ("long long[2]", 16, 16, 8, None),
+    "int64_t3": ("long long[3]", 24, 16, 8, None),
+    "int64_t4": ("long long[4]", 32, 16, 8, None),
+    "uint64_t": ("unsigned long long", 8, 8, 8, None),
+    "uint64_t2": ("unsigned long long[2]", 16, 16, 8, None),
+    "uint64_t3": ("unsigned long long[3]", 24, 16, 8, None),
+    "uint64_t4": ("unsigned long long[4]", 32, 16, 8, None),
 }
+
+# Why a type outside the table is outside it, appended to the refusal.
+# A reader wants opposite reactions to a table gap and to a portability rule, and the message is the only thing
+# that tells them which they have.
+REJECTION_REASONS: tuple[tuple[str, str], ...] = (
+    ("float1x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
+    ("float2x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
+    ("float3x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
+    ("float4x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
+    ("matrix", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
+)
+
+
+# Every sg::vertex_attribute_format enumerator, so a `format=` override can be checked against the real set.
+# The two a member's type can never reach are the last: `rgba8_unorm` and `rgba8_uint` are what the override
+# exists for.
+# Keep in step with k_formats in impl/hlsl_value_types.cc.
+VERTEX_ATTRIBUTE_FORMATS = (
+    "f32", "vec2f", "vec3f", "vec4f",
+    "i32", "vec2i", "vec3i", "vec4i",
+    "u32", "vec2u", "vec3u", "vec4u",
+    "rgba8_unorm", "rgba8_uint",
+)
+
+
+def rejection_reason_for(hlsl_type: str) -> str:
+    """The sentence to append to a refusal, or empty when the pass has nothing more specific to say."""
+    for prefix, reason in REJECTION_REASONS:
+        if hlsl_type.startswith(prefix):
+            return reason
+    return ""
 
 
 def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
@@ -281,6 +364,12 @@ def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
                 fields[target] = value
             continue
 
+        # The key first, then its arity -- the order hlsl_sampler_state.cc dispatches in.
+        # Checking arity first reported "'bogus' takes exactly one value" for a key that is not a field at all,
+        # which is a different sentence from the C++ half's for the same input.
+        if key not in SAMPLER_FLOAT_KEYS and key != "max_anisotropy":
+            raise BindingError(f"{attribute.location}: '{key}' is not a field of sg::sampler")
+
         if len(values) != 1:
             raise BindingError(f"{attribute.location}: '{key}' takes exactly one value")
 
@@ -292,13 +381,9 @@ def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
             fields[key] = values[0]
             continue
 
-        if key == "max_anisotropy":
-            if not values[0].isdigit() or int(values[0]) == 0:
-                raise BindingError(f"{attribute.location}: '{values[0]}' is not an anisotropy")
-            fields[key] = values[0]
-            continue
-
-        raise BindingError(f"{attribute.location}: '{key}' is not a field of sg::sampler")
+        if not values[0].isdigit() or int(values[0]) == 0:
+            raise BindingError(f"{attribute.location}: '{values[0]}' is not an anisotropy")
+        fields[key] = values[0]
 
     return fields
 
@@ -683,10 +768,16 @@ class _Parser:
         offset = 0
         while self.at < body[2]:
             member = self.parse_constant_member()
-            size = VALUE_TYPES[member.type][1]
+            _, size, cb_align, _, _ = VALUE_TYPES[member.type]
 
-            # A scalar or vector may not straddle a row, and a row is filled before it is left.
-            if offset % 16 + size > 16:
+            # Where the type may start at all, which for a 64-bit scalar is 8 and for a 64-bit vector or a matrix
+            # is a whole row -- Q14i and Q14g measured both, and neither follows from the 32-bit rules.
+            offset += (cb_align - offset % cb_align) % cb_align
+
+            # And then the 32-bit rule: a value of 16 bytes or less may not straddle a row, and a row is filled
+            # before it is left.
+            # A wider one straddles freely, which is what a `double3` crossing a row boundary showed.
+            if size <= 16 and offset % 16 + size > 16:
                 offset += 16 - offset % 16
 
             member.offset = offset
@@ -730,7 +821,8 @@ class _Parser:
         self.at += 1
 
         if type_name not in VALUE_TYPES:
-            raise BindingError(f"{location}: '{type_name}' is not a constant block type this pass knows")
+            raise BindingError(f"{location}: '{type_name}' is not a constant block type this pass knows"
+                               f"{rejection_reason_for(type_name)}")
 
         return StructMember(name, type_name, "", 0, token.offset)
 
@@ -749,12 +841,28 @@ class _Parser:
         if pending.name in ("vertex_input", "payload"):
             raise BindingError(
                 f"{pending.location}: a '{pending.name}' attribute must stand before a struct declaration")
+
+        # `static` and `attribute` each stand before a declaration rather than before a namespace, so the
+        # sentence below is not true of either -- and neither one points at the fix.
+        # reject_unclaimed_static already says the right thing; it was reachable only from a namespace's closing
+        # brace, so a `static` at file scope fell through to the wrong message.
+        if pending.name == "static":
+            Parser.reject_unclaimed_static(pending)
+
+        if pending.name == "attribute":
+            raise BindingError(
+                f"{pending.location}: an 'attribute' attribute must stand before a struct member")
         raise BindingError(
             f"{pending.location}: a '{pending.name}' attribute must stand before a namespace declaration")
 
     def parse_inline_constants(self, attribute: Annotation) -> None:
-        """The one `ConstantBuffer<T> name;` a `push_constants` attribute stands before."""
-        space = self.space_of(attribute)
+        """The one `ConstantBuffer<T> name;` a `push_constants` attribute stands before.
+
+        The register is always `b0` and the space is reserved, so the attribute carries no number at all.
+        """
+        if attribute.arguments:
+            raise BindingError(
+                f"{attribute.location}: 'push_constants' takes no arguments, and its space is reserved")
 
         if self.inline_constants is not None:
             raise BindingError(
@@ -771,13 +879,22 @@ class _Parser:
         if not binding.template_argument:
             raise BindingError(f"{location}: an inline-constants block must name the struct it holds")
 
-        self.inline_constants = InlineConstants(binding.name, space, binding.type_offset, binding.semicolon_offset,
-                                                binding.template_argument)
+        self.inline_constants = InlineConstants(binding.name, INLINE_CONSTANTS_SPACE, binding.type_offset,
+                                                binding.semicolon_offset, binding.template_argument)
 
     def parse_vertex_input(self, attribute: Annotation) -> None:
         """The `struct <name> { <type> <member> : <SEMANTIC>; ... };` a `vertex_input` attribute stands before."""
         vertex_input = VertexInput("")
-        self.read_vertex_input_arguments(attribute, vertex_input)
+
+        # Declaration order, the same order the members are already numbered by.
+        # The pass trusted it for the members and asked the author for the struct's own number, which was one
+        # rule too many -- `slot=` stays for the case that needs it, and that case is two shaders sharing a
+        # vertex-input header while declaring their structs in a different order.
+        vertex_input.slot = len(self.vertex_inputs)
+
+        stated = self.read_vertex_input_arguments(attribute, vertex_input)
+        if stated is not None:
+            vertex_input.slot = stated
 
         keyword_location = self.current().location
         self.at += 1  # `struct`
@@ -791,15 +908,51 @@ class _Parser:
         if any(other.name == vertex_input.name for other in self.vertex_inputs):
             raise BindingError(f"{keyword_location}: struct '{vertex_input.name}' is declared twice")
 
+        # The same collision a group already refuses by number, and it can only come from an explicit `slot=`
+        # now that the default is the declaration index.
+        for other in self.vertex_inputs:
+            if other.slot == vertex_input.slot:
+                raise BindingError(f"{keyword_location}: slot {vertex_input.slot} is claimed twice, by struct "
+                                   f"'{other.name}' and struct '{vertex_input.name}'")
+
         if not self.is_punctuation("{"):
             raise BindingError(f"{keyword_location}: struct '{vertex_input.name}' must open its block right away")
         self.at += 1
 
+        # A vertex buffer is a byte stream the input assembler decodes per attribute offset, so the mirror
+        # *defines* the layout: every member is naturally packed, which for the 32-bit attribute types is a
+        # plain sum.
+        offset = 0
+
+        # A member may carry its own attribute, which today means one thing: the format it is fed in.
+        pending_member_attribute: Annotation | None = None
         while not self.is_punctuation("}"):
             if self.at_end():
                 raise BindingError(f"{self.location_here()}: struct '{vertex_input.name}' is never closed")
-            vertex_input.members.append(self.parse_struct_member())
+
+            if self.current().kind == "annotation":
+                location = self.current().location
+                parsed = self.read_annotation()
+                if parsed.name != "attribute":
+                    raise BindingError(f"{location}: '{parsed.name}' does not stand before a struct member")
+                if pending_member_attribute is not None:
+                    raise BindingError(f"{location}: two attributes stand before one member")
+                pending_member_attribute = parsed
+                continue
+
+            member = self.parse_struct_member()
+            if pending_member_attribute is not None:
+                member.format_override = self.format_override_of(pending_member_attribute)
+                pending_member_attribute = None
+
+            member.offset = offset
+            offset += VALUE_TYPES[member.type][1]
+            vertex_input.members.append(member)
         self.at += 1  # the '}'
+
+        if pending_member_attribute is not None:
+            raise BindingError(
+                f"{pending_member_attribute.location}: an 'attribute' attribute must stand before a struct member")
 
         # The declaration's own `;`, which HLSL requires and the pass does not otherwise care about.
         if self.is_punctuation(";"):
@@ -832,7 +985,14 @@ class _Parser:
             if self.at_end():
                 raise BindingError(f"{self.location_here()}: struct '{payload.name}' is never closed")
             member = self.parse_struct_member(requires_semantic=False)
-            payload.size += VALUE_TYPES[member.type][1]
+
+            # Natural alignment is the mirror's own, so a member sits where C++ would put it -- a plain sum while
+            # every type in the table was 4-aligned, and an alignment step now that the 64-bit ones are not.
+            _, size, _, cpp_align, _ = VALUE_TYPES[member.type]
+            payload.size += (cpp_align - payload.size % cpp_align) % cpp_align
+            member.offset = payload.size
+            payload.size += size
+
             payload.members.append(member)
         self.at += 1  # the '}'
 
@@ -842,11 +1002,34 @@ class _Parser:
         if not payload.members:
             raise BindingError(f"{keyword_location}: payload '{payload.name}' declares no members")
 
+        # C++ pads a struct out to its own alignment, so the mirror's `sizeof` is the sum rounded up to the
+        # widest member's -- and max_payload_size has to be that number rather than the sum, or the generated
+        # static_assert compares two different things.
+        # A no-op until a payload holds a 64-bit member, since everything else in the table aligns to 4.
+        alignment = max(VALUE_TYPES[m.type][3] for m in payload.members)
+        payload.size += (alignment - payload.size % alignment) % alignment
+
         self.payloads.append(payload)
 
     @staticmethod
-    def read_vertex_input_arguments(attribute: Annotation, vertex_input: VertexInput) -> None:
-        """`slot=<n>` and the bare `per_instance` flag, both optional."""
+    def format_override_of(attribute: Annotation) -> str:
+        """The one argument `attribute` takes: `format=<sg::vertex_attribute_format enumerator>`."""
+        if (len(attribute.arguments) != 1 or attribute.arguments[0][0] != "format"
+                or len(attribute.arguments[0][1]) != 1):
+            raise BindingError(f"{attribute.location}: 'attribute' takes exactly one format=<name>")
+
+        name = attribute.arguments[0][1][0]
+        if name not in VERTEX_ATTRIBUTE_FORMATS:
+            raise BindingError(f"{attribute.location}: '{name}' is not an sg::vertex_attribute_format")
+        return name
+
+    @staticmethod
+    def read_vertex_input_arguments(attribute: Annotation, vertex_input: VertexInput) -> int | None:
+        """`slot=<n>` and the bare `per_instance` flag, both optional.
+
+        A stated slot is returned rather than set, so the caller can tell it from the default.
+        """
+        stated: int | None = None
         for key, values in attribute.arguments:
             if not key and len(values) == 1 and values[0] == "per_instance":
                 vertex_input.per_instance = True
@@ -855,12 +1038,13 @@ class _Parser:
             if key == "slot" and len(values) == 1:
                 if not values[0].isdigit():
                     raise BindingError(f"{attribute.location}: '{values[0]}' is not a slot")
-                vertex_input.slot = int(values[0])
+                stated = int(values[0])
                 continue
 
             named = key if key else values[0]
             raise BindingError(
                 f"{attribute.location}: 'vertex_input' takes slot=<n> and per_instance, not '{named}'")
+        return stated
 
     def parse_struct_member(self, requires_semantic: bool = True) -> StructMember:
         """One `<type> <name>[ : <SEMANTIC>];`.
@@ -878,11 +1062,12 @@ class _Parser:
 
         if type_name not in VALUE_TYPES:
             kind = "vertex attribute" if requires_semantic else "payload"
-            raise BindingError(f"{location}: '{type_name}' is not a {kind} type this pass knows")
+            raise BindingError(f"{location}: '{type_name}' is not a {kind} type this pass knows"
+                               f"{rejection_reason_for(type_name)}")
 
         # `bool` is the case: four bytes in a constant block, and no vertex attribute format on any API.
         # Refused here rather than generated, since the generator would otherwise emit a format that is not one.
-        if requires_semantic and VALUE_TYPES[type_name][2] is None:
+        if requires_semantic and VALUE_TYPES[type_name][4] is None:
             raise BindingError(
                 f"{location}: '{type_name}' has no vertex attribute format, so it cannot feed a vertex input")
 
@@ -918,18 +1103,6 @@ class _Parser:
 
         return StructMember(name, type_name, semantic[:digits], semantic_index, type_offset)
 
-    @staticmethod
-    def space_of(attribute: Annotation) -> int:
-        """The one argument `push_constants` takes: `space=<n>`."""
-        if (len(attribute.arguments) != 1 or attribute.arguments[0][0] != "space"
-                or len(attribute.arguments[0][1]) != 1):
-            raise BindingError(f"{attribute.location}: 'push_constants' takes exactly one space=<n>")
-
-        value = attribute.arguments[0][1][0]
-        if not value.isdigit():
-            raise BindingError(f"{attribute.location}: '{value}' is not a space")
-        return int(value)
-
     def parse_namespace(self, pending: Annotation | None) -> Group | None:
         keyword_location = self.current().location
         self.at += 1  # `namespace`
@@ -957,6 +1130,12 @@ class _Parser:
         if number in self.group_numbers:
             raise BindingError(f"{name_location}: group {number} is declared twice, by namespace '{name}'")
         self.group_numbers.add(number)
+
+        # Group n occupies space n, so this is the one way a group and an inline-constants block could still land
+        # in the same space now that the block's own space is reserved rather than stated.
+        if number == INLINE_CONSTANTS_SPACE:
+            raise BindingError(f"{name_location}: group {number} would share its space with the inline constants, "
+                               f"which reserve it")
 
         if not self.is_punctuation("{"):
             raise BindingError(f"{keyword_location}: namespace '{name}' must open its block right away")
@@ -1111,16 +1290,5 @@ def parse_binding_groups(hlsl: str) -> Bindings:
 
     # After the walk, so the struct an inline-constants block names may be declared on either side of it.
     parser.layout_inline_constants()
-
-    # A group owns its number as a space, and an inline-constants block is always b0 -- so a block sharing a
-    # space with a group would land on the group's first `b` binding the moment one is declared.
-    # Refused whether or not that binding exists yet: the alternative is a shader that breaks on a reorder.
-    if parser.inline_constants is not None:
-        constants = parser.inline_constants
-        for group in groups:
-            if group.group == constants.space:
-                raise BindingError(
-                    f"the inline-constants block '{constants.name}' takes space {constants.space}, "
-                    f"which group {group.group} ('{group.name}') already owns")
 
     return Bindings(groups, parser.inline_constants, parser.vertex_inputs, parser.payloads)

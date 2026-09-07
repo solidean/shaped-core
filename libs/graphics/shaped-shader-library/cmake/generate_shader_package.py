@@ -425,7 +425,7 @@ def emit_mirror_members(members: list[StructMember]) -> str:
     """The members of a mirror struct, naturally packed the way both HLSL and C++ pack them."""
     out = []
     for member in members:
-        cpp_type, _, _ = VALUE_TYPES[member.type]
+        cpp_type = VALUE_TYPES[member.type][0]
         if cpp_type.endswith("]"):
             base, _, extent = cpp_type.partition("[")
             out.append(f"    {base} {member.name}[{extent[:-1]}];\n")
@@ -434,22 +434,21 @@ def emit_mirror_members(members: list[StructMember]) -> str:
     return "".join(out)
 
 
-def emit_mirror_asserts(qualified: str, name: str, members: list[StructMember], what: str) -> str:
-    """Size and every member's offset, against what the generator computed.
+def emit_mirror_asserts(qualified: str, name: str, members: list[StructMember], what: str, total: int) -> str:
+    """Size and every member's offset, against what the parse computed.
 
     Size alone would pass a mirror whose fields are in the wrong places and whose padding happens to add up,
     which is exactly the failure a hand-written mirror has today.
+
+    The offsets come from the parse rather than from re-summing sizes here: natural packing stopped being a
+    plain sum when the 64-bit types entered the table, and one arithmetic is better than two that agree.
     """
-    out = []
-    total = sum(VALUE_TYPES[m.type][1] for m in members)
-    out.append(f"\nstatic_assert(sizeof({qualified}) == {total},\n")
+    out = [f"\nstatic_assert(sizeof({qualified}) == {total},\n"]
     out.append(f'              "{name} is not the size its {what} states");\n')
 
-    offset = 0
     for member in members:
-        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {offset},\n")
+        out.append(f"static_assert(offsetof({qualified}, {member.name}) == {member.offset},\n")
         out.append(f'              "{name}::{member.name} is not where its {what} states");\n')
-        offset += VALUE_TYPES[member.type][1]
     return "".join(out)
 
 
@@ -479,7 +478,7 @@ def emit_constants(manifest: Manifest, entry: ConstantsEntry) -> str:
             pad_index += 1
             offset = member.offset
 
-        cpp_type, size, _ = VALUE_TYPES[member.type]
+        cpp_type, size = VALUE_TYPES[member.type][0], VALUE_TYPES[member.type][1]
         if cpp_type.endswith("]"):
             base, _, extent = cpp_type.partition("[")
             out.append(f"    {base} {member.name}[{extent[:-1]}];\n")
@@ -525,7 +524,7 @@ def emit_payload(manifest: Manifest, entry: PayloadEntry) -> str:
     out.append(f"    static constexpr cc::isize max_payload_size = {payload.size};\n")
     out.append("};\n")
     out.append(f"}} // namespace {manifest.namespace}\n")
-    out.append(emit_mirror_asserts(qualified, payload.name, payload.members, "payload size"))
+    out.append(emit_mirror_asserts(qualified, payload.name, payload.members, "payload size", payload.size))
     return "".join(out)
 
 
@@ -550,7 +549,9 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
 
     # The mirror is naturally packed, so its stride is its size -- but say so rather than assume it, since a
     # wrong stride draws geometry rather than failing.
-    out.append(emit_mirror_asserts(qualified, vertex_input.name, vertex_input.members, "vertex layout"))
+    last = vertex_input.members[-1]
+    stride = last.offset + VALUE_TYPES[last.type][1]
+    out.append(emit_mirror_asserts(qualified, vertex_input.name, vertex_input.members, "vertex layout", stride))
 
     out.append(f"\n/// What sg::vertex_input_layout::create<{qualified}>() reads.\n")
     out.append("template <>\n")
@@ -560,7 +561,9 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
     out.append(f"                .per_instance = {'true' if vertex_input.per_instance else 'false'},\n")
     out.append("                .attributes = {\n")
     for member in vertex_input.members:
-        _, _, fmt = VALUE_TYPES[member.type]
+        # A stated format wins over the one the member's type implies -- which is the only way to reach a
+        # packed one, since HLSL spells a normalized-byte `float4` exactly like a float one.
+        fmt = member.format_override or VALUE_TYPES[member.type][4]
         out.append(f'                    {{.semantic = "{member.semantic}",\n')
         out.append(f"                     .semantic_index = {member.semantic_index},\n")
         out.append(f"                     .format = sg::vertex_attribute_format::{fmt},\n")

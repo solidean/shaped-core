@@ -183,7 +183,9 @@ def check(case: Case) -> list[str]:
         header = f"{vertex_input.name} slot={vertex_input.slot}"
         if vertex_input.per_instance:
             header += " per_instance"
-        members = [f"{m.name} {m.type} {m.semantic}{m.semantic_index}" for m in vertex_input.members]
+        members = [f"{m.name} {m.type} {m.semantic}{m.semantic_index}"
+                   + (f" format={m.format_override}" if m.format_override else "")
+                   for m in vertex_input.members]
         rendered_inputs.append((header, members))
 
     if rendered_inputs != case.vertex_inputs:

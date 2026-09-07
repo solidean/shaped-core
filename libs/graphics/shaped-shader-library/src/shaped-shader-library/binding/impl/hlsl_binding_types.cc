@@ -34,6 +34,7 @@ constexpr table_entry k_table[] = {
     {"RWTexture3D", 'u', binding_type::readwrite_texture, texture_view_dimension::tex_3d},
 
     {"Buffer", 't', binding_type::readonly_structured_buffer},
+    {"RWBuffer", 'u', binding_type::readwrite_structured_buffer},
     {"StructuredBuffer", 't', binding_type::readonly_structured_buffer},
     {"RWStructuredBuffer", 'u', binding_type::readwrite_structured_buffer},
     {"ByteAddressBuffer", 't', binding_type::readonly_raw_buffer},

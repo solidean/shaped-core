@@ -16,10 +16,10 @@
 #     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
-#   inline_constants <name> space=<n> type=<T> size=<bytes>   unindented, since it belongs to no group,
+#   inline_constants <name> space=<n> type=<T> size=<bytes>   the space is always the reserved one,
 #     <member> <type> @<offset>                               with one line per member of the block's struct
 #   vertex_input <name> slot=<n> [per_instance]        unindented too, and one line per member follows
-#     <member> <type> <SEMANTIC><index>
+#     <member> <type> <SEMANTIC><index> [format=<f>]   format only where the member's attribute stated one
 #   payload <name> size=<bytes>                        unindented, with one `<member> <type>` line per member
 #   --- error           instead of `groups`: the message the pass must report, exactly
 #
@@ -316,6 +316,18 @@ frame group=0
   samp index=0 type=sampler count=1
 
 
+--- case an unknown sampler key is reported as unknown, whatever it carries
+--- hlsl
+#pragma sc group 0
+namespace frame_bindings
+{
+#pragma sc static bogus=(a, b)
+    SamplerState linear_sampler;
+}
+--- error
+line 4: 'bogus' is not a field of sg::sampler
+
+
 --- case `static` describes a sampler and nothing else
 --- hlsl
 #pragma sc group 0
@@ -376,14 +388,14 @@ namespace frame
 line 4: 'filter' takes one value or a tuple of three
 
 
---- case an inline-constants block states its space, since its register is always b0
+--- case an inline-constants block takes the reserved space, since its register is always b0
 --- hlsl
 struct frame_constants
 {
     float exposure;
 };
 
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=16
@@ -398,10 +410,10 @@ struct frame_constants
     float3 b;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
-inline_constants frame space=0 type=frame_constants size=32
+inline_constants frame space=9 type=frame_constants size=32
   a float2 @0
   b float3 @16
 
@@ -414,10 +426,10 @@ struct frame_constants
     float3 b;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
-inline_constants frame space=0 type=frame_constants size=16
+inline_constants frame space=9 type=frame_constants size=16
   a float @0
   b float3 @4
 
@@ -430,17 +442,17 @@ struct frame_constants
     float3 tint;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
-inline_constants frame space=0 type=frame_constants size=16
+inline_constants frame space=9 type=frame_constants size=16
   flag bool @0
   tint float3 @4
 
 
 --- case the block's struct may be declared after the block that names it
 --- hlsl
-#pragma sc push_constants space=1
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 
 struct frame_constants
@@ -448,13 +460,13 @@ struct frame_constants
     float4 tint;
 };
 --- groups
-inline_constants frame space=1 type=frame_constants size=16
+inline_constants frame space=9 type=frame_constants size=16
   tint float4 @0
 
 
 --- case a block naming a struct the file does not declare is an error
 --- hlsl
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<nowhere_constants> frame;
 --- error
 the inline-constants block 'frame' names a struct 'nowhere_constants' this file does not declare
@@ -468,23 +480,125 @@ struct frame_constants
     float probe;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
 line 3: an array is not supported in a constant block, because the member after it packs into its last row
 
 
---- case a matrix is refused for the same reason, and float3x3 is not portable at all
+--- case a float4x4 fills its rows exactly, so a constant block may hold one
 --- hlsl
 struct frame_constants
 {
     float4x4 transform;
+    float exposure;
 };
 
-#pragma sc push_constants space=0
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=80
+  transform float4x4 @0
+  exposure float @64
+
+
+--- case a matrix aligns to a whole row, so what precedes it is padded out
+--- hlsl
+struct frame_constants
+{
+    float exposure;
+    float4x4 transform;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=80
+  exposure float @0
+  transform float4x4 @16
+
+
+--- case every other matrix is refused, and the message says which rule it broke
+--- hlsl
+struct frame_constants
+{
+    float3x4 transform;
+};
+
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
-line 3: 'float4x4' is not a constant block type this pass knows
+line 3: 'float3x4' is not a constant block type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
+
+
+--- case a 64-bit scalar aligns to eight, which Q14i measured
+--- hlsl
+struct frame_constants
+{
+    float a;
+    double b;
+    float probe;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=32
+  a float @0
+  b double @8
+  probe float @16
+
+
+--- case a 64-bit vector starts a whole row, and straddles the next one freely
+--- hlsl
+struct frame_constants
+{
+    float a;
+    double2 b;
+    float probe;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=48
+  a float @0
+  b double2 @16
+  probe float @32
+
+
+--- case a double3 crosses a row boundary, which no 32-bit type may do
+--- hlsl
+struct frame_constants
+{
+    double3 a;
+    float probe;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=32
+  a double3 @0
+  probe float @24
+
+
+--- case a half is 32-bit storage here, because nothing passes -enable-16bit-types
+--- hlsl
+struct frame_constants
+{
+    float a;
+    half b;
+    float probe;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=16
+  a float @0
+  b half @4
+  probe float @8
 
 
 --- case a block and a group live in one file, in different spaces
@@ -500,7 +614,7 @@ namespace frame_bindings
     Texture2D<float4> albedo;
 }
 
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<frame_constants> constants;
 --- groups
 frame_bindings group=0
@@ -511,7 +625,7 @@ inline_constants constants space=9 type=frame_constants size=16
 
 --- case `push_constants` describes a ConstantBuffer and nothing else
 --- hlsl
-#pragma sc push_constants space=9
+#pragma sc push_constants
 Texture2D<float4> albedo;
 --- error
 line 2: 'push_constants' describes a ConstantBuffer, and 'albedo' is not one
@@ -519,26 +633,26 @@ line 2: 'push_constants' describes a ConstantBuffer, and 'albedo' is not one
 
 --- case a pipeline layout carries at most one inline-constants block
 --- hlsl
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<a> first;
 
-#pragma sc push_constants space=10
+#pragma sc push_constants
 ConstantBuffer<b> second;
 --- error
 line 4: a second 'push_constants' block, and a pipeline layout carries at most one
 
 
---- case `push_constants` carries its space explicitly
+--- case `push_constants` states no space at all, because the space is reserved
 --- hlsl
-#pragma sc push_constants
+#pragma sc push_constants space=9
 ConstantBuffer<frame_constants> frame;
 --- error
-line 1: 'push_constants' takes exactly one space=<n>
+line 1: 'push_constants' takes no arguments, and its space is reserved
 
 
 --- case a `push_constants` attribute standing before nothing is an error
 --- hlsl
-#pragma sc push_constants space=9
+#pragma sc push_constants
 --- error
 line 1: a 'push_constants' attribute must stand before a ConstantBuffer declaration
 
@@ -604,15 +718,31 @@ struct pt_payload
 line 2: payload 'pt_payload' declares no members
 
 
---- case a payload member's type comes from the same table a vertex attribute's does
+--- case a payload packs naturally, so a member aligns as C++ would align it
 --- hlsl
 #pragma sc payload
 struct pt_payload
 {
-    float4x4 transform;
+    float uv;
+    double depth;
+    uint rng;
+};
+--- groups
+payload pt_payload size=24
+  uv float
+  depth double
+  rng uint
+
+
+--- case a payload member's type comes from the same table a constant block's does
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    float3x4 transform;
 };
 --- error
-line 4: 'float4x4' is not a payload type this pass knows
+line 4: 'float3x4' is not a payload type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
 
 
 --- case a `payload` attribute standing before nothing is an error
@@ -655,7 +785,7 @@ vertex_input cube_instance_input slot=1 per_instance
   flags uint TEXCOORD2
 
 
---- case two vertex input structs feed two slots of one pipeline
+--- case a vertex input's slot is its declaration order, so no shader states one
 --- hlsl
 #pragma sc vertex_input
 struct vs_input
@@ -663,7 +793,7 @@ struct vs_input
     float3 position : POSITION;
 };
 
-#pragma sc vertex_input slot=1 per_instance
+#pragma sc vertex_input per_instance
 struct instance_input
 {
     float4 transform : TEXCOORD0;
@@ -673,6 +803,90 @@ vertex_input vs_input slot=0
   position float3 POSITION0
 vertex_input instance_input slot=1 per_instance
   transform float4 TEXCOORD0
+
+
+--- case `slot=` overrides that order, for two shaders sharing a header in a different one
+--- hlsl
+#pragma sc vertex_input slot=1
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=0 per_instance
+struct instance_input
+{
+    float4 transform : TEXCOORD0;
+};
+--- groups
+vertex_input vs_input slot=1
+  position float3 POSITION0
+vertex_input instance_input slot=0 per_instance
+  transform float4 TEXCOORD0
+
+
+--- case two structs claiming one slot is an error, as it is for a group's number
+--- hlsl
+#pragma sc vertex_input slot=1
+struct vs_input
+{
+    float3 position : POSITION;
+};
+
+#pragma sc vertex_input slot=1
+struct instance_input
+{
+    float4 transform : TEXCOORD0;
+};
+--- error
+line 8: slot 1 is claimed twice, by struct 'vs_input' and struct 'instance_input'
+
+
+--- case a member states a packed format, which its type cannot say
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+    float2 position : POSITION;
+#pragma sc attribute format=rgba8_unorm
+    float4 color : COLOR;
+};
+--- groups
+vertex_input vs_input slot=0
+  position float2 POSITION0
+  color float4 COLOR0 format=rgba8_unorm
+
+
+--- case `attribute` names a format sg actually has
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+#pragma sc attribute format=rgba9_unorm
+    float4 color : COLOR;
+};
+--- error
+line 4: 'rgba9_unorm' is not an sg::vertex_attribute_format
+
+
+--- case `attribute` takes one format and nothing else
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+#pragma sc attribute stride=4
+    float4 color : COLOR;
+};
+--- error
+line 4: 'attribute' takes exactly one format=<name>
+
+
+--- case an `attribute` standing before nothing is an error
+--- hlsl
+#pragma sc attribute format=rgba8_unorm
+Texture2D<float4> albedo;
+--- error
+line 1: an 'attribute' attribute must stand before a struct member
 
 
 --- case a vertex input member carries a semantic, since that is what HLSL matches on
@@ -694,7 +908,7 @@ struct vs_input
     float3x3 basis : NORMAL;
 };
 --- error
-line 4: 'float3x3' is not a vertex attribute type this pass knows
+line 4: 'float3x3' is not a vertex attribute type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
 
 
 --- case `vertex_input` takes slot and per_instance and nothing else
@@ -947,23 +1161,15 @@ void debug() { printf("never closed
 line 6: unterminated literal
 
 
---- case an inline-constants block may not take a space a group owns
+--- case a group may not take the space the inline constants reserve
 --- hlsl
-struct frame_constants
-{
-    float exposure;
-};
-
-#pragma sc group 0
+#pragma sc group 9
 namespace frame_bindings
 {
     Texture2D<float4> albedo;
 }
-
-#pragma sc push_constants space=0
-ConstantBuffer<frame_constants> constants;
 --- error
-the inline-constants block 'constants' takes space 0, which group 0 ('frame_bindings') already owns
+line 2: group 9 would share its space with the inline constants, which reserve it
 
 
 --- case a vertex input member needs a type an input assembler can fetch
@@ -986,7 +1192,7 @@ struct vs_input
     float3 position : POSITION;
 };
 
-#pragma sc vertex_input slot=1 per_instance
+#pragma sc vertex_input per_instance
 struct instance_input
 {
     float3 center : TEXCOORD0;
