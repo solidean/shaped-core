@@ -53,4 +53,6 @@ sc_add_shader_package(
     SHADERS
         cube.hlsl:vertex:main_vs
         cube.hlsl:fragment:main_ps
+        cube.hlsl:vertex_input:vs_input
+        cube.hlsl:constants:gConstants
 )

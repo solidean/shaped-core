@@ -1,28 +1,20 @@
 // One cube, six colored faces, two fixed lights.
 //
-// Written for both backends from one source, which is what makes the two annotations below worth reading.
+// Written for both backends from one source, and every address in it belongs to slib's binding pass rather than
+// to this file — see libs/graphics/shaped-shader-library/docs/binding-preprocessor.md.
 //
-// `[[vk::location(N)]]` numbers a vertex input. sg identifies an attribute by its HLSL semantic, and SPIR-V has no
-// semantics at all — so a Vulkan-targeted shader has to spell out the locations, in the order the sg vertex layout
-// lists its attributes. Getting that order wrong is silent: the pipeline builds and the geometry is wrong.
-// It carries no DXIL meaning, and ssc compiles with -WX, so on that target the attribute is an ignored-attribute
-// error rather than a warning — which is why it forks on `__spirv__` the way the constant block does.
-//
-// `[[vk::push_constant]]` is what makes the constant block sg's inline constants rather than a descriptor.
-// The `__spirv__` fork is DXC's own: the attribute has no DXIL meaning, and a plain `register(b0)` is what a root
-// constant looks like there.
+// This shader used to fork on `__spirv__` twice, which is the fork the pass exists to remove.
+// A vertex input needed `[[vk::location(N)]]` because SPIR-V has no semantics, and getting the order wrong was
+// silent: the pipeline built and the geometry was wrong.
+// The constant block needed `[[vk::push_constant]]` on one target and `register(b0)` on the other.
+// Both are now one attribute apiece, resolved per target by the pass.
 
-#ifdef __spirv__
-#define VK_LOCATION(n) [[vk::location(n)]]
-#else
-#define VK_LOCATION(n)
-#endif
-
+#pragma sc vertex_input
 struct vs_input
 {
-    VK_LOCATION(0) float3 position : POSITION;
-    VK_LOCATION(1) float3 normal : NORMAL;
-    VK_LOCATION(2) float3 color : COLOR;
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float3 color : COLOR;
 };
 
 struct vs_output
@@ -37,11 +29,8 @@ struct cube_constants
     float4x4 view_projection;
 };
 
-#ifdef __spirv__
-[[vk::push_constant]] ConstantBuffer<cube_constants> gConstants;
-#else
-ConstantBuffer<cube_constants> gConstants : register(b0);
-#endif
+#pragma sc push_constants
+ConstantBuffer<cube_constants> gConstants;
 
 vs_output main_vs(vs_input input)
 {

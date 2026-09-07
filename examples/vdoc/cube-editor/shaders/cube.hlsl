@@ -6,12 +6,22 @@
 //
 // The view-projection rides as inline (root) constants: 64 bytes, rewritten once per frame, which is exactly what
 // they are for. Everything varying per cube is in the instance stream instead.
+//
+// Every address here belongs to slib's binding pass rather than to this file — see
+// libs/graphics/shaped-shader-library/docs/binding-preprocessor.md.
+// The two streams are two annotated structs rather than one, which is what says which buffer feeds which member:
+// a `vertex_input` describes exactly one bound slot, and the slots are its declaration order.
 
+#pragma sc vertex_input
 struct vs_input
 {
     float3 position : POSITION;
     float3 normal : NORMAL;
+};
 
+#pragma sc vertex_input per_instance
+struct instance_input
+{
     float3 center : TEXCOORD0;
     float3 half_extent : TEXCOORD1;
     float3 color : TEXCOORD2;
@@ -26,20 +36,23 @@ struct vs_output
     float highlight : TEXCOORD0;
 };
 
-cbuffer cube_constants : register(b0)
+struct cube_constants
 {
-    float4x4 gViewProjection;
+    float4x4 view_projection;
 };
 
-vs_output main_vs(vs_input input)
+#pragma sc push_constants
+ConstantBuffer<cube_constants> gConstants;
+
+vs_output main_vs(vs_input input, instance_input inst)
 {
-    float3 world = input.center + input.position * input.half_extent;
+    float3 world = inst.center + input.position * inst.half_extent;
 
     vs_output output;
-    output.position = mul(gViewProjection, float4(world, 1.0f));
+    output.position = mul(gConstants.view_projection, float4(world, 1.0f));
     output.normal = input.normal;
-    output.color = input.color;
-    output.highlight = input.highlight;
+    output.color = inst.color;
+    output.highlight = inst.highlight;
     return output;
 }
 

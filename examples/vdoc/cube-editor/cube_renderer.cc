@@ -62,35 +62,31 @@ constexpr int cube_index_count = 36;
 }
 } // namespace
 
-template <>
-struct sg::vertex_layout_of<cube_vertex>
-{
-    static sg::vertex_type_layout get()
-    {
-        return {.stride = sizeof(cube_vertex),
-                .attributes = {
-                    {.semantic = "POSITION", .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(cube_vertex, position)},
-                    {.semantic = "NORMAL", .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(cube_vertex, normal)},
-                }};
-    }
-};
+// Neither stream states its layout here any more: cube.hlsl declares both structs and the package generates
+// `sg::vertex_layout_of` for each, so the semantics, the formats, the offsets and the two slots are the shader's.
+// These two types stay because filling them is more readable in tg's, and the asserts are what keeps them the
+// same bytes rather than a comment asking someone to.
+static_assert(sizeof(cube_vertex) == sizeof(cube_editor::shaders::vs_input),
+              "cube_vertex is not the stride cube.hlsl states");
+static_assert(offsetof(cube_vertex, position) == offsetof(cube_editor::shaders::vs_input, position), "position moved");
+static_assert(offsetof(cube_vertex, normal) == offsetof(cube_editor::shaders::vs_input, normal), "normal moved");
 
-template <>
-struct sg::vertex_layout_of<cube_editor::cube_instance>
-{
-    static sg::vertex_type_layout get()
-    {
-        using instance = cube_editor::cube_instance;
-        return {.stride = sizeof(instance),
-                .per_instance = true, // one step per cube, not per vertex — this is the whole point of the second slot
-                .attributes = {
-                    {.semantic = "TEXCOORD", .semantic_index = 0, .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(instance, center)},
-                    {.semantic = "TEXCOORD", .semantic_index = 1, .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(instance, half_extent)},
-                    {.semantic = "TEXCOORD", .semantic_index = 2, .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(instance, color)},
-                    {.semantic = "TEXCOORD", .semantic_index = 3, .format = sg::vertex_attribute_format::f32, .offset = offsetof(instance, highlight)},
-                }};
-    }
-};
+static_assert(sizeof(cube_editor::cube_instance) == sizeof(cube_editor::shaders::instance_input),
+              "cube_instance is not the stride cube.hlsl states");
+static_assert(offsetof(cube_editor::cube_instance, center) == offsetof(cube_editor::shaders::instance_input, center),
+              "center moved");
+static_assert(offsetof(cube_editor::cube_instance, half_extent)
+                  == offsetof(cube_editor::shaders::instance_input, half_extent),
+              "half_extent moved");
+static_assert(offsetof(cube_editor::cube_instance, color) == offsetof(cube_editor::shaders::instance_input, color),
+              "color moved");
+static_assert(offsetof(cube_editor::cube_instance, highlight)
+                  == offsetof(cube_editor::shaders::instance_input, highlight),
+              "highlight moved");
+
+// And the constant block, whose one float4x4 the pass mirrors with HLSL's own packing.
+static_assert(sizeof(tg::mat4f) == sizeof(cube_editor::shaders::cube_constants),
+              "the view-projection matrix is not the size cube.hlsl's block states");
 
 namespace
 {
@@ -170,7 +166,8 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
                                  .layout = layout,
                                  .vertex_shader = vertex_shader,
                                  .fragment_shader = fragment_shader,
-                                 .vertex_input = sg::vertex_input_layout::create<cube_vertex, cube_instance>(),
+                                 .vertex_input
+                                 = sg::vertex_input_layout::create<shaders::vs_input, shaders::instance_input>(),
                                  .rasterization = {.cull = sg::cull_mode::back},
                                  // Both default to OFF, and solid geometry needs both — a cube drawn without them
                                  // shows whichever face happened to be recorded last.
