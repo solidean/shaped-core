@@ -26,6 +26,17 @@ option(SC_BUILD_TOOLS "Build the developer tools in tools/" ${PROJECT_IS_TOP_LEV
 # what keeps them compiling against the API they demonstrate. `dev.py example <match>` runs exactly one.
 option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVEL})
 
+# Which graphics backend the examples are built against.
+#
+# `auto` takes dx12 where there is one, which on Windows means the vulkan arm is never reached by default — so the
+# setting exists to reach it, and building the examples both ways is the only way to see that one shader source
+# really does serve both.
+#
+# Declared here rather than inside an example, and unconditionally: it is repo-wide by name and by description, and
+# an example's own early return would make the cache entry appear and disappear with an unrelated feature detection.
+set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12 or vulkan")
+set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan)
+
 # Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
 # it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.

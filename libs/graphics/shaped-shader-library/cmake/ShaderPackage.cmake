@@ -22,13 +22,23 @@
 #   #include <my_shaders.hh>
 #   auto cs = my::shaders::vignette.compute.main->acquire(ctx);
 #
-# A fourth kind of entry, path:binding:namespace, generates a typed struct for one annotated binding group:
+# Four more kinds of entry generate C++ from what the binding pass reads, rather than an entry point:
 #
-#           frame_bindings.hlsli:binding:frame_bindings
+#           frame_bindings.hlsli:binding:frame_bindings    # an annotated namespace -> one group struct
+#           mesh.hlsl:vertex_input:vs_input               # an annotated struct -> a mirror + vertex_layout_of
+#           mesh.hlsl:payload:trace_payload               # an annotated struct -> a mirror + max_payload_size
+#           shade.hlsl:constants:gConstants               # a push_constants block -> a mirror, with HLSL's padding
 #
-# It generates from the NAMED FILE and never from its includes, so an .hlsli that declares a group is
+# The third field is what the shader named: a namespace for `binding`, a struct for `vertex_input` and
+# `payload`, and the ConstantBuffer's own name for `constants`.
+#
+# Each generates from the NAMED FILE and never from its includes, so an .hlsli that declares a group is
 # registered on its own, in whichever package owns it -- otherwise every shader including it would generate
 # the same struct again.
+#
+# A group struct is data rather than an API: it satisfies sg::declared_binding_group, and the verbs are the
+# scopes' -- ctx.cached.acquire_binding_group_layout<G>(), ctx.transient.create_binding_group(G{...}) and
+# scope.bind<G>(group).
 #
 # A shader in a subdirectory folds the directory into the identifier: post/vignette.hlsl reaches C++ as
 # post_vignette, not vignette.

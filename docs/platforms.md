@@ -122,6 +122,16 @@ The one behavioral difference is in-place resize.
 mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
 So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.
 
+## Example backend (`SC_EXAMPLE_BACKEND`)
+
+`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12` or `vulkan`.
+
+`auto` takes dx12 wherever one exists, which on Windows means the vulkan arm is never reached by default.
+So the setting exists to reach it: building `rotating-cube` both ways is how one HLSL source is shown to really serve both backends, and `rotating-cube` is the only example that builds against either.
+Naming a backend that was not built is a configure error rather than a silent fallback.
+
+It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry is present whether or not any example is gated out by a missing shader compiler.
+
 ## Build types
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.

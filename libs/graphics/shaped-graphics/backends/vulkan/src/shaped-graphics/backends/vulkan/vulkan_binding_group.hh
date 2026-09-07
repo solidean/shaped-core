@@ -51,14 +51,6 @@ struct sg::backend::vulkan::vulkan_array_binding
     cc::vector<vulkan_array_element> elements;
 };
 
-/// vulkan binding_group: a range of the context's descriptor heap holding one set's descriptors, bound by offset.
-///
-/// The descriptor-buffer model makes this a *byte range* rather than an object — there is no VkDescriptorSet and no
-/// pool behind it, and binding the group is naming an offset into the already-bound heap.
-/// That is what makes a staging group's snapshot a memcpy: a minted group's bytes are the staging image's bytes.
-///
-/// A persistent group's range comes from the heap's free list and goes back to it, epoch-deferred, on release.
-/// A transient group's is ring-allocated and reclaimed collectively when its epoch retires.
 /// One view to bind, already resolved to its position in `bindings()`.
 ///
 /// Both inputs reduce to this before anything is written: a `named_view` by looking the name up, a
@@ -72,6 +64,14 @@ struct sg::backend::vulkan::vulkan_resolved_view
     sg::bound_view const* view = nullptr;
 };
 
+/// vulkan binding_group: a range of the context's descriptor heap holding one set's descriptors, bound by offset.
+///
+/// The descriptor-buffer model makes this a *byte range* rather than an object — there is no VkDescriptorSet and no
+/// pool behind it, and binding the group is naming an offset into the already-bound heap.
+/// That is what makes a staging group's snapshot a memcpy: a minted group's bytes are the staging image's bytes.
+///
+/// A persistent group's range comes from the heap's free list and goes back to it, epoch-deferred, on release.
+/// A transient group's is ring-allocated and reclaimed collectively when its epoch retires.
 class sg::backend::vulkan::vulkan_binding_group final : public sg::binding_group
 {
 public:

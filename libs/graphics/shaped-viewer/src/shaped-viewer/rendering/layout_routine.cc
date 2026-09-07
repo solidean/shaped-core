@@ -21,12 +21,18 @@ struct layout_constants_gpu
 // "byte for byte" is now checkable: layout.hlsl's block reaches C++ as a generated mirror, so a field moved in
 // the shader is a compile error here rather than a wrong sample.
 // This struct stays because it carries the defaults a draw starts from, which a mirror does not.
-static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout_constants));
-static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_0) == offsetof(layout_constants_gpu, uv_scale_bias_0));
-static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_1) == offsetof(layout_constants_gpu, uv_scale_bias_1));
-static_assert(offsetof(sv::shaders::layout_constants, tint) == offsetof(layout_constants_gpu, tint));
-static_assert(offsetof(sv::shaders::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe));
-static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offsetof(layout_constants_gpu, separator_color));
+static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout_constants),
+              "the layout constants are not the size layout.hlsl's block states");
+static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_0) == offsetof(layout_constants_gpu, uv_scale_bias_0),
+              "uv_scale_bias_0 moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_1) == offsetof(layout_constants_gpu, uv_scale_bias_1),
+              "uv_scale_bias_1 moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, tint) == offsetof(layout_constants_gpu, tint),
+              "tint moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe),
+              "wipe moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offsetof(layout_constants_gpu, separator_color),
+              "separator_color moved in layout.hlsl");
 
 /// A uv rect as the shader wants it: a scale and a bias applied to the covering triangle's [0,1] corner.
 [[nodiscard]] tg::vec4f uv_scale_bias(tg::aabb2f const& uv)

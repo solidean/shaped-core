@@ -798,7 +798,34 @@ TEST("slib - the SPIR-V arm writes the attribute before the declaration")
 
 TEST("slib - a source carrying no attribute comes back byte for byte")
 {
+    // No `#pragma` at all, so parse_source short-circuits before the tokenizer ever runs.
+    // That is the cheap path and worth pinning, but it is NOT the one that tempts a lexer -- the twin below is.
     constexpr cc::string_view k_hand_written = R"(
+Texture2D<float4> albedo : register(t0, space0);
+SamplerState samp : register(s0, space0);
+
+// an ordinary comment mentioning group 0, register(t1) and [[vk::binding]]
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {}
+)";
+
+    for (auto const target : {sg::shader_format::dxil, sg::shader_format::spirv, sg::shader_format::metal_lib})
+    {
+        auto const rewritten = slib::rewrite_binding_groups(k_hand_written, target);
+        REQUIRE(rewritten.has_value());
+        CHECK(rewritten.value() == k_hand_written);
+    }
+}
+
+TEST("slib - and byte for byte on the lexed path too, which is the one real shaders take")
+{
+    // One `#pragma` the pass does not own is enough to defeat the short-circuit, so every token below actually
+    // reaches the tokenizer -- the comment, the two `register()` spellings and the `[[vk::binding]]` text.
+    // `#pragma pack_matrix` is the honest choice rather than a made-up directive: it is real, it is one the pass
+    // must pass through untouched, and essentially every .hlsli in the tree carries a `#pragma once`.
+    constexpr cc::string_view k_hand_written = R"(
+#pragma pack_matrix(row_major)
+
 Texture2D<float4> albedo : register(t0, space0);
 SamplerState samp : register(s0, space0);
 
