@@ -21,8 +21,10 @@ using namespace cc::primitive_defines;
 // Two of these came out other than the folklore says, which is the whole reason for measuring:
 //   - an array's stride is 16, but its LAST element does not claim the rest of its row;
 //   - `row_major float3x3` followed by anything is not portable at all — SPIR-V rejects the module.
-
-#ifdef CC_OS_WINDOWS
+//
+// The SPIR-V half needs nothing from the Windows SDK, so it runs everywhere and only the DXIL legs are guarded:
+// `impl::reflect_spirv` is what a SPIR-V target selects, and reading `block_size` off it is the only observable
+// check of `-fvk-use-dx-layout` anywhere in the repo.
 
 namespace
 {
@@ -72,18 +74,23 @@ void main(uint3 tid : SV_DispatchThreadID)
     return -1;
 }
 
-/// One rule, checked on both targets, which is where a portability difference would show up.
+/// One rule, checked on every target available here, which is where a portability difference would show up.
 /// `members` ends with a `float probe;` so the entry point has something to read, and every expected size
 /// accounts for it.
+///
+/// DXIL reflection reads the container beside the bytecode through the Windows SDK's d3d12shader.h, which the
+/// Linux DXC release does not ship — so that arm is Windows-only and the SPIR-V one is not.
 void check_rule(cc::string_view what, cc::string_view members, isize expected, cc::string_view prelude = "")
 {
-    for (auto const target : {ssc::dxc::compile_target::dxil, ssc::dxc::compile_target::spirv})
-    {
-        auto const size = block_size_of(members, target, prelude);
-        auto const name = target == ssc::dxc::compile_target::dxil ? "dxil" : "spirv";
-        CC_LOG_INFO("[spike] Q14 {} {}: block_size={} (expected {})", name, what, size, expected);
-        CHECK(size == expected);
-    }
+    auto const spirv = block_size_of(members, ssc::dxc::compile_target::spirv, prelude);
+    CC_LOG_INFO("[spike] Q14 spirv {}: block_size={} (expected {})", what, spirv, expected);
+    CHECK(spirv == expected);
+
+#ifdef CC_OS_WINDOWS
+    auto const dxil = block_size_of(members, ssc::dxc::compile_target::dxil, prelude);
+    CC_LOG_INFO("[spike] Q14 dxil {}: block_size={} (expected {})", what, dxil, expected);
+    CHECK(dxil == expected);
+#endif
 }
 } // namespace
 
@@ -124,8 +131,12 @@ TEST("portable-hlsl spike - Q14c a matrix is rows, and float3x3 is not portable 
     //
     // So a float3x3 in a constant block is not a layout to reproduce — it is a construct a portable shader
     // cannot contain, and the pass rejects it rather than generating a mirror for something that will not build.
-    CHECK(block_size_of("    row_major float3x3 m;\n    float probe;", ssc::dxc::compile_target::dxil) == 48);
+    // The rejection is the SPIR-V validator's, so it is the half worth having everywhere.
     CHECK(block_size_of("    row_major float3x3 m;\n    float probe;", ssc::dxc::compile_target::spirv) == -1);
+
+#ifdef CC_OS_WINDOWS
+    CHECK(block_size_of("    row_major float3x3 m;\n    float probe;", ssc::dxc::compile_target::dxil) == 48);
+#endif
 }
 
 TEST("portable-hlsl spike - Q14d a nested struct starts a row, but does not round up to one")
@@ -160,5 +171,3 @@ TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
     // Which is the reason sr::gpu_boolean exists.
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
-
-#endif

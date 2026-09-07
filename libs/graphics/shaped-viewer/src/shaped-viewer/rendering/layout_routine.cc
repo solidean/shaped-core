@@ -97,7 +97,7 @@ void layout_routine::init_declare(sg::context& ctx)
     // The group is what layout.hlsl declared, so it serves every kind whatever a stage happens to reference:
     // a one-source draw simply binds its primary twice.
     // Nothing has to reason about which stage to reflect either — the constants block is not a group member.
-    _group_layout = shaders::layout_bindings::group::acquire_layout(ctx);
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout_bindings>();
 
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
@@ -186,11 +186,10 @@ void layout_routine::execute(sg::rendering_scope& scope,
             // It samples neither; binding the same texture twice is cheaper than a second layout.
             if (textures.targets.empty())
                 continue;
-            group = shaders::layout_bindings::group{
-                .source_0 = textures.targets[0].as_readonly_view(),
-                .source_1 = textures.targets[0].as_readonly_view(),
-                .source_sampler
-                = {}}.create(ctx, sg::lifetime_scope::transient);
+            group = ctx.transient.create_binding_group(
+                shaders::layout_bindings{.source_0 = textures.targets[0].as_readonly_view(),
+                                         .source_1 = textures.targets[0].as_readonly_view(),
+                                         .source_sampler = {}});
         }
         else
         {
@@ -210,22 +209,21 @@ void layout_routine::execute(sg::rendering_scope& scope,
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
-            group
-                = shaders::layout_bindings::group{.source_0 = primary->as_readonly_view(),
-                                                  .source_1 = secondary->as_readonly_view(),
-                                                  .source_sampler = {.min_filter = filter,
-                                                                     .mag_filter = filter,
-                                                                     .mip_filter = sg::sampler_filter::nearest,
-                                                                     .address_u = sg::sampler_address_mode::clamp_edge,
-                                                                     .address_v = sg::sampler_address_mode::clamp_edge}}
-                      .create(ctx, sg::lifetime_scope::transient);
+            group = ctx.transient.create_binding_group(
+                shaders::layout_bindings{.source_0 = primary->as_readonly_view(),
+                                         .source_1 = secondary->as_readonly_view(),
+                                         .source_sampler = {.min_filter = filter,
+                                                            .mag_filter = filter,
+                                                            .mip_filter = sg::sampler_filter::nearest,
+                                                            .address_u = sg::sampler_address_mode::clamp_edge,
+                                                            .address_v = sg::sampler_address_mode::clamp_edge}});
         }
 
         scope.set_viewport(
             {.offset = tg::pos2f(f32(d.dst_rect.min[0]), f32(d.dst_rect.min[1])), .size = tg::vec2f(f32(w), f32(h))});
         scope.set_scissor(d.dst_rect);
         scope.bind_pipeline(*pipeline.value());
-        shaders::layout_bindings::group::bind(scope, *group);
+        scope.bind<shaders::layout_bindings>(*group);
         scope.set_inline_constants(cc::span<layout_constants_gpu const>(&constants, 1).as_bytes(), {});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }

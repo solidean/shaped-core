@@ -30,7 +30,7 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
 
     // The global root signature must cover every binding *any* stage uses, which is exactly what common.hlsli
     // declares — so there is nothing to merge and no stage to remember to include in the merge.
-    _group_layout = shaders::flat_bindings::group::acquire_layout(ctx);
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::flat_bindings>();
     // Not a member: the pipeline holds it to keep the root signature alive.
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
 
@@ -63,17 +63,17 @@ void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
-    auto const group = shaders::flat_bindings::group{.scene = tlas->as_view(),
-                                                     .Output = d.output.as_readwrite_view(),
-                                                     .frame = d.frame.as_uniform_buffer(),
-                                                     .background = d.background.as_uniform_buffer(),
-                                                     .Materials = d.materials.as_readonly_buffer(),
-                                                     .Vertices = d.vertices.as_readonly_buffer(),
-                                                     .Indices = d.indices.as_readonly_buffer()}
-                           .create(ctx, sg::lifetime_scope::transient);
+    auto const group
+        = ctx.transient.create_binding_group(shaders::flat_bindings{.scene = tlas->as_view(),
+                                                                    .Output = d.output.as_readwrite_view(),
+                                                                    .frame = d.frame.as_uniform_buffer(),
+                                                                    .background = d.background.as_uniform_buffer(),
+                                                                    .Materials = d.materials.as_readonly_buffer(),
+                                                                    .Vertices = d.vertices.as_readonly_buffer(),
+                                                                    .Indices = d.indices.as_readonly_buffer()});
 
     cmd.raytracing.bind_pipeline(*self._pipeline);
-    shaders::flat_bindings::group::bind(cmd.raytracing, *group);
+    cmd.raytracing.bind<shaders::flat_bindings>(*group);
     cmd.raytracing.dispatch_rays(*self._table, self._raygen, d.size[0], d.size[1]);
 }
 } // namespace sv

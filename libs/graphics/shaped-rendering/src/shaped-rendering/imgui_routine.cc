@@ -171,7 +171,7 @@ void imgui_routine::init_declare(sg::context& ctx)
     // The group is what the shader declared, not what a stage happened to reference, so nothing here consults
     // reflection and nothing has to keep the sampler's name or its state in step with the HLSL.
     // The inline constants stay out of it by construction: a push_constants block is not a group member.
-    _group_layout = shaders::imgui_bindings::group::acquire_layout(ctx);
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::imgui_bindings>();
 
     // The vertex stage's only binding is the 16-byte ortho block, which rides as root constants.
     auto const* const constants_binding = [&]() -> sg::binding const*
@@ -310,9 +310,9 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 
                 // Transient: one descriptor allocation per texture switch, recycled with the epoch.
                 // With a single font atlas that is one group for the whole frame.
-                bound_group = shaders::imgui_bindings::group{.texture = texture.value().as_readonly_view()}.create(
-                    ctx, sg::lifetime_scope::transient);
-                shaders::imgui_bindings::group::bind(scope, *bound_group);
+                bound_group = ctx.transient.create_binding_group(
+                    shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }
 

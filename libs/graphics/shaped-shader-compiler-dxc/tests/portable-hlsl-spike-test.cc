@@ -656,10 +656,16 @@ TEST("portable-hlsl spike - Q12 an unknown pragma survives the flatten and compi
     CHECK(cc::string_view(pp.value().source).contains("#pragma sc group 0"));
     CHECK(cc::string_view(pp.value().source).contains("#pragma sc static address=clamp_edge"));
 
-    // And it compiles on both targets under the default options, where warnings_as_errors is ON.
-    for (auto const target : {ssc::dxc::compile_target::dxil, ssc::dxc::compile_target::spirv})
-        CHECK(compiles(comp.value(), "pragma-annotated source", pragma_annotated_hlsl, sg::shader_stage::compute,
-                       "main", target));
+    // And it compiles under the default options, where warnings_as_errors is ON.
+    CHECK(compiles(comp.value(), "pragma-annotated source", pragma_annotated_hlsl, sg::shader_stage::compute, "main",
+                   ssc::dxc::compile_target::spirv));
+
+    // The DXIL arm alone needs the Windows SDK, for the reason the guard above states.
+    // The two `preprocess` assertions are Q12's actual finding and stay cross-platform.
+#ifdef CC_OS_WINDOWS
+    CHECK(compiles(comp.value(), "pragma-annotated source", pragma_annotated_hlsl, sg::shader_stage::compute, "main",
+                   ssc::dxc::compile_target::dxil));
+#endif
 }
 
 TEST("portable-hlsl spike - Q12b -Wall makes an unknown pragma an error, so the pass strips its own")

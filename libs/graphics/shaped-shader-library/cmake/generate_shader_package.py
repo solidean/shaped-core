@@ -591,12 +591,12 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     if bindings:
         out.append("\n#include <clean-core/container/span.hh>\n")
         out.append("#include <clean-core/container/vector.hh>\n")
-        out.append("#include <clean-core/error/result.hh>\n")
         out.append("#include <clean-core/string/string.hh>\n")
         out.append("#include <shaped-graphics/binding/binding.hh>\n")
+        # binding_group.hh carries sg::declared_binding_group, sg::bound_view and sg::slotted_view -- the whole
+        # protocol below.
+        # Nothing here names a context or a layout: those are the scope templates' business.
         out.append("#include <shaped-graphics/binding/binding_group.hh>\n")
-        out.append("#include <shaped-graphics/binding/binding_group_layout.hh>\n")
-        out.append("#include <shaped-graphics/context/context.hh>\n")
         out.append("#include <shaped-graphics/resource/views.hh>\n")
     out.append(f"\nnamespace {manifest.namespace}\n{{\n")
 
@@ -635,14 +635,26 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
 
 
 def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
-    """The struct one annotated namespace becomes: one named member per binding, plus its layout and group."""
+    """The struct one annotated namespace becomes: one named member per binding, plus the declarations sg reads.
+
+    An annotated namespace in HLSL becomes one type in C++, named after it -- there is no inner `group`.
+    What is emitted is data: the fields, the three constants and `gather`.
+    Every verb a caller needs is a scope method constrained on `sg::declared_binding_group`, so `create`,
+    `bind` and the layout acquisition are sg's and not this generator's.
+    """
     group = entry.group
-    out = [f"\nnamespace {manifest.namespace}::{group.name}\n{{\n"]
+    out = [f"\nnamespace {manifest.namespace}\n{{\n"]
     out.append(f"/// The bindings {group.name} declares, in slot order. Generated from {entry.path}; do not edit.\n")
     out.append("///\n")
     out.append("/// Every address here is a constant rather than something reflected, because the same parse that\n")
     out.append("/// wrote the addresses into the shader produced this table.\n")
-    out.append("struct group\n{\n")
+    out.append("///\n")
+    out.append("/// Acquired, created and bound through the scopes that take an sg::declared_binding_group:\n")
+    out.append("///\n")
+    out.append(f"///     ctx.cached.acquire_binding_group_layout<{manifest.namespace}::{group.name}>();\n")
+    out.append(f"///     auto const g = ctx.transient.create_binding_group({manifest.namespace}::{group.name}{{...}});\n")
+    out.append(f"///     scope.bind<{manifest.namespace}::{group.name}>(*g);\n")
+    out.append(f"struct {group.name}\n{{\n")
 
     static_names = {s.name for s in group.static_samplers}
     for binding in group.bindings:
@@ -655,7 +667,7 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
 
     out.append("\n")
     out.append("    /// The group index the attribute gave, so no call site writes the number.\n")
-    out.append(f"    static constexpr sg::u32 group_index = {group.group};\n")
+    out.append(f"    static constexpr int group_index = {group.group};\n")
     out.append("\n")
     out.append("    /// The declared bindings, in slot order — the whole table, not a stage's reflected subset.\n")
     out.append("    [[nodiscard]] static cc::span<sg::binding const> declared_bindings();\n")
@@ -663,33 +675,6 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("    /// The samplers the shader declared `static`, in declaration order.\n")
     out.append("    /// Baked into the pipeline layout's root signature, so they cost no per-group descriptor.\n")
     out.append("    [[nodiscard]] static cc::span<sg::named_sampler const> declared_samplers();\n")
-    out.append("\n")
-    out.append("    /// The layout these declarations define — constant, so no reflection is consulted.\n")
-    out.append("    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(sg::context& ctx);\n")
-    out.append("\n")
-    out.append("    /// The same, plus static samplers for the ones the shader left undeclared.\n")
-    out.append("    /// A declared sampler wins: supplying one the shader already declared is a mistake, not an\n")
-    out.append("    /// override, and it is dropped with an assertion rather than quietly taking effect.\n")
-    out.append("    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(\n")
-    out.append("        sg::context& ctx, cc::span<sg::named_sampler const> samplers);\n")
-    out.append("\n")
-    out.append("    /// Builds a group from the fields above, against the layout `acquire_layout` gives.\n")
-    out.append("    ///\n")
-    out.append("    /// The scope is the caller's because the lifetime is: a group rebuilt every frame belongs in\n")
-    out.append("    /// `transient`, and one that outlives an epoch must not.\n")
-    out.append("    ///\n")
-    out.append("    /// Throws sg::binding_group_exception, or sg::device_lost_exception on a lost device.\n")
-    out.append("    /// What can actually fail here is the descriptor allocation and the device — never a mismatched\n")
-    out.append("    /// layout, since the layout is built from this group's own constant table rather than passed in.\n")
-    out.append("    [[nodiscard]] sg::binding_group_handle create(\n")
-    out.append("        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;\n")
-    out.append("\n")
-    out.append("    /// The same, for a caller that wants the failure as a value.\n")
-    out.append("    [[nodiscard]] cc::result<sg::binding_group_handle> try_create(\n")
-    out.append("        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;\n")
-    out.append("\n")
-    out.append("    /// Binds at the group index the attribute gave, so no call site writes the number.\n")
-    out.append("    static void bind(auto& scope, sg::binding_group const& g) { scope.bind_group(group_index, g); }\n")
     out.append("\n")
     out.append("    /// The slot-keyed views and the dynamic samplers the fields above amount to.\n")
     out.append("    void gather(cc::vector<sg::slotted_view>& views, cc::vector<sg::named_sampler>& samplers) const;\n")
@@ -701,7 +686,10 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("    /// shared corpus covers what we thought of.\n")
     out.append("    [[nodiscard]] static cc::string self_check();\n")
     out.append("};\n")
-    out.append(f"}} // namespace {manifest.namespace}::{group.name}\n")
+    out.append("\n")
+    out.append("// So a protocol mismatch names this group rather than a scope template's constraint.\n")
+    out.append(f"static_assert(sg::declared_binding_group<{group.name}>);\n")
+    out.append(f"}} // namespace {manifest.namespace}\n")
     return "".join(out)
 
 
@@ -711,7 +699,6 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append(f'#include "{manifest.name}.hh"\n\n')
     out.append("#include <shaped-graphics/binding/compiled_shader.hh>\n")
     if bindings:
-        out.append("#include <clean-core/common/assert.hh>\n")
         out.append("#include <clean-core/container/vector.hh>\n")
         out.append("#include <clean-core/string/format.hh>\n")
         out.append("#include <shaped-shader-library/binding/binding_groups.hh>\n")
@@ -769,7 +756,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")
         for entry in bindings:
-            group = f"{manifest.namespace}::{entry.group.name}::group"
+            group = f"{manifest.namespace}::{entry.group.name}"
             out.append(f"    if (auto message = {group}::self_check(); !message.empty())\n")
             out.append("        return message;\n")
         out.append("    return cc::string();\n")
@@ -814,7 +801,7 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
     """
     group = entry.group
     source_index = embedded.index(entry.path)
-    qualified = f"{manifest.namespace}::{group.name}::group"
+    qualified = f"{manifest.namespace}::{group.name}"
     out = [f"\ncc::string {qualified}::self_check()\n{{\n"]
     out.append(f"    auto const groups = slib::parse_binding_groups(k_source_{source_index});\n")
     out.append("    if (groups.has_error())\n")
@@ -869,8 +856,13 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
 
 
 def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: list[str]) -> str:
+    """The three out-of-line members: the two declaration tables and `gather`.
+
+    Nothing here creates or binds anything -- a caller reaches those through the scope templates in sg,
+    which take any `sg::declared_binding_group` and so are written once rather than per group.
+    """
     group = entry.group
-    qualified = f"{manifest.namespace}::{group.name}::group"
+    qualified = f"{manifest.namespace}::{group.name}"
     static_names = {s.name for s in group.static_samplers}
     views = [b for b in group.bindings if b.type != "sampler"]
     samplers = [b for b in group.bindings if b.type == "sampler" and b.name not in static_names]
@@ -886,43 +878,16 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
         out.append("    return {};\n")
     out.append("}\n")
 
-    out.append(f"\nsg::binding_group_layout_handle {qualified}::acquire_layout(sg::context& ctx)\n{{\n")
-    out.append(f"    return ctx.cached.acquire_binding_group_layout(k_bindings_{group.name}, declared_samplers());\n")
-    out.append("}\n")
-
-    out.append(f"\nsg::binding_group_layout_handle {qualified}::acquire_layout(\n")
-    out.append("    sg::context& ctx, cc::span<sg::named_sampler const> samplers)\n{\n")
-    out.append("    cc::vector<sg::named_sampler> merged;\n")
-    out.append("    merged.reserve(declared_samplers().size() + samplers.size());\n")
-    out.append("    for (auto const& declared : declared_samplers())\n")
-    out.append("        merged.push_back(declared);\n")
-    out.append("\n")
-    out.append("    // Declared first, then only what the shader did not declare, so the shader wins in every build\n")
-    out.append("    // and the assertion is what names the mistake in a checked one.\n")
-    out.append("    for (auto const& supplied : samplers)\n")
-    out.append("    {\n")
-    out.append("        bool already_declared = false;\n")
-    out.append("        for (auto const& declared : declared_samplers())\n")
-    out.append("            already_declared = already_declared || declared.name == supplied.name;\n")
-    out.append("\n")
-    out.append("        CC_ASSERT(!already_declared, \"the shader already declared this sampler static\");\n")
-    out.append("        if (!already_declared)\n")
-    out.append("            merged.push_back(supplied);\n")
-    out.append("    }\n")
-    out.append("\n")
-    out.append(f"    return ctx.cached.acquire_binding_group_layout(k_bindings_{group.name}, merged);\n")
-    out.append("}\n")
-
-    # One body for both entry points: it gathers the views and the samplers, and the caller picks the
-    # throwing scope call or the try_ one.
-    # Nothing here can be handed a foreign layout, since acquire_layout builds it from the constant table
-    # above -- which is why there is no slot-against-layout check.
+    # A binding's position in the declaration list IS its slot, which is what the pass numbered the addresses
+    # from -- so the slot comes from the enumeration rather than from a lookup.
     out.append(f"\nvoid {qualified}::gather(cc::vector<sg::slotted_view>& views,\n")
-    out.append("                                                     cc::vector<sg::named_sampler>& samplers) const\n{\n")
+    out.append(" " * (len("void ") + len(qualified) + len("::gather(")))
+    out.append("cc::vector<sg::named_sampler>& samplers) const\n{\n")
     if views:
         out.append(f"    views.reserve({len(views)});\n")
-        for binding in views:
-            slot = group.bindings.index(binding)
+        for slot, binding in enumerate(group.bindings):
+            if binding.type == "sampler":
+                continue
             out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {binding.name}}});\n")
     if samplers:
         out.append("    // A sampler the shader did not mark `static` is per-group rather than baked into the layout.\n")
@@ -932,29 +897,6 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
     if not views and not samplers:
         out.append("    (void)views;\n")
         out.append("    (void)samplers;\n")
-    out.append("}\n")
-
-    out.append(f"\nsg::binding_group_handle {qualified}::create(sg::context& ctx, sg::lifetime_scope scope) const\n{{\n")
-    out.append("    auto const layout = acquire_layout(ctx);\n")
-    out.append("    cc::vector<sg::slotted_view> views;\n")
-    out.append("    cc::vector<sg::named_sampler> samplers;\n")
-    out.append("    gather(views, samplers);\n")
-    out.append("\n")
-    out.append("    if (scope == sg::lifetime_scope::transient)\n")
-    out.append("        return ctx.transient.create_binding_group(layout, views, samplers);\n")
-    out.append("    return ctx.persistent.create_binding_group(layout, views, samplers);\n")
-    out.append("}\n")
-
-    out.append(f"\ncc::result<sg::binding_group_handle> {qualified}::try_create(sg::context& ctx,\n")
-    out.append("                                                                        sg::lifetime_scope scope) const\n{\n")
-    out.append("    auto const layout = acquire_layout(ctx);\n")
-    out.append("    cc::vector<sg::slotted_view> views;\n")
-    out.append("    cc::vector<sg::named_sampler> samplers;\n")
-    out.append("    gather(views, samplers);\n")
-    out.append("\n")
-    out.append("    if (scope == sg::lifetime_scope::transient)\n")
-    out.append("        return ctx.transient.try_create_binding_group(layout, views, samplers);\n")
-    out.append("    return ctx.persistent.try_create_binding_group(layout, views, samplers);\n")
     out.append("}\n")
 
     out.append(emit_self_check(manifest, entry, embedded))

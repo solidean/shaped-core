@@ -313,7 +313,7 @@ TEST("slib - a compiled shader reflects the addresses its generated table declar
     // One-directional: reflection reports only what the entry point referenced, so its set is a subset of
     // the declared table.
     // shade.hlsl reads all three.
-    for (auto const& declared : slib_test::shaders::frame_bindings::group::declared_bindings())
+    for (auto const& declared : slib_test::shaders::frame_bindings::declared_bindings())
     {
         auto const* reflected = find_binding(compiled, declared.name);
         if (reflected == nullptr)

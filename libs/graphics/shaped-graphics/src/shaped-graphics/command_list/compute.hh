@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
 #include <shaped-graphics/fwd.hh>
 
 #include <type_traits>
@@ -41,6 +42,15 @@ public:
     /// Binds `group` to descriptor set `group_index` of the active pipeline.
     /// The group's layout must match the pipeline's for that slot.
     void bind_group(int group_index, binding_group const& group);
+
+    /// Binds `group` at the index the generated group `G` declares, so no call site writes the number.
+    /// The backend still checks that index against the layout the group was built for — this only saves
+    /// spelling it.
+    template <declared_binding_group G>
+    void bind(binding_group const& group)
+    {
+        bind_group(G::group_index, group);
+    }
 
     /// Dispatches `x`*`y`*`z` **workgroups** of the active pipeline.
     void dispatch_groups(int x, int y = 1, int z = 1);

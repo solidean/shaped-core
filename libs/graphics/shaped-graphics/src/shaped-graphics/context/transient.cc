@@ -121,6 +121,13 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 
+// The hop the group templates in the header call, now that `context` is complete.
+binding_group_layout_handle context_transient_scope::acquire_declared_layout(cc::span<binding const> bindings,
+                                                                             cc::span<named_sampler const> static_samplers)
+{
+    return _ctx.cached.acquire_binding_group_layout(bindings, static_samplers);
+}
+
 binding_group_handle context_transient_scope::create_binding_group(binding_group_layout_handle layout,
                                                                    cc::span<named_view const> views,
                                                                    cc::span<named_sampler const> samplers)

@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
@@ -86,6 +87,42 @@ struct sg::named_sampler
     cc::string name;
     sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
 };
+
+namespace sg
+{
+/// What a generated binding-group struct provides — the protocol slib's package generator emits, and the
+/// constraint on every `<G>` scope template that takes one.
+///
+/// A group struct is a plain aggregate of bound resources plus this: the group index the shader's attribute
+/// gave, the declarations the pass wrote the shader's own addresses from, and `gather`, which turns the fields
+/// into the slot-keyed supply `create_binding_group` takes.
+/// Everything a caller does with one — acquire its layout, create it, bind it — is a scope method constrained
+/// on this concept, so the generator emits data and never an API of its own.
+///
+/// `declared_bindings` is the whole table rather than a stage's reflected subset, which is the property the
+/// binding pass exists to buy: a merge over three stages' reflected bindings can silently omit a stage, and a
+/// declaration cannot.
+template <class G>
+concept declared_binding_group
+    = requires(G const& g, cc::vector<slotted_view>& views, cc::vector<named_sampler>& samplers) {
+          requires std::is_same_v<std::remove_cv_t<decltype(G::group_index)>, int>;
+          requires std::is_convertible_v<decltype(G::declared_bindings()), cc::span<binding const>>;
+          requires std::is_convertible_v<decltype(G::declared_samplers()), cc::span<named_sampler const>>;
+          g.gather(views, samplers);
+      };
+} // namespace sg
+
+namespace sg::impl
+{
+/// `declared` first, then only those of `supplied` naming a sampler `declared` does not — so the shader wins.
+///
+/// Supplying a sampler the shader already declared `static` is a mistake rather than an override: a static
+/// sampler is baked into the pipeline layout's root signature, so the supplied state would simply not take
+/// effect.
+/// It is dropped with an assertion, which is what names the mistake in a checked build.
+[[nodiscard]] cc::vector<named_sampler> merge_declared_samplers(cc::span<named_sampler const> declared,
+                                                                cc::span<named_sampler const> supplied);
+} // namespace sg::impl
 
 /// A binding_group_layout instantiated with concrete resources bound: each named view is matched to a layout binding, validated, and turned into a backend descriptor.
 /// Bound at a pipeline-layout slot as a unit.

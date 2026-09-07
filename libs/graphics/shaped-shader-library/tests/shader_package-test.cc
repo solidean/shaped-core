@@ -110,7 +110,11 @@ TEST("slib - a binding entry generates the group its namespace declares", exclus
 {
     // The typed half of the codegen: one named member per binding, and the addresses as constants rather
     // than something reflected out of a compiled shader.
-    using group = slib_test::shaders::frame_bindings::group;
+    // An annotated namespace becomes one type, so the name a caller types is the namespace's own.
+    using group = slib_test::shaders::frame_bindings;
+
+    // It satisfies the protocol every sg scope template is constrained on.
+    static_assert(sg::declared_binding_group<group>);
 
     CHECK(group::group_index == 0);
 
@@ -143,7 +147,7 @@ TEST("slib - a binding entry generates the group its namespace declares", exclus
 
 TEST("slib - a `static` sampler reaches the layout rather than the group", exclusive("slib-shader-library"))
 {
-    using group = slib_test::shaders::frame_bindings::group;
+    using group = slib_test::shaders::frame_bindings;
 
     // It still occupies its slot and its register: only where the state comes from changes.
     CHECK(group::declared_bindings()[1].name == "linear_sampler");
@@ -171,7 +175,7 @@ TEST("slib - the generated table and the runtime pass read one shader the same w
     // The self-check every package carries: the table came from the Python half of the pass, and this
     // parses the embedded bytes with the C++ half.
     // Its corpus is every shader anyone declares, so it grows without anyone remembering to extend it.
-    auto const difference = slib_test::shaders::frame_bindings::group::self_check();
+    auto const difference = slib_test::shaders::frame_bindings::self_check();
     if (!difference.empty())
         FAIL(difference);
     CHECK(difference.empty());

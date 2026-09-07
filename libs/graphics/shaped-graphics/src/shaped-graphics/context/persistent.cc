@@ -69,6 +69,13 @@ cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(
 // binding_group_layout / pipeline_layout / compute_pipeline creation lives on ctx.uncached (see uncached.cc) — those are schemas / PSOs, not lifetime-scoped resources.
 // binding_group is a real per-scope descriptor allocation.
 
+// The hop the group templates in the header call, now that `context` is complete.
+binding_group_layout_handle context_persistent_scope::acquire_declared_layout(cc::span<binding const> bindings,
+                                                                              cc::span<named_sampler const> static_samplers)
+{
+    return _ctx.cached.acquire_binding_group_layout(bindings, static_samplers);
+}
+
 binding_group_handle context_persistent_scope::create_binding_group(binding_group_layout_handle layout,
                                                                     cc::span<named_view const> views,
                                                                     cc::span<named_sampler const> samplers)
