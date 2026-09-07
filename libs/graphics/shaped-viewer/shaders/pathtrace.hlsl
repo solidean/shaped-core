@@ -19,9 +19,9 @@ void PathTraceRayGen()
     uint2 px = DispatchRaysIndex().xy;
     uint2 dim = DispatchRaysDimensions().xy;
 
-    uint rng = pt_hash(px.x + px.y * dim.x + rng_seed * 9781u);
+    uint rng = pt_hash(px.x + px.y * dim.x + pt_bindings::frame.rng_seed * 9781u);
 
-    int spp = max(1, samples_per_pixel);
+    int spp = max(1, pt_bindings::frame.samples_per_pixel);
     float3 accum = float3(0, 0, 0);
 
     for (int s = 0; s < spp; ++s)
@@ -29,8 +29,9 @@ void PathTraceRayGen()
         // jittered pinhole primary ray
         float2 jitter = float2(pt_rand(rng), pt_rand(rng));
         float2 ndc = (float2(px) + jitter) / float2(dim) * 2.0 - 1.0; // [-1, 1], y down
-        float3 origin = camera.position;
-        float3 dir = normalize(camera.forward + camera.right_scaled * ndc.x - camera.up_scaled * ndc.y);
+        Camera cam = pt_bindings::frame.camera;
+        float3 origin = cam.position;
+        float3 dir = normalize(cam.forward + cam.right_scaled * ndc.x - cam.up_scaled * ndc.y);
 
         float3 throughput = float3(1, 1, 1);
         float3 radiance = float3(0, 0, 0);
@@ -54,7 +55,7 @@ void PathTraceRayGen()
         int scatters = 0;
 
         int b = 0;
-        while (b < max_bounces)
+        while (b < pt_bindings::frame.max_bounces)
         {
             PtPayload p;
             p.rng = rng;
@@ -185,7 +186,7 @@ void PathTraceRayGen()
                 {
                     // `dir` is unit, so the distance along it is the distance to the rect.
                     float w = pt_mis_weight(prev_pdf, pt_light_pdf(t_light * t_light, cos_light));
-                    radiance += throughput * light.emission * w;
+                    radiance += throughput * pt_bindings::frame.light.emission * w;
                 }
             }
 
@@ -254,9 +255,9 @@ void PathTraceRayGen()
     // The read is at this dispatch's own pixel, so it needs no second texture to be race-free.
     // rgba32_float is what keeps this uncapped: at frame n the update is scaled by 1 / (n + 1), and a half float
     // would stop moving the mean somewhere around n = 2048.
-    if (accum_frame > 0)
+    if (pt_bindings::frame.accum_frame > 0)
     {
-        float n = float(accum_frame);
+        float n = float(pt_bindings::frame.accum_frame);
         color = (pt_bindings::Output[px].rgb * n + color) / (n + 1.0);
     }
 

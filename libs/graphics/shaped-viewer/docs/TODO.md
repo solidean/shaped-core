@@ -481,20 +481,31 @@ What follows is everything else the importer left behind.
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
-- **The path tracer's `FrameConstants` is the last hand-written register in `shaders/`.**
-  Every other binding in the viewer is addressed by slib's [binding pass](../../shaped-shader-library/docs/binding-preprocessor.md).
-  This one is a `cbuffer` block whose members are read unqualified in some seventy places across the integrator, and a group
-  namespace holds declarations rather than blocks — so moving it means a `ConstantBuffer` plus seventy call sites.
-  That is a change to the integrator, not to who owns an address, which is why it was left.
-  It collides with nothing: the pass assigns `b0` to no one in that pipeline.
+- **The material permutation still hand-numbers its samplers, and cannot stop until a group and a space come apart.**
+  `material/shader_generator.cc` emits `SamplerState sv_sampler_{i} : register(s{i}, space0)` at runtime, and
+  `pt_common.hlsli` declares no sampler specifically so `s0`.. stay free for it — a coupling between two files maintained by hand.
+  The permutation wants a group of its own, which is what would delete it.
+  It cannot have one: the pass makes a group's number its space, and sv's bindless tables already hold spaces 1..8
+  (`space_of` numbers one per table from 1) while sitting at group *slot* 1.
+  So there is no free group number whose space is also free, and `sg::max_binding_groups` is 4 besides.
+  What would close it is the pass letting a group's space differ from its number — one more optional attribute argument, and a
+  question rather than an obvious yes, since "group `n` occupies `space<n>` and nothing else does" is the invariant the whole design rests on.
+
+- **A hand-written binding address cannot be made an error yet, for the same reason.**
+  Every shader in a package is now authored through the pass, so the remaining obstacle is not a shader anyone wrote.
+  It is the material permutation: `slib::shader_library::compile_source` routes generated text through
+  `rewrite_binding_groups` like any other source, and that text hand-writes a `register()` per bindless table and per sampler.
+  Bindless tables are the harder half — an unbounded array in a space of its own is not something the grammar can express at all.
+  Until both are expressible the error would reject every material, and a dialect whose purpose is portability must not gain an
+  opt-out mark to work around that.
 
 - **The path tracer cannot use its generated group struct, only the pass's addresses.**
   Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, and
   `collect_samplers` appends one static sampler per `sv_sampler_i` the permutation declares.
   So the layout is built from merged reflection and bound by name, and `pt_common.hlsli` registers no
-  `path:binding:namespace` entry — a generated struct nobody can call `create()` on would only mislead.
-  Two things would close it: the generated `create()` comparing the layout's declared-binding PREFIX rather than its whole
-  `structural_hash`, and the material generator declaring its samplers through the pass instead of hand-numbering `s{i}`.
+  `path:binding:namespace` entry — a generated struct nobody can call `create_binding_group` on would only mislead.
+  Two things would close it: the templated create comparing the layout's declared-binding PREFIX rather than its whole
+  `structural_hash`, and the material generator declaring its samplers through the pass, which is the entry above.
 
 - **`mesh_is_indexed` still rides in `frame_constants_gpu`**, for `pbr_raytrace_routine` alone.
   The path tracer reads it per instance now, out of `instance_gpu`, and its own frame block no longer carries it.

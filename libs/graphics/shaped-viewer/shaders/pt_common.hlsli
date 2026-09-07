@@ -21,6 +21,22 @@ static const int pt_roulette_after = 16;
 // A guard against a dispatch that never ends rather than a quality control — see the roulette in pathtrace.hlsl.
 static const int pt_scatter_cap = 4096;
 
+// The per-frame constants, mirroring sv::pt_frame_constants_gpu (pathtrace_routine.hh) lane-for-lane.
+//
+// A `struct` plus a `ConstantBuffer` rather than a `cbuffer` block, because a group namespace holds
+// declarations: `cbuffer` opens a scope, and the pass refuses one there rather than numbering something whose
+// members it would have to hoist.
+// Declared out here for the same reason, since the struct is a scope too.
+struct FrameConstants
+{
+    Camera camera; // pinhole camera basis (see sv::camera_gpu::from)
+
+    AreaLight light; // the single rectangular area light the integrator samples for direct lighting
+
+    // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
+    int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
+};
+
 // Every resource this pipeline's stages share, declared once for all of them.
 //
 // A closest-hit is GENERATED per material permutation and compiled at runtime, so `scene` used to be written
@@ -29,7 +45,14 @@ static const int pt_scatter_cap = 4096;
 // See shaped-shader-library/docs/binding-preprocessor.md.
 //
 // The pass assigns no `s` register here, which is what leaves `s0`.. free for the `sv_sampler_i` a material
-// permutation emits at runtime.
+// permutation emits at runtime (material/shader_generator.cc).
+//
+// That coupling between two files is maintained by hand, and it should not be: the permutation wants a group of
+// its own. It cannot have one yet, because the pass makes a group's number its space and sv's bindless tables
+// already hold spaces 1..8 at group slot 1 — so there is no free group number whose space is also free.
+// See libs/graphics/shaped-viewer/docs/TODO.md.
+//
+// What did change is that nothing here is addressed by hand any more: `frame` below is the group's, not b0's.
 #pragma sc group 0
 namespace pt_bindings
 {
@@ -48,28 +71,11 @@ namespace pt_bindings
     StructuredBuffer<sv::instance> Instances;
 
     ConstantBuffer<Background> background;
+
+    // Declared LAST so the four addresses above are the ones they always were: the pass runs one counter across
+    // register classes, so appending is the one edit to a shared group that moves nothing.
+    ConstantBuffer<FrameConstants> frame;
 }
-
-// Still a hand-written address, and the last one in this pipeline.
-//
-// A group namespace holds declarations, and this is a `cbuffer` block whose members are read unqualified in some
-// seventy places across the integrator. Moving it means a ConstantBuffer and seventy call sites, which is a change
-// to the integrator rather than to who owns an address.
-//
-// b0 in space 0 is free only because `background` is not the group's FIRST declaration — the pass numbers one
-// counter across register classes, so it lands on b3.
-// Reordering pt_bindings to put a ConstantBuffer first would put it here, and the pass cannot see this
-// hand-written register to refuse it.
-// So the constraint is on the declaration order above, until this block moves into the group too.
-cbuffer FrameConstants : register(b0)
-{
-    Camera camera; // pinhole camera basis (see sv::camera_gpu::from)
-
-    AreaLight light; // the single rectangular area light the integrator samples for direct lighting
-
-    // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
-    int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
-};
 
 // One path segment, in and out.
 //
@@ -130,7 +136,7 @@ float pt_mis_weight(float pdf_this, float pdf_other)
 // The rect's area. Its full edges are 2u and 2v, so the parallelogram is |cross(2u, 2v)| = 4 |cross(u, v)|.
 float pt_light_area()
 {
-    return 4.0 * length(cross(light.u, light.v));
+    return 4.0 * length(cross(pt_bindings::frame.light.u, pt_bindings::frame.light.v));
 }
 
 // The solid-angle pdf of reaching the light along a direction, given the squared distance to the point reached and the
@@ -151,6 +157,8 @@ bool pt_light_intersect(float3 origin, float3 dir, out float t_hit, out float co
 {
     t_hit = 0.0;
     cos_light = 0.0;
+
+    AreaLight light = pt_bindings::frame.light;
 
     float denom = dot(dir, light.normal);
     if (denom >= -1e-9)

@@ -581,6 +581,13 @@ ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
 // both scopes take span<slotted_view const> as well — same validation, no name lookup; a slot naming a sampler or past the end is an error, never a wrong bind
+// a GENERATED group struct (slib's binding pass) is taken directly, and the layout comes from its own declarations:
+sg::declared_binding_group   // concept in binding/binding_group.hh — { group_index; declared_bindings(); declared_samplers(); gather() }
+ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
+ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
+ctx.transient.create_binding_group(G{...})                      // -> binding_group_handle; `try_` twin returns the failure as a value
+ctx.persistent.create_binding_group(G{...})                     // which scope you call IS the lifetime
+scope.bind<G>(group)                                            // binds at G::group_index; on raster / compute / raytracing scopes
 layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its binding_slot
 
 // staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.

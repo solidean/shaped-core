@@ -72,6 +72,8 @@ float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, f
     // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
     float s = pt_rand(rng) * 2.0 - 1.0;
     float t = pt_rand(rng) * 2.0 - 1.0;
+    AreaLight light = pt_bindings::frame.light;
+
     float3 lp = light.center + s * light.u + t * light.v;
 
     float3 to_light = lp - p;
@@ -163,7 +165,8 @@ bool pt_cutout_rejects(PtAttributes attribs)
     // The instance is in the hash as well as the primitive: without it two instances sharing one geometry draw the SAME `u`
     // at the same primitive in the same pixel, so stacked identical alpha-tested cards cut out identically instead of
     // independently.
-    uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u + InstanceID() * 2246822519u);
+    uint h = pt_hash(px.x + px.y * 65536u + pt_bindings::frame.rng_seed * 9781u + PrimitiveIndex() * 2654435761u
+                     + InstanceID() * 2246822519u);
     float u = float(h) * (1.0 / 4294967296.0);
 
     return surface.geometry_opacity < u;

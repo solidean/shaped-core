@@ -216,7 +216,38 @@ So the mirror *defines* the layout and the specialization states that same layou
 
 ## The supported subset
 
-Deliberately small to start.
+**The dialect covers sg's binding types and vertex formats, minus what a measurement says is not portable.**
+That is the shape of the list rather than a policy.
+An exclusion below either names the measurement behind it, in which case it is a rule and will not move, or it does not, in which case it is a gap and closing it is ordinary work.
+
+The exclusions that are rules, each with its measurement:
+
+- **Any matrix but `float4x4`** — Q14g.
+  A `float3x4` is three rows of 16 row-major and four rows of 12 column-major: the same 64-byte total with different member offsets, which is exactly what a mirror reproduces.
+  The pass cannot see which orientation is in force, so it admits the one matrix that does not have one.
+  A matrix with partial rows in the orientation actually used is refused by the SPIR-V validator anyway (Q14c).
+- **An array in a constant block** — Q14b.
+  The member after one packs into its last row's tail, which C++ cannot express.
+- **A nested struct in a constant block** — Q14d.
+  Its start is row-aligned and its end is not, so the member after it packs against its last member.
+- **`half` and `min16float` as 16-bit** — Q14h.
+  They are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing in ssc passes it.
+  The mirror declares a `float`, and Q14h's pinned numbers are what makes adding that flag a failing test rather than a wrong number.
+
+The gaps that are gaps:
+
+- **A bindless table**, which is an unbounded array in a space of its own.
+  Nothing in the grammar expresses one, which is what keeps a hand-written address from being an error today — see "What this does not address".
+- **A group whose space differs from its number.**
+  Group `n` occupies `space<n>`, which is the invariant everything else rests on.
+  It is also what stops sv's material permutation from taking a group of its own, since sv's bindless tables already hold spaces 1..8.
+
+And one that is neither, because HLSL cannot say it at all:
+
+- **A packed vertex format.**
+  `float4` is the same spelling whether four floats or four normalized bytes feed it, so `rgba8_unorm` and `rgba8_uint` cannot be derived from a member's type.
+  A `#pragma sc attribute format=<name>` on the member states one instead.
+
 Inside an annotated namespace the pass understands:
 
 - A declaration `Type name;` and `Type name[N];`.
@@ -307,6 +338,21 @@ Q12 is why: an unknown pragma is silently ignored today and an error under `-Wal
 Rewriting between them therefore sees one fully flattened, target-resolved translation unit — exactly the scope a group's numbering is defined over.
 Rewriting before the flatten would see the entry-point file before its includes and miss every binding a header declares.
 
+### Two alternatives that are closed
+
+Both are ones a future reader will re-propose, so they are written down rather than left to be re-derived.
+
+**Rewriting at build time only**, which would collapse the two grammars into one and is by far the most attractive of the two.
+It is refuted twice over.
+Hot reload reads the author's file from disk at runtime and compiles it, so a build-time-only rewrite would leave every reloaded shader unaddressed.
+And the location counter is flat per *stage* rather than per file.
+A per-file rewrite would number two vertex-input structs in two files independently and produce an invalid module, which is the same asymmetry the per-file/per-TU invariant above is about.
+
+**Generating from reflection instead of from source text.**
+Refuted by the very DXC behaviour that motivates this design.
+Reflection reports only what an entry point actually referenced, so a table built from it would be incomplete by construction — and incomplete in a way that varies per stage, which is Q8.
+A declaration cannot be incomplete, which is the whole reason the pass reads source.
+
 Putting it in `_compile_text` rather than in a compiler is what makes it unskippable.
 `add_compiler` **replaces** any compiler registered for the same `(language, format)` edge.
 So a decorator can be displaced by any later `add_compiler(create_dxc_compiler())` — in a test, an app, or a second library instance.
@@ -360,7 +406,7 @@ Neither test proves the two parsers are the same function; they prove the two ag
 The reflection cross-check above is the third leg, and the only one that compares against DXC rather than against another parser.
 
 `sc_add_shader_package` takes entries `path:stage:entry_point`.
-This adds a fourth kind, `path:binding:namespace`:
+This adds four more — `path:binding:namespace`, `path:vertex_input:struct`, `path:payload:struct` and `path:constants:name` — of which the first is:
 
 ```cmake
 sc_add_shader_package(
@@ -377,7 +423,19 @@ sc_add_shader_package(
 An `.hlsli` that declares a group is registered on its own, in whichever package owns it — otherwise every shader including it would generate the same struct again.
 This is the one asymmetry in the design worth remembering.
 The runtime rewriter is per *flattened translation unit* and rewrites everything it sees; the generator is per *file* and emits only what that file declares.
-They agree because a namespace's numbering is local to its single block.
+
+**They agree about a GROUP's numbering, and only about that.**
+A group's counter is local to its single block in its single file, so both halves see the same block and reach the same numbers.
+
+A vertex location is not covered by that invariant, and deliberately.
+One counter runs across every annotated struct in the *translation unit*, because a location is a position in the stage's own flat namespace.
+A per-struct counter would give the per-vertex and the per-instance struct the same numbers, and the module would not be valid.
+So two `vertex_input` structs in two files get continuous locations from the rewriter and independent ones from the per-file generator.
+
+Nothing breaks today only because the generated `sg::vertex_layout_of` carries no location at all.
+sg matches an attribute by semantic, and the location exists only in the rewritten SPIR-V.
+It arms the moment `sg::vertex_attribute` grows one, and the failure would be Q8's own class: the pipeline builds and the geometry is wrong.
+Either the generator learns the translation unit, or `sg::vertex_attribute` never carries a location.
 
 ### The generated group
 
@@ -553,5 +611,15 @@ The parse is what everything else is built on, and its subset will move once rea
 ## What this does not address
 
 - **sv's bindless tables.**
-  They need a register space per table, and nothing here assigns a space other than one per group.
-  A binding declared outside an annotated namespace keeps its hand-written `register(t0, space5)`, so sv is not blocked by this design — it is simply not served by it yet.
+  A table is an unbounded array in a space of its own, and the grammar expresses neither the unbounded length nor a space that is not a group's number.
+  One space per group is NOT the obstacle, which an earlier version of this section had wrong.
+  One space per group is exactly one space per table.
+  `resources/bindless_tables.cc` already numbers one per table from 1, and `material/shader_generator.cc` emits a fixed-size array into each — byte for byte what an annotated namespace produces.
+  What is missing is a group number to spend.
+  sv's tables hold spaces 1..8 while sitting at group *slot* 1, so no free group number has a free space, and `sg::max_binding_groups` is 4.
+
+- **Making a hand-written address an error.**
+  Every shader in a package is authored through the pass now, so nothing anyone wrote is in the way.
+  The material permutation is: `compile_source` routes its generated text through the rewrite like any other source.
+  That text hand-writes a `register()` per bindless table and per sampler, neither of which the grammar can express.
+  There is no opt-out mark and there should not be one, so the error waits on the table above rather than on a flag.

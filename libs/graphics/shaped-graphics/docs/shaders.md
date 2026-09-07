@@ -195,7 +195,8 @@ Two of them are still said by hand today, and the third is what the binding prep
   ```
 
   A rewriting pass writes every address before the compiler sees the source, so neither target's spelling appears in a shader.
-  A binding declared outside an annotated namespace keeps whatever `register()` it writes by hand, which is what sv's bindless tables still need.
+  The pass rewrites only what it parsed, so text carrying no attribute comes back byte for byte — which is a property of the edit model rather than a way to opt out.
+  A hand-written address is on its way out: it is not portable, and a dialect whose purpose is portability cannot have a supported way to write one.
 - **Vertex input locations.**
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
   A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
@@ -205,7 +206,7 @@ Two of them are still said by hand today, and the third is what the binding prep
   A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
   A shader that does not say so declares a resource the pipeline layout never binds, so the block needs `[[vk::push_constant]]` there and a plain `register(b0)` on DXIL.
 
-**Every `[[vk::…]]` attribute has to be forked on `__spirv__`.**
+**Every `[[vk::…]]` attribute a shader still writes by hand has to be forked on `__spirv__`.**
 DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles with `-WX`, so an unguarded annotation is a compile error on DXIL rather than a no-op:
 
 ```hlsl
@@ -214,11 +215,25 @@ DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles
 #else
 #define VK_LOCATION(n)
 #endif
+
+struct vs_input
+{
+    VK_LOCATION(0) float3 position : POSITION;
+    VK_LOCATION(1) float3 normal : NORMAL;
+};
 ```
 
-Nothing catches a missing fork at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
+`__spirv__` is DXC's own macro, and it works here because **slib flattens a shader's includes once per target rather than once per shader**.
+The preprocess pass is given the same target the compile is, so the fork is resolved against the format actually being built.
+That per-target flatten is the same property the binding pass depends on.
 
-[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example for vertex inputs and inline constants.
+Nothing catches a missing fork at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
+Which is the argument for not writing one: the binding pass resolves the same fork per target, from one attribute, with no macro.
+
+[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example, and it now writes neither fork.
+The vulkan backend's own tier-2 shaders are where a hand-written `[[vk::binding]]` is still deliberate.
+They are compiled offline into committed SPIR-V headers and belong to no package, so no pass ever reads them.
+The three are [triangle.hlsl](../backends/vulkan/tests/triangle.hlsl), [double_compute.hlsl](../backends/vulkan/tests/double_compute.hlsl) and [raytrace.hlsl](../backends/vulkan/tests/raytrace.hlsl).
 [slib's portable-hlsl](../../shaped-shader-library/docs/portable-hlsl.md) is the design across all three, the validation layers, and what is still open.
 
 ## Adding a shader
@@ -227,6 +242,17 @@ Nothing catches a missing fork at build time: shader compilation happens at runt
 2. Add one `path:stage:entry_point` line to that target's `sc_add_shader_package`.
 3. Rebuild — the symbol appears.
 4. `acquire(ctx)` it.
+
+Four more entry kinds generate C++ from what the binding pass reads, rather than an entry point:
+
+| Entry | What it names | What you get |
+|---|---|---|
+| `path:binding:namespace` | an annotated namespace | a group struct satisfying `sg::declared_binding_group` |
+| `path:vertex_input:struct` | an annotated struct | a mirror plus its `sg::vertex_layout_of` |
+| `path:payload:struct` | an annotated struct | a mirror plus its `max_payload_size` |
+| `path:constants:name` | a `push_constants` block | a mirror carrying HLSL's own padding |
+
+A group struct is data rather than an API — `ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
 
 ## More
 

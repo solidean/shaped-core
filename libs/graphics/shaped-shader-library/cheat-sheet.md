@@ -206,19 +206,38 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
-// `#pragma sc push_constants space=<n>` before a ConstantBuffer makes it inline constants: register(b0,
-//   space<n>) on DXIL, [[vk::push_constant]] on SPIR-V. At most one per translation unit; block_size still
-//   comes from reflection.
-//   the space may NOT equal a group's number: b0 there is the group's first `b` binding.
+// `#pragma sc push_constants` before a ConstantBuffer makes it inline constants: register(b0, space9) on
+//   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,
+//   reserved, and a group numbered 9 is refused rather than the block naming a space to avoid.
+//   At most one per translation unit; block_size still comes from reflection, and the mirror is generated.
 // `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
 //   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
 //   ONE counter across every annotated struct in the file, since a location is flat per stage.
+//   the STRUCT's slot is its own declaration order too; `slot=` overrides that, for two shaders sharing a
+//   vertex-input header while declaring their structs in a different order. Two structs on one slot is an error.
 //   a member's type must have a vertex attribute format, so `bool` is refused here (it has none).
+// `#pragma sc attribute format=<sg::vertex_attribute_format>` before a MEMBER states a packed format.
+//   the only way to reach rgba8_unorm / rgba8_uint: HLSL spells a float4 fed by four normalized bytes
+//   exactly like one fed by four floats, so it cannot be derived from the type.
 // `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
 //   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
 //   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.
-// `#pragma sc push_constants` also generates the block's mirror now, from the struct the ConstantBuffer names.
-// text carrying no attribute is not interpreted, so hand-written register() at file scope stays fine.
+// text carrying no attribute is not interpreted, so the rewrite provably touches only what it parsed.
+//   NOT a way to write addresses by hand: such a shader is not portable, and the pass will come to reject it.
+```
+
+## the generated group is data; the verbs are sg's scopes'
+
+```cpp
+// an annotated namespace becomes ONE type, named after it, satisfying sg::declared_binding_group:
+//   the fields, `group_index`, `declared_bindings()`, `declared_samplers()`, `gather()` and `self_check()`.
+auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>();
+auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>(runtime_samplers);
+                                    // + static samplers for the ones the shader left undeclared;
+                                    //   supplying one it DID declare asserts -- it is a mistake, not an override
+auto const g = ctx.transient.create_binding_group(shaders::frame_bindings{.albedo = tex.as_readonly_view()});
+auto const g = ctx.persistent.try_create_binding_group(shaders::frame_bindings{...});  // failure as a value
+scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
 ```
 
 ## include resolution
