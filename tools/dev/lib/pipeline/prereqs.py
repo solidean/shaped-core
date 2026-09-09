@@ -18,38 +18,10 @@ import sys
 from pathlib import Path
 
 from ..core import profile
+from ..project.pins import is_current
 
 # Preset name fragments for cross-targets that never use these (host-side) dependencies.
 _NON_NATIVE = ("wasm", "emscripten", "web", "android", "ios")
-
-
-def _pinned_hash(manifest: Path) -> str | None:
-    """Read the first `pin_hash` from a dependency.yml (the authority its install is matched against).
-
-    Scanned by line rather than parsed, so this stays stdlib-only — dev.py declares no dependencies, and this runs on the fast path of every configure.
-    The first entry is the one whose pin `.install/pin.txt` carries, which is why zydis declares Zydis before the Zycore it vendors.
-
-    An upstream shipping one asset per platform declares `pin_hash_<os>` instead, and the host's key is what counts.
-    Taking the bare key there — or another platform's — would make every configure believe the install is stale and
-    re-fetch it, which is exactly the fast path this function exists to keep fast.
-    """
-    if not manifest.is_file():
-        return None
-    host_key = f"pin_hash_{'windows' if sys.platform == 'win32' else 'macos' if sys.platform == 'darwin' else 'linux'}:"
-    fallback = None
-    for line in manifest.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if s.startswith(host_key):
-            return s.split(":", 1)[1].strip().strip('"').strip("'")
-        if fallback is None and s.startswith("pin_hash:"):
-            fallback = s.split(":", 1)[1].strip().strip('"').strip("'")
-    return fallback
-
-
-def _is_current(manifest: Path, pin: Path) -> bool:
-    """True when the install's pin.txt already matches the manifest's pin_hash."""
-    expected = _pinned_hash(manifest)
-    return bool(expected) and pin.is_file() and pin.read_text(encoding="utf-8").strip() == expected
 
 
 def _ensure(
@@ -82,7 +54,7 @@ def _ensure(
 
     manifest = root / "extern" / directory / "dependency.yml"
     pin = root / "extern" / directory / ".install" / "pin.txt"
-    if _is_current(manifest, pin):
+    if is_current(manifest, pin):
         return  # already installed at the pinned release — fast path
 
     print(f"{name}: {doing} (set {skip_env}=1 to skip) ...", file=sys.stderr)
