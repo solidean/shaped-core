@@ -586,10 +586,12 @@ struct parser
             return cc::error(cc::format("{}: expected a member declaration, found '{}'", to_string(type_token.location),
                                         type_token.text));
 
-        auto const type_name = type_token.text;
         auto const location = type_token.location;
         auto const type_offset = type_token.offset;
-        ++at;
+
+        auto spelling = read_type_spelling();
+        CC_RETURN_IF_ERROR(spelling);
+        auto const type_name = cc::string_view(spelling.value());
 
         auto const value_type = slib::impl::value_type_of(type_name);
         if (!value_type.has_value())
@@ -704,12 +706,34 @@ struct parser
         return cc::unit();
     }
 
+    /// The type spelling at the cursor, with a matrix's orientation qualifier folded into it.
+    ///
+    /// `row_major` and `column_major` are part of the type the table is keyed on rather than modifiers walked
+    /// past, because a matrix's layout is exactly what they decide -- and the default they would otherwise fall
+    /// back to is a compile flag that never reaches the source.
+    [[nodiscard]] cc::result<cc::string> read_type_spelling()
+    {
+        auto const location = current().location;
+        auto spelling = cc::string::create_copy_of(current().text);
+        ++at;
+
+        if (spelling != "row_major" && spelling != "column_major")
+            return spelling;
+
+        if (at_end() || current().kind != hlsl_token_kind::identifier)
+            return cc::error(cc::format("{}: expected a matrix type after '{}'", to_string(location), spelling));
+
+        auto qualified = cc::format("{} {}", spelling, current().text);
+        ++at;
+        return qualified;
+    }
+
     /// One `<type> <name>;` of a constant block.
     ///
-    /// The subset is scalars, vectors and `bool`, which is what the blocks in the tree actually hold.
-    /// An array or a matrix is refused rather than mirrored, and Q14 is why: in a constant block the member
-    /// after one packs into its last row's tail, which C++ cannot express, and for a matrix whose rows are not
-    /// full float4s SPIR-V rejects the module outright.
+    /// The subset is scalars, vectors, `bool` and an oriented matrix, which is what the blocks in the tree
+    /// actually hold.
+    /// An array is refused rather than mirrored, and Q14b is why: the member after one packs into its last row's
+    /// tail, which C++ cannot express.
     [[nodiscard]] cc::result<slib::shader_struct_member> parse_constant_member()
     {
         auto const& token = current();
@@ -717,9 +741,10 @@ struct parser
             return cc::error(
                 cc::format("{}: expected a member declaration, found '{}'", to_string(token.location), token.text));
 
-        auto const type_name = token.text;
         auto const location = token.location;
-        ++at;
+        auto spelling = read_type_spelling();
+        CC_RETURN_IF_ERROR(spelling);
+        auto const type_name = cc::string_view(spelling.value());
 
         if (at_end() || current().kind != hlsl_token_kind::identifier)
             return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));

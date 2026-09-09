@@ -24,9 +24,14 @@ struct vs_output
     float3 color : COLOR;
 };
 
+// `column_major` is stated rather than left to the default, and it is load-bearing twice over.
+// It decides the layout, which is what the generated mirror reproduces -- and it decides whether those sixteen
+// floats are read as rows or as columns, which is what `mul` does with them.
+// The default it would otherwise take comes from `#pragma pack_matrix` / `-Zpr`, so without this word a flag set
+// anywhere could transpose the cube with the mirror's size still correct.
 struct cube_constants
 {
-    float4x4 view_projection;
+    column_major float4x4 view_projection;
 };
 
 #pragma sc push_constants

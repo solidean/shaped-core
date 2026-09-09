@@ -222,17 +222,23 @@ An exclusion below either names the measurement behind it, in which case it is a
 
 The exclusions that are rules, each with its measurement:
 
-- **Any matrix but `float4x4`** — Q14g.
-  A `float3x4` is three rows of 16 row-major and four rows of 12 column-major: the same 64-byte total with different member offsets, which is exactly what a mirror reproduces.
-  The pass cannot see which orientation is in force, so it admits the one matrix that does not have one.
-  A matrix with partial rows in the orientation actually used is refused by the SPIR-V validator anyway (Q14c).
+- **A matrix that does not state its orientation** — Q14g.
+  A matrix stores V vectors of M components at a 16-byte stride, and which of R and C plays each part is exactly what `row_major` / `column_major` decides.
+  Left unstated it comes from `#pragma pack_matrix` or `-Zpr`, which never reaches the source, so one shader would mirror to two different structs depending on how it was compiled.
+  It also decides whether the sixteen floats of a `float4x4` are read as rows or as columns.
+  Stating it is one word, and it is required on every matrix including `float4x4`, whose layout is orientation-independent but whose *meaning* is not.
+- **A matrix whose stored vectors are not full `float4`s** — Q14g2.
+  `row_major floatRx4` and `column_major float4xC` are admitted, at `16 * V` bytes and mirrored as `float[4 * V]`.
+  Anything else leaves a partial last row: DXC packs the next member into its tail while the SPIR-V validator measures the matrix as `stride * V` and calls that an overlap.
+  The mirror would need a tail like `float[7]` even in the cases where the two agree.
 - **An array in a constant block** — Q14b.
   The member after one packs into its last row's tail, which C++ cannot express.
 - **A nested struct in a constant block** — Q14d.
   Its start is row-aligned and its end is not, so the member after it packs against its last member.
 - **`half` and `min16float` as 16-bit** — Q14h.
-  They are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing in ssc passes it.
-  The mirror declares a `float`, and Q14h's pinned numbers are what makes adding that flag a failing test rather than a wrong number.
+  They are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing in ssc passes it, so the table carries them at four bytes and the mirror declares a `float`.
+  Q14h's pinned numbers are what makes adding that flag a failing test rather than a silently halved offset.
+  Native 16-bit is a feature rather than a table row, and what it would take is below.
 
 The gaps that are gaps:
 
@@ -617,6 +623,17 @@ The parse is what everything else is built on, and its subset will move once rea
   `resources/bindless_tables.cc` already numbers one per table from 1, and `material/shader_generator.cc` emits a fixed-size array into each — byte for byte what an annotated namespace produces.
   What is missing is a group number to spend.
   sv's tables hold spaces 1..8 while sitting at group *slot* 1, so no free group number has a free space, and `sg::max_binding_groups` is 4.
+
+- **Native 16-bit types.**
+  Not a portability limit — SM 6.2 plus `-enable-16bit-types`, and on Vulkan `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, which is Turing and up, RDNA and up, Intel Xe and most mobile.
+  Three things are missing, and none of them is a table entry.
+  ssc passes no flag and has no option to, so the storage size is decided outside the source the generator reads.
+  sg has no device capability to gate it on.
+  And C++ has no portable 16-bit float to mirror INTO — `std::float16_t` is C++23 `<stdfloat>` with patchy support and `_Float16` is clang/gcc only.
+  So the mirror would have to be `uint16_t` bits or a type of our own, which changes what a caller writes.
+  The spellings to add would be `float16_t` / `int16_t` / `uint16_t` rather than `half`, since those only compile with the flag on and so state their own requirement.
+  `min16float` is a minimum-precision hint rather than a size, and should stay 32-bit whatever happens.
+  Nothing in the tree uses any of them today.
 
 - **Making a hand-written address an error.**
   Every shader in a package is authored through the pass now, so nothing anyone wrote is in the way.

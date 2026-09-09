@@ -486,11 +486,11 @@ ConstantBuffer<frame_constants> frame;
 line 3: an array is not supported in a constant block, because the member after it packs into its last row
 
 
---- case a float4x4 fills its rows exactly, so a constant block may hold one
+--- case a matrix states its orientation, and its stored vectors are full float4s
 --- hlsl
 struct frame_constants
 {
-    float4x4 transform;
+    column_major float4x4 transform;
     float exposure;
 };
 
@@ -498,16 +498,32 @@ struct frame_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=80
-  transform float4x4 @0
+  transform column_major float4x4 @0
   exposure float @64
 
 
---- case a matrix aligns to a whole row, so what precedes it is padded out
+--- case row_major stores rows, so it is the OTHER dimension that must be four
+--- hlsl
+struct frame_constants
+{
+    row_major float3x4 transform;
+    float exposure;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- groups
+inline_constants frame space=9 type=frame_constants size=64
+  transform row_major float3x4 @0
+  exposure float @48
+
+
+--- case a matrix starts a whole row, so what precedes it is padded out
 --- hlsl
 struct frame_constants
 {
     float exposure;
-    float4x4 transform;
+    column_major float4x4 transform;
 };
 
 #pragma sc push_constants
@@ -515,20 +531,46 @@ ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=80
   exposure float @0
-  transform float4x4 @16
+  transform column_major float4x4 @16
 
 
---- case every other matrix is refused, and the message says which rule it broke
+--- case a matrix with no orientation is refused, since the default is a flag the pass cannot see
 --- hlsl
 struct frame_constants
 {
-    float3x4 transform;
+    float4x4 transform;
 };
 
 #pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
-line 3: 'float3x4' is not a constant block type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
+line 3: 'float4x4' is not a constant block type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
+
+
+--- case a matrix leaving a partial last row is refused, whatever its orientation
+--- hlsl
+struct frame_constants
+{
+    column_major float3x4 transform;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: 'column_major float3x4' is not a constant block type this pass knows, because a matrix must store full float4s (row_major floatRx4, column_major float4xC) — this one leaves a partial last row that the next member packs into, and SPIR-V refuses the module (spike Q14g)
+
+
+--- case an orientation standing before nothing is an error
+--- hlsl
+struct frame_constants
+{
+    row_major;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> frame;
+--- error
+line 3: expected a matrix type after 'row_major'
 
 
 --- case a 64-bit scalar aligns to eight, which Q14i measured
@@ -742,7 +784,21 @@ struct pt_payload
     float3x4 transform;
 };
 --- error
-line 4: 'float3x4' is not a payload type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
+line 4: 'float3x4' is not a payload type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
+
+
+--- case a payload may hold an oriented matrix, naturally packed
+--- hlsl
+#pragma sc payload
+struct pt_payload
+{
+    column_major float4x4 transform;
+    uint rng;
+};
+--- groups
+payload pt_payload size=68
+  transform column_major float4x4
+  rng uint
 
 
 --- case a `payload` attribute standing before nothing is an error
@@ -908,7 +964,7 @@ struct vs_input
     float3x3 basis : NORMAL;
 };
 --- error
-line 4: 'float3x3' is not a vertex attribute type this pass knows, because only float4x4 packs the same in both matrix orientations (spike Q14g)
+line 4: 'float3x3' is not a vertex attribute type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
 
 
 --- case `vertex_input` takes slot and per_instance and nothing else

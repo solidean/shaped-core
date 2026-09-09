@@ -271,11 +271,23 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
     "uint4": ("unsigned[4]", 16, 4, 4, "vec4u"),
     # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
     "bool": ("unsigned", 4, 4, 4, None),
-    # The one matrix, and Q14g is why it is the only one: a float4x4 is four vectors of four whichever
-    # orientation is in force, where a float3x4 has different member offsets row-major and column-major at the
-    # same 64-byte total.
-    # The pass cannot see the orientation, so it admits only the matrix that does not have one.
-    "float4x4": ("float[16]", 64, 16, 4, None),
+    # A matrix is keyed on its ORIENTATION as well as its shape, because that is what its layout depends on --
+    # and the orientation is part of the declaration rather than something the pass has to guess.
+    # A bare `float4x4` is refused for that reason: its default comes from `#pragma pack_matrix` or `-Zpr`, which
+    # the pass cannot see, and it decides whether the mirror's sixteen floats are read as rows or as columns.
+    #
+    # The shapes admitted are those whose stored vectors are full float4s, so the matrix is exactly V rows of 16
+    # with no partial tail: row-major stores R vectors of C, column-major stores C vectors of R.
+    # Q14g measured what a partial tail costs -- the next member packs into it on DXIL and the SPIR-V validator
+    # calls that an overlap, since it measures the matrix as `stride * V` and DXC does not.
+    "row_major float1x4": ("float[4]", 16, 16, 4, None),
+    "row_major float2x4": ("float[8]", 32, 16, 4, None),
+    "row_major float3x4": ("float[12]", 48, 16, 4, None),
+    "row_major float4x4": ("float[16]", 64, 16, 4, None),
+    "column_major float4x1": ("float[4]", 16, 16, 4, None),
+    "column_major float4x2": ("float[8]", 32, 16, 4, None),
+    "column_major float4x3": ("float[12]", 48, 16, 4, None),
+    "column_major float4x4": ("float[16]", 64, 16, 4, None),
     # `half` and `min16float` are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing
     # in ssc passes it.
     # Q14h pins that, so adding the flag is a failing test rather than a wrong number.
@@ -306,13 +318,15 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
 # Why a type outside the table is outside it, appended to the refusal.
 # A reader wants opposite reactions to a table gap and to a portability rule, and the message is the only thing
 # that tells them which they have.
-REJECTION_REASONS: tuple[tuple[str, str], ...] = (
-    ("float1x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
-    ("float2x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
-    ("float3x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
-    ("float4x", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
-    ("matrix", ", because only float4x4 packs the same in both matrix orientations (spike Q14g)"),
-)
+# Keep in step with rejection_reason_for in impl/hlsl_value_types.cc.
+MATRIX_SPELLINGS = ("float1x", "float2x", "float3x", "float4x", "matrix")
+
+NEEDS_ORIENTATION = (", because a matrix's layout depends on its orientation \u2014 write `row_major` or "
+                     "`column_major`, since the default comes from a compile flag the pass cannot see")
+
+PARTIAL_ROW = (", because a matrix must store full float4s (row_major floatRx4, column_major float4xC) \u2014 this "
+               "one leaves a partial last row that the next member packs into, and SPIR-V refuses the module "
+               "(spike Q14g)")
 
 
 # Every sg::vertex_attribute_format enumerator, so a `format=` override can be checked against the real set.
@@ -329,10 +343,11 @@ VERTEX_ATTRIBUTE_FORMATS = (
 
 def rejection_reason_for(hlsl_type: str) -> str:
     """The sentence to append to a refusal, or empty when the pass has nothing more specific to say."""
-    for prefix, reason in REJECTION_REASONS:
-        if hlsl_type.startswith(prefix):
-            return reason
-    return ""
+    if not any(needle in hlsl_type for needle in MATRIX_SPELLINGS):
+        return ""
+
+    oriented = hlsl_type.startswith("row_major ") or hlsl_type.startswith("column_major ")
+    return PARTIAL_ROW if oriented else NEEDS_ORIENTATION
 
 
 def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
@@ -792,19 +807,40 @@ class _Parser:
         # The block's own total rounds up to a whole row.
         constants.size = offset if offset % 16 == 0 else offset + (16 - offset % 16)
 
+    def read_type_spelling(self) -> str:
+        """The type spelling at the cursor, with a matrix's orientation qualifier folded into it.
+
+        `row_major` and `column_major` are part of the type the table is keyed on rather than modifiers walked
+        past, because a matrix's layout is exactly what they decide -- and the default they would otherwise fall
+        back to is a compile flag that never reaches the source.
+        """
+        location = self.current().location
+        spelling = self.current().text
+        self.at += 1
+
+        if spelling not in ("row_major", "column_major"):
+            return spelling
+
+        if self.at_end() or self.current().kind != "identifier":
+            raise BindingError(f"{location}: expected a matrix type after '{spelling}'")
+
+        qualified = f"{spelling} {self.current().text}"
+        self.at += 1
+        return qualified
+
     def parse_constant_member(self) -> StructMember:
         """One `<type> <name>;` of a constant block.
 
-        The subset is scalars, vectors and `bool`. An array or a matrix is refused rather than mirrored, and
-        Q14 is why: the member after one packs into its last row's tail, which C++ cannot express.
+        The subset is scalars, vectors, `bool` and an oriented matrix.
+        An array is refused rather than mirrored, and Q14b is why: the member after one packs into its last
+        row's tail, which C++ cannot express.
         """
         token = self.current()
         if token.kind != "identifier":
             raise BindingError(f"{token.location}: expected a member declaration, found '{token.text}'")
 
-        type_name = token.text
         location = token.location
-        self.at += 1
+        type_name = self.read_type_spelling()
 
         if self.at_end() or self.current().kind != "identifier":
             raise BindingError(f"{location}: expected a name after '{type_name}'")
@@ -1055,10 +1091,9 @@ class _Parser:
         if token.kind != "identifier":
             raise BindingError(f"{token.location}: expected a member declaration, found '{token.text}'")
 
-        type_name = token.text
         location = token.location
         type_offset = token.offset
-        self.at += 1
+        type_name = self.read_type_spelling()
 
         if type_name not in VALUE_TYPES:
             kind = "vertex attribute" if requires_semantic else "payload"

@@ -172,35 +172,60 @@ TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
 
-TEST("portable-hlsl spike - Q14g only float4x4 packs the same whichever orientation is in force")
+TEST("portable-hlsl spike - Q14g a matrix is measured by its orientation, and by what its last row leaves")
 {
-    // The pass's value table may carry a matrix only if its layout is the same in BOTH orientations, because
-    // a shader sets the default either way (`#pragma pack_matrix`, `-Zpr`) while the generated mirror has one
-    // layout — and nothing in the flattened source tells the pass which is in force.
+    // A matrix stores V vectors of M components -- row-major stores R vectors of C, column-major stores C of R
+    // -- laid out at a 16-byte stride, so its extent is (V - 1) * 16 + M * 4.
     //
-    // 4x4 is the case that cannot differ: four vectors of four either way, 64 bytes, probe at 64 -> 80.
-    check_rule("float4x4, default orientation", "    float4x4 m;\n    float probe;", 80);
-    check_rule("float4x4, row_major", "    row_major float4x4 m;\n    float probe;", 80);
-    check_rule("float4x4, column_major", "    column_major float4x4 m;\n    float probe;", 80);
+    // The orientation is therefore part of the layout rather than a detail of it, and it comes from a compile
+    // flag (`#pragma pack_matrix`, `-Zpr`) unless the declaration states one.
+    // That is why the pass keys its table on the qualifier and refuses a bare matrix: the same source would
+    // otherwise mirror to two different structs depending on how it was compiled.
 
-    // float3x4 and float2x4 are the ones the folklore calls full-row, and they are only full-row row-major:
-    // the other way round the 4 is the column count, so the matrix is four vectors of three or two floats.
+    // Row-major, so the COLUMN count is what fills a stored vector.
+    check_rule("row_major float1x4", "    row_major float1x4 m;    float probe;", 32);
+    check_rule("row_major float2x4", "    row_major float2x4 m;    float probe;", 48);
+    check_rule("row_major float3x4", "    row_major float3x4 m;    float probe;", 64);
+    check_rule("row_major float4x4", "    row_major float4x4 m;    float probe;", 80);
+
+    // Column-major, so it is the ROW count instead -- the same eight numbers, transposed.
+    check_rule("column_major float4x1", "    column_major float4x1 m;    float probe;", 32);
+    check_rule("column_major float4x2", "    column_major float4x2 m;    float probe;", 48);
+    check_rule("column_major float4x3", "    column_major float4x3 m;    float probe;", 64);
+    check_rule("column_major float4x4", "    column_major float4x4 m;    float probe;", 80);
+
+    // And a matrix starts a whole row, so what precedes it is padded out to one.
+    check_rule("a matrix starts a row", "    float a;    column_major float4x2 m;    float probe;", 64);
+}
+
+TEST("portable-hlsl spike - Q14g2 a partial last row is what SPIR-V refuses, and only with a member after it")
+{
+    // The minimal case, and the whole reason the table admits only full-float4 vectors:
     //
-    // float2x4 says so in the total outright — 48 row-major against 64 by default.
-    check_rule("float2x4 is 48 row_major", "    row_major float2x4 m;\n    float probe;", 48);
-    check_rule("float2x4 is 64 by default", "    float2x4 m;\n    float probe;", 64);
+    //     struct block { row_major float2x2 m; float probe; };
+    //
+    // D3D lays the matrix out as two rows at a 16-byte stride with 8 bytes used each, so its extent is 24 and
+    // `probe` packs into the last row's tail at 24.
+    // The SPIR-V validator measures the same matrix as `MatrixStride * V` = 32, so it reads `probe` as landing
+    // INSIDE the matrix and rejects the module:
+    //
+    //     member 1 at offset 24 overlaps previous member ending at offset 31
+    //
+    // The disagreement is exactly whether the last row claims its full stride.
+    // D3D says no, the validator yes.
+    CHECK(block_size_of("    row_major float2x2 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
+    CHECK(block_size_of("    row_major float3x3 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
+    CHECK(block_size_of("    row_major float4x3 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
 
-    // float3x4 is the trap, and the reason this case exists: both orientations total 64, so a mirror built
-    // on the total alone would look right.
-    // Row-major it is three rows of 16 and `probe` sits at 48; column-major it is four rows of 12 and `probe`
-    // sits at 60, packed into the last row's tail.
-    // The member offsets differ, which is exactly what a mirror reproduces.
-    check_rule("float3x4 totals 64 row_major", "    row_major float3x4 m;\n    float probe;", 64);
-    check_rule("float3x4 totals 64 by default", "    float3x4 m;\n    float probe;", 64);
+    // It is the FOLLOWING member that is refused rather than the matrix, which is what says the tail is the
+    // subject: the same matrix last in the block, with nothing to pack into it, compiles.
+    CHECK(block_size_of("    float probe;\n    row_major float2x2 m;", ssc::dxc::compile_target::spirv) == 48);
 
-    // So the table admits float4x4 and refuses every other matrix — and a matrix whose rows are partial in
-    // the orientation actually used is refused by the SPIR-V validator anyway, as Q14c found for float3x3.
-    CHECK(block_size_of("    row_major float4x3 m;\n    float probe;", ssc::dxc::compile_target::spirv) == -1);
+    // Column-major escapes this in practice even where the arithmetic looks identical, and the SPIR-V was not
+    // dumped to find out why the RowMajor decoration is measured differently.
+    // It does not gate anything: the pass admits only vectors of four, where extent and stride * V coincide
+    // and there is no tail to disagree about.
+    check_rule("column_major float2x2 packs its tail", "    column_major float2x2 m;    float probe;", 32);
 }
 
 TEST("portable-hlsl spike - Q14h half is 32-bit storage here, and it is a compile flag that says so")
