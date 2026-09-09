@@ -27,6 +27,8 @@ It refuses `*-example` targets too: an example is addressed by its name, not by 
 A match selecting more than one example is an error, so the command never silently runs the wrong one.
 
 `dev.py` is **quiet by default**: it captures each step to `build/<preset>/run-logs/` and prints only a one-line trace per step plus a pass/fail summary.
+Invoked through the Bash tool your stdout is a pipe, which is the non-TTY path, so you always get exactly that trace.
+The live progress region a human sees at a terminal never runs for you, and nothing about the loop below changes.
 So the loop is **dev.py, then diagnose with the MCP tools**:
 
 | After a... | Use          | For                                                            |
@@ -48,7 +50,7 @@ Everything below is session judgement; the mechanisms, flags and artifact format
 
 - **`--preset` is a PER-SUBCOMMAND flag — it goes AFTER the subcommand.**
   `uv run dev.py test --preset release-clang`, *not* `dev.py --preset … test`.
-  Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs` and `--colored` / `--plain` go before it; everything else goes after.
+  Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`, `--progress` / `--no-progress` and `--colored` / `--plain` go before it; everything else goes after.
   The `--profile*` flags are the exception: they bind on either side.
   Getting it wrong is an argparse error rather than a wrong build, so it costs a round trip, not an answer.
 

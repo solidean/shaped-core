@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import cmake, fingerprint, prereqs
-from ..core import console
+from ..core import console, ui
 from ..core.logs import step_fields, write_sidecar
 from ..core.models import Preset, StepResult
 from ..core.process import env_for_preset, run_step
@@ -113,10 +113,7 @@ def configure(
     results: list[StepResult] = []
     for preset in presets:
         if not force and fingerprint.is_current(preset.build_dir, root):
-            print(
-                console.dim(f"configure: fingerprint unchanged for {preset.name!r}, skipping"),
-                file=sys.stderr,
-            )
+            ui.write_line(console.dim(f"configure: fingerprint unchanged for {preset.name!r}, skipping"))
             continue
         results.append(_configure_one(preset, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path))
     return results
@@ -157,7 +154,7 @@ def ensure_configured_all(
         return [(stale[0], _configure_one(stale[0], root=root, mirror=mirror, verbose=verbose,
                                           emsdk_path=emsdk_path, prereqs_done=True))]
 
-    print(console.dim(f"configure: {len(stale)} presets in parallel"), file=sys.stderr)
+    ui.write_line(console.dim(f"configure: {len(stale)} presets in parallel"))
     with ThreadPoolExecutor(max_workers=len(stale)) as pool:
         results = list(zip(stale, pool.map(
             lambda p: _configure_one(p, root=root, mirror=mirror, verbose=verbose, emsdk_path=emsdk_path,

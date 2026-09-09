@@ -215,6 +215,11 @@ def main() -> None:
     parser.add_argument("--profile-lanes", choices=("global", "per-type"), default="global",
                         help="Lane allocation: 'global' (default) packs every job into one pool, "
                              "'per-type' gives each job type its own pool and its own track.")
+    progress_group = parser.add_mutually_exclusive_group()
+    progress_group.add_argument("--progress", action="store_true",
+                                help="Force the live progress display (default: on when the console is a terminal)")
+    progress_group.add_argument("--no-progress", action="store_true",
+                                help="Force the terse capture-only output — what a pipe, a redirect or CI gets anyway")
     color_group = parser.add_mutually_exclusive_group()
     color_group.add_argument("--colored", action="store_true",
                              help="Force colored output (default: auto-detect by terminal)")
@@ -235,6 +240,10 @@ def main() -> None:
         parser.error("unrecognized arguments: %s" % " ".join(forwarded))
     args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
+    # Deliberately independent of the color decision above: --plain and NO_COLOR say how to render, not whether to.
+    # A monochrome progress region is still worth having, and coupling the two axes only makes both harder to explain.
+    dev.ui.configure("off" if args.no_progress else "on" if args.progress else "auto",
+                     tail_lines=16 if args.verbose else 8)
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
     if args.profile:
         dev.profile.configure(
@@ -267,9 +276,16 @@ def main() -> None:
 
         atexit.register(_emit_profile)
 
+    import atexit as _atexit
+    _atexit.register(dev.ui.shutdown)
+
     ctx = cmd.Context(root=ROOT, policy=build_policy())
-    with dev.profile.span(args.command, type="invocation", extra={"argv": sys.argv[1:]}):
-        commands[args.command].run(args, ctx)
+    try:
+        with dev.profile.span(args.command, type="invocation", extra={"argv": sys.argv[1:]}):
+            commands[args.command].run(args, ctx)
+    finally:
+        # Before atexit, so an escaping traceback is printed below the region rather than into it.
+        dev.ui.shutdown()
 
 
 if __name__ == "__main__":

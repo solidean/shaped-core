@@ -7,7 +7,7 @@ docs/dev-py-driver.md is the design behind both.
 
 from __future__ import annotations
 
-from .lib.core import console, profile, report
+from .lib.core import console, profile, report, ui
 from .lib.core.archive import archive_diag, archive_logs
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
@@ -91,6 +91,7 @@ __all__ = [
     "build",
     "clangd",
     "console",
+    "ui",
     "profile",
     "report",
     "BuildMark",

@@ -6,6 +6,7 @@ It captures stdout/stderr to per-step log files, optionally mirroring them live,
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import shutil
@@ -20,8 +21,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from . import console, profile
-from .logs import report_capture, step_log_paths
+from . import console, profile, ui
+from .logs import capture_line, step_log_paths
 from .models import Preset, StepResult
 
 
@@ -294,12 +295,13 @@ def response_file(args: list[str], prefix: str) -> Iterator[list[str]]:
 # Step runner
 # ---------------------------------------------------------------------------
 
-def _pump(src, log_file, mirror_to) -> None:
-    """Read `src` line by line, writing to `log_file` and (optionally) `mirror_to`.
+def _pump(src, log_file, mirror_to, on_line=None) -> None:
+    """Read `src` line by line, writing to `log_file`, optionally `mirror_to`, and optionally handing it to `on_line`.
 
     This loop must not die while the child is alive.
     Nothing else drains the pipe, so a pump thread that raises leaves the child blocked on a full OS pipe buffer forever, and `proc.wait()` with it.
     So every per-line failure is reported once and swallowed, and draining continues to the end of the stream.
+    `on_line` feeds the live progress region, and is held to that same rule: a bug in the renderer must not hang the build.
     """
     reported = False
 
@@ -327,6 +329,11 @@ def _pump(src, log_file, mirror_to) -> None:
                     mirror_to.flush()
                 except Exception as e:
                     complain("mirror child output to this terminal", e)
+            if on_line is not None:
+                try:
+                    on_line(line)
+                except Exception as e:
+                    complain("show child output in the progress display", e)
     except Exception as e:
         complain("read the child's output", e)
     finally:
@@ -411,9 +418,9 @@ def run_step(
     """
     mirror = mirror or (_mirror_test_output and step_type == "test")
 
-    print(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")), file=sys.stderr)
+    ui.write_line(console.dim(f"[{_ts()}] [{step_type}]" + (f" {name}" if name else "")))
     if verbose:
-        print(console.dim(f"  $ {' '.join(cmd)}"), file=sys.stderr)
+        ui.write_line(console.dim(f"  $ {' '.join(cmd)}"))
 
     stdout_path, stderr_path = step_log_paths(build_dir, step_type, name)
 
@@ -427,16 +434,26 @@ def run_step(
     started_at = profile.now() # not time.time(): its granularity would let sequential steps overlap
     timed_out = False
     asked = False
-    with open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
+    # A mirrored step owns the screen, so the region parks for its duration rather than also holding a row.
+    # The handle is opened here and finished at the very end: the summary it collapses to is only known once the child
+    # has exited and its result has been assembled, long after the block below has closed.
+    # An exception escaping in between leaves the row live, and dev.py's own `finally: ui.shutdown()` is what erases it —
+    # before the traceback prints, so the report never lands inside a frame.
+    live = ui.open_step(name or step_type, step_type=step_type, active=not mirror)
+    with (ui.suspend() if mirror else contextlib.nullcontext()), \
+         open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
          open(stderr_path, "w", encoding="utf-8", errors="replace") as err_f:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
         )
+        # Both streams feed the one row, so ninja's stdout edges and the compiler's stderr diagnostics
+        # interleave in the tail the way they actually happened.
+        feed = live.feed
         threads = [
-            threading.Thread(target=_pump, args=(proc.stdout, out_f, sys.stdout if mirror else None)),
-            threading.Thread(target=_pump, args=(proc.stderr, err_f, sys.stderr if mirror else None)),
+            threading.Thread(target=_pump, args=(proc.stdout, out_f, sys.stdout if mirror else None, feed)),
+            threading.Thread(target=_pump, args=(proc.stderr, err_f, sys.stderr if mirror else None, feed)),
         ]
         for t in threads:
             t.start()
@@ -468,8 +485,9 @@ def run_step(
                 err_f.write("[dev.py] Could not ask it for a crash report, so there is no stack above.\n")
     duration_s = time.perf_counter() - start
 
-    report_capture(stdout_path)
-    report_capture(stderr_path)
+    for pointer in (capture_line(stdout_path), capture_line(stderr_path)):
+        if pointer:
+            ui.write_line(pointer)
 
     returncode = 124 if timed_out else proc.returncode
     profile.record(
@@ -490,10 +508,7 @@ def run_step(
 
     label = name or step_type
     if timed_out:
-        print(
-            console.red(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms"),
-            file=sys.stderr,
-        )
+        summary = console.red(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms")
     else:
         extra = ""
         if summary_extra is not None:
@@ -504,8 +519,11 @@ def run_step(
         verb = "succeeded" if result.ok else "failed"
         code_note = "" if result.ok else _describe_exit_code(returncode)
         tint = console.green if result.ok else console.red
-        print(tint(f"  {label} {verb}{extra}{code_note} in {duration_s * 1000:.0f} ms"), file=sys.stderr)
+        summary = tint(f"  {label} {verb}{extra}{code_note} in {duration_s * 1000:.0f} ms")
 
+    # Retiring the row prints the summary, so a step that passed collapses to this one line and a step that failed keeps
+    # the tail of what it was saying as the evidence.
+    live.finish(ok=result.ok, summary=summary)
     return result
 
 

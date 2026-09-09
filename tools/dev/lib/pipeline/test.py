@@ -20,6 +20,7 @@ from pathlib import Path
 from ..core import console
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset
+from ..core import ui
 from ..core.process import emsdk_env, run_step
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
@@ -144,7 +145,9 @@ def test(
         launcher_for_preset = jsr.LazyLauncher(runtime, preset_base_env)
 
         records: list[dict] = []
+        binaries = ui.open_phase(f"test {preset.name}", total=len(binary_names))
         for name in binary_names:
+            binaries.advance(name)
             target = by_name.get(name)
             if target is None or target.artifact is None:
                 continue
@@ -194,7 +197,7 @@ def test(
             # With a name filter, "no matching tests in this binary" isn't a failure.
             if test_name and not result.ok and _selected_no_tests(result.stderr_log):
                 if verbose:
-                    print(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
+                    ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
                 continue
 
             summary = None
@@ -225,6 +228,8 @@ def test(
             }
             records.append(record)
             all_records.append(record)
+
+        binaries.close()
 
         totals = {
             "binaries": len(records),
