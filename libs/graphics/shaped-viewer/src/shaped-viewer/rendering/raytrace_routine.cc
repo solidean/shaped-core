@@ -27,9 +27,9 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
 
     if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_ch == nullptr)
     {
-        // A broken edit, or a context accepting no format we can produce.
-        // Reported as FAILED rather than left pending: this will not come good until a reload, and a caller that
-        // cannot tell the two apart waits forever on a shader that is never going to compile.
+        // A shader that was never good, or a context accepting no format we can produce.
+        // Reported as FAILED rather than left pending: a caller that cannot tell the two apart waits forever on
+        // something that is not coming.
         fail_init();
         return;
     }

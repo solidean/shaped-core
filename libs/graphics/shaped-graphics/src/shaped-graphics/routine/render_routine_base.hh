@@ -69,14 +69,19 @@ protected:
 
     /// Declare from inside a phase that initialization cannot succeed at this reload generation.
     ///
-    /// The one thing that fails today is building a shader, or the pipeline over it.
-    /// A routine whose shader did not compile is not "still working on it": it stays failed until a reload, and
-    /// collapsing the two answers is how a broken shader becomes a black rectangle that says nothing.
+    /// Building a shader is what fails today; an asset a routine cannot load is the same shape and will want it too.
+    /// Either way the routine is not "still working on it": it stays failed until something changes, and collapsing
+    /// that into pending is how a routine nobody can use becomes one nobody hears about.
     ///
-    /// Cleared automatically when the phases re-run at a new generation, so a reload is a fresh verdict.
+    /// **A failed shader RELOAD does not reach here.** slib promotes a recompile only when it produced a value, so a
+    /// bad edit leaves the last good shader in place and does not even bump the reload generation, so routines keep
+    /// running on what they already built.
+    /// What reaches here is a shader that was never good: the first compile failing, a missing package, or a context
+    /// accepting no format any registered compiler produces.
     ///
-    /// **Scaffolding for the synchronous phases.** Once init is a coroutine, a failed await resolves the init async on
-    /// its error channel and that IS the failed state — this call goes away with the thing that made it necessary.
+    /// Cleared when the phases re-run at a new generation, so a genuine reload is a fresh verdict.
+    /// The spelling changes once init is a coroutine — a failed await will resolve the init async on its error
+    /// channel — but the state it reports does not.
     void fail_init();
 
     virtual void init_once(context& ctx) { (void)ctx; }

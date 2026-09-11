@@ -645,7 +645,9 @@ INVOCABLE_TEST("sg - a dependency cycle is refused where it is declared",
 namespace
 {
 // A routine whose init cannot succeed.
-// It stands in for the only thing that actually fails today: a shader that does not compile.
+// It stands in for a shader that was never good — the first compile failing, or no compiler reaching a format this
+// context accepts.
+// A failed RELOAD is not this: slib keeps the last shader that compiled.
 class broken_routine : public sg::render_routine<broken_routine>
 {
 protected:

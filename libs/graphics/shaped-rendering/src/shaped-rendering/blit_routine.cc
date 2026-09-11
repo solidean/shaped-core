@@ -17,7 +17,7 @@ void blit_routine::init_declare(sg::context& ctx)
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
 
-    // A broken edit leaves both null, so execute finds no pipeline and declines until the next reload compiles.
+    // Null only when a shader was never good: a failed reload keeps the last one that compiled and never gets here.
     _group_layout = nullptr;
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)

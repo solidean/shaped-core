@@ -148,7 +148,7 @@ void imgui_routine::init_declare(sg::context& ctx)
     // A broken edit (or a context accepting no format we can produce): (re)bind a callback that fails, so
     // init still clears every pipeline built against the old layout and execute no-ops until the next reload.
     // The atlas lives on its own routine and deliberately survives a reload — it has nothing to do with our shaders.
-    // Declared before the early return, so a broken reload still leaves the token valid and texture requests serviced.
+    // Declared before the early return, so even a routine that cannot draw still has its token and services textures.
     _textures = depend_on<impl::imgui_texture_routine>(ctx);
 
     _group_layout = nullptr;
