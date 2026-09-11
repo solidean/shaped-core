@@ -56,7 +56,8 @@ class context_uncached_scope;
 class context_cached_scope;
 class routine_registry;
 class render_routine_base;
-template <class Derived>
+struct routine_no_params; // the parameter of an UNPARAMETRIZED routine (see routine/routine_params.hh)
+template <class Derived, class Params = routine_no_params>
 class render_routine;
 template <class Derived>
 class routine_guard;

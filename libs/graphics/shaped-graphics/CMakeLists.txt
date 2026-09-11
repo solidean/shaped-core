@@ -79,6 +79,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/reload_generation.hh
     src/shaped-graphics/routine/render_routine.hh
     src/shaped-graphics/routine/render_routine_base.hh
+    src/shaped-graphics/routine/routine_params.hh
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh

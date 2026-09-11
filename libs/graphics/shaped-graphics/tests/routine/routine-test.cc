@@ -95,6 +95,22 @@ private:
 using guard_routine = counter_routine<0>;
 using racing_counter_routine = counter_routine<1>;
 
+// A routine parametrized on a RUNTIME value: the template names the parameter's type, the value is passed at acquire.
+// One instance per distinct value, so each sees its own params() and runs its own phases.
+class formatted_routine : public sg::render_routine<formatted_routine, sg::pixel_format>
+{
+public:
+    int declare = 0;
+    sg::pixel_format seen = sg::pixel_format::undefined;
+
+protected:
+    void init_declare(sg::context&) override
+    {
+        ++declare;
+        seen = params();
+    }
+};
+
 // The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
 // Reached by type — no handle, no registration call.
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
@@ -352,3 +368,37 @@ INVOCABLE_TEST("sg - acquire_exclusive serializes concurrent access to a routine
 }
 
 #endif // CC_HAS_THREADS
+
+
+// A parametrized routine is one instance per distinct parameter value, and each instance knows which value it is for.
+// Serving one instance for two values would mean a pipeline built for the wrong format -- wrong output rather than
+// slow output, which is why the parameter is part of the registry key rather than something execute() re-checks.
+INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto cmd = ctx->create_command_list();
+
+    auto const& rgba = formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm);
+    auto const& bgra = formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm);
+
+    CHECK(&rgba != &bgra);
+    CHECK(rgba.seen == sg::pixel_format::rgba8_unorm);
+    CHECK(bgra.seen == sg::pixel_format::bgra8_unorm);
+    CHECK(rgba.params() == sg::pixel_format::rgba8_unorm);
+
+    // Re-acquiring either one hands back the same instance rather than building a third.
+    // The per-thread acquire memo matches on the parameter hash too, so alternating between two values must not
+    // keep serving whichever was cached last.
+    CHECK(&formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm) == &rgba);
+    CHECK(&formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm) == &bgra);
+    CHECK(rgba.declare == 1);
+    CHECK(bgra.declare == 1);
+
+    // evict() takes the parameter, so it drops one instance and leaves the other alone.
+    formatted_routine::evict(*ctx, sg::pixel_format::rgba8_unorm);
+    CHECK(formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm).declare == 1);
+    CHECK(formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm).declare == 1); // a fresh one, back at 1
+
+    formatted_routine::evict_all(*ctx);
+    ctx->drop_command_list(cc::move(cmd));
+}

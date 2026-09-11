@@ -46,7 +46,7 @@ protected:
 
 private:
     // The phase engine is driven by the CRTP's static entry points (acquire / prewarm), not by user code.
-    template <class>
+    template <class, class>
     friend class render_routine;
     // It hands the same lock on to its caller, so it needs to name what _init guards.
     template <class>
