@@ -84,6 +84,7 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     stream(*this),
     uncached(*this),
     cached(*this),
+    routines(*this),
     _backend(backend),
     _thread_model(threading),
     _pipeline_cache(std::make_unique<pipeline_cache>())

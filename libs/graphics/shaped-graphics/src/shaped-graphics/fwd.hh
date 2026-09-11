@@ -55,6 +55,8 @@ class context_download_scope;
 class context_uncached_scope;
 class context_cached_scope;
 class routine_registry;
+struct routine_tick_options; // what one routine-init tick may do (see routine/routine_registry.hh)
+struct routine_tick_result;  // what it did
 class render_routine_base;
 struct routine_no_params; // the parameter of an UNPARAMETRIZED routine (see routine/routine_params.hh)
 template <class Derived, class Params = routine_no_params>

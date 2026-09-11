@@ -111,6 +111,23 @@ protected:
     }
 };
 
+// Slow enough that a tick with a small budget stops after one of them.
+// Two distinct types rather than two parametrizations, so the budget test does not depend on iteration order within
+// one type being stable.
+template <int Tag>
+class slow_routine : public sg::render_routine<slow_routine<Tag>>
+{
+public:
+    bool ran = false;
+
+protected:
+    void init_declare(sg::context&) override
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        ran = true;
+    }
+};
+
 // The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
 // Reached by type — no handle, no registration call.
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
@@ -313,10 +330,12 @@ INVOCABLE_TEST("sg - concurrent acquires of one routine run each phase exactly o
             [&]
             {
                 // Line the threads up so they hit the phase engine together, not one after another.
+                auto cmd = ctx->create_command_list();
                 ++ready;
                 while (ready.load() < thread_count)
                     std::this_thread::yield();
-                racing_routine::prewarm(*ctx);
+                (void)racing_routine::acquire(*cmd);
+                ctx->drop_command_list(cc::move(cmd));
             });
 
     for (auto& t : threads)
@@ -401,4 +420,71 @@ INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value
 
     formatted_routine::evict_all(*ctx);
     ctx->drop_command_list(cc::move(cmd));
+}
+
+
+// prewarm registers a routine; the TICK is what brings it up.
+// Those were the same call before, so a caller who still expects prewarm to initialize now gets a routine that is
+// registered and not ready -- which is what the tick's diagnostic is for, once acquire stops initializing on demand.
+//
+// Exclusive on the same tag as the phase-counting tests: a tick initializes EVERY registered routine in the context,
+// so it would otherwise land in the middle of another test's counts.
+INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+
+    using prewarmed = slow_routine<0>;
+    prewarmed::evict(*ctx);
+
+    prewarmed::prewarm(*ctx);
+
+    auto const first = ctx->routines.tick();
+    CHECK(first.initialized >= 1);
+
+    // Everything registered is up, so a second tick has nothing to do and says so.
+    auto const second = ctx->routines.tick();
+    CHECK(second.initialized == 0);
+    CHECK(second.is_idle());
+
+    auto cmd = ctx->create_command_list();
+    CHECK(prewarmed::acquire(*cmd).ran);
+    ctx->drop_command_list(cc::move(cmd));
+
+    prewarmed::evict(*ctx);
+}
+
+// The budget is checked between routines, so a tick that has two slow ones to bring up stops after the first.
+// It is pacing rather than a deadline: the tick still overruns by however long one routine takes, which is why this
+// asserts on what was left rather than on elapsed time.
+INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+
+    using first_slow = slow_routine<1>;
+    using second_slow = slow_routine<2>;
+
+    // Bring everything else up, so the only pending routines are the two below.
+    (void)ctx->routines.tick_until_idle();
+
+    first_slow::evict(*ctx);
+    second_slow::evict(*ctx);
+    first_slow::prewarm(*ctx);
+    second_slow::prewarm(*ctx);
+
+    // A budget far below what one routine costs, so the check between routines always trips after the first.
+    auto const bounded = ctx->routines.tick({.budget_secs = 0.001});
+    CHECK(bounded.initialized == 1);
+    CHECK(bounded.pending == 1);
+    CHECK(bounded.budget_exhausted);
+
+    auto const rest = ctx->routines.tick_until_idle();
+    CHECK(rest.initialized == 1);
+    CHECK(rest.is_idle());
+
+    first_slow::evict(*ctx);
+    second_slow::evict(*ctx);
 }

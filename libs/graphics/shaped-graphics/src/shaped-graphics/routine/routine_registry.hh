@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context
 #include <shaped-graphics/routine/render_routine_base.hh>
@@ -49,9 +50,45 @@ struct routine_key
 /// Map access is guarded, so acquiring is safe from parallel command-list recording.
 /// What a routine holds itself is guarded by the routine's own lock instead, which acquire_exclusive hands to its caller (see sg::render_routine).
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
+/// What a tick is allowed to do.
+struct sg::routine_tick_options
+{
+    /// How long the tick may spend, in seconds.
+    ///
+    /// **Advisory pacing, not a deadline.** It is checked BETWEEN routines, so a tick overruns it by however long the
+    /// longest single initialization takes, and a caller that treats it as a frame deadline will eventually miss one
+    /// and blame the wrong thing.
+    /// Absent means "do everything pending", which is what a test or a loading screen wants.
+    cc::optional<f64> budget_secs;
+};
+
+/// What a tick did.
+struct sg::routine_tick_result
+{
+    int initialized = 0;           ///< routines this tick brought up
+    int pending = 0;               ///< routines still waiting when it returned
+    bool budget_exhausted = false; ///< it stopped early, so another tick has work to do
+
+    /// Whether anything at all is left for a later tick.
+    [[nodiscard]] bool is_idle() const { return pending == 0; }
+};
+
 class sg::routine_registry
 {
 public:
+    /// Drive pending routine initialization, within an optional budget.
+    ///
+    /// **A frame-boundary call**: it opens and submits a command list of its own, so it must not run inside one, and
+    /// it belongs after advance_epoch and before the frame's first acquire.
+    /// One list is shared by every routine initialized in the same tick, so their GPU init work batches.
+    ///
+    /// Routines register themselves on first acquire or prewarm; this is what actually brings them up.
+    routine_tick_result tick(routine_tick_options const& options = {});
+
+    /// tick() until nothing is pending — the spelling a test, a tool or a loading screen wants.
+    /// Unbounded by construction, so never on a frame path.
+    routine_tick_result tick_until_idle();
+
     /// Drop every instance, releasing their cached GPU resources.
     /// Run on context shutdown, and callable early under VRAM pressure or before switching to another live context.
     void clear();
@@ -67,7 +104,14 @@ private:
     template <class, class>
     friend class render_routine;
 
-    routine_registry() = default;
+    explicit routine_registry(context& ctx) : _ctx(ctx) {}
+
+    /// Every registered instance, as shared owners, so the tick can drive them without holding the map lock.
+    /// Taking a snapshot matters: a routine's initialization may register another one, which would otherwise
+    /// invalidate the iteration underneath it.
+    [[nodiscard]] cc::vector<std::shared_ptr<render_routine_base>> snapshot();
+
+    context& _ctx;
 
     using routine_map = cc::map<impl::routine_key, std::shared_ptr<render_routine_base>>;
 

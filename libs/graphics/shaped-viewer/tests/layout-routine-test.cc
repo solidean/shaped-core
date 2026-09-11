@@ -35,8 +35,10 @@ namespace
 
 TEST("sv - the layout routine builds its shaders and layouts")
 {
-    // Deliberately the narrowest case: prewarm runs init_declare and nothing else, so a failure here is the shader
-    // package, the group layout or the inline-constants block rather than anything about a draw.
+    // Deliberately the narrowest case: prewarm registers the routine and one tick brings it up, so a failure here is
+    // the shader package, the group layout or the inline-constants block rather than anything about a draw.
+    // The tick is what does the work -- prewarm alone would register the routine and build nothing, and this test
+    // would pass while proving nothing.
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
@@ -47,7 +49,9 @@ TEST("sv - the layout routine builds its shaders and layouts")
         SKIP("no DXC compiler to build the shaders");
 
     sv::layout_routine::prewarm(*ctx_h);
-    CHECK(true);
+    auto const tick = ctx_h->routines.tick_until_idle();
+    CHECK(tick.initialized >= 1);
+    CHECK(tick.is_idle());
 }
 
 TEST("sv - the layout routine records borders, views and a wipe in one pass")

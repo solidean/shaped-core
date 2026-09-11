@@ -51,6 +51,14 @@ void render_routine_base::ensure_initialized(command_list& cmd)
     _init.lock([&](init_state& s) { ensure_initialized_impl(s, cmd); });
 }
 
+bool render_routine_base::is_initialized()
+{
+    auto const current = current_generation();
+    return _init.lock(
+        [current](init_state& s)
+        { return s.once_done && s.declared_generation == current && s.materialized_generation == current; });
+}
+
 u64 render_routine_base::current_generation()
 {
     return sg::reload_generation();

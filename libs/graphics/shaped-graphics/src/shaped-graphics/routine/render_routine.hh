@@ -116,12 +116,13 @@ public:
         return routine_guard<Derived>(self, cc::move(lock));
     }
 
-    /// Create the instance and run init_once + init_declare (kicking off async compiles) before a command list exists.
-    /// Materialize happens later, on the first acquire(cmd).
-    static void prewarm(context& ctx, Params const& params = {})
-    {
-        instance(ctx, params).ensure_initialized_no_materialize(ctx);
-    }
+    /// Register this routine so the next `ctx.routines.tick()` brings it up, before anything needs it.
+    ///
+    /// It no longer runs the phases itself: initialization is the tick's job, and a routine that is merely prewarmed
+    /// is *registered*, not ready.
+    /// Prewarming the top of a renderer is what lets a whole frame's worth of compiles start in one tick rather than
+    /// being discovered one acquire at a time.
+    static void prewarm(context& ctx, Params const& params = {}) { (void)instance(ctx, params); }
 
     /// Drop ONE parametrization's instance on ctx, releasing its cached GPU resources.
     /// A no-op if it was never acquired there.

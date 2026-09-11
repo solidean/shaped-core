@@ -51,6 +51,8 @@ private:
     // It hands the same lock on to its caller, so it needs to name what _init guards.
     template <class>
     friend class routine_guard;
+    // The tick drives initialization, so it needs to ask whether a routine still wants driving and to run its phases.
+    friend class routine_registry;
 
     /// Which phases have run, and at which reload generation.
     /// It shares _init with the derived routine's own state, so a phase runs only once even under a concurrent acquire.
@@ -60,6 +62,10 @@ private:
         cc::optional<u64> declared_generation;
         cc::optional<u64> materialized_generation;
     };
+
+    /// Whether every phase has run at the CURRENT reload generation, so a tick has nothing left to do here.
+    /// Read under the routine's lock, so it is a snapshot rather than a promise: a reload can land right after it.
+    [[nodiscard]] bool is_initialized();
 
     /// Runs init_once (first time only), then init_declare (first time + after each reload).
     /// The prewarm entry point: call it before opening a command list so async compiles start as early as possible.
