@@ -274,7 +274,13 @@ TEST("cnet - stopping an io_system settles what is still in flight")
     io->stop();
 
     CHECK(io->is_stopping());
-    REQUIRE(connecting->is_ready());
+
+    // Driven rather than read straight back: stop() ANSWERS everything outstanding, but the continuation carrying the
+    // answer runs on whoever pumps -- and with an ambient pool installed that may be a worker this thread has to let
+    // run.
+    // What the test is about is that the async settles rather than being dropped, not that it settles before stop()
+    // returns.
+    REQUIRE(pump_until([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() != nullptr);
     CHECK(connecting->try_error()->is_cancelled());
 
