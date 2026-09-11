@@ -316,7 +316,8 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         auto cmd = ctx.create_command_list();
         {
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.0f, 0.0f, 0.0f, 1.0f))}});
-            sr::blit_routine::execute(pass, color);
+            // Declines while the blit shaders are still compiling, which on the first frames is ordinary.
+            (void)sr::blit_routine::execute(pass, color);
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch(sc->buffer_count());

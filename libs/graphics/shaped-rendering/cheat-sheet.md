@@ -287,7 +287,10 @@ linear-clamp sampler.
 #include <shaped-rendering/blit_routine.hh>
 
 // Inside an already-open raster scope (the caller opens the pass on the target):
-sr::blit_routine::execute(scope, src);   // src = sg::texture_2d const&; reads the target format from the scope
+auto const r = sr::blit_routine::execute(scope, src);  // -> sg::routine_outcome (nodiscard); src = sg::texture_2d const&
+                            //   the target format comes from the scope and PICKS THE INSTANCE — one routine per format
+                            //   FALLIBLE: declines while its pipeline is still building, so a caller that cannot show a
+                            //   half-drawn frame has to look at the outcome rather than assume the draw happened
 sr::blit_routine::prewarm(ctx);          // warm the compile/pipeline ahead of the first frame
 ```
 

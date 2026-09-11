@@ -43,6 +43,19 @@ enum class sg::routine_readiness
     failed,  ///< initialization failed and will not succeed until something changes (a reload, an eviction)
 };
 
+/// What a FALLIBLE routine's execute reports back.
+///
+/// Most routines are not fallible: one whose dependency set is entirely static tokens is handed out only when its
+/// whole subtree is ready, so when it reports ready, execute goes through and returns void.
+/// A routine that acquires something dynamically during execution can still decline, and it has to SAY so — a caller
+/// that cannot tell "declined" from "nothing to draw" is how a headless capture writes a blank image and reports
+/// success.
+enum class sg::routine_outcome
+{
+    executed, ///< the work was recorded
+    declined, ///< something it needed was not ready; nothing was recorded
+};
+
 class sg::render_routine_base
 {
 public:

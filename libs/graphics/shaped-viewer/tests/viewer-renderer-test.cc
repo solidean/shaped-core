@@ -226,7 +226,8 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
     {
         // The second pass keeps what the frame just wrote, and starts from a full-target viewport of its own.
         auto scope = cmd->raster.render_to({.color_targets = {rt.preserved()}});
-        sr::blit_routine::execute(scope, overlay);
+        // The blit is fallible: it declines until its pipeline for this target format is built.
+        CHECK(sr::blit_routine::execute(scope, overlay) == sg::routine_outcome::executed);
     }
 
     ctx.submit_command_list(cc::move(cmd));

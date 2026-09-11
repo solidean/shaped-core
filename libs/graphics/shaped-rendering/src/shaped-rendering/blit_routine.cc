@@ -17,59 +17,49 @@ void blit_routine::init_declare(sg::context& ctx)
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
 
-    // A broken edit: (re)bind a callback that fails, so init still clears every pipeline built against the old layout and execute no-ops until the next reload compiles.
+    // A broken edit leaves both null, so execute finds no pipeline and declines until the next reload compiles.
+    _group_layout = nullptr;
+    _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
-    {
-        _group_layout = nullptr;
-        _pipelines.init(ctx,
-                        [](sg::context&, sg::pixel_format) -> sg::async_raster_pipeline
-                        {
-                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
-                                cc::async_error::make_error(cc::any_error("blit shaders did not compile")));
-                        });
         return;
-    }
 
     // The fragment stage carries both bindings: source_texture (t0) and the dynamic linear_sampler (s0).
     _group_layout = ctx.cached.acquire_binding_group_layout(compiled_ps->bindings);
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
 
-    // The callback captures the layout + shaders.
-    // Init clears every pipeline built against the previous ones.
-    _pipelines.init(ctx,
-                    [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-                        sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
-                    {
-                        auto const desc = sg::raster_pipeline_description{
-                            .layout = layout,
-                            .vertex_shader = vertex_shader,
-                            .fragment_shader = fragment_shader,
-                            .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
-                            .rasterization = {.cull = sg::cull_mode::none},
-                            .color_targets = {{.format = format}},
-                        };
-                        return c.cached.acquire_raster_pipeline(desc);
-                    });
+    // Started, not awaited: this instance exists for exactly one format, so there is one pipeline to build and execute
+    // polls it rather than anyone waiting here.
+    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = pipeline_layout,
+        .vertex_shader = *compiled_vs,
+        .fragment_shader = *compiled_ps,
+        .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = {{.format = params()}},
+    });
 }
 
-void blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src)
+sg::routine_outcome blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src)
 {
     auto& cmd = scope.command_list();
     CC_ASSERT(!scope.color_formats().empty(), "blit must be drawn into a scope with a color target");
     auto const format = scope.color_formats()[0];
 
-    auto const& self = acquire(cmd);
-    auto& ctx = cmd.context();
+    // The format picks the instance, and it is only knowable here — which is what makes this routine fallible.
+    auto const self = try_acquire(cmd, format);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
 
-    // Fallible rather than throwing: execute() runs inside the caller's rendering scope.
-    // An exception unwinding out of there would leave their command list unsubmitted.
-    auto const pipeline = self._pipelines.try_acquire(format);
-    if (pipeline.has_error() || pipeline.value() == nullptr)
-        return; // shaders did not compile, or this format's pipeline failed to build
+    // Polled rather than waited on.
+    // Nothing here may block: execute runs inside the caller's rendering scope, so a wait would stall a frame that has
+    // a pass open, and a throw would leave their command list unsubmitted.
+    auto const* const pipeline = self->_pipeline != nullptr ? self->_pipeline->try_value() : nullptr;
+    if (pipeline == nullptr || *pipeline == nullptr)
+        return sg::routine_outcome::declined;
 
-    auto const group = ctx.transient.create_binding_group(
-        self._group_layout, {{.name = "source_texture", .view = src.as_readonly_view()}},
+    auto const group = cmd.context().transient.create_binding_group(
+        self->_group_layout, {{.name = "source_texture", .view = src.as_readonly_view()}},
         {{.name = "linear_sampler",
           .sampler = {.min_filter = sg::sampler_filter::linear,
                       .mag_filter = sg::sampler_filter::linear,
@@ -77,8 +67,9 @@ void blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src
                       .address_u = sg::sampler_address_mode::clamp_edge,
                       .address_v = sg::sampler_address_mode::clamp_edge}}});
 
-    scope.bind_pipeline(*pipeline.value());
+    scope.bind_pipeline(**pipeline);
     scope.bind_group(0, *group);
     scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    return sg::routine_outcome::executed;
 }
 } // namespace sr
