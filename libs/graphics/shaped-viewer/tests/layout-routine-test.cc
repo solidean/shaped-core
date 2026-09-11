@@ -48,7 +48,10 @@ TEST("sv - the layout routine builds its shaders and layouts")
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the shaders");
 
-    sv::layout_routine::prewarm(*ctx_h);
+    // Prewarm names the format, because the routine is one instance per target format — and this is the case that
+    // makes that worth it: an application that knows its swapchain format can have the pipelines built before the
+    // first frame rather than the frame after.
+    sv::layout_routine::prewarm(*ctx_h, sg::pixel_format::bgra8_unorm);
     auto const tick = ctx_h->routines.tick_until_idle();
     CHECK(tick.initialized >= 1);
     CHECK(tick.is_idle());
@@ -121,7 +124,7 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-        sv::layout_routine::execute(scope, sv::window_id(0), draws, textures);
+        CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, textures) == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
@@ -161,7 +164,8 @@ TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-        sv::layout_routine::execute(scope, sv::window_id(0), draws, {.targets = sources, .traces = {}});
+        CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, {.targets = sources, .traces = {}})
+              == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();

@@ -7,7 +7,6 @@
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
-#include <shaped-rendering/keyed_pipeline_cache.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
 
@@ -50,7 +49,7 @@ struct sv::plan_textures
 ///
 /// Nothing here allocates or reclaims a texture, and nothing takes another routine's lock, so a caller may drive it
 /// from inside a scope they own.
-class sv::layout_routine : public sg::render_routine<layout_routine>
+class sv::layout_routine : public sg::render_routine<layout_routine, sg::pixel_format>
 {
 public:
     /// Records `draws` onto the open `scope`, reading each source out of `textures`.
@@ -58,19 +57,30 @@ public:
     /// The scope's first color target is what the pipelines are built for, and each draw sets its own viewport and
     /// scissor from its rect.
     /// A draw whose source is missing is skipped rather than drawn black.
-    /// A no-op if the shaders did not compile — an exception here would unwind out of the caller's open scope and
-    /// leave their command list unsubmitted.
-    static void execute(sg::rendering_scope& scope,
-                        window_id window,
-                        cc::span<layout_draw const> draws,
-                        plan_textures const& textures);
+    /// Declines, recording nothing, while the shaders are still building and after a build that failed — never by
+    /// throwing, which would unwind out of the caller's open scope and leave their command list unsubmitted.
+    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope,
+                                                     window_id window,
+                                                     cc::span<layout_draw const> draws,
+                                                     plan_textures const& textures);
 
 protected:
     void init_declare(sg::context& ctx) override;
 
 private:
+    /// How many pipelines one instance holds: every draw_kind, blended and not.
+    static constexpr int k_draw_kinds = 4;
+
     sg::binding_group_layout_handle _group_layout;
 
-    /// Mutable because the cache guards itself and its whole acquire path is const, so a lazy build needs no routine lock.
-    mutable sr::keyed_pipeline_cache<impl::layout_pipeline_key> _pipelines;
+    /// Every pipeline this format needs, indexed [kind][blended], built during init.
+    ///
+    /// The format does not vary within one invocation, so it parametrizes the routine — but kind and blend DO vary
+    /// per draw, which is why they are declared here rather than making the routine one instance per draw.
+    /// Six of the eight slots are reachable: a flat fill is always blended, so background and border have no unblended
+    /// form and those two stay null.
+    ///
+    /// Built up front rather than on demand precisely because the alternative is a build on the frame path, inside the
+    /// caller's open rendering scope — which is where nothing may wait.
+    sg::raster_pipeline_handle _pipelines[k_draw_kinds][2];
 };

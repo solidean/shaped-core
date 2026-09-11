@@ -303,5 +303,10 @@ TEST("cnet - stopping twice is the same as stopping once")
 
     // The destructor calls it too, so a caller who stopped by hand must not pay for it twice.
     // Driven for the same reason as the test above: the continuation carrying the answer runs on whoever pumps.
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    //
+    // A longer budget than the default here, and only here.
+    // This one has been seen to need it under the full parallel suite, where the ambient pool is saturated by eighty
+    // other binaries and a queued continuation waits behind all of them.
+    // The number is a safety net against a hang rather than a measurement: what is asserted is that it settles at all.
+    CHECK(pump_until([&] { return connecting->is_ready(); }, 30000));
 }

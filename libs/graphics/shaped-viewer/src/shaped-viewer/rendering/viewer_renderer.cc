@@ -15,10 +15,12 @@ void viewer_renderer::init_declare(sg::context& ctx)
     // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
     _view_renderer = depend_on<view_renderer>(ctx);
 
-    // The layout routine is NOT declared here, and cannot be: it is acquired per target format, and this frame draws
-    // the output in one format and every intermediate target in another.
-    // Registering it is still worth doing, so the next tick brings it up rather than the first frame discovering it.
-    layout_routine::prewarm(ctx);
+    // The layout routine is neither declared nor prewarmed here, and cannot be either: it is acquired per target
+    // format, this frame draws the output in one format and every intermediate target in another, and neither is
+    // known until the frame runs.
+    // So it is registered by the first execute that reaches it and brought up by the following tick, which costs the
+    // frames in between -- an application that knows its swapchain format can prewarm it itself and skip that.
+    (void)ctx;
 }
 
 sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
@@ -35,6 +37,10 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         return sg::routine_outcome::declined;
 
     CC_ASSERT(plan.validate(), "a render plan must be in dependency order before it is recorded");
+
+    // A frame where any pass declined is a frame the caller should not treat as complete, even though the rest of it
+    // recorded — a capture that saved it would be missing whatever that pass was going to place.
+    auto declined = false;
 
     // Allocate (or resize) every texture the plan names, and touch every view it reaches.
     auto const res = view_renderer::resolve(cmd, plan, store);
@@ -67,7 +73,10 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         if (target.is_output)
         {
             auto scope = cmd.raster.render_to({.color_targets = {output}});
-            layout_routine::execute(scope, window_id(0), draws, textures);
+            // The layout routine is acquired per format, so it can still be building for THIS one even though the
+            // chain above was ready — the one place in the frame where that is possible.
+            if (layout_routine::execute(scope, window_id(0), draws, textures) == sg::routine_outcome::declined)
+                declined = true;
             continue;
         }
 
@@ -79,8 +88,9 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         // Transparent black, since every view target carries premultiplied alpha.
         auto scope = cmd.raster.render_to(
             {.color_targets = {textures.targets[ti].as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
-        layout_routine::execute(scope, window_id(0), draws, textures);
+        if (layout_routine::execute(scope, window_id(0), draws, textures) == sg::routine_outcome::declined)
+            declined = true;
     }
-    return sg::routine_outcome::executed;
+    return declined ? sg::routine_outcome::declined : sg::routine_outcome::executed;
 }
 } // namespace sv
