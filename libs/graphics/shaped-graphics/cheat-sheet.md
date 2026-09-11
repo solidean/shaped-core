@@ -84,6 +84,12 @@ sg::present_mode          // vsync | immediate  (swapchain frame pacing — see 
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
+ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
+                                                   //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader
+                                                   //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
+                                                   //   ctx.supports_headless_present()) all forward here, so there is one answer per question
+ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
+                                                   //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this

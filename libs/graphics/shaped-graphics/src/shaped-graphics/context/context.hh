@@ -11,6 +11,7 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
@@ -44,14 +45,26 @@ public:
     /// Whether this context can build pipelines from `format`.
     [[nodiscard]] bool accepts_shader_format(shader_format format) const;
 
+    /// Whether this context has a capability at all — see sg::feature for what "at all" means and why the set is small.
+    ///
+    /// Defaults to false for everything, so a backend reports what it has implemented rather than failing at the call
+    /// site — which is what lets a test skip cleanly instead of asserting.
+    [[nodiscard]] virtual bool supports(feature f) const
+    {
+        (void)f;
+        return false;
+    }
+
+    /// The numeric bounds a portable caller stays inside.
+    /// See sg::device_limits.
+    [[nodiscard]] device_limits const& limits() const { return _limits; }
+
     /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
     ///
     /// A build-and-device fact rather than a preference, and it differs by backend for a real reason: vulkan needs
     /// VK_EXT_headless_surface plus VK_KHR_swapchain, while dx12 emulates the whole thing with ordinary render-target
     /// textures and therefore always can.
-    /// Defaults to false, so a backend that has not implemented headless present reports it rather than failing at
-    /// creation — which is what lets a test skip cleanly instead of asserting.
-    [[nodiscard]] virtual bool supports_headless_present() const { return false; }
+    [[nodiscard]] bool supports_headless_present() const { return supports(feature::headless_present); }
 
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
@@ -501,6 +514,9 @@ protected:
 
     // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
     adapter_info _adapter;
+
+    // The portable floors a caller sizes against, raised by a backend that has actually measured them.
+    device_limits _limits;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;

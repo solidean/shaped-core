@@ -40,6 +40,8 @@ class stream_source;                  // the lazy chunk sequence feeding a strea
 
 class context;
 struct adapter_info;       // which GPU a context runs on (see context/adapter_info.hh)
+enum class feature;        // a capability a context has or has not (see context/capabilities.hh)
+struct device_limits;      // the portable floors a caller sizes against (see context/capabilities.hh)
 struct gpu_memory_usage;   // GPU memory as this process sees it (context/gpu_metrics.hh)
 struct gpu_load;           // how busy the GPU was over a sampling interval
 struct gpu_engine_counter; // monotone busy time on one engine class

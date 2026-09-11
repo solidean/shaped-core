@@ -1,6 +1,8 @@
-#include <clean-core/fwd.hh> // cc::u64: epoch is an enum over u64
+#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/fwd.hh>            // cc::u64: epoch is an enum over u64
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/types.hh>
 
@@ -81,4 +83,31 @@ INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_han
     ctx->wait_for_next_inflight_epoch();
     ctx->wait_for_epoch(ctx->completed_epoch());
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
+}
+
+// ctx.supports() is the single source for a capability, and the per-scope bools forward to it.
+// Two spellings that can disagree is the failure this pins: a backend answering "yes" at the recording site and "no"
+// at the context is how a caller ends up gating on the wrong one.
+INVOCABLE_TEST("sg - capability queries agree with the context", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+
+    CHECK(cmd->raytracing.is_supported() == ctx->supports(sg::feature::raytracing));
+    CHECK(cmd->query.is_supported() == ctx->supports(sg::feature::timestamp_query));
+    CHECK(ctx->supports_headless_present() == ctx->supports(sg::feature::headless_present));
+
+    ctx->drop_command_list(cc::move(cmd));
+}
+
+// The limits are floors a portable caller sizes against, so they must be reportable and sane on every backend.
+INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const& limits = ctx->limits();
+    CHECK(limits.max_binding_groups == sg::max_binding_groups);
+    CHECK(limits.max_sample_count >= 1);
 }

@@ -189,7 +189,23 @@ public:
         return _headless_surface_supported && _swapchain_supported;
     }
 
-    [[nodiscard]] bool supports_headless_present() const override { return is_headless_present_supported(); }
+    /// Vulkan has every stage sg models, so the graphics-stage features are a flat yes; the other three are device facts.
+    [[nodiscard]] bool supports(sg::feature f) const override
+    {
+        switch (f)
+        {
+        case sg::feature::raytracing:
+            return is_raytracing_supported();
+        case sg::feature::timestamp_query:
+            return _query_system.supports_timestamps();
+        case sg::feature::headless_present:
+            return is_headless_present_supported();
+        case sg::feature::geometry_shader:
+        case sg::feature::tessellation_shader:
+            return true;
+        }
+        return false;
+    }
 
     /// Whether this instance can create a surface for `platform`.
     /// False for one whose extension the loader does not offer, and for one this build was compiled without — a
