@@ -59,6 +59,8 @@ void box_filter_mipmap_routine::init_declare(sg::context& ctx)
     (void)cc::try_async_blocking_get(node);
     if (auto const* const built = node->try_value())
         _program = *built;
+    else
+        fail_init(); // the shader or the pipeline did not build, and will not until a reload
 }
 
 void box_filter_mipmap_routine::_dispatch_level(sg::command_list& cmd,

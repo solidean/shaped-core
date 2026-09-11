@@ -32,13 +32,16 @@ struct sv::trace_desc
 /// A render routine (see the "everything that traces is a routine" rule).
 /// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
 /// `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the output image.
-/// `execute` only reads what `init_declare` built, so it takes the const `acquire` and holds no lock — concurrent traces on the same context do not serialize on this routine.
+/// `execute` only reads what `init_declare` built, so it holds no lock — concurrent traces on the same context do not serialize on this routine.
+/// Unparametrized: there is one pipeline, not one per anything.
 class sv::pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and dispatches `d.size` primary rays into `d.output`.
-    /// A no-op (leaves the target untouched) if the shaders did not compile.
-    static void execute(sg::command_list& cmd, trace_desc const& d);
+    ///
+    /// Declines, leaving the target untouched, while the shaders are still building and after a build that failed —
+    /// which a caller can tell apart by asking try_acquire directly.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, trace_desc const& d);
 
 protected:
     void init_declare(sg::context& ctx) override;

@@ -16,6 +16,8 @@ void render_routine_base::ensure_initialized_no_materialize_impl(init_state& s, 
     u64 const current = current_generation();
     if (s.declared_generation != current)
     {
+        // A fresh generation is a fresh verdict: whatever failed last time is given another chance to compile.
+        _failed = false;
         // Re-runs on every shader reload, so this is what a hot-reload hitch costs.
         CC_RECORD_SCOPE("sg.routine.declare");
         init_declare(ctx);
@@ -63,7 +65,16 @@ routine_readiness render_routine_base::own_readiness_locked(init_state const& s)
 {
     auto const current = current_generation();
     auto const done = s.once_done && s.declared_generation == current && s.materialized_generation == current;
-    return done ? routine_readiness::ready : routine_readiness::pending;
+    if (!done)
+        return routine_readiness::pending;
+    return _failed ? routine_readiness::failed : routine_readiness::ready;
+}
+
+void render_routine_base::fail_init()
+{
+    // Called from inside a phase, which already runs under _init — so the flag is written directly rather than by
+    // re-taking a lock cc::mutex would not let us take twice.
+    _failed = true;
 }
 
 routine_readiness render_routine_base::own_readiness()

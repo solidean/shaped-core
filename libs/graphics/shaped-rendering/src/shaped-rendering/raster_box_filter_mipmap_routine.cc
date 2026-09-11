@@ -21,7 +21,10 @@ void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
     _group_layout = nullptr;
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
+    {
+        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
         return;
+    }
 
     // The fragment stage carries the one binding: gSource (t0), the single-mip view of the level being read.
     // No sampler — the filter loads its four texels rather than sampling, which is what makes the tap positions

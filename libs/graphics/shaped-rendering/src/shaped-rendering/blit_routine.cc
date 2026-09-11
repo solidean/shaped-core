@@ -21,7 +21,10 @@ void blit_routine::init_declare(sg::context& ctx)
     _group_layout = nullptr;
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
+    {
+        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
         return;
+    }
 
     // The fragment stage carries both bindings: source_texture (t0) and the dynamic linear_sampler (s0).
     _group_layout = ctx.cached.acquire_binding_group_layout(compiled_ps->bindings);

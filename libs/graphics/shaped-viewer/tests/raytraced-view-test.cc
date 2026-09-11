@@ -81,14 +81,15 @@ TEST("sv - flat-PBR raytraced view (headless)")
          .height = size[1],
          .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
-    sv::pbr_raytrace_routine::execute(*cmd, {.frame = frame,
-                                             .background = background,
-                                             .instances = instances,
-                                             .output = target,
-                                             .materials = mat_rec->materials,
-                                             .vertices = mesh_rec->vertices,
-                                             .indices = mesh_rec->indices,
-                                             .size = size});
+    CHECK(sv::pbr_raytrace_routine::execute(*cmd, {.frame = frame,
+                                                   .background = background,
+                                                   .instances = instances,
+                                                   .output = target,
+                                                   .materials = mat_rec->materials,
+                                                   .vertices = mesh_rec->vertices,
+                                                   .indices = mesh_rec->indices,
+                                                   .size = size})
+          == sg::routine_outcome::executed);
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();

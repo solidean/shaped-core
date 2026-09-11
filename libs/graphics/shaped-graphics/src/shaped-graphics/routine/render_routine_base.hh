@@ -67,6 +67,18 @@ public:
 protected:
     render_routine_base() = default;
 
+    /// Declare from inside a phase that initialization cannot succeed at this reload generation.
+    ///
+    /// The one thing that fails today is building a shader, or the pipeline over it.
+    /// A routine whose shader did not compile is not "still working on it": it stays failed until a reload, and
+    /// collapsing the two answers is how a broken shader becomes a black rectangle that says nothing.
+    ///
+    /// Cleared automatically when the phases re-run at a new generation, so a reload is a fresh verdict.
+    ///
+    /// **Scaffolding for the synchronous phases.** Once init is a coroutine, a failed await resolves the init async on
+    /// its error channel and that IS the failed state — this call goes away with the thing that made it necessary.
+    void fail_init();
+
     virtual void init_once(context& ctx) { (void)ctx; }
     virtual void init_declare(context& ctx) { (void)ctx; }
     virtual void init_materialize(command_list& cmd) { (void)cmd; }
@@ -125,6 +137,12 @@ private:
 
     /// The process-global reload generation to compare against (sg::reload_generation).
     [[nodiscard]] static u64 current_generation();
+
+    /// Set by fail_init from inside a phase, cleared when the phases re-run at a new generation.
+    ///
+    /// Guarded by _init rather than held inside it: a phase runs under that lock and cc::mutex is not recursive, so a
+    /// flag the phase itself must set cannot live in the payload it would have to re-take the lock to reach.
+    bool _failed = false;
 
     cc::mutex<init_state> _init;
 };

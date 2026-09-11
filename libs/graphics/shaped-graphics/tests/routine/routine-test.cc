@@ -641,3 +641,42 @@ INVOCABLE_TEST("sg - a dependency cycle is refused where it is declared",
     cyclic_a::evict(*ctx);
     cyclic_b::evict(*ctx);
 }
+
+namespace
+{
+// A routine whose init cannot succeed.
+// It stands in for the only thing that actually fails today: a shader that does not compile.
+class broken_routine : public sg::render_routine<broken_routine>
+{
+protected:
+    void init_declare(sg::context&) override { fail_init(); }
+};
+} // namespace
+
+// "Still compiling" and "will never compile" have to be different answers.
+// Collapsed into one, a routine with a broken shader reads as pending forever: every caller keeps skipping it, no
+// frame ever looks wrong enough to investigate, and nothing anywhere says why.
+INVOCABLE_TEST("sg - a routine whose init fails reports failed, not pending",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    broken_routine::evict(*ctx);
+
+    CHECK(broken_routine::try_acquire(*ctx).is_pending()); // registered, not yet attempted
+
+    (void)ctx->routines.tick_until_idle();
+
+    auto const failed = broken_routine::try_acquire(*ctx);
+    CHECK(failed.is_failed());
+    CHECK(!failed.is_ready());
+    CHECK(!failed.is_pending());
+
+    // A reload is a fresh verdict: the phases run again and get another chance to compile.
+    // (This one fails again, so it is the re-attempt that is being checked, not the outcome.)
+    sg::signal_reload();
+    (void)ctx->routines.tick_until_idle();
+    CHECK(broken_routine::try_acquire(*ctx).is_failed());
+
+    broken_routine::evict(*ctx);
+}

@@ -154,7 +154,10 @@ void imgui_routine::init_declare(sg::context& ctx)
     _group_layout = nullptr;
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
+    {
+        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
         return;
+    }
 
     // Group 0 is built from the *fragment* bindings alone.
     // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).

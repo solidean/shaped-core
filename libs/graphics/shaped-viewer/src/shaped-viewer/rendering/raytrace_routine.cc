@@ -26,7 +26,13 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     _group_layout = nullptr;
 
     if (compiled_rg == nullptr || compiled_ms == nullptr || compiled_ch == nullptr)
-        return; // a broken edit, or a context accepting no format we can produce — execute no-ops
+    {
+        // A broken edit, or a context accepting no format we can produce.
+        // Reported as FAILED rather than left pending: this will not come good until a reload, and a caller that
+        // cannot tell the two apart waits forever on a shader that is never going to compile.
+        fail_init();
+        return;
+    }
 
     // The global root signature must cover every binding *any* stage uses
     // (raygen: scene/Output/frame; miss: background; hit: frame/Materials/Vertices/Indices).
@@ -43,7 +49,10 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
     auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
     if (pipeline_r.has_error())
-        return; // the state object did not build — execute no-ops, as for a broken shader
+    {
+        fail_init(); // the state object did not build — as final as a broken shader, and reported the same way
+        return;
+    }
     _pipeline = cc::move(pipeline_r).value();
 
     auto stbd = sg::raytracing_shader_table_description{.pipeline = _pipeline};
@@ -53,28 +62,31 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     _table = ctx.uncached.create_raytracing_shader_table(stbd);
 }
 
-void pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
+sg::routine_outcome pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)
 {
-    auto const& self = acquire(cmd);
+    auto const self = try_acquire(cmd);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
 
-    if (self._pipeline == nullptr || self._table == nullptr)
-        return; // shaders did not compile, or the pipeline did not build; leave the target untouched
+    if (self->_pipeline == nullptr || self->_table == nullptr)
+        return sg::routine_outcome::declined; // nothing to trace with; leave the target untouched
 
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
     auto const group = ctx.transient.create_binding_group(
-        self._group_layout, {{.name = "scene", .view = tlas->as_view()},
-                             {.name = "Output", .view = d.output.as_readwrite_view()},
-                             {.name = "frame", .view = d.frame.as_uniform_buffer()},
-                             {.name = "background", .view = d.background.as_uniform_buffer()},
-                             {.name = "Materials", .view = d.materials.as_readonly_buffer()},
-                             {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
-                             {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
+        self->_group_layout, {{.name = "scene", .view = tlas->as_view()},
+                              {.name = "Output", .view = d.output.as_readwrite_view()},
+                              {.name = "frame", .view = d.frame.as_uniform_buffer()},
+                              {.name = "background", .view = d.background.as_uniform_buffer()},
+                              {.name = "Materials", .view = d.materials.as_readonly_buffer()},
+                              {.name = "Vertices", .view = d.vertices.as_readonly_buffer()},
+                              {.name = "Indices", .view = d.indices.as_readonly_buffer()}});
 
-    cmd.raytracing.bind_pipeline(*self._pipeline);
+    cmd.raytracing.bind_pipeline(*self->_pipeline);
     cmd.raytracing.bind_group(0, *group);
-    cmd.raytracing.dispatch_rays(*self._table, self._raygen, d.size[0], d.size[1]);
+    cmd.raytracing.dispatch_rays(*self->_table, self->_raygen, d.size[0], d.size[1]);
+    return sg::routine_outcome::executed;
 }
 } // namespace sv
