@@ -66,6 +66,8 @@ template <class Derived, class Params = routine_no_params>
 class render_routine;
 template <class Derived>
 class routine_guard;
+template <class Other, class Params>
+class routine_dependency; // one routine's declared need for another (see routine/render_routine.hh)
 class pipeline_cache;
 class command_list;
 class command_list_upload_scope;

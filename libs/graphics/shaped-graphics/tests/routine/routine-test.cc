@@ -520,3 +520,124 @@ INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
 
     reported::evict(*ctx);
 }
+
+namespace
+{
+// A dependency chain: chained_leaf <- chained_middle <- chained_top.
+// The token is minted during init and redeemed through the scope, which is what makes "valid while the holder is
+// acquired" a compile-time property rather than a runtime check.
+class chained_leaf : public sg::render_routine<chained_leaf>
+{
+public:
+    int value = 0;
+
+protected:
+    void init_declare(sg::context&) override { value = 7; }
+};
+
+class chained_middle : public sg::render_routine<chained_middle>
+{
+public:
+    [[nodiscard]] int leaf_value(sg::routine_scope<chained_middle> const& self) const
+    {
+        return self.acquire(_leaf).value;
+    }
+
+protected:
+    void init_declare(sg::context& ctx) override { _leaf = depend_on<chained_leaf>(ctx); }
+
+private:
+    sg::routine_dependency<chained_leaf, sg::routine_no_params> _leaf;
+};
+
+class chained_top : public sg::render_routine<chained_top>
+{
+protected:
+    void init_declare(sg::context& ctx) override { _middle = depend_on<chained_middle>(ctx); }
+
+private:
+    sg::routine_dependency<chained_middle, sg::routine_no_params> _middle;
+};
+} // namespace
+
+// A holder is not ready until its whole subtree is, which is what makes redeeming a token inside it infallible.
+// Without the fold, `top` would report ready while the leaf it transitively needs had never run.
+INVOCABLE_TEST("sg - a routine is not ready until its dependencies are",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    chained_top::evict(*ctx);
+    chained_middle::evict(*ctx);
+    chained_leaf::evict(*ctx);
+
+    // Registers top; its init has not run, so the edges do not exist yet either.
+    CHECK(chained_top::try_acquire(*ctx).is_pending());
+
+    (void)ctx->routines.tick_until_idle();
+
+    auto const top = chained_top::try_acquire(*ctx);
+    CHECK(top.is_ready());
+
+    // The middle reaches the leaf through the token, never by acquiring it again.
+    auto const middle = chained_middle::try_acquire(*ctx);
+    REQUIRE(middle.is_ready());
+    CHECK(middle->leaf_value(middle) == 7);
+
+    chained_top::evict(*ctx);
+    chained_middle::evict(*ctx);
+    chained_leaf::evict(*ctx);
+}
+
+namespace
+{
+// Two routines that need each other.
+// Declared apart and defined below, because each init names the other's type.
+class cyclic_b;
+
+class cyclic_a : public sg::render_routine<cyclic_a>
+{
+protected:
+    void init_declare(sg::context& ctx) override;
+
+private:
+    sg::routine_dependency<cyclic_b, sg::routine_no_params> _b;
+};
+
+class cyclic_b : public sg::render_routine<cyclic_b>
+{
+protected:
+    void init_declare(sg::context& ctx) override;
+
+private:
+    sg::routine_dependency<cyclic_a, sg::routine_no_params> _a;
+};
+
+void cyclic_a::init_declare(sg::context& ctx)
+{
+    _b = depend_on<cyclic_b>(ctx);
+}
+void cyclic_b::init_declare(sg::context& ctx)
+{
+    _a = depend_on<cyclic_a>(ctx);
+}
+} // namespace
+
+// A cycle is refused where the edge is declared, not discovered later as a hang.
+// It is two failures at once: readiness never settles because each end waits for the other, and initialization would
+// deadlock taking the two routines' locks in opposite orders -- a stack trace naming two mutexes and no routine.
+INVOCABLE_TEST("sg - a dependency cycle is refused where it is declared",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    cyclic_a::evict(*ctx);
+    cyclic_b::evict(*ctx);
+
+    cyclic_a::prewarm(*ctx);
+    CHECK_ASSERTS(ctx->routines.tick_until_idle());
+
+    // The registry is left holding the half-built graph, so clear it rather than leaving it for the next test.
+    cyclic_a::evict(*ctx);
+    cyclic_b::evict(*ctx);
+}

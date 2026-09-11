@@ -35,6 +35,16 @@ public:
     }
     [[nodiscard]] Derived* operator->() const { return &**this; }
 
+    /// Redeem a dependency token minted by THIS routine's init.
+    /// See routine_scope::acquire.
+    template <class Other, class P>
+    [[nodiscard]] Other const& acquire(routine_dependency<Other, P> const& token) const
+    {
+        CC_ASSERT(is_ready(), "a dependency was redeemed through a routine that is not ready");
+        CC_ASSERT(token.is_valid(), "a dependency token was never minted — declare it with depend_on during init");
+        return *token._target;
+    }
+
     routine_guard(routine_guard&&) = default;
     routine_guard& operator=(routine_guard&&) = default;
 
@@ -56,6 +66,45 @@ private:
     routine_readiness _readiness;
     // The phase engine's lock is the routine's lock; what it guards is the whole of *_routine, not just the phase flags.
     cc::mutex_guard<render_routine_base::init_state> _lock;
+};
+
+/// A promise, minted during one routine's init, that another routine is ready whenever the holder is.
+///
+/// The framework refuses to hand out the holder until its whole token subtree is ready, so redeeming a token during
+/// execution cannot fail — which is what keeps the branch count at one per entry into the routine system rather than
+/// one per routine.
+///
+/// It holds a STRONG reference: a depended-on routine cannot be evicted while a dependent exists, so redemption needs
+/// no liveness check at all.
+/// It is redeemed through a scope or a guard rather than off the routine, so a token used somewhere its holder is not
+/// acquired does not compile.
+template <class Other, class Params>
+class sg::routine_dependency
+{
+public:
+    routine_dependency() = default;
+
+    /// False until an init minted it — a default-constructed token names nothing.
+    [[nodiscard]] bool is_valid() const { return _target != nullptr; }
+
+    /// The parameter the dependency was minted for.
+    [[nodiscard]] Params const& params() const { return _params; }
+
+private:
+    template <class, class>
+    friend class render_routine;
+    template <class>
+    friend class routine_scope;
+    template <class>
+    friend class routine_guard;
+
+    explicit routine_dependency(std::shared_ptr<Other> target, Params params)
+      : _target(cc::move(target)), _params(cc::move(params))
+    {
+    }
+
+    std::shared_ptr<Other> _target;
+    Params _params = {};
 };
 
 /// Read-only access to a routine's per-context instance, plus where it stands — what try_acquire hands back.
@@ -82,6 +131,18 @@ public:
         return *_routine;
     }
     [[nodiscard]] Derived const* operator->() const { return &**this; }
+
+    /// Redeem a dependency token minted by THIS routine's init.
+    ///
+    /// Infallible: the framework refused to hand *this* out until the whole token subtree was ready.
+    /// Only reachable through a scope, which is what makes "valid while the holder is acquired" structural.
+    template <class Other, class P>
+    [[nodiscard]] Other const& acquire(routine_dependency<Other, P> const& token) const
+    {
+        CC_ASSERT(is_ready(), "a dependency was redeemed through a routine that is not ready");
+        CC_ASSERT(token.is_valid(), "a dependency token was never minted — declare it with depend_on during init");
+        return *token._target;
+    }
 
     routine_scope(routine_scope&&) = default;
     routine_scope& operator=(routine_scope&&) = default;
@@ -227,7 +288,28 @@ public:
     /// The parameter this instance was created for.
     [[nodiscard]] Params const& params() const { return _params; }
 
+protected:
+    /// Declare that this routine needs another one, and get the token that reaches it during execution.
+    ///
+    /// Call it from init.
+    /// The edge is recorded, so this routine is not handed out until `Other` is ready too, and a cycle is refused
+    /// where the edge is declared rather than discovered as a hang.
+    /// Minting every token before awaiting anything is what lets a whole subtree start together.
+    template <class Other, class P = typename Other::params_t>
+    [[nodiscard]] routine_dependency<Other, P> depend_on(context& ctx, P const& params = {})
+    {
+        auto target = Other::shared_instance(ctx, params);
+        ctx.routines.add_dependency(this, target);
+        return routine_dependency<Other, P>(cc::move(target), params);
+    }
+
 private:
+    // depend_on reaches another routine's shared_instance, so every instantiation is a friend of every other.
+    // The alternative is making that public, which would hand any caller a way to keep a routine alive behind the
+    // registry's back.
+    template <class, class>
+    friend class render_routine;
+
     /// Per-thread memo of the last instance handed out, so the steady state costs a pointer compare instead of a locked map lookup.
     /// Weak on purpose: a cached slot must never keep a routine alive past evict/clear/context shutdown — expiry is exactly what invalidates it.
     ///
@@ -241,6 +323,23 @@ private:
         std::weak_ptr<Derived> alive;
     };
 
+    /// The per-context instance for Derived at `params` as a shared owner, created on first use.
+    /// A dependency token holds one of these, which is what pins a depended-on routine against eviction.
+    [[nodiscard]] static std::shared_ptr<Derived> shared_instance(context& ctx, Params const& params)
+    {
+        auto held = ctx.routines.template get_or_create<Derived>(impl::routine_params_hash(params),
+                                                                 [&]
+                                                                 {
+                                                                     auto r = std::make_shared<Derived>();
+                                                                     r->_params = params;
+                                                                     return r;
+                                                                 });
+        // Two distinct parameters that hash alike would otherwise silently share one instance, which is a wrong
+        // pipeline rather than a slow one.
+        CC_ASSERT(held->params() == params, "routine parameter hash collision");
+        return held;
+    }
+
     /// The per-context instance for Derived at `params`, created on first use.
     [[nodiscard]] static Derived& instance(context& ctx, Params const& params)
     {
@@ -252,16 +351,7 @@ private:
         if (cache.ctx == &ctx && cache.params_hash == params_hash && !cache.alive.expired())
             return *cache.routine;
 
-        auto const held = ctx.routines.template get_or_create<Derived>(params_hash,
-                                                                       [&]
-                                                                       {
-                                                                           auto r = std::make_shared<Derived>();
-                                                                           r->_params = params;
-                                                                           return r;
-                                                                       });
-        // Two distinct parameters that hash alike would otherwise silently share one instance, which is a wrong
-        // pipeline rather than a slow one.
-        CC_ASSERT(held->params() == params, "routine parameter hash collision");
+        auto const held = shared_instance(ctx, params);
         cache = {&ctx, params_hash, held.get(), held};
         return *held;
     }

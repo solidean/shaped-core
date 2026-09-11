@@ -89,6 +89,13 @@ public:
     /// Unbounded by construction, so never on a frame path.
     routine_tick_result tick_until_idle();
 
+    /// Where `routine` stands, folding in everything it depends on.
+    ///
+    /// A routine whose dependency is not up is not usable either, which is the whole point of a token: the holder is
+    /// refused until its subtree is ready, so redeeming one inside the holder cannot fail.
+    /// `failed` absorbs and `pending` dominates `ready`, so one broken dependency anywhere makes the holder failed.
+    [[nodiscard]] routine_readiness readiness_of(render_routine_base& routine);
+
     /// Drop every instance, releasing their cached GPU resources.
     /// Run on context shutdown, and callable early under VRAM pressure or before switching to another live context.
     void clear();
@@ -105,6 +112,18 @@ private:
     friend class render_routine;
 
     explicit routine_registry(context& ctx) : _ctx(ctx) {}
+
+    /// Record that `from` depends on `to`, and refuse a cycle.
+    ///
+    /// The edges live here rather than on the routines because the cycle check has to walk several of them: doing that
+    /// through per-routine locks would take them in whatever order the graph happens to have, which is the deadlock
+    /// the check exists to prevent.
+    void add_dependency(render_routine_base const* from, std::shared_ptr<render_routine_base> to);
+
+    /// Forget what an evicted routine depended on.
+    /// Edges pointing AT it are left alone: they belong to routines that still hold a token, and the strong reference
+    /// in that token is what keeps it alive — which is exactly the promise a token makes.
+    void drop_edges_from(render_routine_base const* routine);
 
     /// Every registered instance, as shared owners, so the tick can drive them without holding the map lock.
     /// Taking a snapshot matters: a routine's initialization may register another one, which would otherwise
@@ -142,7 +161,17 @@ private:
     void evict(u64 params_hash)
     {
         auto const key = impl::routine_key{.type = impl::routine_type_key<R>(), .params_hash = params_hash};
-        _entries.lock([key](routine_map& entries) { entries.erase(key); });
+        auto const evicted = _entries.lock(
+            [key](routine_map& entries) -> std::shared_ptr<render_routine_base>
+            {
+                auto e = entries.entry(key);
+                if (!e.exists())
+                    return nullptr;
+                auto held = e.value();
+                entries.erase(key);
+                return held;
+            });
+        drop_edges_from(evicted.get());
     }
 
     /// Drop EVERY parametrization of R.
@@ -163,5 +192,12 @@ private:
             });
     }
 
+    using edge_map = cc::map<render_routine_base const*, cc::vector<std::shared_ptr<render_routine_base>>>;
+
     cc::mutex<routine_map> _entries;
+
+    // A token holds a strong reference, so an edge does too: a depended-on routine cannot be evicted while a
+    // dependent exists.
+    // clear() drops these first, so a cycle that slipped past the check does not outlive the registry.
+    cc::mutex<edge_map> _edges;
 };
