@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <sv_shaders.hh>
@@ -53,17 +54,20 @@ constexpr sg::blend_state over_blend
 }
 } // namespace
 
-void layout_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 {
-    auto vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
-    auto border_ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
-    auto view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
-    auto wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
+    auto& ctx = scope.context();
 
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(border_ps);
-    (void)cc::try_async_blocking_get(view_ps);
-    (void)cc::try_async_blocking_get(wipe_ps);
+    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
+    auto const border_ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
+    auto const view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
+    auto const wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
+
+    // All four are in flight from their acquire, so settling them one after another costs no concurrency.
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(border_ps);
+    co_await cc::async_settled(view_ps);
+    co_await cc::async_settled(wipe_ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_border = border_ps->try_value();
@@ -79,7 +83,7 @@ void layout_routine::init_declare(sg::context& ctx)
     if (compiled_vs == nullptr || compiled_border == nullptr || compiled_view == nullptr || compiled_wipe == nullptr)
     {
         fail_init();
-        return;
+        co_return;
     }
 
     // Group 0 comes from the *wipe* fragment stage, which is the only one binding both sources — so one layout serves
@@ -101,7 +105,7 @@ void layout_routine::init_declare(sg::context& ctx)
     {
         _group_layout = nullptr;
         fail_init();
-        return;
+        co_return;
     }
 
     auto const pipeline_layout
@@ -144,7 +148,6 @@ void layout_routine::init_declare(sg::context& ctx)
     }
 
     // Started together, then collected: the builds overlap rather than running one after another.
-    // These waits are what become a single co_await once init is a coroutine.
     auto at = isize(0);
     for (auto kind_index = 0; kind_index < k_draw_kinds; ++kind_index)
     {
@@ -154,15 +157,18 @@ void layout_routine::init_declare(sg::context& ctx)
             if (is_flat_fill(kind) && blended == 0)
                 continue;
 
-            auto const built = cc::try_async_blocking_get(pending[at++]);
-            if (built.has_error())
+            auto const& node = pending[at++];
+            co_await cc::async_settled(node);
+            auto const* const built = node->try_value();
+            if (built == nullptr)
             {
                 fail_init(); // one pipeline missing makes the whole routine unusable, so say so once
-                return;
+                co_return;
             }
-            _pipelines[kind_index][blended] = built.value();
+            _pipelines[kind_index][blended] = *built;
         }
     }
+    co_return;
 }
 
 sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,

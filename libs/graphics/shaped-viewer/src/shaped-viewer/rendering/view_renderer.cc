@@ -3,6 +3,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
@@ -283,8 +284,10 @@ struct ensured_slot
 }
 } // namespace
 
-void view_renderer::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
+    auto& ctx = scope.context();
+
     // The renderer traces through the leaf routine, so the edge is declared rather than merely warmed: this routine is
     // not handed out until the one it traces through is ready, which is what its callers would otherwise have to check
     // for themselves on every frame.
@@ -292,6 +295,7 @@ void view_renderer::init_declare(sg::context& ctx)
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
+    co_return;
 }
 
 plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& plan, view_store& store)

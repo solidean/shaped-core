@@ -30,9 +30,9 @@ struct sv::trace_desc
 /// The basic flat-shaded PBR ray-tracing pass.
 ///
 /// A render routine (see the "everything that traces is a routine" rule).
-/// It owns the DXR pipeline + shader table + global root signature, built once in `init_declare` from the slib-acquired shaders and rebuilt on reload.
+/// It owns the DXR pipeline + shader table + global root signature, built once in `init` from the slib-acquired shaders and rebuilt on reload.
 /// `execute` (re)builds the frame's TLAS, binds the scene, and dispatches one ray per pixel into the output image.
-/// `execute` only reads what `init_declare` built, so it holds no lock — concurrent traces on the same context do not serialize on this routine.
+/// `execute` only reads what `init` built, so it holds no lock — concurrent traces on the same context do not serialize on this routine.
 /// Unparametrized: there is one pipeline, not one per anything.
 class sv::pbr_raytrace_routine : public sg::render_routine<pbr_raytrace_routine>
 {
@@ -44,10 +44,10 @@ public:
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, trace_desc const& d);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    // Rebuilt wholesale by init_declare on every reload.
+    // Rebuilt wholesale by init on every reload.
     // The pipeline layout is not among them — the pipeline holds it.
     sg::binding_group_layout_handle _group_layout;
     sg::raytracing_pipeline_handle _pipeline;

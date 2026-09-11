@@ -65,7 +65,7 @@ public:
                                                      plan_textures const& textures);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// How many pipelines one instance holds: every draw_kind, blended and not.

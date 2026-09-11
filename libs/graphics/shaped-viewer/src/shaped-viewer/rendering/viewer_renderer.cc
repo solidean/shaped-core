@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
@@ -9,8 +10,10 @@
 
 namespace sv
 {
-void viewer_renderer::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> viewer_renderer::init(sg::routine_init_scope scope)
 {
+    auto& ctx = scope.context();
+
     // The frame runs through the view renderer, so the edge is declared: this routine reports pending until the whole
     // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
     _view_renderer = depend_on<view_renderer>(ctx);
@@ -20,7 +23,7 @@ void viewer_renderer::init_declare(sg::context& ctx)
     // known until the frame runs.
     // So it is registered by the first execute that reaches it and brought up by the following tick, which costs the
     // frames in between -- an application that knows its swapchain format can prewarm it itself and skip that.
-    (void)ctx;
+    co_return;
 }
 
 sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,

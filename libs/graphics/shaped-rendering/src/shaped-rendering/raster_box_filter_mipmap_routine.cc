@@ -1,18 +1,23 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <sr_shaders.hh>
 
 namespace sr
 {
-void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_init_scope scope)
 {
-    auto vs = sr::shaders::raster_box_filter_mipmap.vertex.main_vs->acquire(ctx);
-    auto ps = sr::shaders::raster_box_filter_mipmap.fragment.main_ps->acquire(ctx);
+    auto& ctx = scope.context();
 
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(ps);
+    auto const vs = sr::shaders::raster_box_filter_mipmap.vertex.main_vs->acquire(ctx);
+    auto const ps = sr::shaders::raster_box_filter_mipmap.fragment.main_ps->acquire(ctx);
+
+    // Settled rather than awaited for the value: a shader that did not compile is this routine's verdict to report,
+    // not an error to propagate — fail_init says so in the vocabulary a caller already branches on.
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
@@ -23,7 +28,7 @@ void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
         fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
-        return;
+        co_return;
     }
 
     // The fragment stage carries the one binding: gSource (t0), the single-mip view of the level being read.
@@ -42,11 +47,10 @@ void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
         .color_targets = {{.format = params()}},
     });
 
-    // Waited on HERE rather than in execute, which is the whole point of the split: init is where the waiting is
-    // allowed to be, and it is exactly this wait that becomes a co_await when the phases become coroutines.
-    // Without it `ready` would not mean ready — execute would poll a pipeline still being built and decline for a few
-    // frames, which is correct behaviour reached by accident rather than by design.
-    (void)cc::try_async_blocking_get(_pipeline);
+    // Awaited HERE rather than polled in execute, which is the whole point of the split: `ready` means ready, so a
+    // caller that got the routine handed to it never sees it decline for a few frames while a pipeline finishes.
+    co_await cc::async_settled(_pipeline);
+    co_return;
 }
 
 int raster_box_filter_mipmap_routine::level_count(sg::texture_2d const& texture, int first_level)

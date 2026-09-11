@@ -77,7 +77,7 @@ public:
 
 protected:
     /// No shaders of its own; it warms the path tracer so its compiles start early.
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// Bumped every time the routine initializes, which is once per shader reload.

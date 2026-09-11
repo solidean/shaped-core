@@ -1,8 +1,12 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-graphics/routine/routine_registry.hh>
 
 namespace sg
@@ -26,6 +30,11 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
 {
     CC_RECORD_SCOPE("sg.routine.tick");
 
+    // Initialization runs on the ambient async scheduler, and installing one is the application's job.
+    // Asserts where there is none rather than standing up a private one: a phase nothing can drive would leave every
+    // routine pending forever, which is a configuration error and not a state to report.
+    auto& scheduler = cc::ambient_async_scheduler();
+
     auto result = routine_tick_result();
 
     auto pending = snapshot();
@@ -34,39 +43,95 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
 
     auto const start = cc::current_time_steady_secs();
 
+    // The reload generation is read ONCE, here.
+    // That is what keeps a reload from landing in the middle of a frame: everything this tick does belongs to one
+    // generation, and the next tick is where a newer one is noticed.
+    auto const generation = sg::reload_generation();
+
     // One list for every routine this tick brings up, so their GPU init work batches into a single submit rather than
     // one per routine.
-    // Opened lazily: a tick that finds nothing to materialize must not cost a command list.
-    std::unique_ptr<command_list> cmd;
+    // Opened for the whole tick, because a phase resuming on a worker needs a window to still be there.
+    auto cmd = _ctx.create_command_list();
+    open_window(*cmd);
 
     for (auto const& routine : pending)
-    {
-        if (routine->is_initialized())
-            continue;
+        routine->cancel_init_for_reload_if_stale(generation);
 
-        // Checked BETWEEN routines, never inside one — a routine's initialization is not interruptible, which is why
-        // the budget is documented as pacing rather than a deadline.
+    // Driven until nothing moves or the budget runs out.
+    // A phase runs on a worker, so a pass that starts one usually collects it on a later pass rather than immediately.
+    while (true)
+    {
+        // Checked BETWEEN passes, never inside a phase — a phase is not interruptible except where it yields, which
+        // is why the budget is documented as pacing rather than a deadline.
         if (options.budget_secs.has_value() && cc::current_time_steady_secs() - start >= options.budget_secs.value())
         {
             result.budget_exhausted = true;
             break;
         }
 
-        if (cmd == nullptr)
-            cmd = _ctx.create_command_list();
+        auto progressed = false;
+        for (auto const& routine : pending)
+            if (routine->advance_init(*this, _ctx, generation))
+            {
+                ++result.initialized;
+                progressed = true;
+            }
 
-        routine->ensure_initialized(*cmd);
-        ++result.initialized;
+        auto any_work = false;
+        for (auto const& routine : pending)
+            if (routine->needs_init(generation))
+                any_work = true;
+
+        if (!any_work)
+            break; // everything is either up or failed at this generation
+
+        // Driven here, not merely waited for: under a single-threaded scheduler this thread is the only one that can
+        // run a phase at all, and a tick that only pumped would spin against a queue nobody empties.
+        if (!progressed && !scheduler.try_run_one() && !cc::thread_pump_all())
+            cc::this_thread_yield();
     }
 
-    if (cmd != nullptr)
-        (void)_ctx.submit_command_list(cc::move(cmd));
+    close_window();
+    (void)_ctx.submit_command_list(cc::move(cmd));
 
     for (auto const& routine : pending)
-        if (!routine->is_initialized())
+        if (routine->own_readiness() == routine_readiness::pending)
             ++result.pending;
 
     return result;
+}
+
+void routine_registry::open_window(command_list& cmd)
+{
+    auto waiting = _window.lock(
+        [&](window_state& w)
+        {
+            w.cmd = &cmd;
+            auto gate = cc::move(w.gate);
+            w.gate = {};
+            return gate;
+        });
+
+    // Settled OUTSIDE the lock: whoever was parked resumes here, and a resumption that reached back into the window
+    // would deadlock on a mutex this thread still held.
+    if (waiting != nullptr)
+        waiting->push_value(cc::unit{});
+}
+
+void routine_registry::close_window()
+{
+    _window.lock([](window_state& w) { w.cmd = nullptr; });
+}
+
+cc::shared_async<cc::unit> routine_registry::next_window()
+{
+    return _window.lock(
+        [](window_state& w)
+        {
+            if (w.gate == nullptr)
+                w.gate = cc::make_async_manual<cc::unit>();
+            return w.gate;
+        });
 }
 
 routine_tick_result routine_registry::tick_until_idle()
@@ -104,7 +169,7 @@ void routine_registry::add_dependency(render_routine_base const* from, std::shar
             while (!stack.empty())
             {
                 auto const* const at = stack.back();
-                stack.pop_back();
+                stack.remove_back();
 
                 CC_ASSERT(at != from, "a render-routine dependency cycle: the routine being depended on already "
                                       "depends on the one declaring it, directly or through another routine");
@@ -167,7 +232,7 @@ routine_readiness routine_registry::readiness_of(render_routine_base& routine)
     while (!stack.empty())
     {
         auto* const at = stack.back();
-        stack.pop_back();
+        stack.remove_back();
 
         auto already = false;
         for (auto const* s : seen)

@@ -1,4 +1,6 @@
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-graphics/command_list/command_list.hh>
@@ -21,13 +23,19 @@ class counting_routine : public sg::render_routine<counting_routine>
 {
 public:
     int once = 0;
-    int declare = 0;
-    int materialize = 0;
+    int inits = 0;
 
 protected:
-    void init_once(sg::context&) override { ++once; }
-    void init_declare(sg::context&) override { ++declare; }
-    void init_materialize(sg::command_list&) override { ++materialize; }
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    {
+        ++once;
+        co_return;
+    }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        ++inits;
+        co_return;
+    }
 };
 
 // A dx12 WARP context, or nullptr where none is available (the caller SKIPs).
@@ -50,13 +58,12 @@ TEST("sg - routines are per-context: each context builds its own instance from s
         auto cmd_a = ctx_a->create_command_list();
         auto const& ra = counting_routine::acquire(*cmd_a);
         CHECK(ra.once == 1);
-        CHECK(ra.declare == 1);
-        CHECK(ra.materialize == 1);
+        CHECK(ra.inits == 1);
         ctx_a->drop_command_list(cc::move(cmd_a));
     } // ctx_a shuts down here — its routine instance (and cached GPU state) is released with it.
 
     // Advance the global generation.
-    // On A's instance this would only bump declare/materialize; a fresh context must instead build its OWN instance from scratch — init_once included.
+    // On A's instance this would only bump inits; a fresh context must instead build its OWN instance from scratch — init_once included.
     sg::signal_reload();
 
     auto const ctx_b = make_warp_context();
@@ -65,8 +72,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     auto cmd_b = ctx_b->create_command_list();
     auto const& rb = counting_routine::acquire(*cmd_b);
     CHECK(rb.once == 1); // ran again on ctx_b: the instance is per-context, not a process singleton
-    CHECK(rb.declare == 1);
-    CHECK(rb.materialize == 1);
+    CHECK(rb.inits == 1);
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
@@ -91,9 +97,9 @@ TEST("sg - two live contexts keep separate routine instances")
     (void)counting_routine::acquire(*cmd_a);
 
     CHECK(ra.once == 1);
-    CHECK(ra.declare == 1);
+    CHECK(ra.inits == 1);
     CHECK(rb.once == 1);
-    CHECK(rb.declare == 1);
+    CHECK(rb.inits == 1);
 
     ctx_a->drop_command_list(cc::move(cmd_a));
     ctx_b->drop_command_list(cc::move(cmd_b));

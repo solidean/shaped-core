@@ -7,6 +7,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context
 #include <shaped-graphics/routine/render_routine_base.hh>
+#include <shaped-graphics/routine/routine_init_scope.hh>
 #include <shaped-graphics/routine/routine_params.hh>
 
 #include <type_traits>
@@ -76,6 +77,26 @@ struct sg::routine_tick_result
 class sg::routine_registry
 {
 public:
+    /// Run `f` against the tick's shared command list if a window is open; false when none is.
+    ///
+    /// Public only because routine_init_scope::with_cmd is a template and has to reach it; it is not a caller's API.
+    template <class F>
+    [[nodiscard]] bool try_with_cmd(F&& f)
+    {
+        return _window.lock(
+            [&](window_state& w)
+            {
+                if (w.cmd == nullptr)
+                    return false;
+                f(*w.cmd);
+                return true;
+            });
+    }
+
+    /// Settles when the next tick opens a command-list window.
+    /// What a phase parked in with_cmd waits on.
+    [[nodiscard]] cc::shared_async<cc::unit> next_window();
+
     /// Drive pending routine initialization, within an optional budget.
     ///
     /// **A frame-boundary call**: it opens and submits a command list of its own, so it must not run inside one, and
@@ -124,6 +145,13 @@ private:
     /// Edges pointing AT it are left alone: they belong to routines that still hold a token, and the strong reference
     /// in that token is what keeps it alive — which is exactly the promise a token makes.
     void drop_edges_from(render_routine_base const* routine);
+
+    /// Make the tick's command list reachable to phases, and release whoever parked waiting for one.
+    void open_window(command_list& cmd);
+
+    /// Stop handing the list out, before the tick submits it.
+    /// A phase that resumes after this parks on the next window rather than recording into a submitted list.
+    void close_window();
 
     /// Every registered instance, as shared owners, so the tick can drive them without holding the map lock.
     /// Taking a snapshot matters: a routine's initialization may register another one, which would otherwise
@@ -194,10 +222,62 @@ private:
 
     using edge_map = cc::map<render_routine_base const*, cc::vector<std::shared_ptr<render_routine_base>>>;
 
+    /// The command list a tick records routine init work into, and who is waiting for one.
+    struct window_state
+    {
+        command_list* cmd = nullptr;
+
+        /// Settled when a window opens.
+        /// Replaced each time one does, so a waiter parks on the NEXT one.
+        cc::shared_async<cc::unit> gate;
+    };
+
     cc::mutex<routine_map> _entries;
 
     // A token holds a strong reference, so an edge does too: a depended-on routine cannot be evicted while a
     // dependent exists.
     // clear() drops these first, so a cycle that slipped past the check does not outlive the registry.
     cc::mutex<edge_map> _edges;
+
+    // One window at a time, and one mutex around it: every routine initialized in a tick records into the same list,
+    // from whichever worker its coroutine happens to be on.
+    cc::mutex<window_state> _window;
 };
+
+// routine_init_scope's bodies live here because they reach the registry, which is declared above it.
+
+inline sg::context& sg::routine_init_scope::context() const
+{
+    return *_run->ctx;
+}
+
+template <class F>
+cc::shared_async<cc::unit> sg::routine_init_scope::with_cmd(F f) const
+{
+    auto run = _run; // by value: a coroutine's captures outlive the frame that started it
+    while (true)
+    {
+        // Awaiting a cancelled async short-circuits this coroutine onto its error channel, which is how a phase
+        // abandoned by a reload stops without every routine having to test a flag.
+        if (run->cancelled)
+            co_await cc::make_async_from_error<cc::unit>(cc::async_error::make_cancelled());
+
+        if (run->registry->try_with_cmd(f))
+            co_return;
+
+        // No window right now: this phase resumed outside a tick.
+        // Park until the next one opens rather than reaching for a list that is not there — which would leave one open
+        // across an advance_epoch.
+        co_await run->registry->next_window();
+    }
+}
+
+inline cc::shared_async<cc::unit> sg::routine_init_scope::yield() const
+{
+    if (_run->cancelled)
+        return cc::make_async_from_error<cc::unit>(cc::async_error::make_cancelled());
+
+    // Scheduled rather than already-settled, so awaiting it really does hand the thread back and let the tick's budget
+    // stop between one chunk of a phase and the next.
+    return cc::make_async_scheduled<cc::unit>([](cc::async_context<cc::unit>&) { return cc::unit{}; });
+}

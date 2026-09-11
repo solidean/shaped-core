@@ -198,11 +198,8 @@ private:
                                 int y,
                                 int z);
 
-    /// Compiles this variant's entry point and builds its pipeline, as one async chain rather than two waits.
-    static cc::shared_async<std::shared_ptr<mipmap_program const>> _build_program(sg::context& ctx, mipmap_variant v);
-
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// The one program this instance is for — its variant is params().

@@ -43,7 +43,7 @@ public:
 
 protected:
     /// No shaders of its own; it declares the view renderer it runs the frame through.
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// Declared rather than prewarmed, so one readiness check covers view_renderer and the pathtracer under it.

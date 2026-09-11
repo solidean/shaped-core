@@ -2,6 +2,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/fwd.hh> // offsetof
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <imgui/imgui.h>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
@@ -127,36 +128,37 @@ void imgui_routine::render_viewports(sg::context& ctx)
                                   ? rt.preserved()
                                   : rt.cleared(tg::vec4f(0.0f, 0.0f, 0.0f, 1.0f));
             auto pass = cmd->raster.render_to({.color_targets = {target}});
-            execute(pass, viewport->DrawData);
+            // Declined means imgui's pipeline is not up yet; the viewport shows its clear this frame.
+            (void)execute(pass, viewport->DrawData);
         }
         ctx.submit_command_list_and_present(*chain, cc::move(cmd));
     }
 }
 
-void imgui_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
 {
-    auto vs = sr::shaders::imgui.vertex.main_vs->acquire(ctx);
-    auto ps = sr::shaders::imgui.fragment.main_ps->acquire(ctx);
+    auto& ctx = scope.context();
 
-    // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(ps);
+    // The atlas lives on its own routine and deliberately survives a reload — it has nothing to do with our shaders.
+    // Minted before the first await, so a routine that turns out not to be able to draw still has its token and
+    // services textures.
+    _textures = depend_on<impl::imgui_texture_routine>(ctx);
+
+    auto const vs = sr::shaders::imgui.vertex.main_vs->acquire(ctx);
+    auto const ps = sr::shaders::imgui.fragment.main_ps->acquire(ctx);
+
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
-
-    // A broken edit (or a context accepting no format we can produce): (re)bind a callback that fails, so
-    // init still clears every pipeline built against the old layout and execute no-ops until the next reload.
-    // The atlas lives on its own routine and deliberately survives a reload — it has nothing to do with our shaders.
-    // Declared before the early return, so even a routine that cannot draw still has its token and services textures.
-    _textures = depend_on<impl::imgui_texture_routine>(ctx);
 
     _group_layout = nullptr;
     _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
         fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
-        return;
+        co_return;
     }
 
     // Group 0 is built from the *fragment* bindings alone.
@@ -198,9 +200,9 @@ void imgui_routine::init_declare(sg::context& ctx)
                 .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
                 .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
 
-    // Waited on here rather than polled in execute, so `ready` means ready.
-    // This is the wait that becomes a co_await when the phases become coroutines.
-    (void)cc::try_async_blocking_get(_pipeline);
+    // Awaited here rather than polled in execute, so `ready` means ready.
+    co_await cc::async_settled(_pipeline);
+    co_return;
 }
 
 imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, ImDrawData* draw_data)

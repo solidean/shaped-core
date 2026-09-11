@@ -95,7 +95,7 @@ struct sv::pt_trace_desc
 ///
 /// A render routine, structured exactly like pbr_raytrace_routine.
 /// It owns the slib-acquired raygen and miss shaders, and one DXR pipeline per **set of material permutations** a trace binds.
-/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init_declare`.
+/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init`.
 /// What can, and is, are the three shaders every pipeline shares.
 /// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
 ///
@@ -126,7 +126,7 @@ public:
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, pt_trace_desc const& d);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// One pipeline, built over one ordered set of hit groups.
@@ -168,7 +168,7 @@ private:
     /// starts the work and reports what is ready, and the trace happens a frame or two later.
     [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
 
-    // Re-acquired by init_declare on every reload, which is also when every variant built from the old ones is dropped.
+    // Re-acquired by init on every reload, which is also when every variant built from the old ones is dropped.
     sg::async_compiled_shader _raygen_shader;
     sg::async_compiled_shader _miss_shader;
     sg::async_compiled_shader _shadow_miss_shader;

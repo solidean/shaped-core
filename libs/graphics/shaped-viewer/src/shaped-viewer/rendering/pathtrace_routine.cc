@@ -103,19 +103,25 @@ enum class permutation_state
 }
 } // namespace
 
-void pathtrace_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
 {
+    auto& ctx = scope.context();
+
     _raygen_shader = sv::shaders::pathtrace.raygen.PathTraceRayGen->acquire(ctx);
     _miss_shader = sv::shaders::pt_hit.miss.PtMiss->acquire(ctx);
     _shadow_miss_shader = sv::shaders::pt_hit.miss.PtShadowMiss->acquire(ctx);
 
-    // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get(_raygen_shader);
-    (void)cc::try_async_blocking_get(_miss_shader);
-    (void)cc::try_async_blocking_get(_shadow_miss_shader);
-
     // A reload re-acquires the shared shaders, so every pipeline built from the old ones is stale.
+    // Cleared before the first await, so nothing built against the previous generation survives the gap.
     _variants.clear();
+
+    // Settled here so `ready` means the three shared stages are in hand.
+    // What stays dynamic is the per-material closest-hit set, which only a frame knows -- that is why this routine is
+    // fallible even once it is ready.
+    co_await cc::async_settled(_raygen_shader);
+    co_await cc::async_settled(_miss_shader);
+    co_await cc::async_settled(_shadow_miss_shader);
+    co_return;
 }
 
 pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx, pt_trace_desc const& d)

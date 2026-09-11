@@ -1,20 +1,23 @@
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/raytrace_routine.hh>
 #include <sv_shaders.hh>
 
 namespace sv
 {
-void pbr_raytrace_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> pbr_raytrace_routine::init(sg::routine_init_scope scope)
 {
-    auto rg = sv::shaders::raygen.raygen.RayGen->acquire(ctx);
-    auto ms = sv::shaders::shading.miss.Miss->acquire(ctx);
-    auto ch = sv::shaders::shading.closest_hit.ClosestHit->acquire(ctx);
+    auto& ctx = scope.context();
 
-    // No async pool is guaranteed here, so drive the compiles inline.
-    (void)cc::try_async_blocking_get(rg);
-    (void)cc::try_async_blocking_get(ms);
-    (void)cc::try_async_blocking_get(ch);
+    auto const rg = sv::shaders::raygen.raygen.RayGen->acquire(ctx);
+    auto const ms = sv::shaders::shading.miss.Miss->acquire(ctx);
+    auto const ch = sv::shaders::shading.closest_hit.ClosestHit->acquire(ctx);
+
+    // All three are in flight from their acquire, so settling them one after another costs no concurrency.
+    co_await cc::async_settled(rg);
+    co_await cc::async_settled(ms);
+    co_await cc::async_settled(ch);
 
     auto const* const compiled_rg = rg->try_value();
     auto const* const compiled_ms = ms->try_value();
@@ -31,7 +34,7 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
         // Reported as FAILED rather than left pending: a caller that cannot tell the two apart waits forever on
         // something that is not coming.
         fail_init();
-        return;
+        co_return;
     }
 
     // The global root signature must cover every binding *any* stage uses
@@ -46,20 +49,22 @@ void pbr_raytrace_routine::init_declare(sg::context& ctx)
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const hit_h = rpd.add_hit_shader({.closest_hit = *compiled_ch});
-    // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
-    auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
-    if (pipeline_r.has_error())
+    auto const pipeline = ctx.cached.acquire_raytracing_pipeline(rpd);
+    co_await cc::async_settled(pipeline);
+    auto const* const built = pipeline->try_value();
+    if (built == nullptr)
     {
         fail_init(); // the state object did not build — as final as a broken shader, and reported the same way
-        return;
+        co_return;
     }
-    _pipeline = cc::move(pipeline_r).value();
+    _pipeline = *built;
 
     auto stbd = sg::raytracing_shader_table_description{.pipeline = _pipeline};
     _raygen = stbd.add_raygen_shader(raygen_h);
     (void)stbd.add_miss_shader(miss_h);
     (void)stbd.add_hit_shader(hit_h);
     _table = ctx.uncached.create_raytracing_shader_table(stbd);
+    co_return;
 }
 
 sg::routine_outcome pbr_raytrace_routine::execute(sg::command_list& cmd, trace_desc const& d)

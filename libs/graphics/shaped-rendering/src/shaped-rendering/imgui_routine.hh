@@ -86,10 +86,10 @@ public:
     static void render_viewports(sg::context& ctx);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// Rebuilt by init_declare on every reload.
+    /// Rebuilt by init on every reload.
     sg::binding_group_layout_handle _group_layout;
 
     /// The shared atlas, reached through a token so every parametrization sees the same one.

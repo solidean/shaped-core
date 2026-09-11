@@ -29,7 +29,7 @@ public:
     [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope, sg::texture_2d const& src);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     sg::binding_group_layout_handle _group_layout;

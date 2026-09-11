@@ -60,6 +60,7 @@ struct routine_tick_result;  // what it did
 class render_routine_base;
 enum class routine_readiness; // pending / ready / failed (see routine/render_routine_base.hh)
 enum class routine_outcome;   // what a fallible routine's execute reports (see routine/render_routine_base.hh)
+class routine_init_scope;     // what an initializing routine is given (see routine/routine_init_scope.hh)
 template <class Derived>
 class routine_scope;
 struct routine_no_params; // the parameter of an UNPARAMETRIZED routine (see routine/routine_params.hh)

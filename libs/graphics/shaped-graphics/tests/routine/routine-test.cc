@@ -1,6 +1,8 @@
+#include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -22,7 +24,7 @@ using namespace cc::primitive_defines;
 // against every backend the binary was built with (see tests/context/context-test.cc for the harness).
 //
 // Three things are proven here:
-//   1. the framework's phase orchestration re-runs declare/materialize on a reload, but not init_once,
+//   1. the framework's phase orchestration re-runs init on a reload, but not init_once,
 //   2. eviction really drops an instance, and the per-thread acquire cache does not resurrect it, and
 //   3. a real routine compiles a compute shader through slib and dispatches it end to end.
 //
@@ -40,13 +42,19 @@ class counting_routine : public sg::render_routine<counting_routine<Tag>>
 {
 public:
     int once = 0;
-    int declare = 0;
-    int materialize = 0;
+    int inits = 0;
 
 protected:
-    void init_once(sg::context&) override { ++once; }
-    void init_declare(sg::context&) override { ++declare; }
-    void init_materialize(sg::command_list&) override { ++materialize; }
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    {
+        ++once;
+        co_return;
+    }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        ++inits;
+        co_return;
+    }
 };
 
 using phases_routine = counting_routine<0>;
@@ -58,16 +66,21 @@ class racing_routine : public sg::render_routine<racing_routine>
 {
 public:
     static inline cc::atomic<int> once = 0;
-    static inline cc::atomic<int> declare = 0;
+    static inline cc::atomic<int> inits = 0;
 
 protected:
-    void init_once(sg::context&) override { ++once; }
-    // The sleep widens the window a racing second caller would slip through, so the test below actually exercises the lock instead of passing because the first thread happened to finish first.
-    // Only the winner ever sleeps, so it costs one interval, not one per thread.
-    void init_declare(sg::context&) override
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
+    {
+        ++once;
+        co_return;
+    }
+    // The sleep widens the window a racing second registration would slip through, so the test below actually
+    // exercises the single-initialization rule rather than passing because the first thread happened to finish first.
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        ++declare;
+        ++inits;
+        co_return;
     }
 };
 
@@ -112,14 +125,15 @@ using racing_counter_routine = counter_routine<1>;
 class formatted_routine : public sg::render_routine<formatted_routine, sg::pixel_format>
 {
 public:
-    int declare = 0;
+    int inits = 0;
     sg::pixel_format seen = sg::pixel_format::undefined;
 
 protected:
-    void init_declare(sg::context&) override
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
-        ++declare;
+        ++inits;
         seen = params();
+        co_return;
     }
 };
 
@@ -133,14 +147,15 @@ public:
     bool ran = false;
 
 protected:
-    void init_declare(sg::context&) override
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         ran = true;
+        co_return;
     }
 };
 
-// The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
+// The end-to-end routine: owns its pipeline, built in init and dispatched in execute.
 // Reached by type — no handle, no registration call.
 class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 {
@@ -151,13 +166,14 @@ public:
         CC_ASSERT(self.is_ready(), "tick the routine system before dispatching this");
         CC_ASSERT(self->_pipeline != nullptr, "pattern_fill routine failed to initialize");
 
-        // Force the compute pipeline only now — init_declare merely kicked off the background compile.
-        auto const pipeline = cc::async_blocking_get(self->_pipeline);
+        // Polled, not waited on: init awaited the build, so a ready routine has a ready pipeline.
+        auto const* const pipeline = self->_pipeline->try_value();
+        CC_ASSERT(pipeline != nullptr && *pipeline != nullptr, "a ready routine must have a built pipeline");
 
         auto const group = cmd.context().transient.create_binding_group(
             self->_group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
 
-        cmd.compute.bind_pipeline(*pipeline);
+        cmd.compute.bind_pipeline(**pipeline);
         cmd.compute.bind_group(0, *group);
         cmd.compute.dispatch_threads(out.element_count());
     }
@@ -169,20 +185,22 @@ public:
     }
 
 protected:
-    void init_declare(sg::context& ctx) override
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
     {
+        auto& ctx = scope.context();
+
         auto const shader = sg::test::shaders::pattern_fill.compute.main->acquire(ctx);
-        (void)cc::try_async_blocking_get(shader); // no async pool here, so drive it inline
+        co_await cc::async_settled(shader);
         auto const* const compiled = shader->try_value();
         if (compiled == nullptr)
-            return; // the context cannot produce a format we can use; is_usable() then reports it
+            co_return; // the context cannot produce a format we can use; is_usable() then reports it
 
         _group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
         auto const layout
             = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {_group_layout}});
-        // Only kick off the background compile here — execute() forces it when it actually needs the pipeline.
         _pipeline = ctx.cached.acquire_compute_pipeline(
             sg::compute_pipeline_description{.shader = *compiled, .layout = layout});
+        co_await cc::async_settled(_pipeline);
     }
 
 private:
@@ -219,7 +237,7 @@ INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclus
     ctx->drop_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg - routine phases run once, then re-run declare + materialize on a reload",
+INVOCABLE_TEST("sg - routine phases run once, then re-run init on a reload",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))
 {
@@ -233,21 +251,18 @@ INVOCABLE_TEST("sg - routine phases run once, then re-run declare + materialize 
     auto const first = phases_routine::try_acquire(*cmd);
     REQUIRE(first.is_ready());
     CHECK(first->once == 1);
-    CHECK(first->declare == 1);
-    CHECK(first->materialize == 1);
+    CHECK(first->inits == 1);
 
     // A second tick at the same generation changes nothing (same per-context instance).
     (void)ctx->routines.tick_until_idle();
     CHECK(first->once == 1);
-    CHECK(first->declare == 1);
-    CHECK(first->materialize == 1);
+    CHECK(first->inits == 1);
 
-    // A reload bumps the global generation: declare + materialize re-run, init_once does not.
+    // A reload bumps the global generation: init re-runs, init_once does not.
     sg::signal_reload();
     (void)ctx->routines.tick_until_idle();
     CHECK(first->once == 1);
-    CHECK(first->declare == 2);
-    CHECK(first->materialize == 2);
+    CHECK(first->inits == 2);
 
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -265,22 +280,21 @@ INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache do
     REQUIRE(first.is_ready());
     CHECK(first->once == 1);
 
-    // Drive the first instance's declare count to 2, so it is distinguishable from a fresh one.
+    // Drive the first instance's init count to 2, so it is distinguishable from a fresh one.
     sg::signal_reload();
     (void)ctx->routines.tick_until_idle();
-    CHECK(first->declare == 2);
+    CHECK(first->inits == 2);
 
     evict_routine::evict(*ctx);
 
     // A fresh instance, built from scratch: every phase back at 1.
-    // A cached slot that survived the eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
+    // A cached slot that survived the eviction would instead hand back the old object (inits == 2) — or worse, a freed one.
     (void)evict_routine::try_acquire(*cmd);
     (void)ctx->routines.tick_until_idle();
     auto const second = evict_routine::try_acquire(*cmd);
     REQUIRE(second.is_ready());
     CHECK(second->once == 1);
-    CHECK(second->declare == 1);
-    CHECK(second->materialize == 1);
+    CHECK(second->inits == 1);
 
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -349,14 +363,14 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
 {
     REQUIRE(ctx != nullptr);
 
-    // The exclusion tag is what makes `declare == 1` meaningful: sg::reload_generation() is process-global, and a
+    // The exclusion tag is what makes `inits == 1` meaningful: sg::reload_generation() is process-global, and a
     // concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
     //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
     // backend in the same process would otherwise carry in.
     racing_routine::evict(*ctx);
     racing_routine::once = 0;
-    racing_routine::declare = 0;
+    racing_routine::inits = 0;
 
     constexpr auto thread_count = 8;
     auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
@@ -384,7 +398,7 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
     CHECK(racing_routine::once.load() == 0); // nothing has ticked yet
     (void)ctx->routines.tick_until_idle();
     CHECK(racing_routine::once.load() == 1);
-    CHECK(racing_routine::declare.load() == 1);
+    CHECK(racing_routine::inits.load() == 1);
 }
 
 INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
@@ -460,17 +474,17 @@ INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value
     // keep serving whichever was cached last.
     CHECK(&*formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm) == &*rgba);
     CHECK(&*formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm) == &*bgra);
-    CHECK(rgba->declare == 1);
-    CHECK(bgra->declare == 1);
+    CHECK(rgba->inits == 1);
+    CHECK(bgra->inits == 1);
 
     // evict() takes the parameter, so it drops one instance and leaves the other alone.
     formatted_routine::evict(*ctx, sg::pixel_format::rgba8_unorm);
-    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm)->declare == 1);
+    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm)->inits == 1);
 
     // The evicted one is gone, so asking registers a fresh instance that the next tick builds from scratch.
     CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm).is_pending());
     (void)ctx->routines.tick_until_idle();
-    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm)->declare == 1);
+    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm)->inits == 1);
 
     formatted_routine::evict_all(*ctx);
     ctx->drop_command_list(cc::move(cmd));
@@ -511,9 +525,10 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
     prewarmed::evict(*ctx);
 }
 
-// The budget is checked between routines, so a tick that has two slow ones to bring up stops after the first.
-// It is pacing rather than a deadline: the tick still overruns by however long one routine takes, which is why this
-// asserts on what was left rather than on elapsed time.
+// The budget bounds how long the TICK spends driving, not how long an initialization takes.
+// A phase runs on a worker, so a budget below what the phases cost returns with them still in flight -- and a later
+// tick collects them.
+// Pacing rather than a deadline, which is why this asserts on what was left rather than on elapsed time.
 INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))
@@ -531,15 +546,16 @@ INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
     first_slow::prewarm(*ctx);
     second_slow::prewarm(*ctx);
 
-    // A budget far below what one routine costs, so the check between routines always trips after the first.
+    // A budget far below what the two routines cost, so the tick returns before either has settled.
     auto const bounded = ctx->routines.tick({.budget_secs = 0.001});
-    CHECK(bounded.initialized == 1);
-    CHECK(bounded.pending == 1);
     CHECK(bounded.budget_exhausted);
+    CHECK(!bounded.is_idle());
 
+    // The work the bounded tick started is still running; this is what collects it.
     auto const rest = ctx->routines.tick_until_idle();
-    CHECK(rest.initialized == 1);
     CHECK(rest.is_idle());
+    CHECK(first_slow::try_acquire(*ctx)->ran);
+    CHECK(second_slow::try_acquire(*ctx)->ran);
 
     first_slow::evict(*ctx);
     second_slow::evict(*ctx);
@@ -588,7 +604,11 @@ public:
     int value = 0;
 
 protected:
-    void init_declare(sg::context&) override { value = 7; }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        value = 7;
+        co_return;
+    }
 };
 
 class chained_middle : public sg::render_routine<chained_middle>
@@ -600,7 +620,11 @@ public:
     }
 
 protected:
-    void init_declare(sg::context& ctx) override { _leaf = depend_on<chained_leaf>(ctx); }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
+    {
+        _leaf = depend_on<chained_leaf>(scope.context());
+        co_return;
+    }
 
 private:
     sg::routine_dependency<chained_leaf, sg::routine_no_params> _leaf;
@@ -609,7 +633,11 @@ private:
 class chained_top : public sg::render_routine<chained_top>
 {
 protected:
-    void init_declare(sg::context& ctx) override { _middle = depend_on<chained_middle>(ctx); }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
+    {
+        _middle = depend_on<chained_middle>(scope.context());
+        co_return;
+    }
 
 private:
     sg::routine_dependency<chained_middle, sg::routine_no_params> _middle;
@@ -654,7 +682,7 @@ class cyclic_b;
 class cyclic_a : public sg::render_routine<cyclic_a>
 {
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     sg::routine_dependency<cyclic_b, sg::routine_no_params> _b;
@@ -663,35 +691,76 @@ private:
 class cyclic_b : public sg::render_routine<cyclic_b>
 {
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     sg::routine_dependency<cyclic_a, sg::routine_no_params> _a;
 };
 
-void cyclic_a::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> cyclic_a::init(sg::routine_init_scope scope)
 {
-    _b = depend_on<cyclic_b>(ctx);
+    _b = depend_on<cyclic_b>(scope.context());
+    co_return;
 }
-void cyclic_b::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> cyclic_b::init(sg::routine_init_scope scope)
 {
-    _a = depend_on<cyclic_a>(ctx);
+    _a = depend_on<cyclic_a>(scope.context());
+    co_return;
 }
+
+/// What the test's assertion handler throws to unwind out of the phase that closed the cycle.
+struct cycle_assert
+{
+};
 } // namespace
 
 // A cycle is refused where the edge is declared, not discovered later as a hang.
 // It is two failures at once: readiness never settles because each end waits for the other, and initialization would
 // deadlock taking the two routines' locks in opposite orders -- a stack trace naming two mutexes and no routine.
+//
+// CHECK_ASSERTS cannot be used here, and the reason is structural: it works by throwing out of the expression, and the
+// assert fires inside a PHASE, whose promise catches the exception and fails the node instead of unwinding to the tick.
+// So the handler is installed by hand, and what is checked is both halves -- that the assert fired, and that the
+// framework then reports the cycle as a failed routine rather than one pending forever.
+//
+// Singlethreaded for a reason of the same kind: the handler stack is per-thread, so the phases have to run inline on
+// this thread rather than on a pool worker that nobody scoped.
 INVOCABLE_TEST("sg - a dependency cycle is refused where it is declared",
                (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+               exclusive("sg-reload-generation"),
+               singlethreaded)
 {
     REQUIRE(ctx != nullptr);
     cyclic_a::evict(*ctx);
     cyclic_b::evict(*ctx);
 
+#if CC_ASSERT_ENABLED
+    auto asserts_seen = 0;
+    {
+        auto const handler = cc::impl::scoped_assertion_handler(
+            [&](cc::impl::assertion_info const&)
+            {
+                ++asserts_seen;
+                throw cycle_assert{}; // unwinds out of the phase, exactly as nexus's own handler would
+            });
+
+        cyclic_a::prewarm(*ctx);
+        (void)ctx->routines.tick_until_idle();
+    }
+    CHECK(asserts_seen == 1);
+
+    // Both ends are unusable: the one that closed the edge failed outright, and the one above it inherits that
+    // through the subtree fold rather than reporting ready over a dependency that is not coming.
+    CHECK(cyclic_b::try_acquire(*ctx).is_failed());
+    CHECK(cyclic_a::try_acquire(*ctx).is_failed());
+#else
+    // With assertions off the cycle is not refused at all, and both ends come up over an edge that loops.
+    // What still has to hold is that nothing hangs: the readiness walk carries a visited set, so a cycle costs a leak
+    // rather than a spin.
     cyclic_a::prewarm(*ctx);
-    CHECK_ASSERTS(ctx->routines.tick_until_idle());
+    (void)ctx->routines.tick_until_idle();
+    CHECK(cyclic_a::try_acquire(*ctx).is_ready());
+#endif
 
     // The registry is left holding the half-built graph, so clear it rather than leaving it for the next test.
     cyclic_a::evict(*ctx);
@@ -707,7 +776,11 @@ namespace
 class broken_routine : public sg::render_routine<broken_routine>
 {
 protected:
-    void init_declare(sg::context&) override { fail_init(); }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope) override
+    {
+        fail_init();
+        co_return;
+    }
 };
 } // namespace
 

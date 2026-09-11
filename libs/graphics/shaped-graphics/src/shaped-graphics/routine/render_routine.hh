@@ -216,7 +216,10 @@ private:
 ///           // ... bind self's pipeline, dispatch ...
 ///       }
 ///   protected:
-///       void init_declare(sg::context& ctx) override { /* acquire shaders, build the pipeline, declare dependencies */ }
+///       cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
+///       {
+///           // acquire shaders, declare dependencies, build the pipeline — awaiting each
+///       }
 ///   };
 ///
 /// **Branch once, at the top.** A routine's own dependencies are declared with depend_on during init and redeemed
@@ -263,7 +266,7 @@ public:
     [[nodiscard]] static routine_scope<Derived> try_acquire(context& ctx, Params const& params = {})
     {
         Derived& self = instance(ctx, params);
-        return routine_scope<Derived>(self, self.readiness());
+        return routine_scope<Derived>(self, ctx.routines.readiness_of(self));
     }
 
     /// The same, mutable, holding the routine's lock — for a routine that writes anything.
@@ -276,9 +279,10 @@ public:
     [[nodiscard]] static routine_guard<Derived> try_acquire_exclusive(context& ctx, Params const& params = {})
     {
         Derived& self = instance(ctx, params);
-        auto lock = self._init.lock_scoped();
-        auto const readiness = self.own_readiness_locked(*lock);
-        return routine_guard<Derived>(self, cc::move(lock), readiness);
+        // Read BEFORE the lock: folding in the subtree takes each routine's own lock, and cc::mutex is not recursive.
+        // Only a tick can change it, and a tick is a frame-boundary call — so there is nothing to race.
+        auto const readiness = ctx.routines.readiness_of(self);
+        return routine_guard<Derived>(self, self._init.lock_scoped(), readiness);
     }
 
     /// Register this routine so the next `ctx.routines.tick()` brings it up, before anything needs it.

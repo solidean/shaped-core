@@ -46,7 +46,7 @@ public:
     [[nodiscard]] static int level_count(sg::texture_2d const& texture, int first_level = 1);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     sg::binding_group_layout_handle _group_layout;
