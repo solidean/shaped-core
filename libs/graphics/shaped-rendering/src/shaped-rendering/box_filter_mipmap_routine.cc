@@ -25,17 +25,18 @@ constexpr variant_traits traits_of[] = {
 } // namespace
 
 cc::shared_async<std::shared_ptr<mipmap_program const>> box_filter_mipmap_routine::_build_program(sg::context& ctx,
-                                                                                                  variant v)
+                                                                                                  mipmap_variant v)
 {
-    // One chain rather than two blocking waits: the shader compile and the pipeline build are both async, and
-    // awaiting them parks this frame instead of holding a thread.
-    // This is where a coroutine belongs — init_declare itself is a `void` virtual and cannot be one.
+    // One chain rather than two waits: the shader compile and the pipeline build are both async, and awaiting them
+    // in a coroutine parks instead of holding a thread.
+    // init_declare still drives this to completion, because a `void` virtual cannot await — that is exactly what
+    // changes when the phases become coroutines, and then this function IS init.
     using asset_ptr = decltype(sr::shaders::box_filter_mipmap.compute.main_2d_cs);
     asset_ptr const entries[]
         = {sr::shaders::box_filter_mipmap.compute.main_1d_cs, sr::shaders::box_filter_mipmap.compute.main_1d_array_cs,
            sr::shaders::box_filter_mipmap.compute.main_2d_cs, sr::shaders::box_filter_mipmap.compute.main_2d_array_cs,
            sr::shaders::box_filter_mipmap.compute.main_3d_cs};
-    static_assert(sizeof(entries) / sizeof(entries[0]) == int(variant::count_), "one entry point per variant");
+    static_assert(sizeof(entries) / sizeof(entries[0]) == int(mipmap_variant::count_), "one entry point per variant");
 
     auto const& compiled = co_await entries[int(v)]->acquire(ctx);
 
@@ -49,36 +50,33 @@ cc::shared_async<std::shared_ptr<mipmap_program const>> box_filter_mipmap_routin
 
 void box_filter_mipmap_routine::init_declare(sg::context& ctx)
 {
-    // Nothing is compiled here.
-    // init_declare is documented to *kick off* work, and a caller that only ever mips 2D textures should not
-    // wait on the 1D, 3D and array shaders to reach its first frame.
-    // Re-init also clears what was built against the previous shaders, which is what a reload needs.
-    _programs.init(ctx, [](sg::context& c, variant const& v) { return _build_program(c, v); });
+    // Cleared first, so a reload that fails to compile leaves nothing built against the previous shaders.
+    _program = nullptr;
+
+    // One variant per instance, so only what a caller actually asks for is ever compiled — the laziness the
+    // per-variant cache used to provide, now a property of which instances exist.
+    auto node = _build_program(ctx, params());
+    (void)cc::try_async_blocking_get(node);
+    if (auto const* const built = node->try_value())
+        _program = *built;
 }
 
 void box_filter_mipmap_routine::_dispatch_level(sg::command_list& cmd,
+                                                box_filter_mipmap_routine const& self,
                                                 sg::raw_view const& source,
                                                 sg::raw_view const& target,
-                                                variant v,
                                                 int x,
                                                 int y,
                                                 int z)
 {
-    auto const& self = acquire(cmd);
-
-    // Fallible rather than throwing: this runs inside the caller's command list, and an exception unwinding out
-    // of here would leave it unsubmitted.
-    auto const program = self._programs.try_acquire(v);
-    if (program.has_error() || program.value() == nullptr)
-        return; // this variant's shader did not compile
-
+    // execute already established that the routine is ready and its program built, once for the whole chain.
     auto& ctx = cmd.context();
-    auto const& names = traits_of[int(v)];
+    auto const& names = traits_of[int(self.params())];
 
     auto const group = ctx.transient.create_binding_group(
-        program.value()->layout, {{.name = names.source, .view = source}, {.name = names.target, .view = target}});
+        self._program->layout, {{.name = names.source, .view = source}, {.name = names.target, .view = target}});
 
-    cmd.compute.bind_pipeline(*program.value()->pipeline);
+    cmd.compute.bind_pipeline(*self._program->pipeline);
     cmd.compute.bind_group(0, *group);
     cmd.compute.dispatch_threads(x, y, z);
 }

@@ -5,7 +5,23 @@
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
-#include <shaped-rendering/keyed_pipeline_cache.hh>
+
+#include <memory>
+
+/// Which shader entry point a texture shape reads through, and the only thing its dimension decides.
+///
+/// This is the routine's PARAMETER, so it is public: the registry holds one box_filter_mipmap_routine instance per
+/// variant, and a caller naming the type has to be able to name the parameter too.
+enum class sr::mipmap_variant : sg::u8
+{
+    tex_1d,
+    tex_1d_array,
+    tex_2d,
+    tex_2d_array, ///< also every cube and cube array, whose UAV is a 2D array of faces
+    tex_3d,
+
+    count_
+};
 
 /// One mipmap variant's compiled program: the group layout its bindings define, and the pipeline over it.
 ///
@@ -37,7 +53,7 @@ struct sr::mipmap_program
 /// N+1, so no level is read and written by the same dispatch.
 /// The texture must carry `readonly_texture | readwrite_texture` usage and have the levels allocated already —
 /// this fills a chain, it never reshapes one.
-class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine>
+class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine, sr::mipmap_variant>
 {
 public:
     /// Generates levels `first_level` through the end of `texture`'s chain from the level below each.
@@ -45,22 +61,31 @@ public:
     /// `first_level` must be >= 1 (level 0 is the source of everything and is never generated) and within the
     /// chain; generating from a level whose own contents are not yet uploaded produces garbage, so the caller
     /// orders this after the upload it depends on.
-    /// A no-op if the shader did not compile, or if the texture has no level to generate.
+    /// Declines while this variant's shader is still compiling, and after a compile that failed.
+    /// A texture with no level to generate is not a refusal — level_count says so first.
     template <class Traits>
-    static void execute(sg::command_list& cmd, sg::texture<Traits> const& texture, int first_level = 1)
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
+                                                     sg::texture<Traits> const& texture,
+                                                     int first_level = 1)
     {
         static_assert(!Traits::is_multisampled, "a multisampled texture has no mip chain to fill");
 
         if (level_count(texture, first_level) == 0)
-            return;
+            return sg::routine_outcome::executed;
+
+        // Acquired ONCE for the whole chain rather than once per level: the variant is fixed by the texture's shape,
+        // so every level of one call lands on the same instance.
+        auto const self = try_acquire(cmd, _variant_of<Traits>());
+        if (!self.is_ready() || self->_program == nullptr)
+            return sg::routine_outcome::declined;
 
         auto const levels = texture.mip_levels();
         for (auto level = first_level; level < levels; ++level)
         {
             auto const e = _extent_of(texture, level);
-            _dispatch_level(cmd, _source_of(texture, level - 1), _target_of(texture, level), _variant_of<Traits>(), e.x,
-                            e.y, e.z);
+            _dispatch_level(cmd, *self, _source_of(texture, level - 1), _target_of(texture, level), e.x, e.y, e.z);
         }
+        return sg::routine_outcome::executed;
     }
 
     /// How many dispatches `execute` would record — what a caller budgeting GPU work per frame needs to know
@@ -74,27 +99,15 @@ public:
     }
 
 private:
-    /// Which shader entry point a shape reads through, and the only thing the dimension decides.
-    enum class variant : sg::u8
-    {
-        tex_1d,
-        tex_1d_array,
-        tex_2d,
-        tex_2d_array, ///< also every cube and cube array, whose UAV is a 2D array of faces
-        tex_3d,
-
-        count_
-    };
-
     template <class Traits>
-    [[nodiscard]] static constexpr variant _variant_of()
+    [[nodiscard]] static constexpr mipmap_variant _variant_of()
     {
         if constexpr (Traits::dimension == sg::texture_dimension::d1)
-            return Traits::is_array ? variant::tex_1d_array : variant::tex_1d;
+            return Traits::is_array ? mipmap_variant::tex_1d_array : mipmap_variant::tex_1d;
         else if constexpr (Traits::dimension == sg::texture_dimension::d3)
-            return variant::tex_3d;
+            return mipmap_variant::tex_3d;
         else
-            return (Traits::is_array || Traits::is_cube) ? variant::tex_2d_array : variant::tex_2d;
+            return (Traits::is_array || Traits::is_cube) ? mipmap_variant::tex_2d_array : mipmap_variant::tex_2d;
     }
 
     /// The single-mip source view of `level`, in the dimension the matching entry point expects.
@@ -176,28 +189,26 @@ private:
         return e;
     }
 
-    /// Records one level, in whichever variant the shape resolved to.
+    /// Records one level, reading the program off the routine the caller already acquired.
     static void _dispatch_level(sg::command_list& cmd,
+                                box_filter_mipmap_routine const& self,
                                 sg::raw_view const& source,
                                 sg::raw_view const& target,
-                                variant v,
                                 int x,
                                 int y,
                                 int z);
 
-    /// Compiles `v`'s entry point and builds its pipeline, as one async chain rather than two blocking waits.
-    /// This is what `init_declare` hands the cache, and the cache runs it once per variant that is asked for.
-    static cc::shared_async<std::shared_ptr<mipmap_program const>> _build_program(sg::context& ctx, variant v);
+    /// Compiles this variant's entry point and builds its pipeline, as one async chain rather than two waits.
+    static cc::shared_async<std::shared_ptr<mipmap_program const>> _build_program(sg::context& ctx, mipmap_variant v);
 
 protected:
     void init_declare(sg::context& ctx) override;
 
 private:
-    /// One program per variant, built lazily and only for the variants a caller actually uses.
+    /// The one program this instance is for — its variant is params().
     ///
-    /// A cache rather than an array because `init_declare` must not block: it is documented to *kick off*
-    /// compiles, and waiting on all five up front would stall the first frame on shaders most callers never
-    /// touch.
-    /// Mutable, since the cache guards itself and its whole acquire path is const.
-    mutable keyed_pipeline_cache<variant, mipmap_program> _programs;
+    /// Only the variants a caller actually asks for are ever instantiated, which is the laziness the old per-variant
+    /// cache existed to provide: a caller that only mips 2D textures never reaches the 1D, 3D or array shaders,
+    /// because it never acquires those instances.
+    std::shared_ptr<mipmap_program const> _program;
 };

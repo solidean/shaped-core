@@ -23,6 +23,7 @@ struct gpu_boolean;
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
+enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
 struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
 // Dear ImGui integration (see imgui_context.hh).

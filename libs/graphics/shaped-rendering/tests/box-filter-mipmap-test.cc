@@ -73,14 +73,14 @@ TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-sha
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 3) == 2);
 
     auto cmd = ctx.create_command_list();
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_1d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_3d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_cube);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d_array);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_1d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_3d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_cube) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d_array) == sg::routine_outcome::executed);
 
     // Regenerating only the tail is the streaming case: the first levels are already good.
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d, 3);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d, 3) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
 
     ctx.advance_epoch_and_wait_for_idle();
@@ -176,8 +176,8 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
         up->upload.bytes_to_texture(tex_1d_array.raw(), rgba8_constant(1, sentinel),
                                     {.mip_level = 2, .array_layer = slice});
     }
-    sr::box_filter_mipmap_routine::execute(*up, tex_cube);
-    sr::box_filter_mipmap_routine::execute(*up, tex_1d_array);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_cube) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_1d_array) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch_and_wait_for_idle();
 
@@ -235,7 +235,7 @@ TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive
 
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
-    sr::box_filter_mipmap_routine::execute(*up, tex);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch_and_wait_for_idle();
 
