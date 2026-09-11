@@ -24,6 +24,11 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 
 A **group index** is a descriptor set the hardware sees: SPIR-V's `set`, WGSL's `@group`.
 Vulkan guarantees four of them, and binding a descriptor set means naming the very index the shader was compiled against — bind it elsewhere and the shader reads the wrong table.
+WebGPU guarantees four as well, and four is the floor sg budgets against.
+A caller gets three of them, [`sg::max_binding_groups`](../../src/shaped-graphics/fwd.hh).
+The fourth is [`sg::reserved_binding_group`](../../src/shaped-graphics/fwd.hh), which is sg's own — where a backend puts what it has to emulate.
+That reservation holds on every backend, not only the ones that need it.
+A cap that varied per backend would be one a caller exceeds on the backend they develop against, and discovers on another.
 A **space** is HLSL's `space`, and it is only a namespace for register numbers: `t0, space1` and `t0, space2` are two distinct registers.
 Neither of them says anything about which descriptor table they end up in.
 An arbitrary number of spaces is fine, which is exactly why a space could never stand in for a set.

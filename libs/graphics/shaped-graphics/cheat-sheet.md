@@ -563,7 +563,9 @@ sg::bound_view             // one raw_view (stored inline, `.view = tex.as_reado
                             //   consumers read both arms via .span() / .size()
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
-sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `group_index`)
+sg::max_binding_groups      // int (3) — group slots a CALLER gets (== cmd.compute.bind_group's `group_index`); same on every backend
+sg::reserved_binding_group  // int (3) — the slot above them, sg's own: inline-constant emulation where a backend has no
+                            //   push constants, later RT emulation and shader-side diagnostics. WebGPU guarantees 4, so 3 + 1 fits everywhere
 sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
