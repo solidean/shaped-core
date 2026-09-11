@@ -236,47 +236,35 @@ sr::write_capture_image(ctx, tex, path)  // -> cc::result<cc::unit>; blocking re
   A JPEG truncated on a 4096-byte boundary still DECODES, flat-filling the tail from the last DC value.
   So a missing flush reads as a rendering artifact rather than as a broken file.
 
-## Pipeline cache
+## One routine per pipeline
 
-One pipeline per key, built once — the reusable form of the "small vector of {format, pipeline} plus a find-or-create" a routine otherwise grows.
-The key is almost always the render-target pixel format.
+A raster pipeline bakes its target format in, so a routine that draws into "whatever it is handed" is a schema, not one unit of work.
+Parametrize it; the registry holds one instance per value.
 
 ```cpp
-#include <shaped-rendering/keyed_pipeline_cache.hh>
+class sr::blit_routine : public sg::render_routine<blit_routine, sg::pixel_format>   // the format IS the parameter
+{
+    void init_declare(sg::context& ctx) override
+    {
+        // one pipeline, for params() — built here, where waiting is allowed
+        _pipeline = ctx.cached.acquire_raster_pipeline({.layout = ..., .color_targets = {{.format = params()}}});
+        (void)cc::try_async_blocking_get(_pipeline);   // so `ready` means ready
+    }
+    sg::async_raster_pipeline _pipeline;
+};
 
-sr::keyed_pipeline_cache<sg::pixel_format> pipelines;   // Pipeline defaults to sg::raster_pipeline
-
-// In init_declare, after building the layout: (re)bind the build callback + CLEAR the cache.
-// The callback RETURNS the async — it never waits for one.
-pipelines.init(ctx, [layout, vs, ps](sg::context& c, sg::pixel_format format)
-                    { return c.cached.acquire_raster_pipeline({.layout = layout, .vertex_shader = vs,
-                                                               .fragment_shader = ps,
-                                                               .color_targets = {{.format = format}}}); });
-// a build that is not already a node: cc::make_async_from_value / cc::make_async_from_error
-
-auto pipe = pipelines.try_acquire(format);    // -> cc::result<handle>; the form for inside a rendering scope
-if (!pipe.has_error() && pipe.value())
-    scope.bind_pipeline(*pipe.value());
-
-pipelines.acquire(format);        // -> handle; throws on build failure (matches sg's create_*)
-pipelines.acquire_async(format);  // -> cc::shared_async<handle>; the fallible form, error on the async channel
-pipelines.prepare(format);        // warm the cache for `format` ahead of the draw
+// at the draw, which is inside the caller's open scope and may not wait:
+auto const self = try_acquire(cmd, scope.color_formats()[0]);
+if (!self.is_ready())
+    return sg::routine_outcome::declined;
 ```
 
-- **The callback returns the node; it must never block on one.**
-  The cache stores exactly what the callback returns, so `ctx.cached.acquire_raster_pipeline` is handed straight over and the PSO is shared with every other routine asking for the same description.
-  Blocking a pool worker on another node parks the very workers that node needs, and enough routines initializing at once deadlock — which is why there is no synchronous form to reach for.
-- **`init` clears the cache** — call it on every (re)load: a rebuilt layout invalidates every pipeline cached
-  against the old one, and re-`init` both drops them and rebinds the fresh callback.
-- **`handle` is `std::shared_ptr<Pipeline const>`** — for the default it IS `sg::raster_pipeline_handle`.
-- **Use `try_acquire` inside a rendering scope**, never `acquire`: an exception unwinding out past an open
-  command list would leave it unsubmitted.
-- **The build callback may run on a pool worker and concurrently for distinct keys.**
-  Capture only immutable state (the layout + shaders), and do not race `init` with in-flight builds.
-  With no pool, builds run inline.
-- **The whole acquire path is `const`** — `acquire` / `try_acquire` / `acquire_async` / `prepare` work on a `keyed_pipeline_cache const&`, so a routine's const draw path can build lazily.
-  Only `init` mutates.
-
+- **Nothing unused is built.** A caller that only mips 2D textures never reaches the 1D / 3D / array shaders, because it never acquires those instances.
+  That is the laziness the old per-key cache provided, now a property of which instances exist.
+- **Do not over-approximate.** Declaring every possible value up front loads pipelines nobody needs; `prewarm(ctx, value)` is for a caller that genuinely knows what is coming.
+- **A key that cannot be a parameter keeps a map.** `sv::pathtrace_routine`'s permutations are scene data: unbounded, and discovered on the frame path.
+  So it holds its own map and declines until the one a trace needs is built.
+- This replaced `sr::keyed_pipeline_cache`, whose acquire blocked because the build happened on the draw path.
 ## Blit routine
 
 Sample a source texture across an open raster scope's target with a fullscreen triangle — the "draw this

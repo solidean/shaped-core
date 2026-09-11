@@ -129,19 +129,40 @@ private:
 };
 ```
 
-`acquire_exclusive` is the one to reach for.
-A routine is expected to hold state — a pipeline cache keyed by target format, a resource registry, a scratch buffer that grows — and the guard is what makes writing it safe.
+`try_acquire_exclusive` is the one to reach for.
+A routine is expected to hold state — its pipeline, a resource registry, a scratch buffer that grows — and the guard is what makes writing it safe.
 Keep the guard to the scope that actually mutates; it serializes every other thread recording that routine for as long as it lives.
 
-`acquire` is the other half, and it takes **no lock at all**: it returns `Derived const&`, so only non-mutating members are reachable.
-That makes it a contract rather than a guarantee — **whatever the const path can reach must be immutable after init, or self-guarded on its own**.
-`sr::keyed_pipeline_cache` is self-guarded, which is why its whole acquire path is `const`.
-A reload on another thread re-runs `init_declare` while this thread reads.
-So **a routine whose `execute` touches anything `init_declare` writes belongs on `acquire_exclusive`**, which in practice is nearly all of them.
+`try_acquire` is the other half, and it takes **no lock at all**: it hands back a read-only scope, so only non-mutating members are reachable.
+That makes it a contract rather than a guarantee — **whatever it can reach must be immutable after init, or self-guarded on its own**.
+So **a routine whose `execute` touches anything `init` writes belongs on `try_acquire_exclusive`**, which in practice is nearly all of them.
 
-Taking a *different* routine's guard while holding your own is fine — `sv::view_renderer` drives its leaf routines under its own guard, and today they take none of their own.
-`sv::viewer_renderer` sits above it and takes none itself, so the chain through a frame is viewer_renderer, then view_renderer, then leaf.
-The lock is not recursive, so the two rules are: never re-acquire the *same* routine under its own guard, and take any two routines in the same order everywhere.
+**Neither one initializes.**
+Asking registers the routine; [the tick](#the-tick-is-what-initializes) is what brings it up, which is why both report three states rather than handing back something usable unconditionally.
+
+Taking a *different* routine's guard while holding your own is fine, and a dependency token is how it is spelled.
+`self.acquire_exclusive(token)` hands back a guard on the dependency, taken after the holder's.
+The order is holder then dependency, which the acyclic graph makes consistent — reaching the two the other way round would need a cycle, and those are refused where the edge is declared.
+The lock is not recursive, so the rule that remains is: never re-acquire the *same* routine under its own guard.
+
+## The tick is what initializes
+
+Nothing a caller does brings a routine up.
+`ctx.routines.tick()` does, and a routine nothing has ticked reads as pending.
+That is the point: initialization is where shaders are compiled and pipelines built, and none of that may happen on the frame path.
+
+It is a **frame-boundary call**.
+It opens and submits a command list of its own, so it must not run inside one, and it belongs after `advance_epoch` and before the frame's first acquire.
+Every routine it brings up in one tick records into that one list, so their GPU init work batches into a single submit.
+
+Its budget is **advisory pacing rather than a deadline**.
+A routine's initialization is not interruptible, so the check sits between routines and a tick overruns by however long the longest one takes.
+A caller that treats it as a frame deadline will eventually miss one and blame the wrong thing.
+
+A reload is observed here too, and only here, so it cannot land in the middle of a frame.
+
+**An application that never ticks gets a renderer where nothing is ever ready**, silently — every `try_acquire` pending, every draw skipped, an empty screen and no explanation.
+That is a new way to hold the library wrong, so the registry says so: routines pending and no tick for several frames is a warning on sg's recording domain.
 
 Both halves of that are an approximation of the model this actually wants, and the gap is a missing clean-core type:
 **the init phases should exclude every `execute`, while `execute` calls that only read should run in parallel with each other.**

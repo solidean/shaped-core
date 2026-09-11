@@ -29,9 +29,6 @@ struct mipmap_program;                  // one mipmap variant's group layout + c
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 
-/// A pipeline cache keyed by whatever a routine varies on (see keyed_pipeline_cache.hh).
-template <class Key, class Pipeline>
-class keyed_pipeline_cache;
 
 // OS windows (see window.hh).
 // Always declared; SR_HAS_WINDOW says whether a backend was built in, and without one creation fails.

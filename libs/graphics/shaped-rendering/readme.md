@@ -86,23 +86,21 @@ see its [docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
 `sr` hosts the **concrete** routines built on top of it; they land as they are implemented.
 See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview and [docs/structure.md](docs/structure.md) for the wider roadmap.
 
-## Pipeline cache
+## One routine per pipeline, rather than a cache inside one
 
-`sr::keyed_pipeline_cache<Key, Pipeline = sg::raster_pipeline>` is a get-or-create cache of pipelines keyed by a caller-chosen key — one pipeline per key, built once.
-The key is almost always the render-target pixel format: a routine draws the same shaders into whatever target it is handed, and each distinct format needs its own pipeline.
-It replaces the hand-rolled "small vector of `{format, pipeline}` plus a linear-search find-or-create" that routines otherwise grow (`sr::blit_routine` is the first user).
+A raster pipeline bakes its color-target format in, so "blit" is not one unit of work — it is one per format.
+Routines that vary like that are **parametrized** on what the pipeline bakes in — `sg::render_routine<blit_routine, sg::pixel_format>`.
+The registry then holds one instance per value, each owning the single pipeline it needs.
 
-The build callback — given the context and the key — does the actual creation, so the cache stays agnostic to what a pipeline needs.
-For a raster pipeline that callback is `ctx.cached.acquire_raster_pipeline`, whose node the cache stores as-is.
-The keyed cache owns the key -> pipeline mapping and reload invalidation, while pipeline identity and the build itself belong to sg's own cache.
-So two routines drawing the same shaders into the same format share one PSO.
-The caller captures its layout and shaders into the callback at `init` time.
-`init` clears the cache, which is exactly what a hot-reload wants: a rebuilt layout invalidates every pipeline cached against the old one.
-The sync path is a `try_acquire` (→ `cc::result`) / `acquire` (→ throws) pair, mirroring sg's `try_create_*` / `create_*`.
-`acquire_async` is the fallible async form, and `prepare` warms a key ahead of the draw.
+This replaced `sr::keyed_pipeline_cache`, which was one instance holding a map it filled lazily on first use.
+The map had to be built on the draw path, inside the caller's open rendering scope, which is exactly where nothing may wait — so its acquire blocked, and every routine using it inherited that.
+Built during init instead, a pipeline is ready or the routine is not, and `try_acquire` says which.
 
-See the [cheat-sheet](cheat-sheet.md) for the full surface.
+Nothing is built that nobody asks for: a caller that only mips 2D textures never reaches the 1D, 3D or array shaders, because it never acquires those instances.
+The laziness is a property of which instances exist rather than of a cache.
 
+Where a key genuinely cannot be a routine parameter, the routine keeps a map of its own and declines until the permutation it needs is built.
+`sv::pathtrace_routine` is the case: it keys its pipelines on the ordered set of hit groups a trace names, which is scene data.
 ## Building & testing
 
 Build and test through the repo driver — never run the `shaped-rendering-test` binary directly.

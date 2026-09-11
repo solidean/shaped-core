@@ -770,19 +770,36 @@ void init_once(sg::context& ctx)          // first init only, NEVER on reload �
 void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
 void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
-my_routine::acquire_exclusive(cmd)         // -> sg::routine_guard<my_routine> — lazily create + init, and HOLD the routine's lock; self-> is mutable
-my_routine::acquire(cmd)                   // -> my_routine const&  — same, but NO lock held: only const members are reachable
-my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
-my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
-// Both memoize the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
-// A routine is EXPECTED to hold state, so acquire_exclusive is the usual one — a routine needs NO mutex of its own.
-// Threading, three parts, all now the framework's:
+my_routine::try_acquire_exclusive(cmd[, params])  // -> sg::routine_guard<my_routine>  HOLDS the routine's lock; self-> is mutable
+my_routine::try_acquire(cmd[, params])           // -> sg::routine_scope<my_routine>  NO lock held; read-only
+//   NEITHER INITIALIZES. Asking registers the routine; ctx.routines.tick() is what brings it up.
+//   Both report three states — .is_ready() / .is_pending() / .is_failed(); no operator bool, so a site says which it means.
+//   `pending` = still building. `failed` = will not come good until a reload (a shader that was never good).
+my_routine::prewarm(ctx[, params])         // void — register it so the NEXT tick brings it up; it does not build anything itself
+my_routine::evict(ctx[, params])           // void — drop ONE parametrization; evict_all(ctx) drops every one
+// Instance memoized per thread on (context, params hash), weakly — never keeps a routine alive past evict/clear/shutdown.
+
+// Parametrized routines: the template names the parameter's TYPE, the value is runtime.
+class blit_routine : public sg::render_routine<blit_routine, sg::pixel_format> { ... params() ... };
+//   one instance per distinct value; a parameter must come from a SMALL, ENUMERABLE set (documented, not enforced)
+
+// Dependencies, declared in init and redeemed during execution:
+_token = depend_on<other_routine>(ctx[, params]);   // -> sg::routine_dependency<other_routine, P>; records the edge
+auto const& other = self.acquire(_token);           // CANNOT FAIL — the holder is not handed out until its subtree is ready
+auto other = self.acquire_exclusive(_token);        // the same, for a dependency this routine mutates
+//   ONE readiness check per entry into the routine system, not one per routine — that is what the token buys.
+//   A cycle asserts where the edge is declared: it would be a deadlock, not just a hang.
+
+// Threading:
 //   registry guarded (acquiring from parallel recording is fine);
-//   ONE lock per routine covering both the init phases and everything the routine owns — acquire_exclusive hands it to you;
-//   acquire() takes no lock, so whatever it reaches must be immutable after init or self-guarded (sr::keyed_pipeline_cache is).
-//   State written in init_declare and only read later is exactly the case that needs acquire_exclusive: a reload rewrites it.
-// The lock is not recursive: never re-acquire the SAME routine under its guard. A DIFFERENT routine is fine, in a consistent order.
+//   initialization runs ONLY inside a tick, so the phases are never concurrent and a reload cannot land mid-frame;
+//   the read-only scope takes no lock, so what it reaches must be immutable after init or self-guarded.
 // re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
+
+ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initialized, pending, budget_exhausted, is_idle()}
+//   THE driver. A frame-boundary call: it opens and submits its own command list, so never inside one —
+//   after advance_epoch, before the frame's first acquire. Budget is advisory PACING (checked between routines), not a deadline.
+ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
 ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown

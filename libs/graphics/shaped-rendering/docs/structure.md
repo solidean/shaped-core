@@ -68,7 +68,6 @@ Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas 
 
 ```text
 sr::blit_routine          [done]     fullscreen-triangle blit of a texture across an open raster scope
-sr::keyed_pipeline_cache  [done]     one pipeline per caller-chosen key, usually the target's pixel format
 mipmap generation         [planned]
 texture compression       [planned]
 tonemapping               [planned]

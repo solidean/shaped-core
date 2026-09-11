@@ -18,7 +18,8 @@
 ///     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
 ///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
 ///
-/// The routine owns the GPU textures backing imgui's atlas and a keyed_pipeline_cache (one pipeline per target format).
+/// The routine owns one raster pipeline for its target format; the GPU textures behind imgui's atlas belong to the
+/// texture routine above, which every format shares.
 /// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
 /// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
 ///
