@@ -4,7 +4,6 @@
 #include <clean-core/thread/atomic.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -19,17 +18,25 @@
 
 using namespace cc::primitive_defines;
 
-// Render-routine framework tests, on a dx12 WARP context (software, present on any Windows host, so they run on headless CI).
-// WARP + DXC are Windows-only, which is why this file is gated on the dx12 backend and a shader compiler in the CMakeLists.
+// Render-routine framework tests, backend-agnostic: each is an INVOCABLE_TEST taking a live context, so it runs
+// against every backend the binary was built with (see tests/context/context-test.cc for the harness).
+//
 // Three things are proven here:
 //   1. the framework's phase orchestration re-runs declare/materialize on a reload, but not init_once,
-//   2. routines are per-context — a fresh context re-initializes from scratch (no stale cross-context state, the bug the per-context registry design fixes by construction), and
+//   2. eviction really drops an instance, and the per-thread acquire cache does not resurrect it, and
 //   3. a real routine compiles a compute shader through slib and dispatches it end to end.
+//
+// **Every test owns its routine type.** A routine instance is per-context and these tests share one context per
+// backend, so two tests reaching for the same type would see each other's phase counts — and the one that ran second
+// would assert against a routine that was already initialized.
+// Tests needing TWO contexts live in routine-contexts-test.cc, which cannot be backend-agnostic for that reason.
 
 namespace
 {
-// A fake routine that records how often each phase ran; does no GPU work.
-class counting_routine : public sg::render_routine<counting_routine>
+// Records how often each phase ran; does no GPU work.
+// One per test that counts phases, since the count is per (type, context) and the context is shared.
+template <int Tag>
+class counting_routine : public sg::render_routine<counting_routine<Tag>>
 {
 public:
     int once = 0;
@@ -42,9 +49,11 @@ protected:
     void init_materialize(sg::command_list&) override { ++materialize; }
 };
 
+using phases_routine = counting_routine<0>;
+using evict_routine = counting_routine<1>;
+
 // Like counting_routine, but counted atomically so racing acquires can be checked.
 // The counters are static so the test can read them after the race without a handle to the per-context instance.
-// racing_routine is used by exactly one test, with one context, which resets them before the race.
 class racing_routine : public sg::render_routine<racing_routine>
 {
 public:
@@ -64,23 +73,27 @@ protected:
 
 // Counts increments made through acquire_exclusive, deliberately with a PLAIN int rather than an atomic.
 // The guard is what must make the read-modify-write exclusive, and an atomic would pass with or without it.
-class counter_routine : public sg::render_routine<counter_routine>
+template <int Tag>
+class counter_routine : public sg::render_routine<counter_routine<Tag>>
 {
 public:
     static void bump(sg::command_list& cmd)
     {
-        auto self = acquire_exclusive(cmd);
+        auto self = counter_routine::acquire_exclusive(cmd);
         ++self->_count;
     }
 
-    [[nodiscard]] static int count_of(sg::command_list& cmd) { return acquire_exclusive(cmd)->_count; }
+    [[nodiscard]] static int count_of(sg::command_list& cmd) { return counter_routine::acquire_exclusive(cmd)->_count; }
 
     // Reads the same member through the unlocked path, which only compiles because it does not mutate.
-    [[nodiscard]] static int count_via_const(sg::command_list& cmd) { return acquire(cmd)._count; }
+    [[nodiscard]] static int count_via_const(sg::command_list& cmd) { return counter_routine::acquire(cmd)._count; }
 
 private:
     int _count = 0;
 };
+
+using guard_routine = counter_routine<0>;
+using racing_counter_routine = counter_routine<1>;
 
 // The end-to-end routine: owns its pipeline via init_declare, dispatches in execute.
 // Reached by type — no handle, no registration call.
@@ -103,6 +116,8 @@ public:
         cmd.compute.dispatch_threads(out.element_count());
     }
 
+    [[nodiscard]] static bool is_usable(sg::command_list& cmd) { return acquire(cmd)._pipeline != nullptr; }
+
 protected:
     void init_declare(sg::context& ctx) override
     {
@@ -110,7 +125,7 @@ protected:
         (void)cc::try_async_blocking_get(shader); // no async pool here, so drive it inline
         auto const* const compiled = shader->try_value();
         if (compiled == nullptr)
-            return; // the context cannot produce a format we can use; execute() then asserts
+            return; // the context cannot produce a format we can use; is_usable() then reports it
 
         _group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
         auto const layout
@@ -124,61 +139,52 @@ private:
     sg::binding_group_layout_handle _group_layout;
     sg::async_compute_pipeline _pipeline;
 };
-
-// A dx12 WARP context, or nullptr where none is available (the caller SKIPs).
-sg::context_handle make_warp_context()
-{
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    return ctx.has_value() ? ctx.value() : nullptr;
-}
 } // namespace
 
-TEST("sg - routine acquire hands out a const reference, acquire_exclusive a move-only guard")
+INVOCABLE_TEST("sg - routine acquire hands out a const reference, acquire_exclusive a move-only guard",
+               (sg::context_handle const& ctx))
 {
     // A mutable reference creeping back into the unlocked path would silently re-open unguarded writes.
     static_assert(
-        std::is_same_v<decltype(counting_routine::acquire(std::declval<sg::command_list&>())), counting_routine const&>);
-    static_assert(std::is_same_v<decltype(counter_routine::acquire_exclusive(std::declval<sg::command_list&>())),
-                                 sg::routine_guard<counter_routine>>);
-    static_assert(!std::is_copy_constructible_v<sg::routine_guard<counter_routine>>);
+        std::is_same_v<decltype(guard_routine::acquire(std::declval<sg::command_list&>())), guard_routine const&>);
+    static_assert(std::is_same_v<decltype(guard_routine::acquire_exclusive(std::declval<sg::command_list&>())),
+                                 sg::routine_guard<guard_routine>>);
+    static_assert(!std::is_copy_constructible_v<sg::routine_guard<guard_routine>>);
 
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
-
+    REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
     // Both entry points reach the one per-context instance — a write through the guard is what the const path then reads.
-    counter_routine::bump(*cmd);
-    CHECK(counter_routine::count_of(*cmd) == 1);
-    CHECK(counter_routine::count_via_const(*cmd) == 1);
+    auto const before = guard_routine::count_of(*cmd);
+    guard_routine::bump(*cmd);
+    CHECK(guard_routine::count_of(*cmd) == before + 1);
+    CHECK(guard_routine::count_via_const(*cmd) == before + 1);
 
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg - routine phases run once, then re-run declare + materialize on a reload", exclusive("sg-reload-generation"))
+INVOCABLE_TEST("sg - routine phases run once, then re-run declare + materialize on a reload",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
-
+    REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    auto const& routine = counting_routine::acquire(*cmd);
+    auto const& routine = phases_routine::acquire(*cmd);
     CHECK(routine.once == 1);
     CHECK(routine.declare == 1);
     CHECK(routine.materialize == 1);
 
     // A second pass at the same generation changes nothing (same per-context instance).
     // We re-read through `routine`, so the returned reference is intentionally discarded.
-    (void)counting_routine::acquire(*cmd);
+    (void)phases_routine::acquire(*cmd);
     CHECK(routine.once == 1);
     CHECK(routine.declare == 1);
     CHECK(routine.materialize == 1);
 
     // A reload bumps the global generation: declare + materialize re-run, init_once does not.
     sg::signal_reload();
-    (void)counting_routine::acquire(*cmd);
+    (void)phases_routine::acquire(*cmd);
     CHECK(routine.once == 1);
     CHECK(routine.declare == 2);
     CHECK(routine.materialize == 2);
@@ -186,60 +192,26 @@ TEST("sg - routine phases run once, then re-run declare + materialize on a reloa
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg - routines are per-context: each context builds its own instance from scratch",
-     exclusive("sg-reload-generation"))
+INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
-    // Context A initializes the routine, then goes away.
-    {
-        auto const ctx_a = make_warp_context();
-        if (ctx_a == nullptr)
-            SKIP("no dx12 WARP device");
-
-        auto cmd_a = ctx_a->create_command_list();
-        auto const& ra = counting_routine::acquire(*cmd_a);
-        CHECK(ra.once == 1);
-        CHECK(ra.declare == 1);
-        CHECK(ra.materialize == 1);
-        ctx_a->drop_command_list(cc::move(cmd_a));
-    } // ctx_a shuts down here — its routine instance (and cached GPU state) is released with it.
-
-    // Advance the global generation.
-    // On A's instance this would only bump declare/materialize; a fresh context must instead build its OWN instance from scratch — init_once included.
-    sg::signal_reload();
-
-    auto const ctx_b = make_warp_context();
-    REQUIRE(ctx_b != nullptr);
-
-    auto cmd_b = ctx_b->create_command_list();
-    auto const& rb = counting_routine::acquire(*cmd_b);
-    CHECK(rb.once == 1); // ran again on ctx_b: the instance is per-context, not a process singleton
-    CHECK(rb.declare == 1);
-    CHECK(rb.materialize == 1);
-    ctx_b->drop_command_list(cc::move(cmd_b));
-}
-
-TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)",
-     exclusive("sg-reload-generation"))
-{
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
-
+    REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    auto const& first = counting_routine::acquire(*cmd);
+    auto const& first = evict_routine::acquire(*cmd);
     CHECK(first.once == 1);
 
     // Drive the first instance's declare count to 2, so it is distinguishable from a fresh one.
     sg::signal_reload();
-    (void)counting_routine::acquire(*cmd);
+    (void)evict_routine::acquire(*cmd);
     CHECK(first.declare == 2);
 
-    counting_routine::evict(*ctx);
+    evict_routine::evict(*ctx);
 
     // A fresh instance, built from scratch: every phase back at 1.
     // A cached slot that survived the eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
-    auto const& second = counting_routine::acquire(*cmd);
+    auto const& second = evict_routine::acquire(*cmd);
     CHECK(second.once == 1);
     CHECK(second.declare == 1);
     CHECK(second.materialize == 1);
@@ -247,47 +219,21 @@ TEST("sg - evicting a routine drops its instance (the acquire cache does not res
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg - two live contexts keep separate routine instances")
+INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
+               (sg::context_handle const& ctx),
+               exclusive("slib-shader-library"))
 {
-    auto const ctx_a = make_warp_context();
-    if (ctx_a == nullptr)
-        SKIP("no dx12 WARP device");
-    auto const ctx_b = make_warp_context();
-    REQUIRE(ctx_b != nullptr);
+    REQUIRE(ctx != nullptr);
 
-    auto cmd_a = ctx_a->create_command_list();
-    auto cmd_b = ctx_b->create_command_list();
-
-    auto const& ra = counting_routine::acquire(*cmd_a);
-    auto const& rb = counting_routine::acquire(*cmd_b);
-    CHECK(&ra != &rb);
-
-    // Interleaved acquires must keep landing on the right instance — neither context may be served the other's routine, however the per-thread acquire cache ping-pongs between them.
-    (void)counting_routine::acquire(*cmd_a);
-    (void)counting_routine::acquire(*cmd_b);
-    (void)counting_routine::acquire(*cmd_a);
-
-    CHECK(ra.once == 1);
-    CHECK(ra.declare == 1);
-    CHECK(rb.once == 1);
-    CHECK(rb.declare == 1);
-
-    ctx_a->drop_command_list(cc::move(cmd_a));
-    ctx_b->drop_command_list(cc::move(cmd_b));
-}
-
-TEST("sg - a routine compiles a shader and dispatches it end to end", exclusive("slib-shader-library"))
-{
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
-    if (!ctx->accepts_shader_format(sg::shader_format::dxil))
-        SKIP("context does not accept DXIL");
-
+    // Both compilers are registered and the asset picks between them by asking the context what it accepts, which is
+    // what makes this test say nothing about which backend it is running on.
     slib::shader_library shader_lib;
-    auto compiler = slib::create_dxc_compiler();
-    REQUIRE(compiler.has_value());
-    shader_lib.add_compiler(cc::move(compiler.value()));
+    auto dxil = slib::create_dxc_compiler();
+    if (dxil.has_value())
+        shader_lib.add_compiler(cc::move(dxil.value()));
+    auto spirv = slib::create_dxc_spirv_compiler();
+    if (spirv.has_value())
+        shader_lib.add_compiler(cc::move(spirv.value()));
     shader_lib.add_package(sg::test::shaders::package());
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
@@ -296,6 +242,12 @@ TEST("sg - a routine compiles a shader and dispatches it end to end", exclusive(
     REQUIRE(out.raw() != nullptr);
 
     auto disp = ctx->create_command_list();
+    if (!pattern_fill_routine::is_usable(*disp))
+    {
+        ctx->drop_command_list(cc::move(disp));
+        SKIP("no compiler reaches a shader format this context accepts");
+    }
+
     pattern_fill_routine::execute(*disp, out);
     ctx->submit_command_list(cc::move(disp));
 
@@ -314,24 +266,25 @@ TEST("sg - a routine compiles a shader and dispatches it end to end", exclusive(
     CHECK(ok);
 }
 
-
 // Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF, the WASM/no-threads mode) compiles cc::mutex with no mutex member and no locking at all,
 // because nothing in such a build is supposed to contend.
 // Spawning std::threads there would race by construction and prove nothing about the guard.
 #if CC_HAS_THREADS
 
-TEST("sg - concurrent acquires of one routine run each phase exactly once", exclusive("sg-reload-generation"))
+INVOCABLE_TEST("sg - concurrent acquires of one routine run each phase exactly once",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
     // The phase engine is guarded, so racing acquires must not both run init_declare.
     // Without that lock this is a plain data race on the phase flags, and the counts come out above one under contention.
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
+    REQUIRE(ctx != nullptr);
 
     // The exclusion tag is what makes `declare == 1` meaningful: sg::reload_generation() is process-global, and a concurrent
     // sg::signal_reload() elsewhere would legitimately re-run init_declare here.
     //
-    // racing_routine's counters are static (see there), so clear them before the race — a prior run in the same process would otherwise carry in.
+    // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
+    // backend in the same process would otherwise carry in.
+    racing_routine::evict(*ctx);
     racing_routine::once = 0;
     racing_routine::declare = 0;
 
@@ -357,15 +310,18 @@ TEST("sg - concurrent acquires of one routine run each phase exactly once", excl
     CHECK(racing_routine::declare.load() == 1);
 }
 
-TEST("sg - acquire_exclusive serializes concurrent access to a routine's own state")
+INVOCABLE_TEST("sg - acquire_exclusive serializes concurrent access to a routine's own state",
+               (sg::context_handle const& ctx))
 {
     // Unguarded, the plain-int increment races and the total lands below the expected count.
-    auto const ctx = make_warp_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
+    REQUIRE(ctx != nullptr);
 
     constexpr auto thread_count = 8;
     constexpr auto bumps_per_thread = 2000;
+
+    auto probe = ctx->create_command_list();
+    auto const before = racing_counter_routine::count_of(*probe);
+    ctx->drop_command_list(cc::move(probe));
 
     auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
     cc::atomic<int> ready = 0;
@@ -382,7 +338,7 @@ TEST("sg - acquire_exclusive serializes concurrent access to a routine's own sta
                     std::this_thread::yield();
 
                 for (auto n = 0; n < bumps_per_thread; ++n)
-                    counter_routine::bump(*cmd);
+                    racing_counter_routine::bump(*cmd);
 
                 ctx->drop_command_list(cc::move(cmd));
             });
@@ -391,7 +347,7 @@ TEST("sg - acquire_exclusive serializes concurrent access to a routine's own sta
         t.join();
 
     auto cmd = ctx->create_command_list();
-    CHECK(counter_routine::count_of(*cmd) == thread_count * bumps_per_thread);
+    CHECK(racing_counter_routine::count_of(*cmd) == before + thread_count * bumps_per_thread);
     ctx->drop_command_list(cc::move(cmd));
 }
 
