@@ -120,6 +120,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/context/gpu_metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
+    src/shaped-graphics/binding/shader_stage.hh
     src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_shader_table.hh

@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -24,6 +25,28 @@ enum class sg::binding_type
     readwrite_texture,           ///< storage texture — UAV (readwrite, shape texture)
     sampler,                     ///< texture sampler — not a view; bound as a static or dynamic sampler
     acceleration_structure,      ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
+};
+
+/// How a sampled texture binding's texels are read, which decides whether a sampler may filter them.
+/// WebGPU requires it on a bind group layout entry and rejects a mismatch outright: a 32-bit float texture is
+/// unfilterable there, so a layout claiming `filterable` over one fails validation rather than running slowly.
+/// dx12 and vulkan do not ask, so an absent value costs them nothing.
+enum class sg::texture_sample_type
+{
+    filterable_float,   ///< the ordinary case: unorm / snorm / 16-bit float, which a linear sampler may filter
+    unfilterable_float, ///< 32-bit float channels — sampled as float, never filtered
+    depth,              ///< a depth texture, read through a comparison or an ordinary sampler
+    sint,               ///< signed integer texels, never filtered
+    uint,               ///< unsigned integer texels, never filtered
+};
+
+/// What kind of sampler a sampler binding expects.
+/// WebGPU requires it on the layout, before any sampler is bound, so it cannot be derived from the bound `sg::sampler`.
+enum class sg::sampler_binding_type
+{
+    filtering,     ///< may use a linear min/mag/mip filter
+    non_filtering, ///< nearest only — the only kind an unfilterable-float texture accepts
+    comparison,    ///< a shadow sampler, carrying a compare_op
 };
 
 namespace sg
@@ -134,6 +157,29 @@ struct sg::binding
     /// dimension-correct null descriptor for a vacant element.
     cc::optional<texture_view_dimension> texture_dimension;
 
+    /// The stages that declared this binding.
+    /// A compiled_shader is one stage, so reflection sets exactly that bit and `merge_bindings` unions them as the
+    /// stages are folded into one layout.
+    ///
+    /// **Empty means not known, not "no stage".** A hand-written binding that never says is treated as visible
+    /// everywhere, which is what dx12 and vulkan did unconditionally before this field existed.
+    /// It matters because WebGPU cannot be permissive here: its default limits allow zero storage buffers in the
+    /// vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device.
+    shader_stages visibility;
+
+    /// For `readwrite_texture` bindings: the texel format the shader declared (`RWTexture2D<float4>`).
+    /// A WebGPU storage-texture layout entry requires it, and a layout is built before any view exists — so it
+    /// cannot be taken from the bound view the way dx12 and vulkan take it.
+    cc::optional<pixel_format> storage_format;
+
+    /// For `readonly_texture` bindings: how the texels are read.
+    /// See texture_sample_type.
+    cc::optional<texture_sample_type> sample_type;
+
+    /// For `sampler` bindings: which kind of sampler.
+    /// See sampler_binding_type.
+    cc::optional<sampler_binding_type> sampler_type;
+
     /// Whether this is an array binding (count > 1): one descriptor per element, vacant elements as
     /// `sg::vacant_view`, and access declared explicitly per dispatch rather than inferred.
     [[nodiscard]] constexpr bool is_array() const { return count > 1; }
@@ -142,11 +188,19 @@ struct sg::binding
 namespace sg
 {
 
+/// Stamps `stage` into every binding's `visibility`.
+///
+/// A compiled_shader is exactly one stage, so this is what a compiler calls once its reflection is in hand — which
+/// is why no reflector has to know which stage it was run for.
+/// Additive rather than assigning, so calling it on bindings already merged across stages cannot narrow them.
+void apply_stage_visibility(cc::span<binding> bindings, shader_stage stage);
+
 /// Appends every binding of `from` whose name `into` does not already carry.
 /// One pipeline has one binding interface, so a multi-stage pipeline's group layout must cover the union of
 /// its stages' reflected bindings — merge them stage by stage, then hand the result to a group layout.
-/// A name already in `into` keeps its existing entry: two stages disagreeing on the address, count or type
-/// is a shader bug this does not detect.
+/// A name already in `into` keeps its existing entry, except for `visibility`, which is unioned: accumulating the
+/// stages that declared a binding is the one thing this merge exists to do beyond deduplicating.
+/// Two stages disagreeing on the address, count or type is a shader bug this does not detect.
 void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
 
 /// The union of all `stages`' bindings by name, in first-seen order — the merge above over several stages.

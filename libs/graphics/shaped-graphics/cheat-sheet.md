@@ -525,6 +525,11 @@ sg::binding_type            // uniform_buffer | read{only,write}_structured_buff
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
+                            //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
+                            //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
+                            //   cc::optional<pixel_format> storage_format   — readwrite_texture only; WGSL declares it, HLSL does not
+                            //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
+                            //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
                             //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
                             //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
                             //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot
@@ -533,15 +538,17 @@ sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they a
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
+sg::apply_stage_visibility(bindings, stage)  // void — stamp one stage into every binding's visibility; a compiler calls it once, reflection never knows the stage
 sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage
 sg::merge_bindings(into, from)          // void — same merge, accumulating into a cc::vector<binding> stage by stage
+                            //   first-seen wins on every field EXCEPT visibility, which is UNIONED — accumulating the declaring stages is the point
 sg::split_off_sampler_bindings(v)       // -> cc::vector<binding>  REMOVES the sampler bindings from v and returns them (both keep order)
                             //   split off the samplers you bind register-wise (pipeline_layout static_samplers); leaving one in the group claims its register twice
 
 #include <shaped-graphics/binding/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
 sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
-sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob (ctx.accepts_shader_format(f))
+sg::shader_format           // dxil | spirv | metal_lib | wgsl — which backend consumes the blob (ctx.accepts_shader_format(f)); wgsl is SOURCE text, not bytecode
 // sg only CONSUMES compiled shaders. Producing one — packages, compilation, hot reload — is
 // shaped-shader-library's job; docs/shaders.md is the front door for the whole shader system.
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;

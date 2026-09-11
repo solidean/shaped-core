@@ -164,6 +164,10 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
                                             isize(object->GetBufferSize()));
     shader.bytecode = cc::make_pinned_data(bytes);
     shader.bindings = cc::move(reflected.value().bindings);
+    // Reflection reports what the shader declares, never which stage it was compiled for, so the stage is stamped
+    // here — the one place that knows it.
+    // merge_bindings then unions the stages as a pipeline's shaders are folded into one layout.
+    sg::apply_stage_visibility(shader.bindings, shader.stage);
     shader.workgroup_size = reflected.value().workgroup_size;
     shader.compiler = sg::compiler_info{
         .name = cc::string("dxc"),

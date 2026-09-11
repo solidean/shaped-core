@@ -201,9 +201,12 @@ enum class compare_op;
 struct sampler;
 
 // Compiled shaders + reflected bindings (see binding/compiled_shader.hh / binding/binding.hh) — value types.
+// shader_stage and its set (shader_stages) live in binding/shader_stage.hh, below binding.hh.
 enum class binding_type;
 enum class shader_stage;
 enum class shader_format;
+enum class texture_sample_type;
+enum class sampler_binding_type;
 struct binding;
 struct compiler_info;
 struct compute_dimensions;

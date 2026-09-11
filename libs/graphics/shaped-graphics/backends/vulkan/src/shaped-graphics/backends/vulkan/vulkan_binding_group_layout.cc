@@ -36,6 +36,39 @@ VkDescriptorType to_vk_descriptor_type(sg::binding_type t)
     }
     CC_UNREACHABLE("unhandled binding_type in to_vk_descriptor_type");
 }
+
+/// The stages a binding is visible to, as vulkan's mask.
+///
+/// An EMPTY set means the binding never said, which is what every hand-written binding does and what reflection did
+/// before it carried a stage — so it stays VK_SHADER_STAGE_ALL, exactly the behaviour this replaced.
+/// Vulkan is happy to be told more stages than actually read a binding; the reason to narrow it is that WebGPU is not,
+/// and a field nothing consumes is a field that quietly stops being true.
+[[nodiscard]] VkShaderStageFlags to_vk_stage_flags(sg::shader_stages visibility)
+{
+    if (visibility.is_empty())
+        return VK_SHADER_STAGE_ALL;
+
+    auto flags = VkShaderStageFlags(0);
+    auto const add = [&](sg::shader_stage s, VkShaderStageFlagBits bit)
+    {
+        if (visibility.has(s))
+            flags |= bit;
+    };
+
+    add(sg::shader_stage::vertex, VK_SHADER_STAGE_VERTEX_BIT);
+    add(sg::shader_stage::tessellation_control, VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT);
+    add(sg::shader_stage::tessellation_evaluation, VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT);
+    add(sg::shader_stage::geometry, VK_SHADER_STAGE_GEOMETRY_BIT);
+    add(sg::shader_stage::fragment, VK_SHADER_STAGE_FRAGMENT_BIT);
+    add(sg::shader_stage::compute, VK_SHADER_STAGE_COMPUTE_BIT);
+    add(sg::shader_stage::raygen, VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+    add(sg::shader_stage::closest_hit, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+    add(sg::shader_stage::any_hit, VK_SHADER_STAGE_ANY_HIT_BIT_KHR);
+    add(sg::shader_stage::miss, VK_SHADER_STAGE_MISS_BIT_KHR);
+    add(sg::shader_stage::intersection, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
+    add(sg::shader_stage::callable, VK_SHADER_STAGE_CALLABLE_BIT_KHR);
+    return flags;
+}
 } // namespace
 
 cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::create(
@@ -100,9 +133,7 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
             .binding = b.index,
             .descriptorType = to_vk_descriptor_type(b.type),
             .descriptorCount = b.count,
-            // sg has no per-stage visibility on a binding, so every stage may read it.
-            // Narrowing this is a pure optimization and needs a stage set sg does not carry.
-            .stageFlags = VK_SHADER_STAGE_ALL,
+            .stageFlags = to_vk_stage_flags(b.visibility),
             .pImmutableSamplers = nullptr,
         };
     }
