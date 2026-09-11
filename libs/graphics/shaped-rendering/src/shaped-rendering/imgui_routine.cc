@@ -147,18 +147,14 @@ void imgui_routine::init_declare(sg::context& ctx)
 
     // A broken edit (or a context accepting no format we can produce): (re)bind a callback that fails, so
     // init still clears every pipeline built against the old layout and execute no-ops until the next reload.
-    // The texture registry deliberately survives — the atlas has nothing to do with our shaders.
+    // The atlas lives on its own routine and deliberately survives a reload — it has nothing to do with our shaders.
+    // Declared before the early return, so a broken reload still leaves the token valid and texture requests serviced.
+    _textures = depend_on<impl::imgui_texture_routine>(ctx);
+
+    _group_layout = nullptr;
+    _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
-    {
-        _group_layout = nullptr;
-        _pipelines.init(ctx,
-                        [](sg::context&, sg::pixel_format) -> sg::async_raster_pipeline
-                        {
-                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
-                                cc::async_error::make_error(cc::any_error("imgui shaders did not compile")));
-                        });
         return;
-    }
 
     // Group 0 is built from the *fragment* bindings alone.
     // That is what keeps the vertex stage's b0 out of it — inline constants must be excluded from every group layout (see pipeline_layout.hh).
@@ -183,29 +179,25 @@ void imgui_routine::init_declare(sg::context& ctx)
     auto const pipeline_layout
         = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}, .inline_constants = *constants_binding});
 
-    // The callback captures the layout + shaders; init clears every pipeline built against the previous ones.
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
     // Alpha blending is imgui's standard straight-alpha equation;
     // the alpha channel uses one/inv-src-alpha so compositing onto a transparent target accumulates coverage correctly rather than saturating.
-    _pipelines.init(
-        ctx,
-        [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-            sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
-        {
-            auto const desc = sg::raster_pipeline_description{
-                .layout = layout,
-                .vertex_shader = vertex_shader,
-                .fragment_shader = fragment_shader,
-                .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
-                .topology = sg::primitive_topology::triangle_list,
-                .rasterization = {.cull = sg::cull_mode::none},
-                .color_targets
-                = {{.format = format,
-                    .blend = sg::blend_state{
-                        .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
-                        .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}};
-            return c.cached.acquire_raster_pipeline(desc);
-        });
+    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = pipeline_layout,
+        .vertex_shader = *compiled_vs,
+        .fragment_shader = *compiled_ps,
+        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+        .topology = sg::primitive_topology::triangle_list,
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets
+        = {{.format = params(),
+            .blend = sg::blend_state{
+                .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
+                .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
+
+    // Waited on here rather than polled in execute, so `ready` means ready.
+    // This is the wait that becomes a co_await when the phases become coroutines.
+    (void)cc::try_async_blocking_get(_pipeline);
 }
 
 imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, ImDrawData* draw_data)
@@ -234,7 +226,7 @@ imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, Im
     return geo;
 }
 
-void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
+sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 {
     CC_ASSERT(draw_data != nullptr, "draw data must not be null — call ImGui::Render() first");
 
@@ -245,25 +237,29 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
     CC_ASSERT(!sg::is_srgb_format(target_format), "imgui colors are already sRGB-encoded; bind a non-srgb view of "
                                                   "the target instead");
 
-    auto self = acquire_exclusive(cmd);
+    // The target's format picks the instance, and is only knowable once the caller's scope is open.
+    auto self = try_acquire_exclusive(cmd, target_format);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
 
-    // Fallible rather than throwing: execute() runs inside the caller's rendering scope, and an exception
-    // unwinding out of there would leave their command list unsubmitted.
-    auto const pipeline = self->_pipelines.try_acquire(target_format);
-
-    // Textures first: a draw below may sample an atlas imgui only just grew.
+    // Textures first, and BEFORE any refusal below: a draw may sample an atlas imgui only just grew, and imgui's own
+    // bookkeeping has to keep up whether or not we can draw this frame.
     // These go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
-    self->_textures.service_requests(ctx, draw_data);
+    auto textures = self.acquire_exclusive(self->_textures);
+    textures->service_requests(ctx, draw_data);
 
-    if (pipeline.has_error() || pipeline.value() == nullptr)
-        return; // shaders did not compile, or this format's pipeline failed to build
+    // Polled rather than waited on: execute runs inside the caller's rendering scope, so nothing here may block, and
+    // a throw would leave their command list unsubmitted.
+    auto const* const pipeline = self->_pipeline != nullptr ? self->_pipeline->try_value() : nullptr;
+    if (pipeline == nullptr || *pipeline == nullptr)
+        return sg::routine_outcome::declined;
     if (draw_data->TotalVtxCount == 0 || draw_data->TotalIdxCount == 0)
-        return;
+        return sg::routine_outcome::executed; // nothing to draw is not a refusal
 
     auto const geo = upload_geometry(cmd, draw_data);
 
-    scope.bind_pipeline(*pipeline.value());
+    scope.bind_pipeline(**pipeline);
     scope.bind_vertex_buffer(geo.vertices.as_vertex_buffer());
     scope.bind_index_buffer(geo.indices.as_index_buffer());
     scope.set_viewport({.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(target_size[0]), float(target_size[1]))});
@@ -301,7 +297,7 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
 
             if (dc.GetTexID() != bound_texture)
             {
-                auto const texture = self->_textures.try_texture_of(dc.GetTexID());
+                auto const texture = textures->try_texture_of(dc.GetTexID());
                 if (texture.has_error())
                     continue; // imgui named a texture we never created; skip rather than bind garbage
 
@@ -323,6 +319,7 @@ void imgui_routine::execute(sg::rendering_scope& scope, ImDrawData* draw_data)
         global_vertex_offset += list->VtxBuffer.Size;
         global_index_offset += isize(list->IdxBuffer.Size);
     }
+    return sg::routine_outcome::executed;
 }
 
 void render_imgui(imgui_context& imgui, sg::context& ctx, sg::swapchain& main, tg::vec4f clear_color)
@@ -337,7 +334,9 @@ void render_imgui(imgui_context& imgui, sg::context& ctx, sg::swapchain& main, t
     auto cmd = ctx.create_command_list();
     {
         auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(clear_color)}});
-        imgui_routine::execute(pass, ImGui::GetDrawData());
+        // The frame is presented either way: a cleared target is the honest "nothing drawn yet" while the shaders
+        // build, and skipping the present would stall the window instead.
+        (void)imgui_routine::execute(pass, ImGui::GetDrawData());
     }
     ctx.submit_command_list_and_present(main, cc::move(cmd));
 }

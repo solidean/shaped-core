@@ -49,7 +49,7 @@ struct imgui_fixture
         {
             auto pass = cmd->raster.render_to(
                 {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-            sr::imgui_routine::execute(pass, draw_data);
+            CHECK(sr::imgui_routine::execute(pass, draw_data) == sg::routine_outcome::executed);
         }
         ctx->submit_command_list(cc::move(cmd));
 

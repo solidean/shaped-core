@@ -61,7 +61,8 @@ class imgui_routine;
 namespace impl
 {
 class imgui_texture_registry;
-}
+class imgui_texture_routine; // the routine owning that registry, shared by every imgui_routine parametrization
+} // namespace impl
 
 /// The domain every recording site in shaped-rendering is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

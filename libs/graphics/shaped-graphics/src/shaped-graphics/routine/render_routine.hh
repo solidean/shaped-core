@@ -45,6 +45,19 @@ public:
         return *token._target;
     }
 
+
+    /// Redeem a token for a dependency this routine MUTATES, taking that routine's lock for the returned guard.
+    ///
+    /// The lock order is holder then dependency, which the acyclic graph makes consistent: a cycle would be the only
+    /// way to reach the two in the opposite order, and that is refused where the edge is declared.
+    template <class Other, class P>
+    [[nodiscard]] routine_guard<Other> acquire_exclusive(routine_dependency<Other, P> const& token) const
+    {
+        CC_ASSERT(is_ready(), "a dependency was redeemed through a routine that is not ready");
+        CC_ASSERT(token.is_valid(), "a dependency token was never minted — declare it with depend_on during init");
+        return Other::guard_for(*token._target);
+    }
+
     routine_guard(routine_guard&&) = default;
     routine_guard& operator=(routine_guard&&) = default;
 
@@ -142,6 +155,19 @@ public:
         CC_ASSERT(is_ready(), "a dependency was redeemed through a routine that is not ready");
         CC_ASSERT(token.is_valid(), "a dependency token was never minted — declare it with depend_on during init");
         return *token._target;
+    }
+
+
+    /// Redeem a token for a dependency this routine MUTATES, taking that routine's lock for the returned guard.
+    ///
+    /// The lock order is holder then dependency, which the acyclic graph makes consistent: a cycle would be the only
+    /// way to reach the two in the opposite order, and that is refused where the edge is declared.
+    template <class Other, class P>
+    [[nodiscard]] routine_guard<Other> acquire_exclusive(routine_dependency<Other, P> const& token) const
+    {
+        CC_ASSERT(is_ready(), "a dependency was redeemed through a routine that is not ready");
+        CC_ASSERT(token.is_valid(), "a dependency token was never minted — declare it with depend_on during init");
+        return Other::guard_for(*token._target);
     }
 
     routine_scope(routine_scope&&) = default;
@@ -310,6 +336,12 @@ private:
     template <class, class>
     friend class render_routine;
 
+    // Redeeming a token exclusively builds a guard over the dependency, and only a scope or a guard may do that.
+    template <class>
+    friend class routine_scope;
+    template <class>
+    friend class routine_guard;
+
     /// Per-thread memo of the last instance handed out, so the steady state costs a pointer compare instead of a locked map lookup.
     /// Weak on purpose: a cached slot must never keep a routine alive past evict/clear/context shutdown — expiry is exactly what invalidates it.
     ///
@@ -322,6 +354,14 @@ private:
         Derived* routine = nullptr;
         std::weak_ptr<Derived> alive;
     };
+
+    /// A guard over an instance a caller already established is ready — what an exclusive token redeem hands back.
+    /// Readiness is not re-read: the holder's aggregate already covered this routine's subtree.
+    [[nodiscard]] static routine_guard<Derived> guard_for(Derived& self)
+    {
+        auto lock = self._init.lock_scoped();
+        return routine_guard<Derived>(self, cc::move(lock), routine_readiness::ready);
+    }
 
     /// The per-context instance for Derived at `params` as a shared owner, created on first use.
     /// A dependency token holds one of these, which is what pins a depended-on routine against eviction.

@@ -175,7 +175,8 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
         // imgui's carries no depth format at all — binding one here would not match the pipeline the routine uses.
         // `preserved()` is what keeps the scene that the scope above just drew.
         auto pass = cmd->raster.render_to({.color_targets = {rt.preserved()}});
-        sr::imgui_routine::execute(pass, ImGui::GetDrawData());
+        // Declines while the imgui shaders are still building, which on the first frames is ordinary.
+        (void)sr::imgui_routine::execute(pass, ImGui::GetDrawData());
     }
     if (!_capture.active)
     {

@@ -6,7 +6,6 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/impl/imgui_texture_registry.hh>
-#include <shaped-rendering/keyed_pipeline_cache.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// Renders one frame of Dear ImGui draw data through sg — the renderer half of an imgui backend.
@@ -27,8 +26,33 @@
 /// it is allocated from the transient scope and lives on the stack for one execute(), so the call is re-entrant across imgui's viewports.
 ///
 /// `draw_data` is non-const because imgui's 1.92 texture protocol writes back into it:
+/// Owns the GPU textures behind imgui's atlas, for every imgui_routine parametrization to share.
+///
+/// It exists because imgui_routine is parametrized on its target's pixel format and the atlas is not: a multi-viewport
+/// frame draws the main window in the swapchain's format and every viewport in bgra8_unorm, which would otherwise be
+/// two routine instances and therefore two copies of the same font atlas.
+/// Unparametrized, so there is exactly one — and every imgui_routine reaches it through a dependency token.
+///
+/// It has no shaders and nothing to initialize; the registry fills as imgui asks for textures.
+class sr::impl::imgui_texture_routine : public sg::render_routine<imgui_texture_routine>
+{
+public:
+    /// Creates, updates and destroys GPU textures to match what imgui is asking for this frame.
+    void service_requests(sg::context& ctx, ImDrawData* draw_data) { _textures.service_requests(ctx, draw_data); }
+
+    /// The texture behind an ImDrawCmd's id, or an error if imgui named one the registry never created.
+    [[nodiscard]] cc::result<sg::texture_2d> try_texture_of(ImTextureID id) const
+    {
+        return _textures.try_texture_of(id);
+    }
+
+private:
+    /// Deliberately survives a reload — the atlas has nothing to do with our shaders.
+    impl::imgui_texture_registry _textures;
+};
+
 /// the backend reports each texture's new id and status on ImTextureData.
-class sr::imgui_routine : public sg::render_routine<imgui_routine>
+class sr::imgui_routine : public sg::render_routine<imgui_routine, sg::pixel_format>
 {
     // per-frame
 public:
@@ -40,7 +64,9 @@ public:
     /// imgui's vertex colors and font atlas are already sRGB-encoded 8-bit values, and a `*_unorm_srgb` target would encode them a second time.
     /// Bind a non-srgb view of the same resource instead.
     /// Compensating in the shader would cost a conversion per pixel to undo something the caller did not ask for.
-    static void execute(sg::rendering_scope& scope, ImDrawData* draw_data);
+    /// Declines while the shaders or this format's pipeline are still building, and after a compile that failed.
+    /// Texture requests are serviced either way — imgui's atlas has to keep up with imgui whether we can draw or not.
+    [[nodiscard]] static sg::routine_outcome execute(sg::rendering_scope& scope, ImDrawData* draw_data);
 
     /// Draws and presents every imgui viewport except the main one, each into its own swapchain.
     ///
@@ -65,14 +91,12 @@ private:
     /// Rebuilt by init_declare on every reload.
     sg::binding_group_layout_handle _group_layout;
 
-    /// The GPU textures behind imgui's atlas.
-    /// Deliberately survives a reload — the atlas has nothing to do with our shaders.
-    impl::imgui_texture_registry _textures;
+    /// The shared atlas, reached through a token so every parametrization sees the same one.
+    sg::routine_dependency<impl::imgui_texture_routine, sg::routine_no_params> _textures;
 
-    /// One pipeline per color-target format drawn to — in practice exactly one, the swapchain's.
-    /// init_declare (re)binds the build callback, which captures the layout + shaders; a broken reload
-    /// binds a callback that fails, so a stale pipeline is never served.
-    keyed_pipeline_cache<sg::pixel_format> _pipelines;
+    /// The one pipeline this instance is for — its color-target format is params().
+    /// Built during init and only polled by execute, so nothing on the frame path waits for a compile.
+    sg::async_raster_pipeline _pipeline;
 
     /// One viewport's draw data, concatenated into a single buffer pair.
     /// Lives on the stack for the length of one execute() — under multi-viewport that call runs once per viewport per frame,
