@@ -28,8 +28,7 @@ void blit_routine::init_declare(sg::context& ctx)
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
 
-    // Started, not awaited: this instance exists for exactly one format, so there is one pipeline to build and execute
-    // polls it rather than anyone waiting here.
+    // One instance means one pipeline to build, rather than a map filled lazily on the frame path.
     _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = pipeline_layout,
         .vertex_shader = *compiled_vs,
@@ -38,6 +37,12 @@ void blit_routine::init_declare(sg::context& ctx)
         .rasterization = {.cull = sg::cull_mode::none},
         .color_targets = {{.format = params()}},
     });
+
+    // Waited on HERE rather than in execute, which is the whole point of the split: init is where the waiting is
+    // allowed to be, and it is exactly this wait that becomes a co_await when the phases become coroutines.
+    // Without it `ready` would not mean ready — execute would poll a pipeline still being built and decline for a few
+    // frames, which is correct behaviour reached by accident rather than by design.
+    (void)cc::try_async_blocking_get(_pipeline);
 }
 
 sg::routine_outcome blit_routine::execute(sg::rendering_scope& scope, sg::texture_2d const& src)

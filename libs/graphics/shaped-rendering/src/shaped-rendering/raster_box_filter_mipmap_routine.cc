@@ -17,19 +17,11 @@ void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
 
-    // A broken edit: (re)bind a callback that fails, so init still clears every pipeline built against the old
-    // layout and execute no-ops until the next reload compiles.
+    // A broken edit leaves both null, so execute finds no pipeline and declines until the next reload compiles.
+    _group_layout = nullptr;
+    _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
-    {
-        _group_layout = nullptr;
-        _pipelines.init(ctx,
-                        [](sg::context&, sg::pixel_format) -> sg::async_raster_pipeline
-                        {
-                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
-                                cc::async_error::make_error(cc::any_error("raster mipmap shaders did not compile")));
-                        });
         return;
-    }
 
     // The fragment stage carries the one binding: gSource (t0), the single-mip view of the level being read.
     // No sampler — the filter loads its four texels rather than sampling, which is what makes the tap positions
@@ -38,20 +30,20 @@ void raster_box_filter_mipmap_routine::init_declare(sg::context& ctx)
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}});
 
-    _pipelines.init(ctx,
-                    [layout = pipeline_layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-                        sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
-                    {
-                        auto const desc = sg::raster_pipeline_description{
-                            .layout = layout,
-                            .vertex_shader = vertex_shader,
-                            .fragment_shader = fragment_shader,
-                            .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
-                            .rasterization = {.cull = sg::cull_mode::none},
-                            .color_targets = {{.format = format}},
-                        };
-                        return c.cached.acquire_raster_pipeline(desc);
-                    });
+    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = pipeline_layout,
+        .vertex_shader = *compiled_vs,
+        .fragment_shader = *compiled_ps,
+        .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = {{.format = params()}},
+    });
+
+    // Waited on HERE rather than in execute, which is the whole point of the split: init is where the waiting is
+    // allowed to be, and it is exactly this wait that becomes a co_await when the phases become coroutines.
+    // Without it `ready` would not mean ready — execute would poll a pipeline still being built and decline for a few
+    // frames, which is correct behaviour reached by accident rather than by design.
+    (void)cc::try_async_blocking_get(_pipeline);
 }
 
 int raster_box_filter_mipmap_routine::level_count(sg::texture_2d const& texture, int first_level)
@@ -61,25 +53,31 @@ int raster_box_filter_mipmap_routine::level_count(sg::texture_2d const& texture,
     return first_level >= levels ? 0 : levels - first_level;
 }
 
-void raster_box_filter_mipmap_routine::execute(sg::command_list& cmd, sg::texture_2d const& texture, int first_level)
+sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& cmd,
+                                                              sg::texture_2d const& texture,
+                                                              int first_level)
 {
     if (level_count(texture, first_level) == 0)
-        return;
+        return sg::routine_outcome::executed; // nothing to generate is not a refusal
 
-    auto const& self = acquire(cmd);
+    // The texture's format picks the instance, and it is only knowable here.
+    auto const self = try_acquire(cmd, texture.format());
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
+
+    // Polled rather than waited on: this records into the caller's command list, so nothing here may block, and a
+    // throw would leave that list unsubmitted.
+    auto const* const built = self->_pipeline != nullptr ? self->_pipeline->try_value() : nullptr;
+    if (built == nullptr || *built == nullptr)
+        return sg::routine_outcome::declined;
+
     auto& ctx = cmd.context();
-
-    // Fallible rather than throwing: this runs inside the caller's command list, and an exception unwinding out
-    // of here would leave it unsubmitted.
-    auto const pipeline = self._pipelines.try_acquire(texture.format());
-    if (pipeline.has_error() || pipeline.value() == nullptr)
-        return; // the shaders did not compile, or this format's pipeline failed to build
 
     auto const levels = texture.mip_levels();
     for (auto level = first_level; level < levels; ++level)
     {
         auto const group = ctx.transient.create_binding_group(
-            self._group_layout,
+            self->_group_layout,
             {{.name = "gSource", .view = texture.as_readonly_view({.mips = {.start = level - 1, .count = 1}})}});
 
         // Discarded rather than preserved: the pass covers the whole level, so loading what is there costs
@@ -90,9 +88,10 @@ void raster_box_filter_mipmap_routine::execute(sg::command_list& cmd, sg::textur
         // transition to a sampled read while it is still bound as a target.
         auto scope = cmd.raster.render_to({.color_targets = {texture.as_render_target_view({.mip = level}).discarded()}});
 
-        scope.bind_pipeline(*pipeline.value());
+        scope.bind_pipeline(**built);
         scope.bind_group(0, *group);
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
+    return sg::routine_outcome::executed;
 }
 } // namespace sr

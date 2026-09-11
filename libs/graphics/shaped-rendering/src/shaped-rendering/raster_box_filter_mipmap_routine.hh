@@ -5,7 +5,6 @@
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
-#include <shaped-rendering/keyed_pipeline_cache.hh>
 
 /// Fills a texture's mip chain by 2x2 averaging, through the raster pipeline.
 ///
@@ -22,9 +21,11 @@
 /// A render-target view is 2D-shaped, and an array would mean one pass per slice rather than one dispatch across
 /// all of them — so every other shape stays on the compute path, which no sRGB shape reaches today.
 ///
-/// A render routine: it owns one raster pipeline per texture format (via a `keyed_pipeline_cache`) and its layout,
-/// both built in `init_declare`.
-class sr::raster_box_filter_mipmap_routine : public sg::render_routine<raster_box_filter_mipmap_routine>
+/// A render routine, **parametrized on the texture's pixel format**: a raster pipeline bakes its color-target format
+/// in, so this is one unit of work per format rather than one holding a map it fills lazily.
+///
+/// **Fallible**, because the format comes off the texture handed to execute rather than from a token.
+class sr::raster_box_filter_mipmap_routine : public sg::render_routine<raster_box_filter_mipmap_routine, sg::pixel_format>
 {
 public:
     /// Generates levels `first_level` through the end of `texture`'s chain from the level below each, one rendering
@@ -34,8 +35,11 @@ public:
     /// chain; generating from a level whose own contents are not yet uploaded produces garbage, so the caller
     /// orders this after the upload it depends on.
     /// The texture must carry `readonly_texture | render_target` usage and have the levels allocated already.
-    /// A no-op if the shaders did not compile, or if the texture has no level to generate.
-    static void execute(sg::command_list& cmd, sg::texture_2d const& texture, int first_level = 1);
+    /// Declines while the shaders or this format's pipeline are still building, and after a compile that failed.
+    /// Also declines when the texture has no level to generate, which is not a failure — level_count says so first.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
+                                                     sg::texture_2d const& texture,
+                                                     int first_level = 1);
 
     /// How many passes `execute` would record — what a caller budgeting GPU work per frame needs to know before it
     /// commits to the call.
@@ -47,10 +51,7 @@ protected:
 private:
     sg::binding_group_layout_handle _group_layout;
 
-    // One pipeline per texture format mipped.
-    // `init_declare` (re)binds the build callback, which captures the layout + shaders.
-    // A broken reload binds a callback that fails, so a stale pipeline is never served.
-    // Mutable: the cache guards itself and its whole acquire path is const, so a lazy build is reachable without the
-    // routine's lock.
-    mutable keyed_pipeline_cache<sg::pixel_format> _pipelines;
+    /// The one pipeline this instance is for — its format is params().
+    /// Built during init and only polled by execute, so nothing on the caller's frame ever waits for a compile.
+    sg::async_raster_pipeline _pipeline;
 };

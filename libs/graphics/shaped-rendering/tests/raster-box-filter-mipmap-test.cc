@@ -92,8 +92,8 @@ TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclus
         up->upload.bytes_to_texture(tex.raw(), rgba8_half_and_half(0, 255), {.mip_level = 0});
         up->upload.bytes_to_texture(tex.raw(), rgba8_constant(1, sentinel), {.mip_level = 1});
     }
-    sr::raster_box_filter_mipmap_routine::execute(*up, tex_srgb);
-    sr::raster_box_filter_mipmap_routine::execute(*up, tex_unorm);
+    REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex_srgb) == sg::routine_outcome::executed);
+    REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex_unorm) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch_and_wait_for_idle();
 
@@ -155,7 +155,7 @@ TEST("sr - raster box filter mipmap fills a tail of the chain", exclusive("slib-
     up->upload.bytes_to_texture(tex.raw(), rgba8_constant(2 * 2, sentinel), {.mip_level = 2});
     up->upload.bytes_to_texture(tex.raw(), rgba8_constant(1, sentinel), {.mip_level = 3});
 
-    sr::raster_box_filter_mipmap_routine::execute(*up, tex, 2);
+    REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex, 2) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch_and_wait_for_idle();
 

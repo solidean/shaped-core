@@ -35,7 +35,6 @@ private:
     sg::binding_group_layout_handle _group_layout;
 
     /// The one pipeline this instance is for — its format is params().
-    /// Kicked off during init and polled by execute, never waited on: a routine that blocked here would put a shader
-    /// compile on the frame path, which is the thing the routine system exists to keep off it.
+    /// Built during init and only polled by execute, so nothing on the frame path ever waits for a compile.
     sg::async_raster_pipeline _pipeline;
 };
