@@ -4,6 +4,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh> // cc::async_start
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -27,24 +28,44 @@ namespace
     return false;
 }
 
-/// Whether `p` has everything a hit group needs, driving its compiles to completion to find out.
-///
-/// The cache hands back cold nodes and no async pool is guaranteed here, so they are driven inline exactly as
-/// `init_declare` drives the shared shaders — without this a build with no pool finds every permutation cold and
-/// traces nothing, forever.
-[[nodiscard]] bool is_usable(material_permutation const* p)
+/// Where one permutation's compiles stand.
+enum class permutation_state
 {
-    (void)cc::try_async_blocking_get(p->shader);
-    if (p->shader->try_value() == nullptr)
-        return false;
+    pending, ///< still compiling; the trace that wants it waits a frame
+    ready,
+    failed, ///< settled without a value, and will until a reload
+};
+
+/// One node's state, scheduling it if nobody has yet.
+///
+/// The cache hands back COLD nodes, so polling alone would watch one that never starts.
+/// Started rather than driven: this runs on the frame path, where a compile must not be waited for -- async_start
+/// hands it to the ambient scheduler and the trace picks it up a frame or two later.
+[[nodiscard]] permutation_state state_of_node(sg::async_compiled_shader const& node)
+{
+    if (node->try_value() != nullptr)
+        return permutation_state::ready;
+    if (node->is_ready())
+        return permutation_state::failed; // settled with no value
+    (void)cc::async_start(node);
+    return permutation_state::pending;
+}
+
+/// Whether `p` has everything a hit group needs, without waiting for any of it.
+[[nodiscard]] permutation_state state_of(material_permutation const* p)
+{
+    auto const primary = state_of_node(p->shader);
+    if (primary != permutation_state::ready)
+        return primary;
 
     if (!p->can_cut_out)
-        return true;
+        return permutation_state::ready;
 
     // The cutout test, twice, because the two rays that reach it carry different payloads.
-    (void)cc::try_async_blocking_get(p->any_hit);
-    (void)cc::try_async_blocking_get(p->shadow_any_hit);
-    return p->any_hit->try_value() != nullptr && p->shadow_any_hit->try_value() != nullptr;
+    auto const any = state_of_node(p->any_hit);
+    if (any != permutation_state::ready)
+        return any;
+    return state_of_node(p->shadow_any_hit);
 }
 
 /// The static samplers `hit_groups` declare, by the generated name each register carries.
@@ -95,19 +116,19 @@ void pathtrace_routine::init_declare(sg::context& ctx)
 
     // A reload re-acquires the shared shaders, so every pipeline built from the old ones is stale.
     _variants.clear();
-    _traced = false;
 }
 
 pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx, pt_trace_desc const& d)
 {
     CC_ASSERT(d.bindless != nullptr, "a path trace binds the manager's bindless tables");
 
-    // Driven here, and whether or not a substitution ends up needing it.
+    // Started here, and whether or not a substitution ends up needing it.
     //
-    // It is a cold node like every other permutation, and one nobody drives is async work still outstanding when the
-    // frame ends — which is a leak the caller cannot see, since it never asked for this compile in the first place.
-    // Before the early-out below for the same reason: a trace that no-ops on its shared shaders must not leave it cold.
-    auto const* const fallback = d.fallback != nullptr && is_usable(d.fallback) ? d.fallback : nullptr;
+    // It is a cold node like every other permutation, and one nobody starts is async work that never happens — so the
+    // fallback would never become available and every trace missing a real permutation would decline forever.
+    // Before the early-out below for the same reason.
+    auto const* const fallback
+        = d.fallback != nullptr && state_of(d.fallback) == permutation_state::ready ? d.fallback : nullptr;
 
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
@@ -125,8 +146,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        if (!is_usable(p))
-            p = fallback; // still in flight, or a material that does not build
+        if (state_of(p) != permutation_state::ready)
+            p = fallback; // still compiling, or a material that does not build
 
         if (p == nullptr)
             return nullptr; // nothing compiled and nothing to stand in for it — trace no-ops, as it always did
@@ -142,10 +163,33 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         key_bytes.push_back(p->key);
     auto const key = cc::hash128::create(cc::span<cc::hash128 const>(key_bytes).as_bytes(), 0);
 
-    if (auto const* const resident = _variants.get_ptr(key); resident != nullptr)
-        return resident->pipeline == nullptr ? nullptr : resident;
+    if (auto* const resident = _variants.get_ptr(key); resident != nullptr)
+    {
+        if (resident->pipeline != nullptr)
+            return resident;
+        if (resident->failed)
+            return nullptr;
 
-    // `is_usable` already drove every one of these to completion, so the compiled shaders are simply read out here.
+        // Still building, and polled rather than waited on.
+        // A state object discovered on the frame path is exactly the build that must not stall one, so the frames
+        // until it lands trace without it.
+        if (!resident->pending->is_ready())
+            return nullptr;
+
+        auto const* const built = resident->pending->try_value();
+        if (built == nullptr)
+        {
+            resident->failed = true; // remembered, since the same inputs fail the same way until a reload
+            resident->pending = {};
+            return nullptr;
+        }
+        resident->pipeline = *built;
+        resident->pending = {};
+        _finish_variant(ctx, *resident);
+        return resident;
+    }
+
+    // state_of established every one of these is ready, so the compiled shaders are simply read out here.
     auto hits = cc::vector<sg::compiled_shader const*>();
     auto any_hits = cc::vector<sg::compiled_shader const*>();
     auto shadow_any_hits = cc::vector<sg::compiled_shader const*>();
@@ -225,47 +269,44 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         hit_handles.push_back(rpd.add_hit_shader(shadow));
     }
 
-    // The build is async and no pool is guaranteed here, so drive it inline like the compiles above.
-    auto pipeline_r = cc::try_async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
-    if (pipeline_r.has_error())
-    {
-        // Remembered as a failure rather than retried every frame: the same shaders would fail the same way, and a
-        // reload is what clears it.
-        (void)_variants.entry(key).get_or_emplace(pipeline_variant{});
-        return nullptr;
-    }
-    variant.pipeline = cc::move(pipeline_r).value();
+    // STARTED, never waited on.
+    // This is the frame path: a state object is discovered here the first time a material combination is used, so the
+    // variant is registered as pending and the trace that wanted it declines until the build lands, which a later
+    // frame picks up above.
+    variant.pending = ctx.cached.acquire_raytracing_pipeline(rpd);
+    variant.pending_raygen = raygen_h;
+    variant.pending_miss = miss_h;
+    variant.pending_shadow_miss = shadow_miss_h;
+    variant.pending_hits = cc::move(hit_handles);
 
+    (void)_variants.entry(key).get_or_emplace(cc::move(variant));
+    return nullptr;
+}
+
+void pathtrace_routine::_finish_variant(sg::context& ctx, pipeline_variant& variant)
+{
     // Miss records in table order: index 0 = primary/bounce miss, index 1 = shadow miss (the raygen's shadow TraceRay passes MissShaderIndex 1).
     auto stbd = sg::raytracing_shader_table_description{.pipeline = variant.pipeline};
-    variant.raygen = stbd.add_raygen_shader(raygen_h);
-    (void)stbd.add_miss_shader(miss_h);
-    (void)stbd.add_miss_shader(shadow_miss_h);
+    variant.raygen = stbd.add_raygen_shader(variant.pending_raygen);
+    (void)stbd.add_miss_shader(variant.pending_miss);
+    (void)stbd.add_miss_shader(variant.pending_shadow_miss);
     // In the order built above, so a permutation's primary record sits at the `hit_group_offset` the instances carry and
     // its shadow record at the next index.
-    for (auto const h : hit_handles)
+    for (auto const h : variant.pending_hits)
         (void)stbd.add_hit_shader(h);
     variant.table = ctx.uncached.create_raytracing_shader_table(stbd);
-
-    return &_variants.entry(key).get_or_emplace(cc::move(variant));
+    variant.pending_hits = {};
 }
 
-bool pathtrace_routine::is_ready(sg::command_list& cmd)
-{
-    // Exclusive, not the const acquire: these are exactly what execute writes, and the const path is unlocked
-    // (see sg::render_routine's threading note), so reading them there can observe an instance mid-initialization.
-    auto self = acquire_exclusive(cmd);
-    return self->_traced;
-}
-
-void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
+sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 {
     CC_RECORD_SCOPE("sv.pathtrace");
 
-    auto self = acquire_exclusive(cmd);
+    // Exclusive, not the read-only scope: _variant_for writes the permutation map.
+    auto self = try_acquire_exclusive(cmd);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
-
-    self->_traced = false;
 
     CC_ASSERT(d.output.raw() != nullptr, "pathtrace_routine: no output target bound");
 
@@ -278,7 +319,7 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 
     auto const* const variant = self->_variant_for(ctx, d);
     if (variant == nullptr)
-        return; // shaders did not compile, or the pipeline did not build; leave the target untouched
+        return sg::routine_outcome::declined; // still building, or it failed; leave the target untouched
 
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
@@ -298,6 +339,6 @@ void pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
     d.bindless->declare_raytracing_access(cmd);
 
     cmd.raytracing.dispatch_rays(*variant->table, variant->raygen, d.output.width(), d.output.height());
-    self->_traced = true;
+    return sg::routine_outcome::executed;
 }
 } // namespace sv

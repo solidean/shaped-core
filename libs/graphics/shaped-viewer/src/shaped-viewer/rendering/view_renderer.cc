@@ -376,13 +376,13 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     return out;
 }
 
-void view_renderer::trace(sg::command_list& cmd,
-                          viewer_definition const& def,
-                          render_plan const& plan,
-                          u32 trace_index,
-                          plan_resources const& res,
-                          gpu_resource_manager& resources,
-                          view_store& store)
+sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
+                                         viewer_definition const& def,
+                                         render_plan const& plan,
+                                         u32 trace_index,
+                                         plan_resources const& res,
+                                         gpu_resource_manager& resources,
+                                         view_store& store)
 {
     auto& ctx = cmd.context();
 
@@ -394,10 +394,12 @@ void view_renderer::trace(sg::command_list& cmd,
 
     auto const& output = res.traces[trace_index];
     if (output.raw() == nullptr)
-        return; // resolve() refused it; nothing to trace into
+        return sg::routine_outcome::executed; // resolve() refused it; there was nothing to trace
 
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
-    auto self = acquire_exclusive(cmd);
+    auto self = try_acquire_exclusive(cmd);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
 
     auto const resolved = resolve_scene(cmd, l, resources);
 
@@ -410,7 +412,7 @@ void view_renderer::trace(sg::command_list& cmd,
     auto& rec = store.get_or_create(v.id);
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
     if (slot == nullptr)
-        return; // resolve() refused it; nothing to accumulate into
+        return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
 
     // A different image must not be averaged into the old one.
     // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
@@ -438,19 +440,26 @@ void view_renderer::trace(sg::command_list& cmd,
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
     auto const bindless = resources.freeze();
 
-    pathtrace_routine::execute(cmd, {.frame = frame,
-                                     .background = background,
-                                     .instances = resolved.instances,
-                                     .output = output,
-                                     .instance_table = instance_table,
-                                     .hit_groups = resolved.hit_groups,
-                                     // One material still compiling, or one that does not compile, degrades to grey
-                                     // shading on its own meshes rather than costing the view its whole image.
-                                     .fallback = &resources.shaders.acquire_fallback(),
-                                     .bindless = &bindless});
+    auto const traced = pathtrace_routine::execute(
+        cmd, {.frame = frame,
+              .background = background,
+              .instances = resolved.instances,
+              .output = output,
+              .instance_table = instance_table,
+              .hit_groups = resolved.hit_groups,
+              // One material still compiling, or one that does not compile, degrades to grey
+              // shading on its own meshes rather than costing the view its whole image.
+              .fallback = &resources.shaders.acquire_fallback(),
+              .bindless = &bindless});
+
+    // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
+    // weight say more samples had landed than did, and the estimate would stop moving toward the answer.
+    if (traced == sg::routine_outcome::declined)
+        return sg::routine_outcome::declined;
 
     if (slot->accum_frame < accumulation_frame_cap)
         ++slot->accum_frame;
+    return sg::routine_outcome::executed;
 }
 
 sg::texture_2d view_renderer::execute(sg::command_list& cmd,
@@ -511,18 +520,20 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const bindless = resources.freeze();
 
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
-    pathtrace_routine::execute(cmd, {.frame = frame,
-                                     .background = background,
-                                     .instances = resolved.instances,
-                                     .output = slot.texture,
-                                     .instance_table = instance_table,
-                                     .hit_groups = resolved.hit_groups,
-                                     // One material still compiling, or one that does not compile, degrades to grey
-                                     // shading on its own meshes rather than costing the view its whole image.
-                                     .fallback = &resources.shaders.acquire_fallback(),
-                                     .bindless = &bindless});
+    auto const traced = pathtrace_routine::execute(
+        cmd, {.frame = frame,
+              .background = background,
+              .instances = resolved.instances,
+              .output = slot.texture,
+              .instance_table = instance_table,
+              .hit_groups = resolved.hit_groups,
+              // One material still compiling, or one that does not compile, degrades to grey
+              // shading on its own meshes rather than costing the view its whole image.
+              .fallback = &resources.shaders.acquire_fallback(),
+              .bindless = &bindless});
 
-    if (slot.accum_frame < accumulation_frame_cap)
+    // As above: a declined trace recorded nothing, so it must not count as a sample.
+    if (traced == sg::routine_outcome::executed && slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;
     return slot.texture;
 }

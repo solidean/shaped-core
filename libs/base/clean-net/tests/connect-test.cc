@@ -24,6 +24,12 @@ namespace
 /// and a poor one as soon as something outside the pump has to happen first.
 /// The resolver's worker is a real thread, and starting one on wasm means bringing up a Web Worker: that costs tens
 /// of milliseconds, while a tight spin burns thousands of rounds in well under one.
+/// What the two teardown tests allow a parked operation to take.
+///
+/// Deliberately far past anything a healthy run needs: it bounds a hang, and the thing it waits on is a worker thread
+/// competing with every other test binary on the machine.
+constexpr double k_settle_budget_ms = 30000;
+
 bool pump_until(cc::function_ref<bool()> done, double max_ms = 5000)
 {
     auto const started = cc::current_time_steady_secs();
@@ -275,12 +281,15 @@ TEST("cnet - stopping an io_system settles what is still in flight")
 
     CHECK(io->is_stopping());
 
-    // Driven rather than read straight back: stop() ANSWERS everything outstanding, but the continuation carrying the
-    // answer runs on whoever pumps -- and with an ambient pool installed that may be a worker this thread has to let
-    // run.
-    // What the test is about is that the async settles rather than being dropped, not that it settles before stop()
-    // returns.
-    REQUIRE(pump_until([&] { return connecting->is_ready(); }));
+    // Driven rather than read straight back.
+    // stop() ANSWERS everything outstanding, and its continuations run inline on the stopping thread.
+    // But this connect is parked on NAME RESOLUTION, which sits on the resolver's own worker.
+    // That worker settles it after stop() has returned, so the answer is there to be waited for rather than read.
+    //
+    // k_settle_budget_ms rather than the default, because that worker competes with everything else the machine does.
+    // Under the full parallel suite it has been seen to need far longer than five seconds.
+    // The number bounds a hang rather than measuring anything: what is asserted is that the async settles at all.
+    REQUIRE(pump_until([&] { return connecting->is_ready(); }, k_settle_budget_ms));
     REQUIRE(connecting->try_error() != nullptr);
     CHECK(connecting->try_error()->is_cancelled());
 
@@ -302,11 +311,6 @@ TEST("cnet - stopping twice is the same as stopping once")
     io->stop();
 
     // The destructor calls it too, so a caller who stopped by hand must not pay for it twice.
-    // Driven for the same reason as the test above: the continuation carrying the answer runs on whoever pumps.
-    //
-    // A longer budget than the default here, and only here.
-    // This one has been seen to need it under the full parallel suite, where the ambient pool is saturated by eighty
-    // other binaries and a queued continuation waits behind all of them.
-    // The number is a safety net against a hang rather than a measurement: what is asserted is that it settles at all.
-    CHECK(pump_until([&] { return connecting->is_ready(); }, 30000));
+    // Driven on the same budget and for the same reason as the test above: the resolver's worker settles this.
+    CHECK(pump_until([&] { return connecting->is_ready(); }, k_settle_budget_ms));
 }

@@ -113,18 +113,17 @@ class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and integrates one path bundle per pixel over `d.output`'s extent into `d.output`.
-    /// A no-op (leaves the target untouched) if the shaders did not compile, or if any permutation `d` names has not.
-    static void execute(sg::command_list& cmd, pt_trace_desc const& d);
-
-    /// Whether the most recent `execute` on this context actually dispatched.
     ///
-    /// It reports the *last trace* rather than the routine, because there is no longer one pipeline to ask about: a
-    /// pipeline exists per permutation set, so readiness only means anything relative to a trace that named one.
-    /// `execute` degrades to a no-op rather than throwing, which is the right behavior for a live reload and the
-    /// wrong one for a test: a broken shader then leaves an untouched target that no CPU-side assertion notices.
-    /// So a test asserts on this, and a debug overlay can say why the image is empty.
-    /// False before the first execute.
-    [[nodiscard]] static bool is_ready(sg::command_list& cmd);
+    /// **Fallible, and for a reason the other routines do not share.**
+    /// Its pipelines are keyed on the ordered set of hit groups a trace names, which is scene data: unbounded, and
+    /// discovered on the frame path when a material combination is first used.
+    /// That key cannot be a routine parameter, so the permutations stay a map, and this declines and leaves the target
+    /// untouched until the one this trace needs has been built.
+    ///
+    /// Declining is what a caller must look at rather than infer.
+    /// Degrading silently is right for a live reload and wrong for a test, where a broken shader would otherwise leave
+    /// an untouched target no CPU-side assertion notices — so the outcome is nodiscard and the tests assert on it.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, pt_trace_desc const& d);
 
 protected:
     void init_declare(sg::context& ctx) override;
@@ -141,9 +140,32 @@ private:
         sg::raytracing_pipeline_handle pipeline;
         sg::raytracing_shader_table_handle table;
         sg::raygen_index raygen = {};
+
+        /// The state object while it is still being built.
+        /// Held rather than waited on: this permutation is discovered on the frame path, and a build there is the one
+        /// thing that must not stall — so the frames until it lands trace without it.
+        sg::async_raytracing_pipeline pending;
+
+        /// Set when this permutation cannot be built: a shader that will not compile, or a state object that refused.
+        /// Remembered rather than retried every frame, since the same inputs fail the same way until a reload.
+        bool failed = false;
+
+        /// What the shader table is built from, kept until the pipeline it indexes into exists.
+        /// These are positions in the pipeline description rather than objects, so holding them costs nothing.
+        sg::raygen_shader_handle pending_raygen = {};
+        sg::miss_shader_handle pending_miss = {};
+        sg::miss_shader_handle pending_shadow_miss = {};
+        cc::vector<sg::hit_shader_handle> pending_hits;
     };
 
-    /// The variant for `d`'s hit groups, built on a miss, or null when something it needs has not compiled.
+    /// Builds the shader table for a variant whose pipeline has just landed.
+    static void _finish_variant(sg::context& ctx, pipeline_variant& variant);
+
+    /// The variant for `d`'s hit groups, or null while it is still being built or after it failed.
+    ///
+    /// Never waits.
+    /// A permutation is discovered when a frame first uses that material set, which is on the frame path — so this
+    /// starts the work and reports what is ready, and the trace happens a frame or two later.
     [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
 
     // Re-acquired by init_declare on every reload, which is also when every variant built from the old ones is dropped.
@@ -154,7 +176,4 @@ private:
     /// Keyed on the hit-group set in order, together with the layout the second group is bound through.
     /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.
     cc::map<cc::hash128, pipeline_variant> _variants;
-
-    /// Whether the last `execute` dispatched — what `is_ready` reports.
-    bool _traced = false;
 };

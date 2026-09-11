@@ -834,11 +834,14 @@ void viewer::finish_frame(frame& f)
         auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
         // Presented either way: a cleared output is the honest "not ready yet" while the chain builds, and skipping
         // the present would freeze the window instead of showing it catching up.
-        (void)viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+        auto const recorded
+            = viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
 
-        // Asked while the list is still ours: `is_ready` reports the last trace recorded onto it, and submitting moves it away.
-        // A frame with no trace has nothing to report, and nothing to be wrong about.
-        traces_ran = plan.traces.empty() || pathtrace_routine::is_ready(*im.current_cmd);
+        // The frame's own answer, rather than a flag the pathtracer left behind for someone to read.
+        // It is WIDER than the old question -- it covers the layout passes too, not just the traces -- and that is
+        // what a capture actually needs: a frame where any pass declined is one that would be saved incomplete.
+        // A frame with no trace and nothing declined has nothing to be wrong about.
+        traces_ran = recorded == sg::routine_outcome::executed;
 
         if (im.config.headless)
         {

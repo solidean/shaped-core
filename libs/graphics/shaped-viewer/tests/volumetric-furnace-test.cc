@@ -173,13 +173,13 @@ image_stats trace_furnace(sg::context& ctx,
 
         auto const bindless = resources.freeze();
 
-        sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                              .background = background,
-                                              .instances = instances,
-                                              .output = target,
-                                              .instance_table = instance_table,
-                                              .hit_groups = hit_groups,
-                                              .bindless = &bindless});
+        auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
 
         // The routine degrades to a no-op when its shaders do not build, and every number below would then be read off a
         // target nothing ever wrote.
@@ -188,7 +188,7 @@ image_stats trace_furnace(sg::context& ctx,
         // unwinding past a recorded-but-unsubmitted command list asserts inside its destructor.
         // A second assertion while the first is unwinding is an immediate `abort`, which loses the message that would have
         // said what went wrong — see the viewer TODO's entry on exactly this.
-        auto const ready = sv::pathtrace_routine::is_ready(*cmd);
+        auto const ready = traced == sg::routine_outcome::executed;
 
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
         // intermediate ones say nothing the final one does not.

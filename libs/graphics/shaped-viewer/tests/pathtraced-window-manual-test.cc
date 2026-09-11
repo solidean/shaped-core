@@ -301,13 +301,13 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
             auto const bindless = resources.freeze();
 
-            sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
-                                                        .background = background,
-                                                        .instances = instances,
-                                                        .output = color,
-                                                        .instance_table = instance_table,
-                                                        .hit_groups = hit_groups,
-                                                        .bindless = &bindless});
+            auto const traced = sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
+                                                                            .background = background,
+                                                                            .instances = instances,
+                                                                            .output = color,
+                                                                            .instance_table = instance_table,
+                                                                            .hit_groups = hit_groups,
+                                                                            .bindless = &bindless});
             ctx.submit_command_list(cc::move(trace_cmd));
         }
 

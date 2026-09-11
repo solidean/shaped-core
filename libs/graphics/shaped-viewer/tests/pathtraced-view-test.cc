@@ -122,18 +122,18 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     // The tables the closest-hit reaches all of that through, locked for the recording.
     auto const bindless = resources.freeze();
 
-    sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                          .background = background,
-                                          .instances = instances,
-                                          .output = target,
-                                          .instance_table = instance_table,
-                                          .hit_groups = hit_groups,
-                                          .bindless = &bindless});
+    auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                              .background = background,
+                                                              .instances = instances,
+                                                              .output = target,
+                                                              .instance_table = instance_table,
+                                                              .hit_groups = hit_groups,
+                                                              .bindless = &bindless});
 
     // The routine degrades to a no-op when its shaders do not build, so without this every CPU-side check below
     // still passes against a target nothing ever wrote.
     // That silence is expensive: a shader break shows up as a debugging session on the image, not a failing test.
-    REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
+    REQUIRE(traced == sg::routine_outcome::executed);
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
@@ -219,16 +219,16 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
         cmd->upload.data_to_buffer(instance_table, records);
 
         auto const bindless = resources.freeze();
-        sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                              .background = background,
-                                              .instances = instances,
-                                              .output = target,
-                                              .instance_table = instance_table,
-                                              .hit_groups = hit_groups,
-                                              .fallback = fallback,
-                                              .bindless = &bindless});
+        auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .fallback = fallback,
+                                                                  .bindless = &bindless});
 
-        auto const ready = sv::pathtrace_routine::is_ready(*cmd);
+        auto const ready = traced == sg::routine_outcome::executed;
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch_and_wait_for_idle();
         return ready;

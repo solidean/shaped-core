@@ -67,13 +67,13 @@ public:
 
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
-    static void trace(sg::command_list& cmd,
-                      viewer_definition const& def,
-                      render_plan const& plan,
-                      u32 trace_index,
-                      plan_resources const& res,
-                      gpu_resource_manager& resources,
-                      view_store& store);
+    [[nodiscard]] static sg::routine_outcome trace(sg::command_list& cmd,
+                                                   viewer_definition const& def,
+                                                   render_plan const& plan,
+                                                   u32 trace_index,
+                                                   plan_resources const& res,
+                                                   gpu_resource_manager& resources,
+                                                   view_store& store);
 
 protected:
     /// No shaders of its own; it warms the path tracer so its compiles start early.

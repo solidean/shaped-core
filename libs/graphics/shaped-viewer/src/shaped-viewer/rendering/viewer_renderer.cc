@@ -54,7 +54,8 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     // future compute post-process would need.
     for (auto i = u32(0); i < plan.traces.size(); ++i)
         if (plan.traces[i].refresh)
-            view_renderer::trace(cmd, def, plan, i, res, resources, store);
+            if (view_renderer::trace(cmd, def, plan, i, res, resources, store) == sg::routine_outcome::declined)
+                declined = true;
 
     // Then one pass per target, in dependency order, so a source is finished before anything samples it.
     // Each pass closes before the next begins, which is what releases the output-merger binding — a target still bound
