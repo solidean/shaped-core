@@ -11,20 +11,28 @@ namespace sv
 {
 void viewer_renderer::init_declare(sg::context& ctx)
 {
-    // The frame runs through these two, so warm the whole chain when this is first initialized rather than stalling on the first frame.
-    view_renderer::prewarm(ctx);
+    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until the whole
+    // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
+    _view_renderer = depend_on<view_renderer>(ctx);
+
+    // The layout routine is NOT declared here, and cannot be: it is acquired per target format, and this frame draws
+    // the output in one format and every intermediate target in another.
+    // Registering it is still worth doing, so the next tick brings it up rather than the first frame discovering it.
     layout_routine::prewarm(ctx);
 }
 
-void viewer_renderer::execute(sg::command_list& cmd,
-                              viewer_definition const& def,
-                              render_plan const& plan,
-                              gpu_resource_manager& resources,
-                              view_store& store,
-                              sg::color_target const& output)
+sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
+                                             viewer_definition const& def,
+                                             render_plan const& plan,
+                                             gpu_resource_manager& resources,
+                                             view_store& store,
+                                             sg::color_target const& output)
 {
-    // Nothing of ours is read back — this is what runs init_declare (and so warms the chain) on first use.
-    (void)acquire(cmd);
+    // Nothing of ours is read back; what this establishes is that the whole chain below is ready.
+    // A token holder is not handed out until its subtree is, so one check here stands for every routine under it.
+    auto const self = try_acquire(cmd);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
 
     CC_ASSERT(plan.validate(), "a render plan must be in dependency order before it is recorded");
 
@@ -73,5 +81,6 @@ void viewer_renderer::execute(sg::command_list& cmd,
             {.color_targets = {textures.targets[ti].as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
         layout_routine::execute(scope, window_id(0), draws, textures);
     }
+    return sg::routine_outcome::executed;
 }
 } // namespace sv

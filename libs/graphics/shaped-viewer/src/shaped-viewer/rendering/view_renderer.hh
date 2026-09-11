@@ -86,5 +86,9 @@ private:
     /// shaders produced.
     /// Back when the accumulation lived on this routine, `evict` gave that for free; a store the caller owns outlives
     /// the instance, so the invalidation has to be said out loud.
+    /// The routine every trace goes through.
+    /// Declared rather than prewarmed, so this renderer reports pending until the pathtracer is ready.
+    sg::routine_dependency<pathtrace_routine, sg::routine_no_params> _pathtrace;
+
     u64 _shader_generation = 0;
 };

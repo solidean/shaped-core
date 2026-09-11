@@ -302,5 +302,6 @@ TEST("cnet - stopping twice is the same as stopping once")
     io->stop();
 
     // The destructor calls it too, so a caller who stopped by hand must not pay for it twice.
-    CHECK(connecting->is_ready());
+    // Driven for the same reason as the test above: the continuation carrying the answer runs on whoever pumps.
+    CHECK(pump_until([&] { return connecting->is_ready(); }));
 }

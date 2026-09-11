@@ -31,14 +31,21 @@ public:
     /// a layout leaves, so pass `output.cleared(...)` to define them.
     ///
     /// One command list end to end: sg transitions each texture from its trace's UAV write to a sampled read on its own.
-    static void execute(sg::command_list& cmd,
-                        viewer_definition const& def,
-                        render_plan const& plan,
-                        gpu_resource_manager& resources,
-                        view_store& store,
-                        sg::color_target const& output);
+    ///
+    /// Declines, recording nothing, while anything in the chain below is still building — one check here stands for
+    /// every routine under it, which is what the dependency tokens buy.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
+                                                     viewer_definition const& def,
+                                                     render_plan const& plan,
+                                                     gpu_resource_manager& resources,
+                                                     view_store& store,
+                                                     sg::color_target const& output);
 
 protected:
-    /// No shaders of its own; it warms the view renderer and the blit it places with.
+    /// No shaders of its own; it declares the view renderer it runs the frame through.
     void init_declare(sg::context& ctx) override;
+
+private:
+    /// Declared rather than prewarmed, so one readiness check covers view_renderer and the pathtracer under it.
+    sg::routine_dependency<view_renderer, sg::routine_no_params> _view_renderer;
 };

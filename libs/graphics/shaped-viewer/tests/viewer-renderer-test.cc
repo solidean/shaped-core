@@ -119,8 +119,9 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
     auto cmd = ctx.create_command_list();
     resources.advance_to(ctx.current_epoch()); // the frame's job, not a routine's
     auto store = sv::view_store{};             // and so is what its views keep across frames
-    sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                 output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
+          == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 
@@ -151,8 +152,9 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
     auto cmd = ctx.create_command_list();
     resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
-    sv::viewer_renderer::execute(*cmd, {}, {}, resources, store,
-                                 output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    CHECK(sv::viewer_renderer::execute(*cmd, {}, {}, resources, store,
+                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
+          == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 
@@ -220,8 +222,9 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
     auto cmd = ctx.create_command_list();
     resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
-    sv::viewer_renderer::execute(*cmd, def, plan_for(def, output_size), resources, store,
-                                 rt.cleared(tg::vec4f(0, 0, 0, 1)));
+    CHECK(sv::viewer_renderer::execute(*cmd, def, plan_for(def, output_size), resources, store,
+                                       rt.cleared(tg::vec4f(0, 0, 0, 1)))
+          == sg::routine_outcome::executed);
 
     {
         // The second pass keeps what the frame just wrote, and starts from a full-target viewport of its own.
@@ -344,8 +347,9 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
     resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
     store.begin_frame(u64(ctx.current_epoch()));
-    sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                 output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+    CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
+          == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch_and_wait_for_idle();
 

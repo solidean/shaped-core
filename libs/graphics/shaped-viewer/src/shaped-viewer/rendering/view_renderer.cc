@@ -285,8 +285,10 @@ struct ensured_slot
 
 void view_renderer::init_declare(sg::context& ctx)
 {
-    // The renderer traces through the leaf routine, so warm its shader compiles when it is first initialized rather than stalling on the first frame.
-    pathtrace_routine::prewarm(ctx);
+    // The renderer traces through the leaf routine, so the edge is declared rather than merely warmed: this routine is
+    // not handed out until the one it traces through is ready, which is what its callers would otherwise have to check
+    // for themselves on every frame.
+    _pathtrace = depend_on<pathtrace_routine>(ctx);
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;

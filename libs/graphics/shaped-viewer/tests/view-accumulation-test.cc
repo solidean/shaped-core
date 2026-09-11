@@ -253,8 +253,9 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
 
         // No history fed in: this asserts the store's own bookkeeping, not the refresh policy's.
         auto const plan = sv::build_render_plan(def, output_size, index, {});
-        sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                     output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                           output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
+              == sg::routine_outcome::executed);
 
         // A dead shader traces nothing and would pass every check below; readiness is the last trace's, so it is
         // only an answer once one has been recorded.

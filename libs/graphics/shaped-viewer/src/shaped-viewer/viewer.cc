@@ -832,7 +832,9 @@ void viewer::finish_frame(frame& f)
         // The output is a back buffer or the offscreen texture, and viewer_renderer cannot tell: same format, same
         // render_target_view, so the whole pass below this is identical either way.
         auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
-        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+        // Presented either way: a cleared output is the honest "not ready yet" while the chain builds, and skipping
+        // the present would freeze the window instead of showing it catching up.
+        (void)viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
 
         // Asked while the list is still ours: `is_ready` reports the last trace recorded onto it, and submitting moves it away.
         // A frame with no trace has nothing to report, and nothing to be wrong about.
