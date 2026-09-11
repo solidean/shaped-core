@@ -192,40 +192,49 @@ private:
 ///   class my_routine : public sg::render_routine<my_routine> { ... };
 ///
 /// and the routine gets a by-type entry point — no handle, no registration call, no by-name lookup.
-/// Both entry points find (or lazily create) this routine's per-context instance in cmd.context().routines and initialize it;
-/// they differ in what they hand back, and that is how a routine says whether it mutates.
 ///
-///   acquire(cmd)            -> Derived const&           no lock held; only const members are reachable
-///   acquire_exclusive(cmd)  -> routine_guard<Derived>   holds the routine's lock; the routine is fully mutable through it
+/// **Nothing here initializes.** Asking for a routine registers it; `ctx.routines.tick()` is what brings it up, so a
+/// routine nothing has ticked reads as pending rather than quietly compiling a shader on the frame path.
 ///
-/// A routine is expected to *hold state* — pipelines keyed by target format, a resource registry, a scratch buffer it grows.
-/// So acquire_exclusive is the usual one, and the customary shape is a static execute() that opens with it:
+///   try_acquire(cmd[, params])            -> routine_scope<Derived>   ready / pending / failed, read-only
+///   try_acquire_exclusive(cmd[, params])  -> routine_guard<Derived>   the same, holding the routine's lock
+///   scope.acquire(token)                  -> Other const&             a declared dependency; cannot fail
+///   scope.acquire_exclusive(token)        -> routine_guard<Other>     the same, for one this routine mutates
 ///
-///   class my_routine : public sg::render_routine<my_routine>
+/// A routine is expected to *hold state* — its pipeline, a resource registry, a scratch buffer it grows — so the
+/// exclusive form is the usual one, and the customary shape is a static execute() that opens with it:
+///
+///   class my_routine : public sg::render_routine<my_routine, sg::pixel_format>
 ///   {
 ///   public:
 ///       static void execute(sg::command_list& cmd, /* args */)
 ///       {
-///           auto self = acquire_exclusive(cmd);
-///           // ... bind self's pipelines, dispatch ...
+///           auto self = try_acquire_exclusive(cmd, format);
+///           if (!self.is_ready())
+///               return;                      // still building, or it failed — see routine_readiness
+///           auto const& other = self.acquire(self->_dependency);   // declared in init; cannot fail here
+///           // ... bind self's pipeline, dispatch ...
 ///       }
 ///   protected:
-///       void init_declare(sg::context& ctx) override { /* acquire shaders + pipelines; already under the lock */ }
+///       void init_declare(sg::context& ctx) override { /* acquire shaders, build the pipeline, declare dependencies */ }
 ///   };
 ///
-/// Threading, in three parts:
+/// **Branch once, at the top.** A routine's own dependencies are declared with depend_on during init and redeemed
+/// through the scope, and the framework refuses to hand out a holder until its whole subtree is ready — so the number
+/// of readiness checks a renderer grows is one per entry into the routine system, not one per routine.
+///
+/// Threading:
 ///
 ///   - the registry is guarded, so acquiring from parallel command-list recording is safe;
-///   - one lock per routine covers both the init phases and everything the routine owns;
-///     each phase therefore runs exactly once, and two threads recording the same routine serialize (see render_routine_base);
-///   - **the const path is not locked.**
-///     Whatever a routine exposes to acquire() must be immutable after init, or self-guarded (as sr::keyed_pipeline_cache is):
-///     a reload on another thread re-runs init_declare while this thread reads.
-///     A routine whose execute() touches anything init_declare writes belongs on acquire_exclusive — which is nearly all of them.
+///   - initialization runs only inside a tick, which is a frame-boundary call — so the phases are not reachable
+///     concurrently with each other, and a reload cannot land in the middle of a frame;
+///   - the read-only scope takes no lock, so whatever it reaches must be immutable after init or self-guarded.
+///     A routine whose execute touches anything init writes belongs on try_acquire_exclusive, which is nearly all.
 ///
 /// TODO(sg): the lock this wants is a shared/exclusive one, which clean-core does not have yet.
-/// The model to reach: the init phases exclude every execute, while executes that only *read* run in parallel with each other.
-/// Today acquire() takes no lock where it wants a shared one, and acquire_exclusive() serializes executes that could overlap.
+/// The model to reach: init excludes every execute, while executes that only *read* run in parallel with each other.
+/// Today the read-only scope takes no lock where it wants a shared one, and the exclusive one serializes executes
+/// that could overlap.
 /// It needs a cc::shared_mutex<T> (lock_shared(f) / lock_shared_scoped()) — see the sg TODO.
 ///
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
@@ -238,26 +247,6 @@ public:
     /// The parameter type this routine is keyed on, so a caller can name it without repeating the declaration.
     /// sg::routine_no_params for an unparametrized routine, which is every routine that does not say otherwise.
     using params_t = Params;
-
-    /// The per-context instance for Derived, fully initialized (declare + materialize) at the current reload generation.
-    /// No lock is held, so this reaches only const members — see the threading note above for what that requires of them.
-    [[nodiscard]] static Derived const& acquire(command_list& cmd, Params const& params = {})
-    {
-        Derived& self = instance(cmd.context(), params);
-        self.ensure_initialized(cmd);
-        return self;
-    }
-
-    /// The same instance, mutable, with the routine's lock held for as long as the returned guard lives.
-    /// This is the entry point for a routine that writes anything.
-    [[nodiscard]] static routine_guard<Derived> acquire_exclusive(command_list& cmd, Params const& params = {})
-    {
-        Derived& self = instance(cmd.context(), params);
-        auto lock = self._init.lock_scoped();
-        // The phases run under the very lock the caller is about to hold, so a reload can never land mid-execute.
-        self.ensure_initialized_impl(*lock, cmd);
-        return routine_guard<Derived>(self, cc::move(lock), self.own_readiness_locked(*lock));
-    }
 
     /// Where this routine stands, without initializing it — the fallible entry point.
     ///

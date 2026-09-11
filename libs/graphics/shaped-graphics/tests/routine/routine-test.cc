@@ -77,16 +77,28 @@ template <int Tag>
 class counter_routine : public sg::render_routine<counter_routine<Tag>>
 {
 public:
+    // The tests below tick before racing, so a pending routine here would be the test's bug rather than the guard's.
     static void bump(sg::command_list& cmd)
     {
-        auto self = counter_routine::acquire_exclusive(cmd);
+        auto self = counter_routine::try_acquire_exclusive(cmd);
+        CC_ASSERT(self.is_ready(), "tick the routine system before racing this");
         ++self->_count;
     }
 
-    [[nodiscard]] static int count_of(sg::command_list& cmd) { return counter_routine::acquire_exclusive(cmd)->_count; }
+    [[nodiscard]] static int count_of(sg::command_list& cmd)
+    {
+        auto self = counter_routine::try_acquire_exclusive(cmd);
+        CC_ASSERT(self.is_ready(), "tick the routine system first");
+        return self->_count;
+    }
 
-    // Reads the same member through the unlocked path, which only compiles because it does not mutate.
-    [[nodiscard]] static int count_via_const(sg::command_list& cmd) { return counter_routine::acquire(cmd)._count; }
+    // Reads the same member through the read-only scope, which only compiles because it does not mutate.
+    [[nodiscard]] static int count_via_const(sg::command_list& cmd)
+    {
+        auto const self = counter_routine::try_acquire(cmd);
+        CC_ASSERT(self.is_ready(), "tick the routine system first");
+        return self->_count;
+    }
 
 private:
     int _count = 0;
@@ -135,21 +147,26 @@ class pattern_fill_routine : public sg::render_routine<pattern_fill_routine>
 public:
     static void execute(sg::command_list& cmd, sg::buffer<u32> const& out)
     {
-        auto const& self = acquire(cmd);
-        CC_ASSERT(self._pipeline != nullptr, "pattern_fill routine failed to initialize");
+        auto const self = try_acquire(cmd);
+        CC_ASSERT(self.is_ready(), "tick the routine system before dispatching this");
+        CC_ASSERT(self->_pipeline != nullptr, "pattern_fill routine failed to initialize");
 
         // Force the compute pipeline only now — init_declare merely kicked off the background compile.
-        auto const pipeline = cc::async_blocking_get(self._pipeline);
+        auto const pipeline = cc::async_blocking_get(self->_pipeline);
 
         auto const group = cmd.context().transient.create_binding_group(
-            self._group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
+            self->_group_layout, {{.name = "gValues", .view = out.as_readwrite_buffer()}});
 
         cmd.compute.bind_pipeline(*pipeline);
         cmd.compute.bind_group(0, *group);
         cmd.compute.dispatch_threads(out.element_count());
     }
 
-    [[nodiscard]] static bool is_usable(sg::command_list& cmd) { return acquire(cmd)._pipeline != nullptr; }
+    [[nodiscard]] static bool is_usable(sg::command_list& cmd)
+    {
+        auto const self = try_acquire(cmd);
+        return self.is_ready() && self->_pipeline != nullptr;
+    }
 
 protected:
     void init_declare(sg::context& ctx) override
@@ -174,20 +191,26 @@ private:
 };
 } // namespace
 
-INVOCABLE_TEST("sg - routine acquire hands out a const reference, acquire_exclusive a move-only guard",
+INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclusive a move-only guard",
                (sg::context_handle const& ctx))
 {
     // A mutable reference creeping back into the unlocked path would silently re-open unguarded writes.
-    static_assert(
-        std::is_same_v<decltype(guard_routine::acquire(std::declval<sg::command_list&>())), guard_routine const&>);
-    static_assert(std::is_same_v<decltype(guard_routine::acquire_exclusive(std::declval<sg::command_list&>())),
+    static_assert(std::is_same_v<decltype(guard_routine::try_acquire(std::declval<sg::command_list&>())),
+                                 sg::routine_scope<guard_routine>>);
+    static_assert(std::is_same_v<decltype(guard_routine::try_acquire_exclusive(std::declval<sg::command_list&>())),
                                  sg::routine_guard<guard_routine>>);
+    // Both are move-only: a copy would be a second holder of a lock, or of a readiness that was true when it was taken.
     static_assert(!std::is_copy_constructible_v<sg::routine_guard<guard_routine>>);
+    static_assert(!std::is_copy_constructible_v<sg::routine_scope<guard_routine>>);
 
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    // Both entry points reach the one per-context instance — a write through the guard is what the const path then reads.
+    // Registered by asking, brought up by the tick — the helpers below assert readiness rather than waiting for it.
+    (void)guard_routine::try_acquire(*cmd);
+    (void)ctx->routines.tick_until_idle();
+
+    // Both entry points reach the one per-context instance — a write through the guard is what the read-only scope then sees.
     auto const before = guard_routine::count_of(*cmd);
     guard_routine::bump(*cmd);
     CHECK(guard_routine::count_of(*cmd) == before + 1);
@@ -203,24 +226,28 @@ INVOCABLE_TEST("sg - routine phases run once, then re-run declare + materialize 
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    auto const& routine = phases_routine::acquire(*cmd);
-    CHECK(routine.once == 1);
-    CHECK(routine.declare == 1);
-    CHECK(routine.materialize == 1);
+    // Asking registers it; the TICK is what runs the phases.
+    (void)phases_routine::try_acquire(*cmd);
+    (void)ctx->routines.tick_until_idle();
 
-    // A second pass at the same generation changes nothing (same per-context instance).
-    // We re-read through `routine`, so the returned reference is intentionally discarded.
-    (void)phases_routine::acquire(*cmd);
-    CHECK(routine.once == 1);
-    CHECK(routine.declare == 1);
-    CHECK(routine.materialize == 1);
+    auto const first = phases_routine::try_acquire(*cmd);
+    REQUIRE(first.is_ready());
+    CHECK(first->once == 1);
+    CHECK(first->declare == 1);
+    CHECK(first->materialize == 1);
+
+    // A second tick at the same generation changes nothing (same per-context instance).
+    (void)ctx->routines.tick_until_idle();
+    CHECK(first->once == 1);
+    CHECK(first->declare == 1);
+    CHECK(first->materialize == 1);
 
     // A reload bumps the global generation: declare + materialize re-run, init_once does not.
     sg::signal_reload();
-    (void)phases_routine::acquire(*cmd);
-    CHECK(routine.once == 1);
-    CHECK(routine.declare == 2);
-    CHECK(routine.materialize == 2);
+    (void)ctx->routines.tick_until_idle();
+    CHECK(first->once == 1);
+    CHECK(first->declare == 2);
+    CHECK(first->materialize == 2);
 
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -232,22 +259,28 @@ INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache do
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    auto const& first = evict_routine::acquire(*cmd);
-    CHECK(first.once == 1);
+    (void)evict_routine::try_acquire(*cmd);
+    (void)ctx->routines.tick_until_idle();
+    auto const first = evict_routine::try_acquire(*cmd);
+    REQUIRE(first.is_ready());
+    CHECK(first->once == 1);
 
     // Drive the first instance's declare count to 2, so it is distinguishable from a fresh one.
     sg::signal_reload();
-    (void)evict_routine::acquire(*cmd);
-    CHECK(first.declare == 2);
+    (void)ctx->routines.tick_until_idle();
+    CHECK(first->declare == 2);
 
     evict_routine::evict(*ctx);
 
     // A fresh instance, built from scratch: every phase back at 1.
     // A cached slot that survived the eviction would instead hand back the old object (declare == 2) — or worse, a freed one.
-    auto const& second = evict_routine::acquire(*cmd);
-    CHECK(second.once == 1);
-    CHECK(second.declare == 1);
-    CHECK(second.materialize == 1);
+    (void)evict_routine::try_acquire(*cmd);
+    (void)ctx->routines.tick_until_idle();
+    auto const second = evict_routine::try_acquire(*cmd);
+    REQUIRE(second.is_ready());
+    CHECK(second->once == 1);
+    CHECK(second->declare == 1);
+    CHECK(second->materialize == 1);
 
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -304,16 +337,20 @@ INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
 // Spawning std::threads there would race by construction and prove nothing about the guard.
 #if CC_HAS_THREADS
 
-INVOCABLE_TEST("sg - concurrent acquires of one routine run each phase exactly once",
+// Registration races; initialization does not.
+//
+// This test used to race the PHASE ENGINE, because acquire ran the phases on whichever thread got there first.
+// It cannot any more -- only the tick runs them.
+// What is left to race is the registry: many threads asking for a routine that does not exist yet must produce one
+// instance rather than eight, and the phases must still run once over it.
+INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the tick initializes it once",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))
 {
-    // The phase engine is guarded, so racing acquires must not both run init_declare.
-    // Without that lock this is a plain data race on the phase flags, and the counts come out above one under contention.
     REQUIRE(ctx != nullptr);
 
-    // The exclusion tag is what makes `declare == 1` meaningful: sg::reload_generation() is process-global, and a concurrent
-    // sg::signal_reload() elsewhere would legitimately re-run init_declare here.
+    // The exclusion tag is what makes `declare == 1` meaningful: sg::reload_generation() is process-global, and a
+    // concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
     //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
     // backend in the same process would otherwise carry in.
@@ -329,23 +366,28 @@ INVOCABLE_TEST("sg - concurrent acquires of one routine run each phase exactly o
         threads.emplace_back(
             [&]
             {
-                // Line the threads up so they hit the phase engine together, not one after another.
+                // Line the threads up so they reach the registry together, not one after another.
                 auto cmd = ctx->create_command_list();
                 ++ready;
                 while (ready.load() < thread_count)
                     std::this_thread::yield();
-                (void)racing_routine::acquire(*cmd);
+                // No CHECK here: a check on a spawned thread is not attributed to the running test, and what is being
+                // proven is the aggregate below rather than anything one thread sees.
+                (void)racing_routine::try_acquire(*cmd);
                 ctx->drop_command_list(cc::move(cmd));
             });
 
     for (auto& t : threads)
         t.join();
 
+    // Eight racing registrations, one instance, and the phases run over it exactly once.
+    CHECK(racing_routine::once.load() == 0); // nothing has ticked yet
+    (void)ctx->routines.tick_until_idle();
     CHECK(racing_routine::once.load() == 1);
     CHECK(racing_routine::declare.load() == 1);
 }
 
-INVOCABLE_TEST("sg - acquire_exclusive serializes concurrent access to a routine's own state",
+INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
                (sg::context_handle const& ctx))
 {
     // Unguarded, the plain-int increment races and the total lands below the expected count.
@@ -355,6 +397,8 @@ INVOCABLE_TEST("sg - acquire_exclusive serializes concurrent access to a routine
     constexpr auto bumps_per_thread = 2000;
 
     auto probe = ctx->create_command_list();
+    (void)racing_counter_routine::try_acquire(*probe);
+    (void)ctx->routines.tick_until_idle();
     auto const before = racing_counter_routine::count_of(*probe);
     ctx->drop_command_list(cc::move(probe));
 
@@ -397,26 +441,36 @@ INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
-    auto const& rgba = formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm);
-    auto const& bgra = formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm);
+    (void)formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm);
+    (void)formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm);
+    (void)ctx->routines.tick_until_idle();
 
-    CHECK(&rgba != &bgra);
-    CHECK(rgba.seen == sg::pixel_format::rgba8_unorm);
-    CHECK(bgra.seen == sg::pixel_format::bgra8_unorm);
-    CHECK(rgba.params() == sg::pixel_format::rgba8_unorm);
+    auto const rgba = formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm);
+    auto const bgra = formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm);
+    REQUIRE(rgba.is_ready());
+    REQUIRE(bgra.is_ready());
 
-    // Re-acquiring either one hands back the same instance rather than building a third.
+    CHECK(&*rgba != &*bgra);
+    CHECK(rgba->seen == sg::pixel_format::rgba8_unorm);
+    CHECK(bgra->seen == sg::pixel_format::bgra8_unorm);
+    CHECK(rgba->params() == sg::pixel_format::rgba8_unorm);
+
+    // Asking again hands back the same instance rather than building a third.
     // The per-thread acquire memo matches on the parameter hash too, so alternating between two values must not
     // keep serving whichever was cached last.
-    CHECK(&formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm) == &rgba);
-    CHECK(&formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm) == &bgra);
-    CHECK(rgba.declare == 1);
-    CHECK(bgra.declare == 1);
+    CHECK(&*formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm) == &*rgba);
+    CHECK(&*formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm) == &*bgra);
+    CHECK(rgba->declare == 1);
+    CHECK(bgra->declare == 1);
 
     // evict() takes the parameter, so it drops one instance and leaves the other alone.
     formatted_routine::evict(*ctx, sg::pixel_format::rgba8_unorm);
-    CHECK(formatted_routine::acquire(*cmd, sg::pixel_format::bgra8_unorm).declare == 1);
-    CHECK(formatted_routine::acquire(*cmd, sg::pixel_format::rgba8_unorm).declare == 1); // a fresh one, back at 1
+    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm)->declare == 1);
+
+    // The evicted one is gone, so asking registers a fresh instance that the next tick builds from scratch.
+    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm).is_pending());
+    (void)ctx->routines.tick_until_idle();
+    CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm)->declare == 1);
 
     formatted_routine::evict_all(*ctx);
     ctx->drop_command_list(cc::move(cmd));
@@ -449,7 +503,9 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
     CHECK(second.is_idle());
 
     auto cmd = ctx->create_command_list();
-    CHECK(prewarmed::acquire(*cmd).ran);
+    auto const up = prewarmed::try_acquire(*cmd);
+    REQUIRE(up.is_ready());
+    CHECK(up->ran);
     ctx->drop_command_list(cc::move(cmd));
 
     prewarmed::evict(*ctx);

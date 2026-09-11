@@ -476,7 +476,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     CC_ASSERT(scene != nullptr, "a traced view needs a scene_3d layer");
 
     // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
-    auto self = acquire_exclusive(cmd);
+    auto self = try_acquire_exclusive(cmd);
+
+    // The slot is resolved either way, so a view whose renderer is not up yet still has a texture to re-present
+    // rather than the caller getting nothing back.
+    auto const shader_generation = self.is_ready() ? self->_shader_generation : 0;
 
     // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
     // bindless index this trace reads.
@@ -484,7 +488,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), v.resolution);
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = trace_hash(fc, bg, resolved, v.resolution, self->_shader_generation);
+    auto const hash = trace_hash(fc, bg, resolved, v.resolution, shader_generation);
 
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
@@ -492,6 +496,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const acc = ensure_temporal(ctx, store, v.id, temporal_id::accumulation(layer), v.resolution,
                                      sg::pixel_format::rgba32_float);
     auto& slot = *acc.slot;
+
+    if (!self.is_ready())
+        return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds
 
     if (acc.resized)
         store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
