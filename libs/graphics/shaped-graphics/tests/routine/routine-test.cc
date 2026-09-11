@@ -488,3 +488,35 @@ INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
     first_slow::evict(*ctx);
     second_slow::evict(*ctx);
 }
+
+// try_acquire REPORTS; it never initializes.
+// A routine nothing has ticked reads as pending rather than quietly bringing itself up on the frame path, which is the
+// whole difference between the two entry points.
+INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+
+    using reported = slow_routine<3>;
+    reported::evict(*ctx);
+
+    // Asking is enough to register it, so the next tick brings it up -- but asking did not bring it up.
+    auto const pending = reported::try_acquire(*ctx);
+    CHECK(pending.is_pending());
+    CHECK(!pending.is_ready());
+    CHECK(!pending.is_failed());
+
+    (void)ctx->routines.tick_until_idle();
+
+    auto const ready = reported::try_acquire(*ctx);
+    CHECK(ready.is_ready());
+    CHECK(ready->ran);
+
+    // The exclusive form reports the same thing, and holds the lock while doing it.
+    auto guard = reported::try_acquire_exclusive(*ctx);
+    CHECK(guard.is_ready());
+    CHECK(guard->ran);
+
+    reported::evict(*ctx);
+}

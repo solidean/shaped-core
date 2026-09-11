@@ -58,6 +58,9 @@ class routine_registry;
 struct routine_tick_options; // what one routine-init tick may do (see routine/routine_registry.hh)
 struct routine_tick_result;  // what it did
 class render_routine_base;
+enum class routine_readiness; // pending / ready / failed (see routine/render_routine_base.hh)
+template <class Derived>
+class routine_scope;
 struct routine_no_params; // the parameter of an UNPARAMETRIZED routine (see routine/routine_params.hh)
 template <class Derived, class Params = routine_no_params>
 class render_routine;

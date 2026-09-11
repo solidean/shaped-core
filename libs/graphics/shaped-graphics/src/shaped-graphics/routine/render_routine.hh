@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>                 // cc::move
 #include <clean-core/thread/mutex.hh>                   // cc::mutex_guard
 #include <shaped-graphics/command_list/command_list.hh> // cmd.context()
@@ -20,8 +21,19 @@ template <class Derived>
 class sg::routine_guard
 {
 public:
-    [[nodiscard]] Derived& operator*() const { return *_routine; }
-    [[nodiscard]] Derived* operator->() const { return _routine; }
+    [[nodiscard]] bool is_ready() const { return _readiness == routine_readiness::ready; }
+    [[nodiscard]] bool is_pending() const { return _readiness == routine_readiness::pending; }
+    [[nodiscard]] bool is_failed() const { return _readiness == routine_readiness::failed; }
+    [[nodiscard]] routine_readiness readiness() const { return _readiness; }
+
+    /// The routine itself.
+    /// Only valid while is_ready().
+    [[nodiscard]] Derived& operator*() const
+    {
+        CC_ASSERT(is_ready(), "a routine was used while it was not ready — test is_ready() first");
+        return *_routine;
+    }
+    [[nodiscard]] Derived* operator->() const { return &**this; }
 
     routine_guard(routine_guard&&) = default;
     routine_guard& operator=(routine_guard&&) = default;
@@ -33,14 +45,58 @@ private:
     template <class, class>
     friend class render_routine;
 
-    explicit routine_guard(Derived& routine, cc::mutex_guard<render_routine_base::init_state> lock)
-      : _routine(&routine), _lock(cc::move(lock))
+    explicit routine_guard(Derived& routine,
+                           cc::mutex_guard<render_routine_base::init_state> lock,
+                           routine_readiness readiness)
+      : _routine(&routine), _lock(cc::move(lock)), _readiness(readiness)
     {
     }
 
     Derived* _routine;
+    routine_readiness _readiness;
     // The phase engine's lock is the routine's lock; what it guards is the whole of *_routine, not just the phase flags.
     cc::mutex_guard<render_routine_base::init_state> _lock;
+};
+
+/// Read-only access to a routine's per-context instance, plus where it stands — what try_acquire hands back.
+///
+/// It is a SCOPE rather than a bare reference for two reasons that arrive together: a caller has to be able to ask
+/// whether the routine is usable before using it, and a dependency token is redeemed THROUGH this rather than off the
+/// routine, so "valid only while the holder is acquired" is structural instead of an assert that release compiles out.
+///
+/// No operator bool: the states are named, so a call site says which one it is testing.
+template <class Derived>
+class sg::routine_scope
+{
+public:
+    [[nodiscard]] bool is_ready() const { return _readiness == routine_readiness::ready; }
+    [[nodiscard]] bool is_pending() const { return _readiness == routine_readiness::pending; }
+    [[nodiscard]] bool is_failed() const { return _readiness == routine_readiness::failed; }
+    [[nodiscard]] routine_readiness readiness() const { return _readiness; }
+
+    /// The routine itself.
+    /// Only valid while is_ready().
+    [[nodiscard]] Derived const& operator*() const
+    {
+        CC_ASSERT(is_ready(), "a routine was used while it was not ready — test is_ready() first");
+        return *_routine;
+    }
+    [[nodiscard]] Derived const* operator->() const { return &**this; }
+
+    routine_scope(routine_scope&&) = default;
+    routine_scope& operator=(routine_scope&&) = default;
+
+    routine_scope(routine_scope const&) = delete;
+    routine_scope& operator=(routine_scope const&) = delete;
+
+private:
+    template <class, class>
+    friend class render_routine;
+
+    explicit routine_scope(Derived& routine, routine_readiness readiness) : _routine(&routine), _readiness(readiness) {}
+
+    Derived* _routine;
+    routine_readiness _readiness;
 };
 
 /// CRTP base for a concrete render routine.
@@ -113,7 +169,40 @@ public:
         auto lock = self._init.lock_scoped();
         // The phases run under the very lock the caller is about to hold, so a reload can never land mid-execute.
         self.ensure_initialized_impl(*lock, cmd);
-        return routine_guard<Derived>(self, cc::move(lock));
+        return routine_guard<Derived>(self, cc::move(lock), self.own_readiness_locked(*lock));
+    }
+
+    /// Where this routine stands, without initializing it — the fallible entry point.
+    ///
+    /// It reports; it never brings a routine up.
+    /// That is the tick's job, so a routine nothing has ticked reads as pending here rather than quietly initializing
+    /// on the frame path.
+    /// Registering it is not initializing it: asking is enough to make the next tick bring it up.
+    [[nodiscard]] static routine_scope<Derived> try_acquire(command_list& cmd, Params const& params = {})
+    {
+        return try_acquire(cmd.context(), params);
+    }
+
+    /// The same, reachable before a command list exists.
+    [[nodiscard]] static routine_scope<Derived> try_acquire(context& ctx, Params const& params = {})
+    {
+        Derived& self = instance(ctx, params);
+        return routine_scope<Derived>(self, self.readiness());
+    }
+
+    /// The same, mutable, holding the routine's lock — for a routine that writes anything.
+    /// Unlike acquire_exclusive it does not initialize, so the returned guard may report pending.
+    [[nodiscard]] static routine_guard<Derived> try_acquire_exclusive(command_list& cmd, Params const& params = {})
+    {
+        return try_acquire_exclusive(cmd.context(), params);
+    }
+
+    [[nodiscard]] static routine_guard<Derived> try_acquire_exclusive(context& ctx, Params const& params = {})
+    {
+        Derived& self = instance(ctx, params);
+        auto lock = self._init.lock_scoped();
+        auto const readiness = self.own_readiness_locked(*lock);
+        return routine_guard<Derived>(self, cc::move(lock), readiness);
     }
 
     /// Register this routine so the next `ctx.routines.tick()` brings it up, before anything needs it.

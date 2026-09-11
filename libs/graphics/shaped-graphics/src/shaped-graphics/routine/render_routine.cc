@@ -59,6 +59,23 @@ bool render_routine_base::is_initialized()
         { return s.once_done && s.declared_generation == current && s.materialized_generation == current; });
 }
 
+routine_readiness render_routine_base::own_readiness_locked(init_state const& s)
+{
+    auto const current = current_generation();
+    auto const done = s.once_done && s.declared_generation == current && s.materialized_generation == current;
+    return done ? routine_readiness::ready : routine_readiness::pending;
+}
+
+routine_readiness render_routine_base::own_readiness()
+{
+    return _init.lock([this](init_state& s) { return own_readiness_locked(s); });
+}
+
+routine_readiness render_routine_base::readiness()
+{
+    return own_readiness();
+}
+
 u64 render_routine_base::current_generation()
 {
     return sg::reload_generation();

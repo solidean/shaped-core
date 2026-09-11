@@ -29,6 +29,20 @@
 /// the losers of the race block until the winner is done, then see it initialized.
 /// It is the same lock acquire_exclusive hands out, so it guards the derived routine's own state too; see sg::render_routine.
 /// A phase callback therefore must not call back into acquire/acquire_exclusive/prewarm for the same routine.
+/// Where a routine stands, as three states rather than two.
+///
+/// "Still compiling" and "will never compile" produce the same answer to a caller that only draws, and collapsing them
+/// is how a broken shader becomes a black rectangle that reports nothing.
+/// The common branch is the same either way -- a caller that only draws tests is_ready() -- so the third state costs
+/// nothing at the sites that ignore it and is the difference between a failure a test can assert on and one a person
+/// has to notice.
+enum class sg::routine_readiness
+{
+    pending, ///< initialization has not finished; try again after another tick
+    ready,   ///< every phase ran at the current reload generation
+    failed,  ///< initialization failed and will not succeed until something changes (a reload, an eviction)
+};
+
 class sg::render_routine_base
 {
 public:
@@ -66,6 +80,20 @@ private:
     /// Whether every phase has run at the CURRENT reload generation, so a tick has nothing left to do here.
     /// Read under the routine's lock, so it is a snapshot rather than a promise: a reload can land right after it.
     [[nodiscard]] bool is_initialized();
+
+    /// The same, given a lock already held — cc::mutex is not recursive, so the exclusive path cannot re-take it.
+    [[nodiscard]] routine_readiness own_readiness_locked(init_state const& s);
+
+    /// Where this routine stands, INCLUDING everything it depends on.
+    /// This is what try_acquire reports, because a routine whose dependency is not up is not usable either.
+    /// Identical to own_readiness until dependency tokens exist to fold in.
+    [[nodiscard]] routine_readiness readiness();
+
+    /// Where this routine stands, ignoring anything it depends on.
+    ///
+    /// `failed` is unreachable while the phases are synchronous and cannot report an error; it exists because the
+    /// state a caller branches on should not change shape when the mechanism behind it does.
+    [[nodiscard]] routine_readiness own_readiness();
 
     /// Runs init_once (first time only), then init_declare (first time + after each reload).
     /// The prewarm entry point: call it before opening a command list so async compiles start as early as possible.
