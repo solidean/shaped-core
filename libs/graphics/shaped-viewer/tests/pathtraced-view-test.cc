@@ -245,3 +245,111 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
     // With the neutral hit group it dispatches: the mesh is placed and shaded grey rather than the view going dark.
     CHECK(trace(&resources.shaders.acquire_fallback()));
 }
+
+// The same trace, shaded through a texture rather than through per-face colours.
+//
+// A permutation declares a sampler only when its material samples something, and those samplers are a group of
+// their own -- a third `binding_group_layout` and a third slot in the pipeline layout (see
+// `sv::material_sampler_group`).
+// Every other path-traced scene in this suite is untextured, so without this the three-way split in
+// `_build_variant` and the layout it builds are never reached at all.
+//
+// What makes this test mean something is the sampler count below: a change that stopped generating samplers would
+// otherwise leave it green while testing nothing.
+TEST("sv - a path-traced textured material builds its sampler group (headless)", nx::config::main_thread)
+{
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    auto const box = sv_test::make_cornell_box();
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_textured_mesh("textured box", box.positions));
+    REQUIRE(resources.meshes.contains(item.mesh));
+    resources.wait_for_pending_uploads();
+
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
+    REQUIRE(mesh_rec != nullptr);
+
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+
+    // The guard this test rests on: a textured material is what puts a sampler in the permutation, and a sampler
+    // is what puts a third group in the pipeline layout.
+    REQUIRE(permutation->samplers.size() >= 1);
+
+    auto instances = cc::vector<sg::tlas_instance>();
+    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(permutation);
+
+    auto const size = tg::vec2i(64, 64);
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+
+    auto fc = sv::pt_frame_constants_gpu{};
+    fc.camera = sv::camera_gpu::from(cam);
+    fc.light = {.center = box.light.center,
+                .u = tg::vec3f(box.light.half_x, 0, 0),
+                .v = tg::vec3f(0, 0, box.light.half_z),
+                .emission = box.light.emission,
+                .normal = tg::vec3f(0, -1, 0)};
+    fc.samples_per_pixel = 4;
+    fc.max_bounces = 3;
+    fc.seed = 1u;
+
+    auto cmd = ctx.create_command_list();
+
+    auto records = cc::vector<sv::instance_gpu>();
+    records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
+
+    auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+    cmd->upload.pod_to_buffer(frame, fc);
+
+    auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+    cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+
+    auto const target = ctx.transient.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = size[0],
+         .height = size[1],
+         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+
+    auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+        records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd->upload.data_to_buffer(instance_table, records);
+
+    auto const bindless = resources.freeze();
+
+    sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                          .background = background,
+                                          .instances = instances,
+                                          .output = target,
+                                          .instance_table = instance_table,
+                                          .hit_groups = hit_groups,
+                                          .bindless = &bindless});
+
+    // A root signature the sampler group broke would fail pipeline creation, and the routine would degrade to a
+    // no-op rather than say so -- which is exactly what this REQUIRE is here to stop.
+    REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
+
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch_and_wait_for_idle();
+}

@@ -173,6 +173,39 @@ inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc
             .material = sv::default_material(shared_material_library())};
 }
 
+/// The same geometry, shaded through a TEXTURE rather than through per-face colours.
+///
+/// This is the only shape of scene that reaches the path tracer's sampler group: a permutation declares a sampler
+/// only when its material samples something, and that sampler group is a third `binding_group_layout` the routine
+/// builds and a third slot in its pipeline layout.
+/// Every other scene here is untextured, so without this the whole of that path is unreached.
+///
+/// `base_color` is bound as a texture INSTEAD of as a per-face attribute, so nothing fills the same slot twice.
+inline sv::mesh as_textured_mesh(cc::string name, cc::span<tg::pos3f const> positions)
+{
+    // One uv per vertex.
+    // The values decide what the sample reads, and nothing here checks the pixels, so they only have to exist.
+    auto uvs = cc::array<tg::vec2f>::create_defaulted(positions.size());
+    for (auto i = isize(0); i < uvs.size(); ++i)
+        uvs[i] = tg::vec2f(f32(i % 2), f32((i / 2) % 2));
+
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+
+    auto mesh = sv::mesh{.name = cc::move(name),
+                         .geometry = sv::triangle_geometry::create_from_positions(positions),
+                         .attributes = cc::move(attributes),
+                         .material = sv::default_material(shared_material_library())};
+
+    // A 2x2 opaque white texture: enough to mint an id and a sampler, and neutral enough that the image is the
+    // one the untextured sibling produces.
+    auto pixels = cc::array<byte>::create_filled(2 * 2 * 4, byte(255));
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 2)}});
+    return mesh;
+}
+
 /// The same, over indexed geometry — triangle order follows the index buffer, so the per-face attributes still line up.
 inline sv::mesh as_indexed_mesh(cc::string name,
                                 cc::span<tg::pos3f const> positions,
