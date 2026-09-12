@@ -64,8 +64,9 @@ Keeping them separate is a deliberate choice, and it rules one design out.
 DXC's `-fvk-*-shift` family would let a shader carry no annotations at all, by mapping HLSL space onto SPIR-V set automatically.
 But that ties the two together: a space used purely as a namespace would silently mint another descriptor set.
 
-The binding preprocessor ties them instead, deliberately and one way: a group's number is both its SPIR-V set and its HLSL space, so group `n` occupies `space<n>` and nothing else does.
-That is a rule about what a *group* is, not a global mapping DXC applies to every space — a binding declared outside an annotated namespace keeps whatever space it wrote by hand.
+The binding preprocessor assigns both itself instead, from the group number alone.
+The set is the number; the space is whatever the pass decides — today `space<n>`, which is a choice it can change without any shader changing.
+That is a rule about what the *pass emits*, not a global mapping DXC applies to every space — a binding declared outside an annotated namespace keeps whatever space it wrote by hand.
 
 ## Vertex input locations
 

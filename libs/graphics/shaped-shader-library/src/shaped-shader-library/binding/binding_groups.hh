@@ -28,7 +28,11 @@ struct slib::declared_sampler
 ///         SamplerState linear_sampler;
 ///     }
 ///
-/// The group number is both the SPIR-V set and the HLSL space, so group `n` occupies `space<n>` and nothing else does.
+/// The group number is the only address an author writes, and it is the SPIR-V set.
+/// The register and the space are the pass's own output — today it gives group `n` `space<n>`, which is the
+/// simplest rule that two independently rewritten translation units can both arrive at, and it is a choice
+/// rather than a law: what has to hold is that an address is a pure function of the annotations, not that this
+/// particular function is the one computing it.
 /// See libs/graphics/shaped-shader-library/docs/binding-preprocessor.md.
 struct slib::shader_binding_group
 {

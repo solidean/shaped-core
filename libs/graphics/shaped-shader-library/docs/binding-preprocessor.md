@@ -111,7 +111,14 @@ namespace <name>
 The marker carries the group index explicitly rather than assigning one by order of appearance.
 Order-of-appearance was the `__COUNTER__` mistake in a new costume: a group shared by shaders in different files would number differently depending on which file the flattening started from.
 
-The number is both the SPIR-V set and the HLSL space, so group `n` occupies `space<n>` and nothing else does.
+The number is the SPIR-V set, and it is the only address anyone writes.
+
+**The register and the space are the pass's output, not the author's input.**
+Today group `n` gets `space<n>`, which is a choice and not a law.
+What has to hold is weaker and more important: an address must be a pure function of the annotations.
+The stages of one pipeline are separate translation units, rewritten independently, and their shared bindings have to land on the same numbers.
+`space = group` satisfies that trivially; so would a rule handing each array binding a space of its own, which is what a bindless table wants.
+Changing the function changes no shader.
 
 **One annotated namespace is declared exactly once, in one file, in one block.**
 Reopening it, nesting one inside another, or declaring the same annotated name in two files is an error the pass reports.
@@ -245,9 +252,12 @@ The gaps that are gaps:
 
 - **A bindless table**, which is an unbounded array in a space of its own.
   Nothing in the grammar expresses one, which is what keeps a hand-written address from being an error today — see "What this does not address".
-- **A group whose space differs from its number.**
-  Group `n` occupies `space<n>`, which is the invariant everything else rests on.
-  It is also what stops sv's material permutation from taking a group of its own, since sv's bindless tables already hold spaces 1..8.
+- **More than one space in a group.**
+  The pass gives group `n` exactly `space<n>`, so a group cannot hold two things that each want a space of their own.
+  Eight bindless tables are exactly that, each numbered from `t0` so that resizing one does not shift the rest.
+  Nothing structural is in the way: `sg::binding` already carries `space` per binding, and `dx12_binding_group_layout.cc` already emits one descriptor range per binding with its own `RegisterSpace`.
+  What is missing is a derivation that hands out more than one space per group while staying a pure function of the annotations — from `(group, slot)`, say.
+  That is also what would let sv's material permutation take a group of its own and delete `sv::space_of`.
 
 And one that is neither, because HLSL cannot say it at all:
 

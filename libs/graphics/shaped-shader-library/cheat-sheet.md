@@ -190,7 +190,8 @@ my::shaders::frame_constants               // the inline-constants mirror, with 
 ```
 
 ```hlsl
-#pragma sc group 0                        // the group number is both the SPIR-V set and the HLSL space
+#pragma sc group 0                        // the SPIR-V set, and the ONLY address anyone writes; register and
+                                          //   space are the pass's output (group n -> space n today, a choice)
 namespace frame_bindings
 {
     Texture2D<float4> albedo;             // index 0 -> t0/space0 and binding(0, 0)

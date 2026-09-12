@@ -1049,7 +1049,9 @@ struct parser
     // After the walk, so the struct an inline-constants block names may be declared on either side of it.
     CC_RETURN_IF_ERROR(p.layout_inline_constants());
 
-    // The group number is both the SPIR-V set and the HLSL space, which is what makes one address serve both targets.
+    // The group number is the SPIR-V set; the space is the pass's to choose, and `space<n>` is the simplest rule
+    // that two independently rewritten translation units both arrive at without talking.
+    // A different rule — one space per array binding, say — would change no shader.
     for (auto& group : groups.value())
         for (auto& binding : group.bindings)
         {
