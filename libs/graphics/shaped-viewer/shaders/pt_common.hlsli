@@ -44,15 +44,10 @@ struct FrameConstants
 // One declaration is what makes them match; slib's binding pass writes the addresses into each stage.
 // See shaped-shader-library/docs/binding-preprocessor.md.
 //
-// The pass assigns no `s` register here, which is what leaves `s0`.. free for the `sv_sampler_i` a material
-// permutation emits at runtime (material/shader_generator.cc).
-//
-// That coupling between two files is maintained by hand and should not be: the permutation wants a group of its
-// own, and nothing structural prevents one — a register space is per register class, so a samplers-only group
-// would never meet a bindless table's `t` registers.
-// What is left is the decision, in libs/graphics/shaped-viewer/docs/TODO.md.
-//
-// What did change is that nothing here is addressed by hand any more: `frame` below is the group's, not b0's.
+// Nothing here has to leave a register free for anyone.
+// A material permutation's samplers used to be hand-numbered `s0`.. in space 0, which only held because this
+// group declared no sampler — a coupling between two files that nothing enforced.
+// They are a group of their own now (`sv::material_sampler_group`), and the pass writes their addresses too.
 #pragma sc group 0
 namespace pt_bindings
 {

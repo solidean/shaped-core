@@ -192,7 +192,14 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
 
     CHECK(g.source.contains("Texture2D gBindlessTextures2D[4096] : register(t0, space3);"));
-    CHECK(g.source.contains("SamplerState sv_sampler_0 : register(s0, space0);"));
+    // The samplers are a group of their own and the binding pass writes their addresses, so the generator
+    // declares them and numbers nothing.
+    // They used to be hand-written `s{i}` in space 0, which only held because pt_common.hlsli declared no sampler.
+    CHECK(g.source.contains("#pragma sc group 2"));
+    CHECK(g.source.contains("namespace sv_material_samplers"));
+    CHECK(g.source.contains("    SamplerState sv_sampler_0;"));
+    CHECK(g.source.contains("using namespace sv_material_samplers;"));
+    CHECK(!g.source.contains("SamplerState sv_sampler_0 : register"));
     CHECK(g.source.contains("float2 uv = sv::interpolate_f2("));
     CHECK(g.source.contains("uint tex = params.Load(ctx.param_offset + "));
     // SampleLevel, because a ray tracing hit shader has no derivatives to pick a mip from.

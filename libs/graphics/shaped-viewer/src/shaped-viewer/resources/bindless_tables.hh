@@ -56,6 +56,17 @@ namespace sv
 /// register-offset math and adding a table never renumbers another.
 [[nodiscard]] u32 space_of(bindless_table t);
 
+/// The group a material permutation declares its samplers in, and the namespace it declares them under.
+///
+/// A permutation is generated and compiled at runtime, so its samplers cannot join a group any package declares
+/// — but they do not have to be hand-numbered either.
+/// They are a group of their own, slib's binding pass writes their addresses, and this is the number a
+/// permutation's `#pragma sc group` carries and the slot `pipeline_layout_description::groups` binds it at.
+///
+/// 2, because the trace's own bindings are group 0 and the manager's tables are the group bound after them.
+inline constexpr int material_sampler_group = 2;
+inline constexpr cc::string_view material_sampler_namespace = "sv_material_samplers";
+
 /// The default table set: every table, with the budgets documented on `bindless_config`.
 [[nodiscard]] cc::vector<bindless_table_budget> default_bindless_tables();
 } // namespace sv

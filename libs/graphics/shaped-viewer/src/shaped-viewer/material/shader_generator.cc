@@ -354,8 +354,19 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     if (samples_texture(r))
         cc::format_append(src, "Texture2D {}[{}] : register(t0, space{});\n", name_of(bindless_table::textures_2d),
                           count_of(bindless, bindless_table::textures_2d), space_of(bindless_table::textures_2d));
-    for (auto i = 0; i < samplers.size(); ++i)
-        cc::format_append(src, "SamplerState sv_sampler_{} : register(s{}, space0);\n", i, i);
+    // The permutation's samplers are a group of its own, so nothing here writes an address.
+    //
+    // They used to be hand-numbered `s{i}` in space 0, which only worked because pt_common.hlsli declared no
+    // sampler -- a coupling between two files that nothing enforced.
+    // `using namespace` keeps the sample expressions below unqualified, as they were when the names were global.
+    if (!samplers.empty())
+    {
+        cc::format_append(src, "\n#pragma sc group {}\n", sv::material_sampler_group);
+        cc::format_append(src, "namespace {}\n{{\n", sv::material_sampler_namespace);
+        for (auto i = 0; i < samplers.size(); ++i)
+            cc::format_append(src, "    SamplerState sv_sampler_{};\n", i);
+        cc::format_append(src, "}}\nusing namespace {};\n\n", sv::material_sampler_namespace);
+    }
 
     // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
     //

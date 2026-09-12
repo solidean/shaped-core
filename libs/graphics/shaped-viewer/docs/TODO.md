@@ -481,17 +481,6 @@ What follows is everything else the importer left behind.
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
-- **The material permutation still hand-numbers its samplers.**
-  `material/shader_generator.cc` emits `SamplerState sv_sampler_{i} : register(s{i}, space0)` at runtime, and
-  `pt_common.hlsli` declares no sampler specifically so `s0`.. stay free for it — a coupling between two files maintained by hand.
-  The permutation wants a group of its own, which is what would delete it, and nothing structural prevents that.
-  A register space is per register *class*, so a samplers-only group at `space<n>` never meets a bindless table's `t` registers there.
-  `sv_sampler_i` already relies on exactly that in space 0 today, alongside `pt_bindings`' own `t`, `u` and `b` registers.
-  Groups 2 and 3 are free under `sg::max_binding_groups`, so the permutation could take one now.
-  What is left is a decision rather than an obstacle.
-  Taking a group *moves* the coupling, since it holds only while that group stays samplers-only and that table stays textures-only.
-  Letting a group's space differ from its number deletes it outright instead.
-  Spaces are ours to assign and reach only the DXIL arm — SPIR-V writes `[[vk::binding(index, group)]]` and never mentions one — so that is a free choice rather than a constraint.
 
 - **A hand-written binding address cannot be made an error yet.**
   Every shader in a package is now authored through the pass, so the remaining obstacle is not a shader anyone wrote.
