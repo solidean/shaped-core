@@ -125,6 +125,14 @@ DEFAULT_SANITIZE_PRESETS: dict[str, str] = {
     "Darwin": "sanitize-macos-arm-llvm",
 }
 
+# ThreadSanitizer preset per platform, run by the `test` check.
+# Linux only, and that is a cost decision rather than a capability one: the macOS preset exists and works, and a second
+# full sanitized build is the most expensive leg the check has.
+# One machine running it on every check is what keeps the preset from rotting between manual runs.
+DEFAULT_SANITIZE_THREAD_PRESETS: dict[str, str] = {
+    "Linux": "sanitize-thread-linux-clang",
+}
+
 # Default coverage preset per platform (RelWithDebInfo, SC_COVERAGE ON).
 # `coverage` uses these instead of DEFAULT_BUILD_PRESETS when no --preset is given.
 COVERAGE_BUILD_PRESETS: dict[str, str] = {
@@ -164,6 +172,7 @@ def build_policy() -> cmd.Policy:
         default_release=DEFAULT_RELEASE_PRESETS,
         default_singlethreaded=DEFAULT_SINGLETHREADED_PRESETS,
         default_sanitize=DEFAULT_SANITIZE_PRESETS,
+        default_sanitize_thread=DEFAULT_SANITIZE_THREAD_PRESETS,
         coverage_build=COVERAGE_BUILD_PRESETS,
         pgo_generate=PGO_GENERATE_PRESETS,
         pgo_use=PGO_USE_PRESETS,

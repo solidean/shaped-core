@@ -245,7 +245,9 @@ CC_FORCE_INLINE void node_allocation_free(byte* ptr, node_class_index idx)
     // owner path: non-atomic free into local; predicted-taken because most frees are on the owning thread.
     // raw token read (no lazy-init): a thread that never allocated has token 0, owns nothing, so it routes
     // to remote -- correct, and it keeps the t==0 branch out of the hot free.
-    if (*cc::node_slab_owner_for_base(base) == cc::node_owner_token_or_zero()) [[likely]]
+    // relaxed load, not a plain one: an adopting thread stamps this word concurrently, and either value routes correctly.
+    if (cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(base)).load(cc::memory_order_relaxed)
+        == cc::node_owner_token_or_zero()) [[likely]]
     {
         auto const freemap = cc::node_slab_freemap_for_base(base);
         CC_ASSERT((*freemap & slot_bit) == 0, "node is already freed. double-delete or corruption?");
@@ -253,7 +255,10 @@ CC_FORCE_INLINE void node_allocation_free(byte* ptr, node_class_index idx)
     }
     else // remote thread: the only path that pays an atomic (double-free assert omitted; the read would race)
     {
-        cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, cc::memory_order_relaxed);
+        // release, paired with the acquire on every drain: what we wrote into the node must be visible to whichever
+        // thread next hands this slot out, or that thread's first write races our last one.
+        // Free on x86, where the read-modify-write is already a full barrier.
+        cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).fetch_or(slot_bit, cc::memory_order_release);
     }
 #else
     auto const freemap = cc::node_slab_freemap_for_base(base);

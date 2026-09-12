@@ -73,6 +73,16 @@ void reactor::submit(io_operation* op)
     _pending.push_back(cc::move(e));
 }
 
+void reactor::arm(io_operation* op)
+{
+    for (auto& e : _pending)
+        if (e.op == op)
+        {
+            e.armed = true;
+            return;
+        }
+}
+
 void reactor::cancel(io_operation* op)
 {
     for (auto& e : _pending)
@@ -96,8 +106,10 @@ i32 reactor::wait(i32 timeout_ms)
 i32 reactor::clamp_timeout(i32 timeout_ms) const
 {
     // Anything already decided means there is nothing to wait for.
+    // An unarmed entry is not decided however ready it looks: it cannot complete until its submitter says so, and
+    // that submitter wakes us when it does.
     for (auto const& e : _pending)
-        if (e.cancelled || e.signalled || e.immediate_failure.has_value())
+        if (e.armed && (e.cancelled || e.signalled || e.immediate_failure.has_value()))
             return 0;
 
     // A wait that could not watch every socket must be short, because one of the sockets it left out may be ready
@@ -116,7 +128,7 @@ i32 reactor::clamp_timeout(i32 timeout_ms) const
     auto shortest = timeout_ms;
     for (auto const& e : _pending)
     {
-        if (e.op->deadline_ns <= 0)
+        if (!e.armed || e.op->deadline_ns <= 0)
             continue;
 
         auto const remaining_ms = (e.op->deadline_ns - now) / (1000 * 1000);
@@ -174,6 +186,15 @@ i32 reactor::complete_ready()
     for (isize i = 0; i < _pending.size();)
     {
         auto& e = _pending[i];
+
+        // Still being wired up by whoever submitted it.
+        // Left exactly as it is, readiness included, so the next pass finds what this one would have consumed.
+        if (!e.armed)
+        {
+            ++i;
+            continue;
+        }
+
         auto outcome = cc::optional<cc::optional<error>>();
 
         if (e.cancelled)

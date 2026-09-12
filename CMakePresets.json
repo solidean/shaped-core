@@ -270,6 +270,17 @@
             }
         },
         {
+            "name": "x64-linux-clang-ninja-sanitize-thread",
+            "displayName": "Sanitize Thread Clang (Ninja, Linux)",
+            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for)",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SANITIZE": "thread",
+                "SC_MIMALLOC": "OFF"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-coverage",
             "displayName": "Coverage Clang (Ninja, Windows)",
             "description": "RelWithDebInfo build with LLVM source-based coverage instrumentation",
@@ -458,6 +469,17 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SANITIZE": "address,undefined",
+                "SC_MIMALLOC": "OFF"
+            }
+        },
+        {
+            "name": "macos-arm-llvm-sanitize-thread",
+            "displayName": "Sanitize Thread Clang (macOS ARM)",
+            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for)",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SANITIZE": "thread",
                 "SC_MIMALLOC": "OFF"
             }
         },
@@ -886,6 +908,14 @@
         {
             "name": "sanitize-macos-arm-llvm",
             "configurePreset": "macos-arm-llvm-sanitize-address-undefined"
+        },
+        {
+            "name": "sanitize-thread-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-sanitize-thread"
+        },
+        {
+            "name": "sanitize-thread-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-sanitize-thread"
         },
         {
             "name": "macos-arm-llvm-debug",

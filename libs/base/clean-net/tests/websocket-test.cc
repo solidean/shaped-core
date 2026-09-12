@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -109,7 +111,7 @@ struct ws_fixture
 };
 } // namespace
 
-TEST("cnet - a websocket carries a message each way")
+CNET_IO_TEST("cnet - a websocket carries a message each way")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -146,7 +148,7 @@ TEST("cnet - a websocket carries a message each way")
     CHECK(back->value().text() == "pong from the server");
 }
 
-TEST("cnet - a websocket carries binary and large messages")
+CNET_IO_TEST("cnet - a websocket carries binary and large messages")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -181,7 +183,7 @@ TEST("cnet - a websocket carries binary and large messages")
     CHECK(same);
 }
 
-TEST("cnet - a websocket message that arrived before anybody asked is not lost")
+CNET_IO_TEST("cnet - a websocket message that arrived before anybody asked is not lost")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -214,7 +216,7 @@ TEST("cnet - a websocket message that arrived before anybody asked is not lost")
     CHECK(b->value().text() == "two");
 }
 
-TEST("cnet - closing a websocket ends the other end's receive")
+CNET_IO_TEST("cnet - closing a websocket ends the other end's receive")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -239,7 +241,7 @@ TEST("cnet - closing a websocket ends the other end's receive")
     CHECK(!server_side->is_open());
 }
 
-TEST("cnet - a request that is not an upgrade gets a 400 from a websocket route")
+CNET_IO_TEST("cnet - a request that is not an upgrade gets a 400 from a websocket route")
 {
     auto fixture = ws_fixture();
 
@@ -257,7 +259,7 @@ TEST("cnet - a request that is not an upgrade gets a 400 from a websocket route"
     CHECK(fixture.accepted.empty());
 }
 
-TEST("cnet - a websocket route and an ordinary route can share a path")
+CNET_IO_TEST("cnet - a websocket route and an ordinary route can share a path")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -278,7 +280,7 @@ TEST("cnet - a websocket route and an ordinary route can share a path")
     CHECK(fixture.accepted.size() == 1);
 }
 
-TEST("cnet - websocket_connect refuses a url that is not ws")
+CNET_IO_TEST("cnet - websocket_connect refuses a url that is not ws")
 {
     auto fixture = ws_fixture();
 
@@ -289,7 +291,7 @@ TEST("cnet - websocket_connect refuses a url that is not ws")
 
 // ---- framing -------------------------------------------------------------------------------------------
 
-TEST("cnet - the frame reader waits for a whole header")
+CNET_IO_TEST("cnet - the frame reader waits for a whole header")
 {
     auto out = cc::vector<byte>();
     u8 const mask[4] = {0x11, 0x22, 0x33, 0x44};
@@ -313,7 +315,7 @@ TEST("cnet - the frame reader waits for a whole header")
     CHECK(header.value().value().header_size == 6);
 }
 
-TEST("cnet - the frame reader refuses what the protocol forbids")
+CNET_IO_TEST("cnet - the frame reader refuses what the protocol forbids")
 {
     // A reserved bit set.
     {
@@ -346,7 +348,7 @@ TEST("cnet - the frame reader refuses what the protocol forbids")
     }
 }
 
-TEST("cnet - unmasking undoes masking, chunk by chunk")
+CNET_IO_TEST("cnet - unmasking undoes masking, chunk by chunk")
 {
     auto out = cc::vector<byte>();
     u8 const mask[4] = {0xA1, 0xB2, 0xC3, 0xD4};
@@ -366,7 +368,7 @@ TEST("cnet - unmasking undoes masking, chunk by chunk")
     CHECK(cc::string_view(reinterpret_cast<char const*>(payload.data()), payload.size()) == "the quick brown fox");
 }
 
-TEST("cnet - the accept key is the one RFC 6455 gives as an example")
+CNET_IO_TEST("cnet - the accept key is the one RFC 6455 gives as an example")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -376,7 +378,7 @@ TEST("cnet - the accept key is the one RFC 6455 gives as an example")
     CHECK(accept.value() == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
 }
 
-TEST("cnet - a generated key is 16 bytes of base64 and never the same twice")
+CNET_IO_TEST("cnet - a generated key is 16 bytes of base64 and never the same twice")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -390,7 +392,7 @@ TEST("cnet - a generated key is 16 bytes of base64 and never the same twice")
     CHECK(a.value() != b.value());
 }
 
-TEST("cnet - close codes with holes in them")
+CNET_IO_TEST("cnet - close codes with holes in them")
 {
     CHECK(impl::is_valid_close_code(1000));
     CHECK(impl::is_valid_close_code(1011));
@@ -404,7 +406,7 @@ TEST("cnet - close codes with holes in them")
     CHECK(!impl::is_valid_close_code(5000));
 }
 
-TEST("cnet - a websocket over a real socket, both ends in one process")
+CNET_IO_TEST("cnet - a websocket over a real socket, both ends in one process")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -479,7 +481,7 @@ struct keepalive_fixture
 };
 } // namespace
 
-TEST("cnet - cancelling a websocket receive ends that receive and nothing else")
+CNET_IO_TEST("cnet - cancelling a websocket receive ends that receive and nothing else")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -516,7 +518,7 @@ TEST("cnet - cancelling a websocket receive ends that receive and nothing else")
     CHECK(again->value().text() == "after the cancel");
 }
 
-TEST("cnet - a receive's deadline bounds the receive rather than the connection")
+CNET_IO_TEST("cnet - a receive's deadline bounds the receive rather than the connection")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -552,7 +554,7 @@ TEST("cnet - a receive's deadline bounds the receive rather than the connection"
     CHECK(again->value().text() == "still connected");
 }
 
-TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
+CNET_IO_TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
 {
     if (!tls_is_supported())
         SKIP("the websocket handshake needs the SHA-1 and base64 that arrive with the TLS backend");
@@ -588,7 +590,7 @@ TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
     CHECK(received->value().text() == "still here");
 }
 
-TEST("cnet - a peer that stops answering fails the receive rather than hanging it")
+CNET_IO_TEST("cnet - a peer that stops answering fails the receive rather than hanging it")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -618,7 +620,7 @@ TEST("cnet - a peer that stops answering fails the receive rather than hanging i
     (void)swallowing;
 }
 
-TEST("cnet - keepalives can be turned off")
+CNET_IO_TEST("cnet - keepalives can be turned off")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);

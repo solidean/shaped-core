@@ -63,4 +63,5 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
+- [docs/thread-safety.md](docs/thread-safety.md) — why every call into DXC is serialized today, and the open finding behind it.
 - [graphics.md](../../../docs/graphics.md) — the whole graphics family overview.

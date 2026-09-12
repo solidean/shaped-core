@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -43,7 +45,7 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 1000)
 }
 } // namespace
 
-TEST("cnet - a virtual network refuses an endpoint nobody listens on")
+CNET_IO_TEST("cnet - a virtual network refuses an endpoint nobody listens on")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -55,7 +57,7 @@ TEST("cnet - a virtual network refuses an endpoint nobody listens on")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - a virtual connection carries bytes both ways")
+CNET_IO_TEST("cnet - a virtual connection carries bytes both ways")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -97,7 +99,7 @@ TEST("cnet - a virtual connection carries bytes both ways")
     CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
 }
 
-TEST("cnet - a virtual read parks until the peer writes")
+CNET_IO_TEST("cnet - a virtual read parks until the peer writes")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -125,7 +127,7 @@ TEST("cnet - a virtual read parks until the peer writes")
     CHECK(received->value() == late.size());
 }
 
-TEST("cnet - a virtual accept parks until somebody connects")
+CNET_IO_TEST("cnet - a virtual accept parks until somebody connects")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -141,7 +143,7 @@ TEST("cnet - a virtual accept parks until somebody connects")
     CHECK(accepted->try_error() == nullptr);
 }
 
-TEST("cnet - a virtual read honours its deadline against the injected clock")
+CNET_IO_TEST("cnet - a virtual read honours its deadline against the injected clock")
 {
     auto clk = manual_clock(0);
     auto io = io_system::create({.unthreaded = true, .time_source = &clk});
@@ -162,7 +164,7 @@ TEST("cnet - a virtual read honours its deadline against the injected clock")
     CHECK(received->try_error() != nullptr);
 }
 
-TEST("cnet - closing a virtual connection ends the peer's read")
+CNET_IO_TEST("cnet - closing a virtual connection ends the peer's read")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -189,7 +191,7 @@ TEST("cnet - closing a virtual connection ends the peer's read")
     CHECK(again->try_error() != nullptr);
 }
 
-TEST("cnet - a virtual half-close leaves the answer coming")
+CNET_IO_TEST("cnet - a virtual half-close leaves the answer coming")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -226,7 +228,7 @@ TEST("cnet - a virtual half-close leaves the answer coming")
     CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
 }
 
-TEST("cnet - two virtual listeners cannot hold the same endpoint")
+CNET_IO_TEST("cnet - two virtual listeners cannot hold the same endpoint")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);

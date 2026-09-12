@@ -25,7 +25,7 @@ So the artifact is **a todo list for the author's next agent session**, not a po
 Cut these before writing.
 They cost attention and return nothing.
 
-- **"Does it build" and "do the tests pass."** CI runs ~14 configurations and `dev.py check --fix` runs four presets locally in full.
+- **"Does it build" and "do the tests pass."** CI runs ~14 configurations, and `dev.py check --fix` runs every preset its platform has in full — four on Windows, five on macOS, six on Linux.
   Build the branch when you need to *verify a specific claim* — that two layouts really do hash differently, that a symbol really is gone — and then say what you learned, not that it compiled.
 - **PR size and splitting.** PRs are ephemeral bookkeeping; only the git repo counts.
   Size matters only as "can this be reviewed", and with agent help that bar is high.
@@ -263,14 +263,14 @@ So the answer was that deflate has no streaming size hint at all, rather than a 
 ### The `#ifdef` arm this machine does not compile is where the defect is
 
 A platform-guarded helper has two arms and only one is ever parsed.
-The unbuilt arm is invisible to every check the author can run: the compiler, clang-tidy, the prose linter, and `dev.py check` across all five presets.
+The unbuilt arm is invisible to every check the author can run: the compiler, clang-tidy, the prose linter, and `dev.py check` across every preset its platform has.
 So a mistake there survives all of it and lands.
 It is the same blind spot as a doc claim, and it wants the same deliberate pass: when a change adds or edits an `#ifdef` arm, **read the arm this machine cannot build, symbol by symbol.**
 
 pr-159 is the worked case, on the branch that made a Windows-only shader compiler cross-platform.
 `dxc_compiler-test.cc` grew a two-arm `make_dxc_compiler`, and the `CC_OS_WINDOWS` arm returned `make_dxc_compiler()` — itself.
 The function has a deduced return type, so a use before that type is deduced is ill-formed and the test binary does not build on Windows at all; the unbounded recursion is what the error prevents.
-The `#else` arm beside it was correct, `check` was green on five presets, and nothing local could have said otherwise.
+The `#else` arm beside it was correct, `check` was green on every preset it runs, and nothing local could have said otherwise.
 
 The tell is mechanical rather than subtle, which is what makes the pass cheap.
 One arm called `slib::create_dxc_spirv_compiler()`, and the other called something whose name was the enclosing function's.

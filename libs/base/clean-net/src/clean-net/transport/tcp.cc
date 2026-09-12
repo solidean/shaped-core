@@ -55,6 +55,8 @@ struct async_operation : impl::io_operation
 ///
 /// The token is attached AFTER the submit: a cancel arriving in between would otherwise be posted ahead of the
 /// operation it means to cancel, and the reactor would have nothing to match it against.
+/// Handing the submission guard to `attach` is what makes that safe -- the reactor holds `raw` inert until the guard
+/// dies, which is at the end of the attach.
 template <class Op, class T>
 [[nodiscard]] cc::shared_async<T> launch(io_system& io, cc::unique_ptr<Op> op, cancel_token const& token)
 {
@@ -63,8 +65,7 @@ template <class Op, class T>
 
     auto* const raw = op.get();
     raw->self = cc::move(op);
-    io.submit(raw);
-    raw->cancellation.attach(token, io, raw);
+    raw->cancellation.attach(io.submit(raw), token);
     return promise;
 }
 
