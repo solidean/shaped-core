@@ -670,7 +670,10 @@ The flag is not wired for clang-cl, so the Windows sanitize preset still reports
 TSan already costs 5-15x, an unoptimized build compounds it, and optimized-with-symbols is what the tool is tuned for.
 `CC_ASSERT` is therefore on here too.
 
-**Not part of the `check` gate.** It is a separate full build of the repo, and `check` already carries five test legs; run it deliberately.
+**Part of the `check` gate on Linux only**, and nowhere else.
+It is a separate full build of the repo at 5-15x test time, so one platform carrying it on every check is the trade.
+That is enough to stop the preset rotting between manual runs, without paying for it three times.
+The macOS preset works and is run by hand; there is no CI leg for either.
 
 Three things to know before reading a report.
 

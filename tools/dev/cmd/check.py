@@ -95,6 +95,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             ctx.policy.default_release.get(system),
             ctx.policy.default_singlethreaded.get(system),
             ctx.policy.default_sanitize.get(system),
+            ctx.policy.default_sanitize_thread.get(system),
         ):
             if sibling:
                 specs.append(sibling)
