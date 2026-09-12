@@ -76,7 +76,7 @@ public:
     /// Whether a caller may block on this context at all — see sg::execution_model.
     ///
     /// A backend property, not a preference: a browser cannot wait, so nothing a caller sets could make it able to.
-    /// `block_until_idle()` is the only sg call that asks, and it asserts where the answer is `never_block`.
+    /// The two `block_until_` spellings are what ask, and both assert where the answer is `never_block`.
     [[nodiscard]] virtual execution_model execution() const { return execution_model::may_block; }
 
     /// Which GPU this context is running on, fixed at creation.
@@ -254,8 +254,8 @@ public:
 
     /// Blocks until the GPU is idle AND every sg actor has drained.
     ///
-    /// **The only blocking spelling in sg**, which is why it says so in its name: `block_until_` greps as the complete
-    /// inventory of places a thread stops.
+    /// **One of the two blocking spellings in sg**, which is why it says so in its name: `block_until_` greps as the
+    /// complete inventory of places a thread stops, and `block_until_epochs_in_flight()` is the other.
     /// Asserts unless `execution()` is `may_block`.
     ///
     /// Draining the GPU is not on its own a completion guarantee — the readback actor delivers a download's bytes on

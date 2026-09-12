@@ -352,7 +352,7 @@ private:
             if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
                 continue;
             cancel_stream(a.job);
-            _active.remove_from_to(i, i + 1);
+            _active.remove_at(i);
         }
     }
 
@@ -543,7 +543,7 @@ private:
             queue_stream_settle(a.job);
         else
             fold_completion_value(a.job);
-        _active.remove_from_to(index, index + 1); // releases the pins + keepalive, on the actor thread
+        _active.remove_at(index); // releases the pins + keepalive, on the actor thread
     }
 
     // Fails a job whose source gave up.
@@ -552,7 +552,7 @@ private:
     {
         auto& a = _active[index];
         cancel_stream(a.job);
-        _active.remove_from_to(index, index + 1);
+        _active.remove_at(index);
     }
 
     // Writes one chunk of `a` into the open window and records its copy.

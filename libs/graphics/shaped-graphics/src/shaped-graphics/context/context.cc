@@ -230,8 +230,8 @@ void context::block_until_epochs_in_flight(int allowed_in_flight)
 void context::block_until_idle()
 {
     CC_ASSERT(execution() == execution_model::may_block,
-              "block_until_idle() is the one call in sg that waits, and this context cannot — read completion off the "
-              "*_completion() asyncs, or poll across frames");
+              "block_until_idle() waits, and this context cannot — read completion off the *_completion() asyncs, or "
+              "poll across frames");
 
     // Three things, in this order, and the order is the point.
     // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first

@@ -39,18 +39,20 @@ enum class sg::feature
 /// The rule the whole API is shaped around: **an async call may be converted to a blocking one only where the wait
 /// amortizes over many operations.**
 /// Per-frame yes, per-startup-batch yes, per-object never.
-/// So sg is never-blocking by default everywhere, and `block_until_idle()` is the single exception — the one spelling
-/// that admits to waiting, and the one a target that cannot wait refuses.
+/// So sg is never-blocking by default everywhere, and the `block_until_` prefix is the complete inventory of the
+/// exceptions — the spellings that admit to waiting, and the ones a target that cannot wait refuses.
+/// There are exactly two, `block_until_epochs_in_flight()` and `block_until_idle()`; libs/graphics/shaped-graphics/docs/concepts/epochs.md has the pair.
 ///
 /// A browser cannot wait at all: a promise settles only after the current task's stack unwinds, so a loop waiting on a
 /// callback has taken the only thread that callback could run on.
 /// That is a property of the target rather than a caller's choice, which is why this is reported and not set.
 enum class sg::execution_model
 {
-    /// A caller may block: `block_until_idle()` works, and a test or a tool can drain the device and read the result.
+    /// A caller may block: both `block_until_` spellings work, and a test or a tool can drain the device and read the
+    /// result.
     may_block,
 
-    /// Nothing may block, and `block_until_idle()` asserts.
+    /// Nothing may block, and both `block_until_` spellings assert.
     /// Completion is observed through the `*_completion()` asyncs, or by polling across frames.
     never_block,
 };

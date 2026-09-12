@@ -262,7 +262,7 @@ void vulkan_upload_async_system::settle_finished()
             continue;
         }
         auto entry = cc::move(_awaiting[i]);
-        _awaiting.remove_at_range({.offset = i, .size = 1});
+        _awaiting.remove_at(i);
 
         if (entry.stream != nullptr && entry.stream->completion != nullptr && !entry.stream->completion->is_ready())
         {
@@ -348,7 +348,7 @@ bool vulkan_upload_async_system::run_one_window()
         // never hang — which is the whole reason it is reserved at enqueue rather than at stage time.
         signal_on_queue(job.completion);
         settle_now(job, /*delivered =*/false);
-        _pending.remove_at_range({.offset = i, .size = 1});
+        _pending.remove_at(i);
     }
     if (_pending.empty())
         return false;
@@ -445,7 +445,7 @@ bool vulkan_upload_async_system::run_one_window()
         }
         else
             _awaiting.push_back({.window_value = job.last_window_value, .stream = job.stream, .delivered = true});
-        _pending.remove_at_range({.offset = index, .size = 1});
+        _pending.remove_at(index);
         return true;
     }
 
@@ -608,7 +608,7 @@ bool vulkan_upload_async_system::run_one_window()
     {
         if (streaming)
             _awaiting.push_back({.window_value = job.last_window_value, .stream = job.stream, .delivered = true});
-        _pending.remove_at_range({.offset = index, .size = 1});
+        _pending.remove_at(index);
     }
     else if (payload_done && job.source != nullptr)
     {

@@ -210,5 +210,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Closing that in clean-core is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
-  The never-block work this branch did is the prerequisite, not the backend: sg no longer has a blocking call on any frame path, and `ctx.execution()` is how a context says it cannot block at all.
+  The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
+  What is left is smaller and more specific than "migrate the frame loops": **no frame loop in the tree uses `try_advance_epoch` yet.**
+  Every one of them — `sv::viewer`, both examples, every window test — throttles with `block_until_epochs_in_flight`.
+  That is allowed under the amortization rule, and it still asserts on a `never_block` context.
+  So the per-frame back-pressure call is the one thing a WebGPU target will hit on its first frame, and `try_advance_epoch` is the spelling that already exists for it.
   What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).
