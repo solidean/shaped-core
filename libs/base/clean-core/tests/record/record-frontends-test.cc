@@ -39,13 +39,13 @@ REC_TEST("record/log - a message with no arguments costs the stream no payload a
         cc::rec::flush_blocking();
     }
 
-    auto const* const e = c.first_named("plain message");
-    REQUIRE(e != nullptr);
-    CHECK(e->kind == cc::rec::event_kind::log);
-    CHECK(e->level == cc::rec::level::info);
+    auto const e = c.first_named("plain message");
+    REQUIRE(e.has_value());
+    CHECK(e.value().kind == cc::rec::event_kind::log);
+    CHECK(e.value().level == cc::rec::level::info);
 
     // The text lives in the descriptor, so the event carries nothing.
-    CHECK(e->text.empty());
+    CHECK(e.value().text.empty());
 }
 
 REC_TEST("record/log - a formatted message is written straight into the chunk")
@@ -60,9 +60,9 @@ REC_TEST("record/log - a formatted message is written straight into the chunk")
     }
 
     // The format string is the site's name, so every message from one site groups under one string.
-    auto const* const e = c.first_named("uploaded {} bytes to {}");
-    REQUIRE(e != nullptr);
-    CHECK(e->text == "uploaded 4096 bytes to gpu");
+    auto const e = c.first_named("uploaded {} bytes to {}");
+    REQUIRE(e.has_value());
+    CHECK(e.value().text == "uploaded 4096 bytes to gpu");
 }
 
 REC_TEST("record/log - levels gate independently, and the gate is the domain's")
@@ -152,21 +152,28 @@ REC_TEST("record/value - scalars, enums, pointers and text all read back")
     }
 
     CHECK(c.count_named("fallback-taken") == 1);
-    CHECK(c.first_named("fallback-taken")->kind == cc::rec::event_kind::marker);
 
-    REQUIRE(c.first_named("answer") != nullptr);
-    CHECK(c.first_named("answer")->value.value() == 42.0);
+    auto const fallback = c.first_named("fallback-taken");
+    REQUIRE(fallback.has_value());
+    CHECK(fallback.value().kind == cc::rec::event_kind::marker);
+
+    auto const recorded_answer = c.first_named("answer");
+    REQUIRE(recorded_answer.has_value());
+    CHECK(recorded_answer.value().value.value() == 42.0);
 
     // An enum collapses onto its underlying type, so a consumer reads a number without knowing the type.
-    REQUIRE(c.first_named("kind") != nullptr);
-    CHECK(c.first_named("kind")->value.value() == 7.0);
+    auto const recorded_kind = c.first_named("kind");
+    REQUIRE(recorded_kind.has_value());
+    CHECK(recorded_kind.value().value.value() == 7.0);
 
     // A pointer is an opaque address, never dereferenced.
-    REQUIRE(c.first_named("address") != nullptr);
-    CHECK(c.first_named("address")->kind == cc::rec::event_kind::value);
+    auto const recorded_address = c.first_named("address");
+    REQUIRE(recorded_address.has_value());
+    CHECK(recorded_address.value().kind == cc::rec::event_kind::value);
 
-    REQUIRE(c.first_named("ratio") != nullptr);
-    CHECK(c.first_named("ratio")->value.value() == 0.25);
+    auto const recorded_ratio = c.first_named("ratio");
+    REQUIRE(recorded_ratio.has_value());
+    CHECK(recorded_ratio.value().value.value() == 0.25);
 }
 
 REC_TEST("record/value - text is recorded as bytes, not as an address")
@@ -215,21 +222,21 @@ REC_TEST("record/stat - snapshots and accumulates are distinct kinds and carry t
         cc::rec::flush_blocking();
     }
 
-    auto const* const depth = c.first_named("queue_depth");
-    REQUIRE(depth != nullptr);
-    CHECK(depth->kind == cc::rec::event_kind::stat_snapshot);
-    CHECK(depth->value.value() == 12.0);
-    CHECK(depth->quantity == &cc::rec::unit_count);
+    auto const depth = c.first_named("queue_depth");
+    REQUIRE(depth.has_value());
+    CHECK(depth.value().kind == cc::rec::event_kind::stat_snapshot);
+    CHECK(depth.value().value.value() == 12.0);
+    CHECK(depth.value().quantity == &cc::rec::unit_count);
 
-    auto const* const uploaded = c.first_named("bytes_uploaded");
-    REQUIRE(uploaded != nullptr);
-    CHECK(uploaded->kind == cc::rec::event_kind::stat_accumulate);
-    CHECK(uploaded->value.value() == 4096.0);
-    REQUIRE(uploaded->quantity != nullptr);
+    auto const uploaded = c.first_named("bytes_uploaded");
+    REQUIRE(uploaded.has_value());
+    CHECK(uploaded.value().kind == cc::rec::event_kind::stat_accumulate);
+    CHECK(uploaded.value().value.value() == 4096.0);
+    REQUIRE(uploaded.value().quantity != nullptr);
 
     // The unit is what lets a listener graph a quantity it has never heard of.
-    CHECK(uploaded->quantity->prefix_base == 1024);
-    CHECK(cc::string_view(uploaded->quantity->symbol) == "B");
+    CHECK(uploaded.value().quantity->prefix_base == 1024);
+    CHECK(cc::string_view(uploaded.value().quantity->symbol) == "B");
 }
 
 //
@@ -257,16 +264,16 @@ REC_TEST("record/scope - a scope opens and closes at the depth it was entered")
     REQUIRE(opens.size() == 2);
     REQUIRE(closes.size() == 2);
 
-    CHECK(cc::string_view(opens[0]->name) == "outer");
-    CHECK(opens[0]->depth.value() == 0);
-    CHECK(cc::string_view(opens[1]->name) == "inner");
-    CHECK(opens[1]->depth.value() == 1);
+    CHECK(cc::string_view(opens[0].name) == "outer");
+    CHECK(opens[0].depth.value() == 0);
+    CHECK(cc::string_view(opens[1].name) == "inner");
+    CHECK(opens[1].depth.value() == 1);
 
     // Closes come back innermost first, at the depth they opened at.
-    CHECK(cc::string_view(closes[0]->name) == "inner");
-    CHECK(closes[0]->depth.value() == 1);
-    CHECK(cc::string_view(closes[1]->name) == "outer");
-    CHECK(closes[1]->depth.value() == 0);
+    CHECK(cc::string_view(closes[0].name) == "inner");
+    CHECK(closes[0].depth.value() == 1);
+    CHECK(cc::string_view(closes[1].name) == "outer");
+    CHECK(closes[1].depth.value() == 0);
 }
 
 REC_TEST("record/scope - a scope with no name takes the enclosing function's")
@@ -284,7 +291,7 @@ REC_TEST("record/scope - a scope with no name takes the enclosing function's")
 
     auto const opens = c.of_kind(cc::rec::event_kind::scope_begin);
     REQUIRE(opens.size() == 1);
-    CHECK(!opens[0]->name.empty());
+    CHECK(!opens[0].name.empty());
 }
 
 REC_TEST("record/scope - the explicit begin/end pair nests like the block form")
@@ -302,8 +309,8 @@ REC_TEST("record/scope - the explicit begin/end pair nests like the block form")
 
     REQUIRE(c.of_kind(cc::rec::event_kind::scope_begin).size() == 1);
     REQUIRE(c.of_kind(cc::rec::event_kind::scope_end).size() == 1);
-    CHECK(c.of_kind(cc::rec::event_kind::scope_begin)[0]->depth.value() == 0);
-    CHECK(c.of_kind(cc::rec::event_kind::scope_end)[0]->depth.value() == 0);
+    CHECK(c.of_kind(cc::rec::event_kind::scope_begin)[0].depth.value() == 0);
+    CHECK(c.of_kind(cc::rec::event_kind::scope_end)[0].depth.value() == 0);
     CHECK(c.count_named("inside") == 1);
 }
 
@@ -340,7 +347,7 @@ REC_TEST("record/scope - an END with nothing open is refused rather than wrappin
 
     // And the scope opened afterwards still sits at depth 0, which is what would have been lost to a wrap.
     CHECK(c.of_kind(cc::rec::event_kind::scope_begin).size() == 2);
-    CHECK(ends[1]->depth.value() == 0);
+    CHECK(ends[1].depth.value() == 0);
 }
 
 REC_TEST("record/scope - a disabled category leaves the pair balanced")

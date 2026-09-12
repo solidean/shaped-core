@@ -161,32 +161,31 @@ struct cc_rec_test::collector final : cc::rec::listener
         return _state.lock([](state const& s) { return s.events; });
     }
 
-    /// The first event with this name, or null.
-    /// The pointer is into the live vector, so it is only valid while nothing can drain -- an unthreaded config, or
-    /// after the listener has been unregistered.
-    [[nodiscard]] entry const* first_named(cc::string_view n) const
+    /// The first event with this name, if there is one.
+    /// A copy for the same reason snapshot() is one: the worker may append and reallocate the moment the lock is
+    /// released, so a pointer out of here would outlive what it points at.
+    [[nodiscard]] cc::optional<entry> first_named(cc::string_view n) const
     {
         return _state.lock(
-            [&](state const& s) -> entry const*
+            [&](state const& s) -> cc::optional<entry>
             {
                 for (auto const& e : s.events)
                     if (cc::string_view(e.name) == n)
-                        return &e;
-                return nullptr;
+                        return e;
+                return {};
             });
     }
 
     /// Every event of one kind, in arrival order.
-    /// Same pointer-lifetime constraint as first_named.
-    [[nodiscard]] cc::vector<entry const*> of_kind(cc::rec::event_kind k) const
+    [[nodiscard]] cc::vector<entry> of_kind(cc::rec::event_kind k) const
     {
         return _state.lock(
             [&](state const& s)
             {
-                cc::vector<entry const*> out;
+                cc::vector<entry> out;
                 for (auto const& e : s.events)
                     if (e.kind == k)
-                        out.push_back(&e);
+                        out.push_back(e);
                 return out;
             });
     }
