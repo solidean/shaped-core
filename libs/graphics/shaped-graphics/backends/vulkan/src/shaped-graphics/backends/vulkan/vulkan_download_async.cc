@@ -22,7 +22,18 @@ void vulkan_download_async_actor::on_thread_init()
 
 void vulkan_download_async_actor::on_message(vulkan_async_download_job job)
 {
-    _system.process(job);
+    // Admitted rather than run: which readback fills the next window is the scheduler's call, and it cannot make one
+    // until every candidate is on the list.
+    _system.admit(cc::move(job));
+}
+
+bool vulkan_download_async_actor::on_process()
+{
+    // One window per cycle, so a large readback yields between chunks instead of holding the actor for its whole
+    // length — which is what lets a small one behind it run.
+    if (_system.run_one_window())
+        return true;
+    return _system.has_pending();
 }
 
 cc::result<cc::unit> vulkan_download_async_system::initialize(vulkan_context& ctx, isize window_bytes)
@@ -125,23 +136,23 @@ void vulkan_download_async_system::wait_for_window(int slot)
     vkWaitSemaphores(_ctx->_device, &wait, UINT64_MAX);
 }
 
-void vulkan_download_async_system::process(vulkan_async_download_job& job)
+void vulkan_download_async_system::admit(vulkan_async_download_job job)
 {
-    CC_RECORD_SCOPE("sg.download.async.copy");
+    // The ordering family is the SOURCE resource.
+    // Two readbacks of one source reserved their completion values in enqueue order, and a timeline only moves
+    // forwards — so they have to run in that order.
+    // Two readbacks of different sources have no such constraint, and that freedom is the whole point of scheduling.
+    auto const* const family_key = job.is_texture ? static_cast<void const*>(job.texture_source.get())
+                                                  : static_cast<void const*>(job.buffer_source.get());
+    job.family = u64(reinterpret_cast<uintptr_t>(family_key));
+    job.sequence = _next_sequence++;
+    _pending.push_back(cc::move(job));
+}
 
-    auto const& source = job.buffer_source;
-    auto const& texture = job.texture_source;
-    bool const wanted = job.pin.lock() != nullptr;
+void vulkan_download_async_system::settle_and_drop(isize index, bool delivered, bool signal_here)
+{
+    auto& job = _pending[index];
 
-    // The source is owned by the job, so it cannot go away underneath this — a caller that dropped every handle to
-    // the resource still gets the bytes they hold a future for.
-    // Only a caller that dropped the FUTURE is a cancellation rather than a delivery: there is nowhere left for the
-    // bytes to be observed.
-    // The completion value is signaled either way, so a later writer waiting on it never hangs — which is the whole
-    // point of reserving it at enqueue.
-    // `signal_here` is false on the delivered path: the last chunk's submit already signalled the completion value
-    // on the GPU, and signalling it again on the host is an error rather than a no-op — a timeline may only ever
-    // move forwards.
     auto const settle = [&](bool delivered, bool signal_here)
     {
         // An empty submit rather than a host signal: a timeline rejects a host signal that would overtake a queued
@@ -173,21 +184,87 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
         }
     };
 
-    // A sink-driven readback has no resident destination, so a dropped future is not a cancellation there.
-    bool const has_destination = job.sink ? true : wanted;
-    if (!has_destination || job.size_in_bytes == 0)
+    settle(delivered, signal_here);
+    if (delivered && job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
+        job.stream->completion->push_value(cc::unit{});
+
+    _pending.remove_at(index);
+}
+
+bool vulkan_download_async_system::run_one_window()
+{
+    CC_RECORD_SCOPE("sg.download.async.copy");
+
+    if (_pending.empty())
+        return false;
+
+    _scheduler.set_window_bytes(_window_bytes);
+
+    // Retire what cannot make progress before asking the scheduler: a readback whose destination is gone would
+    // otherwise be picked forever and keep the actor awake.
+    //
+    // Only a family HEAD may retire, for the reason the upload side gives: retiring signals a completion value, and
+    // signalling a later one before an earlier one is a timeline error rather than a race.
+    // It waits one more cycle instead, by which time whatever was ahead of it has finished.
+    for (isize i = 0; i < _pending.size();)
     {
+        auto const& job = _pending[i];
+        bool const has_destination = job.sink ? true : job.pin.lock() != nullptr;
+        if (has_destination && job.size_in_bytes != 0)
+        {
+            ++i;
+            continue;
+        }
+
+        auto is_head = true;
+        for (isize k = 0; k < _pending.size(); ++k)
+            if (k != i && _pending[k].family == job.family && _pending[k].sequence < job.sequence)
+                is_head = false;
+        if (!is_head)
+        {
+            ++i;
+            continue;
+        }
+
         // Nothing was queued, so the value has to be signalled here or a later writer waiting on it hangs.
         if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
             job.stream->completion->push_error(cc::async_error::make_cancelled());
-        settle(false, /*signal_here =*/true);
-        return;
+        settle_and_drop(i, /*delivered =*/false, /*signal_here =*/true);
     }
+    if (_pending.empty())
+        return false;
 
-    // A readback larger than a window is delivered window by window: each chunk is copied, waited for and memcpy'd
-    // out before the next reuses the staging.
-    isize done = 0;
-    while (done < job.size_in_bytes)
+    _scheduler.begin_window();
+
+    auto candidates = cc::vector<sg::impl::transfer_candidate>();
+    for (auto const& pending : _pending)
+        candidates.push_back({
+            .flavor = pending.stream != nullptr ? sg::impl::transfer_flavor::streaming
+                                                : sg::impl::transfer_flavor::async,
+            .priority = pending.stream != nullptr ? pending.stream->priority.load(std::memory_order_relaxed) : 0,
+            .age_seconds = 0,
+            .family = pending.family,
+            .sequence = pending.sequence,
+            .eligible = true,
+        });
+
+    auto const picked = _scheduler.pick_next(candidates);
+    if (!picked.has_value())
+        return false;
+
+    isize const index = picked.value();
+    auto& job = _pending[index];
+
+    // The source is owned by the job, so it cannot go away underneath this — a caller that dropped every handle to
+    // the resource still gets the bytes they hold a future for.
+    auto const& source = job.buffer_source;
+    auto const& texture = job.texture_source;
+
+    // The cursor lives on the job, because the next window may well go to a different readback.
+    isize& done = job.done;
+
+    // One chunk, then back to the scheduler.
+    // Everything below here is what the old run-to-completion loop did per iteration, unchanged.
     {
         int const slot = _next_window;
         _next_window = (_next_window + 1) % k_window_count;
@@ -348,7 +425,9 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                                                                                                  "the chunk")));
                 if (job.completion)
                     job.completion->push_error(cc::async_error::make_cancelled());
-                return; // the completion value was signalled by the submit above
+                // The completion value was signalled by the submit above, so this only drops the job.
+                _pending.remove_at(index);
+                return true;
             }
         }
         else
@@ -365,18 +444,21 @@ void vulkan_download_async_system::process(vulkan_async_download_job& job)
                     job.stream->completion->push_error(cc::async_error::make_cancelled());
                 if (job.completion)
                     job.completion->push_error(cc::async_error::make_cancelled());
-                return;
+                _pending.remove_at(index);
+                return true;
             }
         }
     }
 
-    // The future settles BEFORE the stream control, and the order is load-bearing.
-    // A caller waits on the handle's completion and then reads its future, so settling the control first leaves a
-    // window where the transfer says it is done and the bytes are not there yet — a race a test loses only
-    // intermittently, which is the worst kind to ship.
-    settle(true, /*signal_here =*/false);
-    if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
-        job.stream->completion->push_value(cc::unit{});
+    if (done >= job.size_in_bytes)
+    {
+        // The future settles BEFORE the stream control, and the order is load-bearing.
+        // A caller waits on the handle's completion and then reads its future, so settling the control first leaves a
+        // window where the transfer says it is done and the bytes are not there yet — a race a test loses only
+        // intermittently, which is the worst kind to ship.
+        settle_and_drop(index, /*delivered =*/true, /*signal_here =*/false);
+    }
+    return true;
 }
 
 sg::bytes_future vulkan_download_async_system::download_buffer(sg::raw_buffer_handle const& buffer,
