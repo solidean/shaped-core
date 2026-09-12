@@ -239,8 +239,7 @@ bool vulkan_download_async_system::run_one_window()
     auto candidates = cc::vector<sg::impl::transfer_candidate>();
     for (auto const& pending : _pending)
         candidates.push_back({
-            .flavor = pending.stream != nullptr ? sg::impl::transfer_flavor::streaming
-                                                : sg::impl::transfer_flavor::async,
+            .flavor = pending.stream != nullptr ? sg::impl::transfer_flavor::streaming : sg::impl::transfer_flavor::async,
             .priority = pending.stream != nullptr ? pending.stream->priority.load(std::memory_order_relaxed) : 0,
             .age_seconds = 0,
             .family = pending.family,

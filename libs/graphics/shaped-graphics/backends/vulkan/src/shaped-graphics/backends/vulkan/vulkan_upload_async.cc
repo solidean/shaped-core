@@ -448,8 +448,8 @@ bool vulkan_upload_async_system::run_one_window()
             settle_now(job, /*delivered =*/alive);
         }
         else
-            _awaiting.push_back({.drain = job.drain, .window_value = job.last_window_value,
-                                 .stream = job.stream, .delivered = true});
+            _awaiting.push_back(
+                {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
         _pending.remove_at(index);
         return true;
     }
@@ -612,8 +612,8 @@ bool vulkan_upload_async_system::run_one_window()
     if (transfer_done)
     {
         if (streaming)
-            _awaiting.push_back({.drain = job.drain, .window_value = job.last_window_value,
-                                 .stream = job.stream, .delivered = true});
+            _awaiting.push_back(
+                {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
         _pending.remove_at(index);
     }
     else if (payload_done && job.source != nullptr)
