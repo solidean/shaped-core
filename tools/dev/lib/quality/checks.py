@@ -6,11 +6,10 @@ This module only knows how to *run* a selected set: static checks first, then th
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..core import console, profile
+from ..core import console, profile, ui
 from .changes import ChangeScope
 
 
@@ -53,30 +52,36 @@ def run_checks(
     """
     failed: list[str] = []
 
-    def run_one(c: Check) -> None:
-        print(console.dim(f"\n--- running {c.name} ---"), file=sys.stderr)
-        with profile.span(c.name, type="check-gate"):
-            ok = c.run(fix=fix, scope=scope, mirror=mirror, verbose=verbose)
-        if not ok:
-            failed.append(c.name)
+    # The gate list is known upfront, so the region can say which gate of how many is running.
+    with ui.phase("check", total=len(selected)) as gates:
 
-    for c in selected:
-        if not c.requires_green:
-            run_one(c)
-    for c in selected:
-        if not c.requires_green:
-            continue
-        if no_test:
-            print(console.yellow(f"\n--- skipped {c.name} (--no-test) ---"), file=sys.stderr)
-        elif failed:
-            print(console.yellow(f"\n--- skipped {c.name} (static checks failed) ---"), file=sys.stderr)
-        else:
-            run_one(c)
+        def run_one(c: Check) -> None:
+            ui.write_line(console.dim(f"\n--- running {c.name} ---"))
+            gates.advance(c.name)
+            with profile.span(c.name, type="check-gate"):
+                ok = c.run(fix=fix, scope=scope, mirror=mirror, verbose=verbose)
+            if not ok:
+                failed.append(c.name)
+
+        for c in selected:
+            if not c.requires_green:
+                run_one(c)
+        for c in selected:
+            if not c.requires_green:
+                continue
+            if no_test:
+                ui.write_line(console.yellow(f"\n--- skipped {c.name} (--no-test) ---"))
+                gates.advance(c.name)
+            elif failed:
+                ui.write_line(console.yellow(f"\n--- skipped {c.name} (static checks failed) ---"))
+                gates.advance(c.name)
+            else:
+                run_one(c)
 
     if failed:
-        print(console.red("\ncheck: FAIL"), file=sys.stderr)
+        ui.write_line(console.red("\ncheck: FAIL"))
         for name in failed:
-            print(console.red(f"  - {name}"), file=sys.stderr)
+            ui.write_line(console.red(f"  - {name}"))
         return False
-    print(console.green("\ncheck: OK"), file=sys.stderr)
+    ui.write_line(console.green("\ncheck: OK"))
     return True

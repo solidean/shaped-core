@@ -1486,6 +1486,23 @@ def test_a_new_span_is_marked_and_a_code_span_is_not(root: Path) -> None:
     assert "<mark" not in html.split("<code>")[1], "a code span holding == must be left alone"
 
 
+def test_a_priced_bullet_is_marked_and_a_paragraph_is_not(root: Path) -> None:
+    """A design-critique is scanned rather than read, so the pricing has to be visible before the words are."""
+    html = render_markdown(
+        "- pro: it is cheap\n"
+        "- con: it needs a dependency\n"
+        "- verdict: rejected\n"
+        "- an ordinary bullet\n"
+    )
+    assert '<li class="verdict v-pro">it is cheap</li>' in html, html
+    assert '<li class="verdict v-con">it needs a dependency</li>' in html, html
+    assert '<li class="verdict v-verdict">rejected</li>' in html, html
+    assert "<li>an ordinary bullet</li>" in html, "an unpriced bullet must stay one"
+
+    # Only inside a list: a sentence that happens to open with the word is prose like any other.
+    assert "verdict" not in render_markdown("pro: this is a paragraph, not a bullet")
+
+
 def test_a_comment_is_tentative_until_the_round_is_finalized(root: Path) -> None:
     """Nothing reaches the agent until a round is sent, so a remark can still be deleted right up to that point."""
     entry = parse_text(ENTRY, Path("entry.md"))

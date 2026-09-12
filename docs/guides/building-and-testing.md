@@ -250,8 +250,20 @@ Its template is [nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-pag
 
 ## Quiet by default, and how to diagnose
 
-dev.py does **not** stream child output.
-For each step it:
+dev.py never streams child output into your scrollback.
+What it does instead depends on where it is running, and the two modes read the same record.
+
+At a **real terminal** it draws a live region at the bottom, one row per running step.
+Each row carries a spinner, an elapsed clock, a progress bar where the step can report one, and the last few lines that step printed.
+A step that succeeds collapses to its one summary line and its rows are erased.
+A step that fails keeps that tail on screen as the evidence, above the usual diagnostic hint.
+So a long run stays one screen tall, and you can see at a glance whether the steps before the current one were fine.
+
+**Piped, redirected, or in CI** — which is every agent-driven run — the region never appears and the output is exactly the terse per-step trace it has always been.
+`--no-progress` selects it explicitly.
+The per-step capture below is common to both modes; the diagnostic hints and the `build_diag` / `test_diag` loop after it are written for this one.
+
+For each step, in both modes, it:
 
 - captures stdout/stderr to `build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt`,
 - writes a JSON sidecar in the build dir (`configure.json` / `build.json` / `test.json`),
@@ -272,6 +284,7 @@ These read the artifacts dev.py already emitted, which beats scrolling raw logs.
 Mirroring is additive to capture, so the logs read the same either way; to watch something live as well, reach for the mirror flags under [Useful flags](#useful-flags).
 **Don't pipe dev.py into `tail`/`head`/`grep`.**
 The output is already terse, and `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
+Piping now also changes the mode, so it is doubly not the way to read a run: you lose the live region and gain nothing.
 
 ## Formatting
 
@@ -667,6 +680,11 @@ The flag is not wired for clang-cl, so the Windows sanitize preset still reports
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
 - `--mirror-test-output` — global; stream only the test binaries live, staying quiet through configure and build.
   The usual choice when you want a binary's own output, such as a benchmark table, without the build wall.
+- `--progress` / `--no-progress` — global; force or disable the live progress region.
+  The default auto-detects: on when stdout and stderr are both a terminal, off when either is piped or redirected, when `TERM=dumb`, or when a CI environment variable is set.
+  `SC_DEV_UI=0` / `1` overrides the detection, and an explicit flag overrides that.
+  It is **independent of the color flags**: `--plain` and `NO_COLOR` say how to render, not whether to, so a monochrome region is still available.
+  Mirroring wins per step — a mirrored step owns the screen and opens no row, while the steps around it still get theirs.
 - `--colored` / `--plain` — global; force or disable colored output.
   The default auto-detects: colored when stdout and stderr are both a terminal, plain when either is piped, such as a run driven by an agent.
   In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.

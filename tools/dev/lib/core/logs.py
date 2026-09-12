@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import console
+from . import console, ui
 from .models import StepResult, TestSummary
 
 
@@ -64,7 +63,10 @@ def step_log_paths(build_dir: Path, step_type: str, name: str | None) -> tuple[P
     return log_dir / f"{stem}.stdout.txt", log_dir / f"{stem}.stderr.txt"
 
 
-_NINJA_EDGE_RE = re.compile(r"^\[\d+/\d+\]")
+# Ninja prints one `[done/total] <action>` line per edge it runs.
+# The counts are captured because the live progress display reads them off the stream as it goes, while ninja_built_count
+# below only counts the lines in a finished log.
+NINJA_EDGE_RE = re.compile(r"^\[(\d+)/(\d+)\]")
 
 
 def ninja_built_count(stdout_log: Path) -> int:
@@ -77,20 +79,24 @@ def ninja_built_count(stdout_log: Path) -> int:
         text = stdout_log.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return 0
-    return sum(1 for line in text.splitlines() if _NINJA_EDGE_RE.match(line))
+    return sum(1 for line in text.splitlines() if NINJA_EDGE_RE.match(line))
 
 
-def report_capture(path: Path) -> None:
-    """Print 'path  [X lines, Y kB]' for a capture, skipping empty files."""
+def capture_line(path: Path) -> str | None:
+    """The 'path  [X lines, Y kB]' pointer for a capture, or None when there is nothing to point at.
+
+    Returned rather than printed: the caller owns where a line goes, and on a terminal it has to be handed to the live
+    region rather than written straight to the stream it is repainting.
+    """
     try:
         data = path.read_bytes()
     except OSError:
-        return
+        return None
     if not data:
-        return
+        return None
     lines = len(data.splitlines())
     kb = len(data) / 1024
-    print(console.dim(f"  -> {path}  [{lines} lines, {kb:.1f} kB]"), file=sys.stderr)
+    return console.dim(f"  -> {path}  [{lines} lines, {kb:.1f} kB]")
 
 
 _BRACKET_LOG_RE = re.compile(r"^\[[^\]]*\]\[[^\]]*\]")
@@ -217,11 +223,10 @@ def merge_junit(xml_paths: list[Path], output: Path) -> TestSummary:
     tree = ET.ElementTree(merged)
     ET.indent(tree, space="  ")
     tree.write(str(output), encoding="unicode", xml_declaration=True)
-    print(f"XML report written to {output}", file=sys.stderr)
-    print(
+    ui.write_line(f"XML report written to {output}")
+    ui.write_line(
         f"  Total tests: {totals['tests']}, failures: {totals['failures']}, "
-        f"errors: {totals['errors']}",
-        file=sys.stderr,
+        f"errors: {totals['errors']}"
     )
     return TestSummary(
         binary=output.name,
