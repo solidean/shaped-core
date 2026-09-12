@@ -189,6 +189,17 @@ Name it with `title` as usual, and hand it over the same way.
    uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes
    uv run review.py round pr-<n> --wait          # blocks, then prints the round
    ```
+
+   **Prefer `AskUserQuestion` over `round --wait` for the handover itself.**
+   A blocking `round --wait` holds the turn open with nothing on screen, which reads as a stall and carries no
+   notification — so a maintainer answering on a phone, or through remote control, has nothing telling them the
+   round is theirs.
+   Ask instead, with the options the moment actually has: the round is ready and they have done it, or they want to
+   talk about something first.
+   Then collect it with `uv run review.py round pr-<n> --no-wait`, which prints an already-finalized round.
+
+   The blocking form is still right when nobody is being asked — an unattended run, or a second round you are
+   collecting in the same sitting.
    `uv run review.py status pr-<n>` says whether a server is actually up, which round is next, and what is still open —
    it probes the port rather than trusting the marker, so a killed server reads as down.
    `restart` is for after the *tool's* code changed; entry edits need no restart, since the page reloads itself.

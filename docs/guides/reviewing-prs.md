@@ -83,6 +83,41 @@ Rewriting at build time only is refuted by hot reload, and by a location counter
 Generating from reflection is refuted by the same DXC behaviour that motivates the whole branch.
 Neither was written down, and the recommendation was to write them into the design doc rather than to change any code.
 
+## A PR arrives red, and fixing it is the review's job
+
+**The normal flow here is: one contributor writes the branch on the one platform they have, opens the PR while CI is failing, and the review happens next.**
+That is deliberate, not a lapse, and a reviewer who treats a red PR as "not ready yet" has misread the process.
+
+The reason is economic.
+Fixing CI before a review means fixing code the review may tell you to throw away, and on a branch that reshapes an API that is most of it.
+So the order is: write it, open it, review it, then make it green — and the *making it green* is inside the review's scope rather than handed back.
+
+Three things follow, and they are what a reviewer should actually do differently:
+
+- **Build and run the branch on whatever the author could not.**
+  That is the first action of the review, not a later verification step.
+  On this repo it usually means: the author is on Linux and only vulkan compiles there, so a Windows box compiles dx12 — or the reverse.
+  Everything the author's machine could not parse is where the defects are, and [the `#ifdef` arm rule](#the-ifdef-arm-this-machine-does-not-compile-is-where-the-defect-is) is the general form of it.
+- **Land the fixes rather than filing them.**
+  A compile error is not a finding — it is work, and it is yours.
+  File the *pattern* if there is one worth naming, and put the fix in the working tree.
+- **Do not propose process changes to prevent a red PR.**
+  Suggesting a pre-merge CI gate, or a rule that branches must be green before review, is arguing against the workflow rather than working in it.
+
+pr-168 is the worked case, and it is worth knowing the shape.
+The branch was written on Linux, where dx12 does not compile at all; the PR body said so plainly.
+On a Windows box it needed five build cycles to clear: 28 diagnostics across 20 files, in eight clusters.
+Clearing them is what made the other two findings visible at all — one real bug in the dx12 transfer drain, and a missing `tick()` that had every render routine declining forever.
+None of that is reachable from a diff.
+The review's first ask proposed adding a Windows CI gate, and the answer settled it, verbatim:
+
+```raw
+CI was red anyways. your task here is to fix the compilation as well. no process changes needed. (it is by design)
+```
+
+**The corollary for the review artifact:** a red CI is not something to report back, because the author already knows.
+What is worth reporting is what the failures turned out to *be*, which is a different and much shorter list.
+
 ## Ranked by what it costs to get wrong
 
 ### 1. API shape
@@ -487,6 +522,38 @@ The wrong claim was less severe than the truth.
 
 **Say which construct is undefined and why, and check the version.**
 Shifts, signed overflow, `char` signedness and aggregate init all changed under recent standards.
+
+### A measurement of a failing system says nothing about why it is failing
+
+A number is evidence, and a number taken from a run that is *already* broken is usually evidence about the breakage rather than about its cause.
+The failure mode is subtle because the measurement is real and the reasoning from it feels quantitative.
+
+pr-168 is the worked case.
+The viewer's routine chain declined every frame, and the question was whether it was still compiling or permanently stuck.
+The review raised the frame count from 8 to 300, saw all 300 run in 267 ms, and concluded: far too fast for a shader compile, therefore stuck rather than slow.
+
+The frames were fast **because** they declined.
+A loop whose body returns immediately runs quickly whatever the reason, so the timing measured the symptom and was consistent with either answer.
+The actual test was one line — a 50 ms sleep per frame — and it passed, because it had been a latency race all along.
+
+**The check is to ask what the measurement would look like under the other hypothesis.**
+Where the answer is "the same", it is not evidence.
+A timing taken from a system that is doing nothing almost always fails that test.
+
+### "The only X" is a count
+
+[A count is a claim](#a-count-is-a-claim-and-it-is-checked-by-enumerating) covers numerals.
+The same rule binds the words that imply one — *the only*, *the single exception*, *the one place*, *nothing else*.
+Those are easier to write without noticing, because they read as emphasis rather than as arithmetic.
+
+They are also disproportionately load-bearing, because a reader uses them to stop looking.
+"`block_until_idle()` is the only sg call that waits" is an instruction to grep for one name.
+
+pr-168 again, from the other side: the branch said it in four places, having settled on two spellings.
+Each sentence was true when written.
+Nothing in the diff of the change that added the second one touches the sentences that say there is one, which is what makes this the doc-rot category rather than a proofreading miss.
+
+**Enumerate on the way past.** When a review is about to write "the only", or is reading one, that is the moment the set gets listed.
 
 ### A count is a claim, and it is checked by enumerating
 

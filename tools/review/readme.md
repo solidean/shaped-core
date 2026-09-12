@@ -98,6 +98,14 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 
 ## What is not obvious
 
+- **`--bulk` is a decision made BEFORE reading, which is when to reach for it.**
+  It says "I am not going to read this subtree hunk by hunk, and here is why" — a vendored drop, a formatting sweep, a
+  branch already reviewed elsewhere.
+  So it is an ingest-time call, and the reason is what makes it auditable.
+  What it is *not* is a way to tidy up afterwards: bulking a subtree you have not read yet means guessing where the
+  findings will not be, and a wrong guess hides exactly the hunks that mattered.
+  A 300-change range with no vendored drops in it is one you ingest plainly and account for entry by entry.
+
 - **A review is scratch, so nothing outside it may cite an entry.**
   Entry numbers, ask names and round numbers are addresses within one folder under `.tmp/` that is deleted, renumbered
   and re-ingested freely.
