@@ -583,9 +583,14 @@ public:
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
 
+    // The inline ring budgets.
+    // Recorded here and applied at the next advance_epoch, never synchronously.
+    void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
+    void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
+
     /// Whether any submitted epoch has yet to retire.
-    /// The inline rings ask before blocking: with nothing in flight, a full ring cannot be reclaimed by waiting, and
-    /// the request is a budget error rather than back-pressure.
+    /// The inline rings ask before blocking: with nothing in flight a full ring cannot be reclaimed by waiting, so the
+    /// request falls back to a one-off allocation rather than waiting for something that is not coming.
     [[nodiscard]] bool has_epochs_in_flight();
 
     /// Blocks until `token`'s command list has finished executing.

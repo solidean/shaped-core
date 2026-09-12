@@ -117,13 +117,19 @@ void dx12_download_inline_system::account_pending_copy(std::shared_ptr<std::atom
     _outstanding.fetch_add(1, std::memory_order_relaxed);  // and the global drain gate
 }
 
-dx12_download_inline_system::span_reservation dx12_download_inline_system::reserve_span(isize total)
+cc::optional<dx12_download_inline_system::span_reservation> dx12_download_inline_system::try_reserve_span(isize total)
 {
     CC_ASSERT(total > 0, "reserve size must be positive");
-    CC_ASSERT(total <= _capacity, "a single inline readback exceeds the readback ring capacity");
+
+    // Larger than the whole ring: no budget makes this fit and no wait produces the space.
+    if (total > _capacity)
+        return {};
 
     for (;;)
     {
+        // Distinguishes "wait for the actor" from "nothing is coming": with no checkpoints, this one epoch's
+        // readbacks genuinely exceed the ring and waiting would never end.
+        auto nothing_in_flight = false;
         cc::optional<span_reservation> r = _ring.lock(
             [&](ring_state& s) -> cc::optional<span_reservation>
             {
@@ -133,8 +139,7 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
                 u64 const end = start + u64(total);
                 if (end - _freed_pos.load(std::memory_order_acquire) > u64(_capacity))
                 {
-                    CC_ASSERT(!s.checkpoints.empty(), "inline downloads in one epoch exceed the readback ring "
-                                                      "capacity");
+                    nothing_in_flight = s.checkpoints.empty();
                     return {};
                 }
                 s.next_pos = end;
@@ -142,7 +147,9 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
             });
 
         if (r.has_value())
-            return cc::move(r.value());
+            return r;
+        if (nothing_in_flight)
+            return {};
 
         // The ring is full, and only the actor draining copies frees space.
         // Where it has no thread of its own, run it here: the wait below would otherwise be on progress nobody can make.
@@ -153,6 +160,44 @@ dx12_download_inline_system::span_reservation dx12_download_inline_system::reser
         u64 const seen = _freed_pos.load(std::memory_order_acquire);
         _freed_pos.wait(seen, std::memory_order_acquire);
     }
+}
+
+dx12_download_inline_system::outside_reservation dx12_download_inline_system::reserve_outside_ring(isize total)
+{
+    warn_outside_ring(total);
+
+    auto staging
+        = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, total);
+    CC_ASSERT(staging.has_value(), "could not allocate a one-off staging buffer for an oversized inline readback");
+
+    auto* const resource = staging.value().resource.Get();
+    auto* const mapped = static_cast<byte*>(staging.value().mapped);
+
+    // Released through the epoch machinery rather than destroyed here: the last reference is dropped by the actor, on
+    // its own thread, and routing it back through deferred deletion keeps every release on the path that already
+    // orders them against the GPU.
+    auto* const ctx = &_ctx;
+    auto keep_alive = std::shared_ptr<void>(
+        static_cast<void*>(resource), [ctx, held = cc::move(staging.value().resource)](void*) mutable
+        { ctx->schedule_deferred_deletion(dx12_expiring_resource{.resource = cc::move(held)}); });
+
+    return outside_reservation{.resource = resource,
+                               .mapped = mapped,
+                               .keep_alive = cc::move(keep_alive),
+                               .epoch_copies = _ring.lock([](ring_state& s) { return s.current_epoch_copies; })};
+}
+
+void dx12_download_inline_system::warn_outside_ring(isize total)
+{
+    auto const epoch = u64(_ctx.current_epoch());
+    auto seen = _last_warned_epoch.load(cc::memory_order_relaxed);
+    if (seen == epoch || !_last_warned_epoch.compare_exchange_strong(seen, epoch, cc::memory_order_relaxed))
+        return;
+
+    CC_LOG_WARNING("an inline readback of {} bytes did not fit the {}-byte readback ring, so it was staged in a "
+                   "one-off allocation — correct but slow. Raise ctx.download.set_budget past the peak an epoch "
+                   "reads back",
+                   total, _capacity);
 }
 
 sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list& cmd,
@@ -177,9 +222,35 @@ sg::bytes_future dx12_download_inline_system::download_texture(dx12_command_list
     // Each chunk is its own deferred un-pad copy, and a window too small for an aligned row yields an empty copy we skip.
     // Only the last real chunk settles the future.
     isize const total = download.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
-    CC_ASSERT(total <= _capacity, "an inline texture readback (with staging slack) exceeds the readback ring capacity");
 
-    span_reservation const span = reserve_span(total);
+    auto const reserved = try_reserve_span(total);
+    if (!reserved.has_value())
+    {
+        // One dedicated buffer, so the walk finishes in a single pass: a one-off buffer has no seam to split at.
+        auto const outside = reserve_outside_ring(total);
+        dx12_download_allocation const alloc = {outside.resource, outside.mapped, 0, total};
+        while (!download.is_finished())
+        {
+            dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
+            CC_ASSERT(pending.bytes > 0, "inline readback made no progress");
+            account_pending_copy(outside.epoch_copies);
+
+            dx12_download_copy_job job;
+            // `keep` owns the staging buffer, captured so it outlives the actor's memcpy.
+            job.deferred_cpu_copy = [inner = cc::move(pending.deferred_cpu_copy), keep = outside.keep_alive] { inner(); };
+            job.pin = std::weak_ptr<void const>(dst.pin());
+            if (download.is_finished()) // only the last chunk settles the future
+            {
+                job.completion = completion;
+                job.gate = gate;
+            }
+            job.epoch_copies = outside.epoch_copies;
+            cmd._pending_downloads.push_back(cc::move(job));
+        }
+        return sg::bytes_future(cc::move(dst), cc::move(completion), cc::move(gate));
+    }
+
+    span_reservation const span = reserved.value();
     u64 cursor = span.start;
     while (!download.is_finished())
     {
@@ -233,7 +304,33 @@ sg::bytes_future dx12_download_inline_system::download_buffer(dx12_command_list&
     // Reserve the whole read once (the span may wrap the seam), then walk it with to-seam windows.
     // Each chunk gets its own deferred memcpy and its own epoch-copy count.
     // Only the last chunk settles the future, so it becomes ready once every chunk has drained — the actor copies in enqueue order.
-    span_reservation const span = reserve_span(size);
+    auto const reserved = try_reserve_span(size);
+    if (!reserved.has_value())
+    {
+        auto const outside = reserve_outside_ring(size);
+        dx12_download_allocation const alloc = {outside.resource, outside.mapped, 0, size};
+        while (!download.is_finished())
+        {
+            dx12_pending_copy pending = download.execute_next_job(*cmd._list.Get(), alloc);
+            CC_ASSERT(pending.bytes > 0, "inline readback made no progress");
+            account_pending_copy(outside.epoch_copies);
+
+            dx12_download_copy_job job;
+            // See the texture readback above for what `keep` is doing here.
+            job.deferred_cpu_copy = [inner = cc::move(pending.deferred_cpu_copy), keep = outside.keep_alive] { inner(); };
+            job.pin = std::weak_ptr<void const>(dst.pin());
+            if (download.is_finished())
+            {
+                job.completion = completion;
+                job.gate = gate;
+            }
+            job.epoch_copies = outside.epoch_copies;
+            cmd._pending_downloads.push_back(cc::move(job));
+        }
+        return sg::bytes_future(cc::move(dst), cc::move(completion), cc::move(gate));
+    }
+
+    span_reservation const span = reserved.value();
     u64 cursor = span.start;
     while (!download.is_finished())
     {

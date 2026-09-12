@@ -102,10 +102,15 @@ void vulkan_context::advance_epoch()
             s.in_flight.push_back(cc::move(data));
         });
 
-
     // Apply a pending ctx.transient.set_budget() now that the new epoch is open: it drains all in-flight epochs and resizes the transient heap.
     // Rare — only after a set_budget — so the stall is acceptable.
     apply_pending_transient_budget();
+
+    // Same for the inline upload/download ring budgets (ctx.upload.set_inline_budget / ctx.download.set_budget).
+    // Each drains in-flight epochs — the download ring also waits its actor out — then reallocates.
+    // A no-op unless a budget change is pending.
+    _upload_inline.apply_pending_budget();
+    _download_inline.apply_pending_budget();
 }
 
 bool vulkan_context::has_epochs_in_flight()

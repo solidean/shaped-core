@@ -288,3 +288,82 @@ INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle co
     CHECK(data.value()[0] == 10);
     CHECK(data.value()[7] == 80);
 }
+
+// The inline rings fall back instead of asserting, in both directions.
+//
+// Two conditions reach the fallback and only one of them is a budget error: a single transfer larger than the whole
+// ring is unreachable by any budget, which is why an assert was the wrong answer even in principle.
+// CC_ASSERT compiles out in release, so the old behaviour was "silently proceed" there and "die" here — the two
+// worst answers to the same question.
+INVOCABLE_TEST("sg - an inline upload larger than the ring is staged anyway", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // A small ring, applied at the next advance.
+    // vulkan implements this too now; it used to be a no-op there while its own ring-full assert told the caller to
+    // call it.
+    ctx->upload.set_inline_budget(64 * 1024);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    // Comfortably past the ring, so no wait could ever produce the space.
+    auto const count = isize(64 * 1024);
+    auto const src = ctx->persistent.create_buffer<u32>(count, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+
+    auto values = cc::vector<u32>();
+    values.resize_to_defaulted(count);
+    for (auto i = isize(0); i < count; ++i)
+        values[i] = u32(i);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
+    auto const back = cmd->download.data_from_buffer(src);
+    (void)ctx->submit_command_list(cc::move(cmd));
+
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    // Staged through a one-off allocation, and the bytes are the ones we wrote.
+    auto const data = back.try_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == count);
+    CHECK(data.value()[0] == 0);
+    CHECK(data.value()[count - 1] == u32(count - 1));
+}
+
+// The other condition: each transfer fits the ring, but one epoch's worth of them does not, with nothing in flight to
+// reclaim.
+// Waiting cannot help there either — the space is held by the epoch still being recorded.
+INVOCABLE_TEST("sg - one epoch's inline transfers may exceed the ring", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    ctx->upload.set_inline_budget(64 * 1024);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    auto const chunk = isize(8 * 1024); // u32s: 32 KiB each, so three overrun a 64 KiB ring
+    auto values = cc::vector<u32>();
+    values.resize_to_defaulted(chunk);
+    for (auto i = isize(0); i < chunk; ++i)
+        values[i] = u32(i + 1);
+
+    auto cmd = ctx->create_command_list();
+    auto buffers = cc::vector<sg::buffer<u32>>();
+    for (auto i = 0; i < 4; ++i)
+    {
+        buffers.push_back(
+            ctx->persistent.create_buffer<u32>(chunk, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src));
+        cmd->upload.data_to_buffer(buffers.back(), cc::span<u32 const>(values));
+    }
+    auto const back = cmd->download.data_from_buffer(buffers.back());
+    (void)ctx->submit_command_list(cc::move(cmd));
+
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    auto const data = back.try_get_data();
+    REQUIRE(data.has_value());
+    CHECK(data.value()[0] == 1);
+    CHECK(data.value()[chunk - 1] == u32(chunk));
+}
