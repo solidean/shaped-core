@@ -12,6 +12,8 @@ width and asserting on what came out.
 
 The load-bearing case is `up_count_matches_frame`: every other bug in a repainting region shows up there first, because a
 frame that moves the cursor up by the wrong number of lines is exactly how one eats the scrollback above it.
+`feed_never_waits_on_the_terminal` is the other one worth knowing about: it pins the rule process.py's `_pump` states,
+by driving frames into a stream that blocks and requiring feed() to return anyway.
 
 Run with `uv run tools/dev/ui-self-test.py`, and `-v` to list the cases as they pass.
 """
@@ -45,11 +47,13 @@ def check(cond: bool, what: str) -> None:
         print(f"  FAIL {what}")
 
 
-def fresh(width: int = 80, *, tail_lines: int = 8) -> io.StringIO:
-    """A configured, painter-less region writing into a fresh buffer."""
+def fresh(width: int = 80, *, tail_lines: int = 8, painter: bool = False,
+          interval_s: float = 0.08) -> io.StringIO:
+    """A configured region writing into a fresh buffer, painter-less unless a case asks for one."""
     ui.shutdown()
     buf = io.StringIO()
-    ui.configure("on", stream=buf, size=(width, 24), painter=False, tail_lines=tail_lines)
+    ui.configure("on", stream=buf, size=(width, 24), painter=painter, tail_lines=tail_lines,
+                 interval_s=interval_s)
     return buf
 
 
@@ -183,8 +187,7 @@ def test_write_line_never_tears() -> None:
 
 def test_concurrent_rows_stay_ordered() -> None:
     """Three steps feeding from three threads keep their row order and produce well-formed frames."""
-    buf = fresh()
-    ui.configure("on", stream=buf, size=(100, 24), painter=True, interval_s=0.01)
+    buf = fresh(width=100, painter=True, interval_s=0.01)
     steps = []
     stack = []
     for name in ("alpha", "beta", "gamma"):
@@ -202,6 +205,9 @@ def test_concurrent_rows_stay_ordered() -> None:
         t.start()
     for t in threads:
         t.join()
+    # Stop the painter before reading: it writes a frame as several separate calls, so a snapshot taken while it runs
+    # can catch a half-drawn screen and the assertions below would be judging that instead.
+    ui._stop_painter()
     ui.render_once()
     out = buf.getvalue()
     for cm in reversed(stack):
@@ -217,6 +223,61 @@ def test_concurrent_rows_stay_ordered() -> None:
     order = [ln.split("build ")[1].split()[0] for ln in rows]
     check(order == ["alpha", "beta", "gamma"], f"concurrent_rows_stay_ordered: row order preserved {order}")
     check(max(len(ln) for ln in screen) <= 99, "concurrent_rows_stay_ordered: nothing exceeded the width")
+
+
+def test_wide_characters_stay_one_row() -> None:
+    """A line of two-cell characters must be cut to the terminal's columns, not to its character count."""
+    buf = fresh(width=40)
+    with ui.step("build all", step_type="build") as s:
+        s.feed("課題" * 60)  # each occupies two terminal cells
+        ui.render_once()
+        out = buf.getvalue()
+    widest = max((ui._columns(ln) for ln in render(out)), default=0)
+    check(widest <= 39, f"wide_characters_stay_one_row: widest rendered row {widest} columns <= 39")
+
+
+def test_feed_never_waits_on_the_terminal() -> None:
+    """A blocked terminal must not block feed(), or the pump threads stop draining and the child hangs on a full pipe."""
+
+    class BlockingStream:
+        """A stream whose first write parks until it is released, standing in for a paused console."""
+
+        def __init__(self) -> None:
+            self.entered = threading.Event()
+            self.released = threading.Event()
+            self.blocked_once = False
+
+        def write(self, text: str) -> int:
+            if not self.blocked_once:
+                self.blocked_once = True
+                self.entered.set()
+                self.released.wait(10)
+            return len(text)
+
+        def flush(self) -> None:
+            pass
+
+    ui.shutdown()
+    stream = BlockingStream()
+    ui.configure("on", stream=stream, size=(80, 24), painter=False)
+    s = ui.open_step("build all", step_type="build")
+    s.feed("[1/2] a first line")
+
+    painter = threading.Thread(target=ui.render_once, daemon=True)
+    painter.start()
+    check(stream.entered.wait(10), "feed_never_waits_on_the_terminal: the stream really did block a write")
+
+    fed = threading.Event()
+
+    def feeder() -> None:
+        s.feed("[2/2] a line arriving while the terminal is stuck")
+        fed.set()
+
+    threading.Thread(target=feeder, daemon=True).start()
+    returned = fed.wait(3)
+    stream.released.set()
+    painter.join(10)
+    check(returned, "feed_never_waits_on_the_terminal: feed returned while the painter held the stream")
 
 
 def test_disabled_is_inert() -> None:
@@ -261,6 +322,8 @@ TESTS = [
     test_failure_retains_tail,
     test_write_line_never_tears,
     test_concurrent_rows_stay_ordered,
+    test_wide_characters_stay_one_row,
+    test_feed_never_waits_on_the_terminal,
     test_disabled_is_inert,
     test_phase_counts,
 ]

@@ -17,6 +17,7 @@ docs/guides/building-and-testing.md is the workflow, and docs/dev-py-driver.md t
 from __future__ import annotations
 
 import argparse
+import atexit
 import sys
 from pathlib import Path
 
@@ -252,9 +253,6 @@ def main() -> None:
         )
 
     # atexit fires on SystemExit too, so these are written however the command exits — a failed build or test included.
-    if args.collect_logs or args.profile:
-        import atexit
-
     if args.collect_logs:
 
         def _emit_log_archive() -> None:
@@ -276,8 +274,8 @@ def main() -> None:
 
         atexit.register(_emit_profile)
 
-    import atexit as _atexit
-    _atexit.register(dev.ui.shutdown)
+    # Registered last, so it runs first: atexit is LIFO, and the region has to be gone before the summaries below print.
+    atexit.register(dev.ui.shutdown)
 
     ctx = cmd.Context(root=ROOT, policy=build_policy())
     try:

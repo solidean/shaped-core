@@ -14,10 +14,9 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-import sys
 from pathlib import Path
 
-from ..core import profile
+from ..core import profile, ui
 from ..project.pins import is_current
 
 # Preset name fragments for cross-targets that never use these (host-side) dependencies.
@@ -57,16 +56,17 @@ def _ensure(
     if is_current(manifest, pin):
         return  # already installed at the pinned release — fast path
 
-    print(f"{name}: {doing} (set {skip_env}=1 to skip) ...", file=sys.stderr)
+    ui.write_line(f"{name}: {doing} (set {skip_env}=1 to skip) ...")
     # Through `uv run`, not sys.executable: the script reads its pin from dependency.yml, so it needs the pyyaml its PEP 723 block declares.
     # Only a real fetch pays that resolution — the fast path above never gets here.
-    with profile.span(name, type="prereq", extra={"script": script_name}):
+    # The fetch script inherits this terminal and narrates itself, so the region parks rather than counting lines it cannot see.
+    # Without that, the next erase deletes as much of the script's own output as the frame was tall.
+    with profile.span(name, type="prereq", extra={"script": script_name}), ui.suspend():
         result = subprocess.run(["uv", "run", str(script)], cwd=root)
     if result.returncode != 0:
-        print(
+        ui.write_line(
             f"{name}: {script_name} failed — {dependent} will be skipped. "
-            f"Run `uv run extern/{directory}/{script_name}` manually to see the error.",
-            file=sys.stderr,
+            f"Run `uv run extern/{directory}/{script_name}` manually to see the error."
         )
 
 

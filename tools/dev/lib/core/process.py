@@ -109,7 +109,7 @@ def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | 
 
     vsdevcmd = _find_vsdevcmd(toolset)
     if vsdevcmd is None:
-        print(console.yellow("WARNING: Could not find VsDevCmd.bat. MSVC builds may fail."), file=sys.stderr)
+        ui.write_line(console.yellow("WARNING: Could not find VsDevCmd.bat. MSVC builds may fail."))
         return None
 
     vcvars_ver = f" -vcvars_ver={toolset}" if toolset and not ("/" in toolset or "\\" in toolset) else ""
@@ -301,7 +301,8 @@ def _pump(src, log_file, mirror_to, on_line=None) -> None:
     This loop must not die while the child is alive.
     Nothing else drains the pipe, so a pump thread that raises leaves the child blocked on a full OS pipe buffer forever, and `proc.wait()` with it.
     So every per-line failure is reported once and swallowed, and draining continues to the end of the stream.
-    `on_line` feeds the live progress region, and is held to that same rule: a bug in the renderer must not hang the build.
+    `on_line` feeds the live progress region, and is held to that same rule: neither a bug in the renderer nor a blocked
+    terminal may hang the build, which is why ui.feed waits on the row lock rather than on the one held across writes.
     """
     reported = False
 
@@ -311,9 +312,10 @@ def _pump(src, log_file, mirror_to, on_line=None) -> None:
             return # one line, not one per output line
         reported = True
         try:
-            print(f"warning: dev.py could not {what}: {type(exc).__name__}: {exc}\n"
-                  f"         output continues, but some of it may be missing or replaced "
-                  f"(the run log has the full text).", file=sys.stderr, flush=True)
+            # Through the region rather than past it: this runs from a pump thread while the painter may be mid-frame.
+            ui.write_line(f"warning: dev.py could not {what}: {type(exc).__name__}: {exc}\n"
+                          f"         output continues, but some of it may be missing or replaced "
+                          f"(the run log has the full text).")
         except Exception:
             pass # the complaint channel itself is broken; there is nowhere left to say so
 

@@ -260,7 +260,8 @@ A step that fails keeps that tail on screen as the evidence, above the usual dia
 So a long run stays one screen tall, and you can see at a glance whether the steps before the current one were fine.
 
 **Piped, redirected, or in CI** — which is every agent-driven run — the region never appears and the output is exactly the terse per-step trace it has always been.
-That is the mode the rest of this section describes, and `--no-progress` selects it explicitly.
+`--no-progress` selects it explicitly.
+The per-step capture below is common to both modes; the diagnostic hints and the `build_diag` / `test_diag` loop after it are written for this one.
 
 For each step, in both modes, it:
 

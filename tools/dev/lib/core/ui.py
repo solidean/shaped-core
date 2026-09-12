@@ -10,8 +10,10 @@ what an agent driving dev.py through a pipe sees.
 Zero dependencies: hand-rolled CSI and SGR, the same way console.py is.
 
 One invariant holds the whole thing up: the up-count must equal the number of newlines the last frame wrote.
-Every line is therefore truncated to the terminal width before it is styled, so a long compiler diagnostic can never wrap
-and desynchronise the count, and one row of terminal is always one line of ours.
+Every line is therefore truncated to the terminal width in *columns* before it is styled, so a long compiler diagnostic
+can never wrap and desynchronise the count, and one row of terminal is always one line of ours.
+Columns rather than characters, because a wide character occupies two cells and a line measured in characters fits by
+that count and still wraps on screen.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import shutil
 import sys
 import threading
 import time
+import unicodedata
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TextIO
@@ -67,11 +70,6 @@ def _ninja_sniffer() -> Sniffer:
 _SNIFFERS: dict[str, Callable[[], Sniffer]] = {"build": _ninja_sniffer}
 
 
-def register_sniffer(step_type: str, factory: Callable[[], Sniffer]) -> None:
-    """Teach the display how a step type reports progress, for a generator this repo does not use."""
-    _SNIFFERS[step_type] = factory
-
-
 @dataclass
 class _Row:
     label: str
@@ -86,7 +84,16 @@ class _Row:
     note: str = ""
 
 
-_lock = threading.RLock()
+# Two locks, never one.
+# `_io_lock` is held across writes to the terminal, and a terminal write can block for as long as the far end is paused
+# — a selected Windows console, a stopped tty, a slow ssh link.
+# `_rows_lock` guards only the row list and the row fields, so the pump threads in process.py can hand a line to a row
+# without ever waiting on the screen.
+# That is what keeps _pump's rule intact: a blocked terminal must not stop the child's pipes being drained.
+# Order, wherever both are held: _io_lock first, then _rows_lock.
+# Nothing takes them the other way round.
+_io_lock = threading.RLock()
+_rows_lock = threading.RLock()
 _enabled = False
 _stream: TextIO | None = None
 _size: tuple[int, int] | None = None
@@ -100,6 +107,8 @@ _unicode = True
 _painter: threading.Thread | None = None
 _stop = threading.Event()
 _win_console_mode: int | None = None
+_prev_sigint = None
+_sigint_installed = False
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +184,7 @@ def configure(
     `painter=False` leaves rendering to explicit render_once() calls, so a test sees deterministic frames and no thread.
     """
     global _enabled, _stream, _size, _tail_lines, _interval_s, _painter, _unicode
+    _stop_painter()  # a second configure must not leave the first one's thread repainting against the new state
     _enabled = _resolve(mode, own_stream=stream is not None)
     _stream = stream if stream is not None else sys.stderr
     _size = size
@@ -189,6 +199,15 @@ def configure(
         _stop.clear()
         _painter = threading.Thread(target=_paint_loop, name="dev-ui", daemon=True)
         _painter.start()
+
+
+def _stop_painter() -> None:
+    """Stop the painter thread and wait for it to leave, so no two threads ever repaint against one _painted."""
+    global _painter
+    _stop.set()
+    if _painter is not None and _painter.is_alive() and _painter is not threading.current_thread():
+        _painter.join(timeout=1.0)
+    _painter = None
 
 
 def _stream_handles_unicode() -> bool:
@@ -208,9 +227,13 @@ def _install_sigint() -> None:
 
     A KeyboardInterrupt during a build must not leave the cursor hidden, and atexit alone does not run early enough to
     keep the traceback out of the region.
+    Installed once: chaining a new handler onto the previous one at every configure would stack them.
     """
+    global _prev_sigint, _sigint_installed
     import signal
 
+    if _sigint_installed:
+        return
     try:
         previous = signal.getsignal(signal.SIGINT)
     except (ValueError, AttributeError):
@@ -226,7 +249,22 @@ def _install_sigint() -> None:
     try:
         signal.signal(signal.SIGINT, handler)
     except (ValueError, OSError):
-        pass  # not the main thread, so there is no handler to install
+        return  # not the main thread, so there is no handler to install
+    _prev_sigint, _sigint_installed = previous, True
+
+
+def _restore_sigint() -> None:
+    """Put back whatever handler was there before, so a configure/shutdown cycle leaves the process as it found it."""
+    global _prev_sigint, _sigint_installed
+    if not _sigint_installed:
+        return
+    import signal
+
+    try:
+        signal.signal(signal.SIGINT, _prev_sigint)
+    except (ValueError, OSError, TypeError):
+        pass
+    _prev_sigint, _sigint_installed = None, False
 
 
 def enabled() -> bool:
@@ -241,16 +279,18 @@ def shutdown() -> None:
     global _enabled, _cursor_hidden
     if not _enabled:
         return
-    _stop.set()
-    with _lock:
+    _stop_painter()
+    with _io_lock:
         _erase()
         if _cursor_hidden:
             _write(_SHOW_CURSOR)
             _cursor_hidden = False
         _flush()
-        _rows.clear()
+        with _rows_lock:
+            _rows.clear()
         _enabled = False
     _restore_console_mode()
+    _restore_sigint()
 
 
 def _restore_console_mode() -> None:
@@ -289,15 +329,36 @@ def _width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
+def _cells(ch: str) -> int:
+    """Terminal cells one character occupies.
+
+    East Asian wide and fullwidth forms take two, which is the whole reason the region cannot measure in characters:
+    a path or an identifier echoed back by a diagnostic would wrap, and a wrapped line is counted once and drawn twice.
+    """
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def _columns(text: str) -> int:
+    """Terminal cells `text` occupies."""
+    return sum(_cells(ch) for ch in text)
+
+
 def _fit(text: str, width: int) -> str:
     """Cut one raw line to `width` printable columns, before any styling is applied.
 
+    Columns rather than characters, since those differ and only the column count decides how many rows a line takes.
     Control characters are dropped and tabs expanded first: a compiler diagnostic carries both, and either would make the
     line occupy a different number of terminal rows than the frame counted on.
     """
     text = text.replace("\t", "    ")
     text = "".join(ch for ch in text if ch == " " or ch.isprintable())
-    return text[:width] if len(text) > width else text
+    used = 0
+    for i, ch in enumerate(text):
+        cells = _cells(ch)
+        if used + cells > width:
+            return text[:i]
+        used += cells
+    return text
 
 
 def _fmt_elapsed(seconds: float) -> str:
@@ -323,13 +384,13 @@ def _row_lines(row: _Row, tick: int, width: int) -> list[str]:
     if row.done is not None and row.total:
         head += f"  [{row.done}/{row.total}]"
         # The bar takes whatever is left after the text and the clock, and is dropped entirely on a narrow terminal.
-        room = width - len(head) - len(elapsed) - 12
+        room = width - _columns(head) - len(elapsed) - 12
         if room >= 8:
             pct = round(100 * row.done / row.total)
             head += f"  {_bar(row.done, row.total, min(24, room))} {pct:>3}%"
     if row.note:
         head += f"  {row.note}"
-    pad = max(1, width - len(head) - len(elapsed) - 4)
+    pad = max(1, width - _columns(head) - len(elapsed) - 4)
     lines = [console.dim(_fit(f"  {head}{' ' * pad}{elapsed}", width - 1))]
     for entry in row.tail:
         lines.append(console.dim(_fit(f"  | {entry}", width - 1)))
@@ -339,7 +400,7 @@ def _row_lines(row: _Row, tick: int, width: int) -> list[str]:
 def _erase() -> None:
     """Remove the whole region, leaving the cursor where it began.
 
-    Callers hold _lock.
+    Callers hold _io_lock.
     """
     global _painted
     if _painted:
@@ -350,18 +411,23 @@ def _erase() -> None:
 def _paint(tick: int = 0) -> None:
     """Draw every row and record how many lines it took.
 
-    Callers hold _lock.
+    Callers hold _io_lock.
+    The frame is composed under _rows_lock and then written with that lock released, so a terminal that blocks mid-frame
+    never holds up a pump thread calling feed().
     """
     global _painted, _cursor_hidden
-    if not _rows or _suspended:
+    if _suspended:
         return
+    width = _width()
+    with _rows_lock:
+        if not _rows:
+            return
+        lines: list[str] = []
+        for row in sorted(_rows, key=lambda r: not r.is_phase):
+            lines.extend(_row_lines(row, tick, width))
     if not _cursor_hidden:
         _write(_HIDE_CURSOR)
         _cursor_hidden = True
-    width = _width()
-    lines: list[str] = []
-    for row in sorted(_rows, key=lambda r: not r.is_phase):
-        lines.extend(_row_lines(row, tick, width))
     for line in lines:
         _write(f"\r{_CSI}2K{line}\n")
     _write(f"{_CSI}J")
@@ -376,7 +442,7 @@ def render_once(tick: int = 0) -> None:
     """
     if not _enabled:
         return
-    with _lock:
+    with _io_lock:
         _erase()
         _paint(tick)
 
@@ -392,9 +458,11 @@ def _paint_loop() -> None:
     tick = 0
     while not _stop.wait(_interval_s):
         tick += 1
-        with _lock:
-            if not _rows or _suspended:
-                continue
+        with _rows_lock:
+            idle = not _rows
+        if idle or _suspended:
+            continue
+        with _io_lock:
             _erase()
             _paint(tick)
 
@@ -411,7 +479,7 @@ def write_line(text: str, *, stream: TextIO | None = None) -> None:
     if not _enabled:
         print(text, file=stream if stream is not None else sys.stderr)
         return
-    with _lock:
+    with _io_lock:
         _erase()
         _write(text + "\n")
         _paint()
@@ -425,14 +493,14 @@ def suspend() -> Iterator[None]:
     if not _enabled:
         yield
         return
-    with _lock:
+    with _io_lock:
         _erase()
         _flush()
         _suspended += 1
     try:
         yield
     finally:
-        with _lock:
+        with _io_lock:
             _suspended -= 1
 
 
@@ -459,7 +527,7 @@ class Step:
         if row is None:
             return
         line = line.rstrip("\n")
-        with _lock:
+        with _rows_lock:
             row.tail.append(line)
             if row.sniffer is not None:
                 progress = row.sniffer(line)
@@ -469,7 +537,7 @@ class Step:
     def set_progress(self, done: int | None, total: int | None) -> None:
         if self._row is None:
             return
-        with _lock:
+        with _rows_lock:
             self._row.done, self._row.total = done, total
 
     def finish(self, *, ok: bool, summary: str) -> None:
@@ -480,15 +548,17 @@ class Step:
                 write_line(summary)
             return
         self._row = None
-        with _lock:
+        with _io_lock:
             _erase()
-            if not ok:
-                for entry in row.tail:
-                    _write(console.dim(_fit(f"  | {entry}", _width() - 1)) + "\n")
+            # Snapshot and unlink under the rows lock, then write with it released.
+            with _rows_lock:
+                tail = [] if ok else list(row.tail)
+                if row in _rows:
+                    _rows.remove(row)
+            for entry in tail:
+                _write(console.dim(_fit(f"  | {entry}", _width() - 1)) + "\n")
             if summary:
                 _write(summary + "\n")
-            if row in _rows:
-                _rows.remove(row)
             _paint()
             _flush()
 
@@ -506,7 +576,7 @@ def open_step(label: str, *, step_type: str, active: bool = True) -> Step:
     factory = _SNIFFERS.get(step_type)
     row = _Row(label=label, step_type=step_type, started=time.monotonic(),
                tail=collections.deque(maxlen=_tail_lines), sniffer=factory() if factory else None)
-    with _lock:
+    with _rows_lock:
         _rows.append(row)
     return Step(row)
 
@@ -517,15 +587,7 @@ def step(label: str, *, step_type: str) -> Iterator[Step]:
 
     An escaping exception retires it, so a crash never leaves a live row behind.
     """
-    if not _enabled:
-        yield Step(None)
-        return
-    factory = _SNIFFERS.get(step_type)
-    row = _Row(label=label, step_type=step_type, started=time.monotonic(),
-               tail=collections.deque(maxlen=_tail_lines), sniffer=factory() if factory else None)
-    with _lock:
-        _rows.append(row)
-    handle = Step(row)
+    handle = open_step(label, step_type=step_type)
     try:
         yield handle
     finally:
@@ -541,7 +603,7 @@ class Phase:
     def advance(self, note: str = "") -> None:
         if self._row is None:
             return
-        with _lock:
+        with _rows_lock:
             self._row.done = (self._row.done or 0) + 1
             self._row.note = note
 
@@ -550,10 +612,11 @@ class Phase:
         if row is None:
             return
         self._row = None
-        with _lock:
+        with _io_lock:
             _erase()
-            if row in _rows:
-                _rows.remove(row)
+            with _rows_lock:
+                if row in _rows:
+                    _rows.remove(row)
             _paint()
 
 
@@ -566,7 +629,7 @@ def open_phase(label: str, *, total: int) -> Phase:
         return Phase(None)
     row = _Row(label=label, step_type="phase", started=time.monotonic(),
                tail=collections.deque(maxlen=0), done=0, total=total, is_phase=True)
-    with _lock:
+    with _rows_lock:
         _rows.append(row)
     return Phase(row)
 

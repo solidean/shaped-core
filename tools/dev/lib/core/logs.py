@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from . import console
+from . import console, ui
 from .models import StepResult, TestSummary
 
 
@@ -224,11 +223,10 @@ def merge_junit(xml_paths: list[Path], output: Path) -> TestSummary:
     tree = ET.ElementTree(merged)
     ET.indent(tree, space="  ")
     tree.write(str(output), encoding="unicode", xml_declaration=True)
-    print(f"XML report written to {output}", file=sys.stderr)
-    print(
+    ui.write_line(f"XML report written to {output}")
+    ui.write_line(
         f"  Total tests: {totals['tests']}, failures: {totals['failures']}, "
-        f"errors: {totals['errors']}",
-        file=sys.stderr,
+        f"errors: {totals['errors']}"
     )
     return TestSummary(
         binary=output.name,

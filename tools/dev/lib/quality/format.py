@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core import console
+from ..core import console, ui
 from ..core.models import StepResult
 from ..core.process import response_file, run_step
 from .changes import ChangeScope, changed_files
@@ -112,7 +112,7 @@ def ensure_pinned_clang_format(root: Path) -> str | None:
     # The script narrates itself on stderr, success or failure — a download worth seconds, or why it could not be done.
     # Passed through either way, so the pause is never unexplained and a failure is not restated in worse words.
     if completed.stderr.strip():
-        print(completed.stderr.strip(), file=sys.stderr)
+        ui.write_line(completed.stderr.strip())
     if completed.returncode != 0:
         return None
     pinned = repo_clang_format(root)
@@ -333,7 +333,7 @@ def run_format(
         msg = (f"clang-format major version {have[0]} != required {need} "
                f"(found {have_str}); formatting may differ from the pinned style")
         if allow_different_version:
-            print(console.yellow(f"WARNING: {msg}"), file=sys.stderr)
+            ui.write_line(console.yellow(f"WARNING: {msg}"))
         else:
             raise FormatSetupError(
                 f"{msg}. Run tools/bin/fetch-clang-format.py to install the pinned {need}.x, "
