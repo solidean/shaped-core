@@ -145,6 +145,10 @@ private:
     /// Say so, once, when routines are being asked for and nothing has ever ticked.
     void warn_if_never_ticked();
 
+    /// Say so, once per routine, when one has been pending across enough ticks that it is not simply still building.
+    /// The companion to warn_if_never_ticked, for the case where the tick IS being called and nothing comes up.
+    void warn_if_pending_too_long(render_routine_base& routine);
+
     /// Forget what an evicted routine depended on.
     /// Edges pointing AT it are left alone: they belong to routines that still hold a token, and the strong reference
     /// in that token is what keeps it alive — which is exactly the promise a token makes.

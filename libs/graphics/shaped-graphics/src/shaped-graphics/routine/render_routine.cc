@@ -125,6 +125,21 @@ bool render_routine_base::is_initialized()
     return own_readiness() == routine_readiness::ready;
 }
 
+void render_routine_base::note_pending_at(u64 tick)
+{
+    // The FIRST tick it was pending at is what the age is measured from, so a routine that has been stuck since the
+    // start does not look freshly pending on every sweep.
+    u64 expected = 0;
+    (void)_first_pending_tick.compare_exchange_strong(expected, tick, cc::memory_order_relaxed);
+}
+
+void render_routine_base::clear_pending_mark()
+{
+    // Came up (or failed), so the next time it goes pending is a fresh span and a fresh verdict.
+    _first_pending_tick.store(0, cc::memory_order_relaxed);
+    _warned_pending.store(false, cc::memory_order_relaxed);
+}
+
 void render_routine_base::fail_init()
 {
     _failed = true;

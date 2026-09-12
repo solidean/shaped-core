@@ -36,7 +36,7 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     // routine pending forever, which is a configuration error and not a state to report.
     auto& scheduler = cc::ambient_async_scheduler();
 
-    ++_ticks;
+    auto const tick_index = ++_ticks;
 
     auto result = routine_tick_result();
 
@@ -99,7 +99,12 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
 
     for (auto const& routine : pending)
         if (routine->own_readiness() == routine_readiness::pending)
+        {
             ++result.pending;
+            routine->note_pending_at(tick_index);
+        }
+        else
+            routine->clear_pending_mark();
 
     return result;
 }
@@ -212,7 +217,17 @@ void routine_registry::warn_if_never_ticked()
 {
     // Threshold rather than the first acquire: a routine registered and asked about in the same frame is ordinary, and
     // the tick that would bring it up has simply not come round yet.
-    static constexpr auto k_acquires_before_warning = u64(1000);
+    //
+    // Low enough that a TEST reaches it.
+    // At a thousand it was a diagnostic only a long-running application could trigger, which is the one case where
+    // the empty screen is already obvious.
+    // A suite that declines every draw and says nothing is the case it is actually worth having.
+    //
+    // This counter is per REGISTRY rather than per routine, which is what sets the floor: a renderer with many
+    // routines spends acquires quickly and legitimately.
+    // One parametrized routine used at sixteen sites in the first frames would already be there, so the threshold has
+    // to clear a whole frame's worth of honest acquires before it means anything.
+    static constexpr auto k_acquires_before_warning = u64(128);
 
     if (_ticks.load(cc::memory_order_relaxed) != 0)
         return;
@@ -226,11 +241,37 @@ void routine_registry::warn_if_never_ticked()
                    k_acquires_before_warning);
 }
 
+void routine_registry::warn_if_pending_too_long(render_routine_base& routine)
+{
+    // The second half of the never-ticked diagnostic, and the more useful one: by the time someone hits THIS they
+    // have already called tick, so the obvious explanation is spent and there is nothing else to read.
+    //
+    // Counted in ticks rather than in acquires, because that is the thing that was supposed to make progress.
+    static constexpr auto k_ticks_before_warning = u64(600); // ~10 s at 60 Hz, well past any honest compile
+
+    auto const ticks = _ticks.load(cc::memory_order_relaxed);
+    if (ticks < k_ticks_before_warning)
+        return;
+
+    auto const first = routine.first_pending_tick();
+    if (first == 0 || ticks - first < k_ticks_before_warning)
+        return;
+    if (routine.mark_warned_pending())
+        return; // already said, once, for this routine
+
+    CC_LOG_WARNING("a render routine has been pending for {} ticks — it or something it depends on is not coming up. "
+                   "Check that its shader package is registered and that its shaders compile",
+                   ticks - first);
+}
+
 routine_readiness routine_registry::readiness_of(render_routine_base& routine)
 {
     auto const own = routine.own_readiness();
     if (own == routine_readiness::pending)
+    {
         warn_if_never_ticked();
+        warn_if_pending_too_long(routine);
+    }
     if (own == routine_readiness::failed)
         return routine_readiness::failed;
 
@@ -282,7 +323,15 @@ routine_readiness routine_registry::readiness_of(render_routine_base& routine)
 
 void routine_registry::clear()
 {
-    // Edges first: a token holds a strong reference, so a cycle that slipped past add_dependency would otherwise keep
+    // Detached work first, and OUTSIDE the map lock: a routine may have started a compile on the frame path that no
+    // phase owns, and that node holds the context this clear is part of tearing down.
+    // Waiting here is what makes "the context outlives everything started against it" true rather than usually true.
+    // Outside the lock because a drain blocks, and a routine registering another one while we hold `_entries` would
+    // deadlock against its own initialization.
+    for (auto const& routine : snapshot())
+        routine->drain_detached_work();
+
+    // Edges next: a token holds a strong reference, so a cycle that slipped past add_dependency would otherwise keep
     // its own routines alive after the map let go of them.
     _edges.lock([](edge_map& edges) { edges.clear(); });
     _entries.lock([](routine_map& entries) { entries.clear(); });

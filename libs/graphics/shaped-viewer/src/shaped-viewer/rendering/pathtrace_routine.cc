@@ -41,20 +41,26 @@ enum class permutation_state
 /// The cache hands back COLD nodes, so polling alone would watch one that never starts.
 /// Started rather than driven: this runs on the frame path, where a compile must not be waited for -- async_start
 /// hands it to the ambient scheduler and the trace picks it up a frame or two later.
-[[nodiscard]] permutation_state state_of_node(sg::async_compiled_shader const& node)
+///
+/// Anything started is appended to `started`, because a node kicked off here belongs to no phase: the tick cannot
+/// collect it, readiness never covers it, and it holds the context until it settles.
+/// drain_detached_work is what waits for them, and that list is the only record there is.
+[[nodiscard]] permutation_state state_of_node(sg::async_compiled_shader const& node,
+                                              cc::vector<sg::async_compiled_shader>& started)
 {
     if (node->try_value() != nullptr)
         return permutation_state::ready;
     if (node->is_ready())
         return permutation_state::failed; // settled with no value
     (void)cc::async_start(node);
+    started.push_back(node);
     return permutation_state::pending;
 }
 
 /// Whether `p` has everything a hit group needs, without waiting for any of it.
-[[nodiscard]] permutation_state state_of(material_permutation const* p)
+[[nodiscard]] permutation_state state_of(material_permutation const* p, cc::vector<sg::async_compiled_shader>& started)
 {
-    auto const primary = state_of_node(p->shader);
+    auto const primary = state_of_node(p->shader, started);
     if (primary != permutation_state::ready)
         return primary;
 
@@ -62,10 +68,10 @@ enum class permutation_state
         return permutation_state::ready;
 
     // The cutout test, twice, because the two rays that reach it carry different payloads.
-    auto const any = state_of_node(p->any_hit);
+    auto const any = state_of_node(p->any_hit, started);
     if (any != permutation_state::ready)
         return any;
-    return state_of_node(p->shadow_any_hit);
+    return state_of_node(p->shadow_any_hit, started);
 }
 
 /// The static samplers `hit_groups` declare, by the generated name each register carries.
@@ -124,6 +130,37 @@ cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
+void pathtrace_routine::record_started(cc::vector<sg::async_compiled_shader> started)
+{
+    if (started.empty())
+        return;
+    _started_on_frame_path.lock(
+        [&](cc::vector<sg::async_compiled_shader>& all)
+        {
+            for (auto& n : started)
+                all.push_back(cc::move(n));
+        });
+}
+
+void pathtrace_routine::drain_detached_work()
+{
+    // Taken out under the lock and waited on outside it: a node settling can run arbitrary continuations, and holding
+    // the routine's own list across that is how a shutdown deadlocks.
+    auto pending = _started_on_frame_path.lock(
+        [](cc::vector<sg::async_compiled_shader>& all)
+        {
+            auto out = cc::move(all);
+            all = {};
+            return out;
+        });
+
+    // Settled rather than valued: a compile that FAILED is as drained as one that succeeded, and this is teardown —
+    // there is nobody left to report a verdict to.
+    for (auto const& node : pending)
+        if (node != nullptr)
+            (void)cc::try_async_blocking_get(node);
+}
+
 pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx, pt_trace_desc const& d)
 {
     CC_ASSERT(d.bindless != nullptr, "a path trace binds the manager's bindless tables");
@@ -133,8 +170,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     // It is a cold node like every other permutation, and one nobody starts is async work that never happens — so the
     // fallback would never become available and every trace missing a real permutation would decline forever.
     // Before the early-out below for the same reason.
+    // Collected locally and appended once, so the guarded list is touched a single time per trace rather than per
+    // permutation — this is the frame path.
+    auto started = cc::vector<sg::async_compiled_shader>();
+
     auto const* const fallback
-        = d.fallback != nullptr && state_of(d.fallback) == permutation_state::ready ? d.fallback : nullptr;
+        = d.fallback != nullptr && state_of(d.fallback, started) == permutation_state::ready ? d.fallback : nullptr;
 
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
@@ -152,16 +193,21 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        if (state_of(p) != permutation_state::ready)
+        if (state_of(p, started) != permutation_state::ready)
             p = fallback; // still compiling, or a material that does not build
 
         if (p == nullptr)
+        {
+            record_started(cc::move(started)); // even a trace that gives up here started compiles that must be waited for
             return nullptr; // nothing compiled and nothing to stand in for it — trace no-ops, as it always did
+        }
         groups.push_back(p);
     }
 
     // The hit groups in order plus the schema the second group is bound through: the two things a pipeline is built
     // from that a caller can vary between traces.
+    record_started(cc::move(started));
+
     auto key_bytes = cc::vector<cc::hash128>();
     key_bytes.reserve(groups.size() + 1);
     key_bytes.push_back(d.bindless->layout()->structural_hash());

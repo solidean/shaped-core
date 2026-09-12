@@ -4,6 +4,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
@@ -128,7 +129,23 @@ public:
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
+    /// Waits out the permutation compiles `execute` started on the frame path.
+    ///
+    /// A declined trace kicks off the compiles it was missing — that is what makes the next frame able to draw — and
+    /// those nodes belong to no phase, so nothing else can collect them.
+    /// See render_routine_base::drain_detached_work.
+    void drain_detached_work() override;
+
 private:
+    /// Append what one trace started to the guarded list; a no-op when it started nothing, which is the steady state.
+    void record_started(cc::vector<sg::async_compiled_shader> started);
+
+    /// Every shader node `execute` called async_start on, so shutdown can wait for them.
+    ///
+    /// Guarded because execute runs under the routine's own lock while a clear does not, and because the whole point
+    /// is to read it from the thread tearing the context down.
+    cc::mutex<cc::vector<sg::async_compiled_shader>> _started_on_frame_path;
+
     /// One pipeline, built over one ordered set of hit groups.
     ///
     /// `group_layout` covers the trace's own bindings alone: the manager's tables are the second group and are
