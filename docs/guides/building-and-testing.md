@@ -633,13 +633,15 @@ A `.install/` at the wrong pin is otherwise invisible, and is the thing that mak
 
 ## Sanitizers
 
-The `sanitize-*` presets are Debug builds with AddressSanitizer + UndefinedBehaviorSanitizer
-(`SANITIZE=address,undefined`, wired in the root [CMakeLists.txt](../../CMakeLists.txt)):
+Two families, and they cannot be combined: **`sanitize-*`** is AddressSanitizer + UndefinedBehaviorSanitizer, **`sanitize-thread-*`** is ThreadSanitizer.
+Both are wired through one `SANITIZE` cache variable in the root [CMakeLists.txt](../../CMakeLists.txt).
 
 ```bash
-uv run dev.py test --preset sanitize-linux-clang   # Linux
-uv run dev.py test --preset sanitize-macos-arm-llvm # macOS
-uv run dev.py test --preset sanitize-clang          # Windows (see caveat)
+uv run dev.py test --preset sanitize-linux-clang      # ASan + UBSan, Linux
+uv run dev.py test --preset sanitize-macos-arm-llvm   # ASan + UBSan, macOS
+uv run dev.py test --preset sanitize-clang            # ASan + UBSan, Windows (see caveat)
+uv run dev.py test --preset sanitize-thread-linux-clang    # TSan, Linux
+uv run dev.py test --preset sanitize-thread-macos-arm-llvm # TSan, macOS
 ```
 
 On **Linux and macOS** the clang driver links the sanitizer runtime itself, and these presets are part of the `check` test gate.
@@ -661,6 +663,30 @@ The cost is that allocation behaviour is not what the other presets do — in-pl
 We cannot fix those without diverging from upstream, and a finding nobody will ever act on trains the reader to scroll past the next one.
 Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
 The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.
+
+### ThreadSanitizer (`sanitize-thread-*`)
+
+`SANITIZE=thread`, and **RelWithDebInfo rather than Debug** — the one place this family's shape differs from the ASan one.
+TSan already costs 5-15x, an unoptimized build compounds it, and optimized-with-symbols is what the tool is tuned for.
+`CC_ASSERT` is therefore on here too.
+
+**Not part of the `check` gate.** It is a separate full build of the repo, and `check` already carries five test legs; run it deliberately.
+
+Three things to know before reading a report.
+
+**TSan models no fence at all.**
+`cc::atomic_thread_fence` is a no-op to the tool.
+So a release fence paired with a relaxed store — correct by the memory model, and what the chase-lev deque used to do — reads as a missing edge and reports as a race.
+Publication therefore carries its ordering on the store, not on a separate fence, wherever TSan has to be able to check it.
+
+**Uninstrumented libraries report as races.**
+Their atomics look like plain memory, so their internal handoffs surface as findings nobody can act on.
+[tools/cmake/tsan-suppressions.txt](../../tools/cmake/tsan-suppressions.txt) is the runtime list, applied by dev.py on every test run, and each entry says which module and why.
+It is the counterpart of `lsan-suppressions.txt` beside it; the compile-time `sanitizer-ignorelist.txt` cannot help here, because a prebuilt `.so` was never compiled by us.
+
+**A stack walk is not the source's.**
+TSan starts threads through a trampoline the walker cannot get past, and rewrites every access, so `cc::capture_stack` reports frames that are correct but not the ones the code suggests.
+`CC_HAS_THREAD_SANITIZER` exists for exactly that, and for nothing else — it is not a way to skip a test that is merely slow under the tool.
 
 ## Useful flags
 

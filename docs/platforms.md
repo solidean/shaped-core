@@ -134,6 +134,7 @@ The standard **Debug / RelWithDebInfo / Release** build types should all work on
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
+The two sanitizer families cannot be combined, so they are separate presets: `sanitize-*` is ASan + UBSan at Debug, `sanitize-thread-*` is ThreadSanitizer at RelWithDebInfo.
 
 **C++20 module scanning is off repo-wide** (`CMAKE_CXX_SCAN_FOR_MODULES`), because nothing here imports a module.
 Left at the default CMP0155 turns on for C++20+, whether a build pays for a per-TU scan comes down to whether a `clang-scan-deps` happens to be installed.
