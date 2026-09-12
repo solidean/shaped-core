@@ -418,6 +418,18 @@ When the branch already records it, there are only two honest moves.
 Or **raise it as a disagreement with the recorded judgement**, quoting what they wrote and saying why this branch should not ship with it.
 That is a different finding, and a much harder one to write.
 
+**The same rule binds a finding about the review tool**, and it bites harder there.
+The reviewer is inside the tool rather than reading about it, and mistakes that familiarity for having read its docs.
+pr-167 is the worked case.
+The tooling entry reported that `validate` resolves paths inside fenced blocks, so pasting a build driver's output — object paths, an SDK header — is impossible without falsifying it.
+It recommended a per-block opt-out.
+The opt-out exists: `raw` as a fence's info string, and `` `raw:…` `` for one span.
+It is implemented in `tools/review/lib/annotate/table.py:36-57`, documented under a heading of its own in `tools/review/docs/block-grammar.md`, and said again in `tools/review/readme.md`.
+The reviewer had read the grammar down to the section above it and stopped.
+
+So **read the tool's own docs end to end before filing against it**, the same way you read the branch's.
+What survived in that case was a much smaller finding: the failure message named the problem and no remedy, which is the one moment an author would have found the feature.
+
 ### A test's comment is a claim about the test, checked the way a doc claim is
 
 Read what the test asserts, then read what its comment says it asserts.

@@ -6,11 +6,13 @@ It worked by an accident — highlighting wraps a fence's body in spans, so the 
 and that accident does not extend to a term mid-sentence, a sha, or a path inside a code comment.
 
 So it moved: `lib/annotate/` finds and resolves references over the entry source, and the page wraps them.
-What is left here is markdown, the fence rule, and the one span the block grammar adds.
+What is left here is markdown, the fence rule, and the two marks the block grammar adds: `==new==` spans and
+`pro:` / `con:` / `verdict:` list items.
 """
 
 from __future__ import annotations
 
+import re
 from html import escape
 from pathlib import Path
 
@@ -44,11 +46,45 @@ def _mark_rule(state, silent: bool) -> bool:
     return True
 
 
+# A list item opening `pro:`, `con:` or `verdict:` becomes a marked one: a green tick, a red cross, an arrow.
+# The case is a design-critique pricing several alternatives, where the shape of the argument has to be visible before
+# a word of it is read — a wall of flowing prose with the pros and cons buried in it is the thing this replaces.
+#
+# Matched before inline parsing, so the content is still the raw source and the prefix comes off cleanly.
+# The marker goes on the enclosing list item rather than into the text, so the words the author wrote are all that is
+# left in the item and the mark is the page's.
+_VERDICT_RE = re.compile(r"^(pro|con|verdict)[ \t]*:[ \t]+", re.IGNORECASE)
+
+
+def _verdict_rule(state) -> None:
+    tokens = state.tokens
+    for i, token in enumerate(tokens):
+        if token.type != "inline":
+            continue
+        match = _VERDICT_RE.match(token.content)
+        if match is None:
+            continue
+        # The enclosing item is the nearest `list_item_open` above, reached through the item's own paragraph and
+        # nothing else: a paragraph that merely starts with the word is not a priced bullet.
+        opener = None
+        for j in range(i - 1, -1, -1):
+            if tokens[j].type == "list_item_open":
+                opener = tokens[j]
+                break
+            if tokens[j].type != "paragraph_open":
+                break
+        if opener is None:
+            continue
+        opener.attrJoin("class", f"verdict v-{match.group(1).lower()}")
+        token.content = token.content[match.end():]
+
+
 def _renderer() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"linkify": False, "html": True})
     md.enable("table")
     md.enable("strikethrough")
     md.inline.ruler.before("emphasis", "mark", _mark_rule)
+    md.core.ruler.before("inline", "verdict", _verdict_rule)
     return md
 
 

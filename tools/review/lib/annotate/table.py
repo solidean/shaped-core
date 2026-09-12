@@ -99,9 +99,16 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     return tokens
 
 
+# The remedy every reference failure carries.
+# An author hitting one is looking for exactly this feature at exactly that moment, and has no reason to go and read
+# the grammar to find out it exists — so the message says it rather than leaving it to be discovered.
+_RAW_REMEDY = "write it as `raw:<path>`, or open the fence as ```raw, to say this is not a reference"
+
+
 def problems(entry: Entry, tokens: list[Token]) -> list[str]:
     """What `validate` reports: every reference that does not hold, with the entry it is in."""
-    return [f"{entry.slug}: {token.text} — {token.problem}" for token in tokens if token.problem]
+    return [f"{entry.slug}: {token.text} — {token.problem}\n  {_RAW_REMEDY}"
+            for token in tokens if token.problem]
 
 
 def to_json(tokens: list[Token]) -> list[dict]:

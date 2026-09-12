@@ -21,6 +21,16 @@ Two design commitments follow from that, and everything else in this document is
   The live progress region ([lib/core/ui.py](../tools/dev/lib/core/ui.py)) is the same commitment seen from the other end.
   It is a second, *ephemeral* view of the record a step is already writing, never a second source of truth — which is exactly why a step that passes erases its rows and leaves only its summary line.
   The permanent transcript stays the terse trace either way, and it exists only where it can be repainted: piped, redirected or in CI it never runs, so an agent's run and a CI log are unchanged.
+
+  Two alternatives are closed, and are written here so nobody re-proposes them.
+
+  **A progress library — `rich`, `tqdm` — is rejected**, and not on its merits: they solve the column-width, wide-character, cursor-restore and Windows-VT problems properly.
+  `dev.py` declares no Python dependencies, so adopting one is a policy change rather than an import, and the region is not the thing worth spending that on.
+  That is the same reasoning [lib/core/console.py](../tools/dev/lib/core/console.py) hand-rolls SGR under.
+
+  **A single repainted status line, with `\r` and no tail, is the fallback if the region ever proves flaky** — not a rejected design.
+  `\r` needs no up-count, so the invariant `ui.py` is built around and both of its failure modes stop existing.
+  What it gives up is the tail of what a step is saying right now, which is the half that earns the feature, so it is a retreat rather than a simplification.
 - **Collection-oriented.** Presets and targets are selected with comma-lists, repeated flags and wildcards, and configure, build and test operate on *lists* rather than one at a time.
   A toolset matrix is one invocation.
   Operating on lists is also what lets the driver decide *where* concurrency belongs.

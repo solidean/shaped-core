@@ -27,12 +27,40 @@ This is the working behind it.
 When a review has both, the verdict should point here rather than asserting "this is the right answer" on its own
 authority — that sentence is exactly the one a reader cannot check.
 
+## How it is laid out
+
+**One `## prose` block per alternative, and the pricing as priced bullets — never as flowing prose.**
+
+An alternative written as a paragraph with its pros and cons inside the sentences is unreadable at the speed this
+entry is meant to be read at.
+The maintainer is scanning five options for the one that dominates, and that scan has to work before a word is read.
+
+So each alternative is its own block, named after itself, opening with one line saying what it is.
+Then the pricing, as a list whose items open `pro:`, `con:` or `verdict:` — the page draws those as a green tick, a
+red cross and an arrow, and drops the prefix.
+
+```markdown
+## prose
+name: take-a-dependency
+
+Use `rich` or `tqdm` instead of hand-rolling the escape sequences.
+
+- pro: the column-width, wide-character and Windows-VT problems are all solved upstream
+- con: dev.py declares no dependencies today, so this is a policy change rather than an import
+- verdict: correctly rejected, and not written down anywhere
+```
+
+The marks are a page convention rather than a block type, so they work in any `prose` or `recommendation` block —
+see [the block grammar](../block-grammar.md#priced-bullets).
+Use them here and leave them out of ordinary findings: they mean *this is being priced against something else*, and
+that is what makes them worth having.
+
 ## What goes in it
 
 - **The alternatives, including the boring ones.**
   Doing nothing structural is always one of them, and it is often the most informative: on a large branch it reveals
   which slice carries which part of the value, and therefore what could be kept if the rest were reverted.
-- **Pro, con and verdict for each**, short.
+- **Pro, con and verdict for each**, as priced bullets and short.
   The maintainer is checking your reasoning, not reading an essay.
 - **Which ones the branch already recorded**, marked and cited.
   For those the question is whether the recorded reasoning *holds*, never whether the option was seen.
