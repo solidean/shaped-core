@@ -121,3 +121,11 @@ The notification wakes the actor's mailbox, so a watched watcher has no interval
 - **Package-level include paths.** A package cannot declare extra search roots beyond the three slib already searches.
 - **A shared-include package.** A mount with no `SHADERS` entries already works via `lib.mount`, but there is no CMake-level way to declare "this target publishes an include-only shader library".
 - **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.
+
+- **A WGSL declaration parser**, to land with or before a WebGPU backend.
+  `sg::shader_format::wgsl` exists and `shader_asset::acquire(ctx)` already picks a compiler by what the context accepts, so nothing structural is missing — what is missing is reflection.
+  A `sg::compiled_shader` carries the bindings a pipeline layout is built from, and for HLSL those come out of DXC.
+  WGSL has no equivalent, so slib would have to read the module itself.
+  Module-scope `var` declarations give the bindings with their group and binding indices, and the single entry point per module gives the stage each one is visible from.
+  That is a declaration parser, not a language front end — it never needs to look inside a function body.
+  It is also what makes `sg::binding::visibility` fillable on that backend, which a WebGPU bind group layout requires and cannot infer.

@@ -204,4 +204,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
+- **Migrate the suites to `ASYNC_TEST`.**
+  nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
+  What blocks it is that `cc::async` cannot resume on the main thread, and `ASYNC_TEST` asserts against nexus's `main_thread` flag — which the window and present suites need.
+  Closing that in clean-core is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
+
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
+  The never-block work this branch did is the prerequisite, not the backend: sg no longer has a blocking call on any frame path, and `ctx.execution()` is how a context says it cannot block at all.
+  What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).
