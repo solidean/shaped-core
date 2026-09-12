@@ -584,7 +584,8 @@ private:
             fold_completion_value(a.job);
 
         // The job is done PACKING, not done copying, so its drain token moves to a record keyed on the value the
-        // copy will signal. Without this the count would reach zero while the window was still in flight.
+        // copy will signal.
+        // Without this the count would reach zero while the window was still in flight.
         if (a.job.drain != nullptr && a.job.completion.is_pending())
             _pending_drains.push_back({.completion = a.job.completion, .drain = a.job.drain});
 
