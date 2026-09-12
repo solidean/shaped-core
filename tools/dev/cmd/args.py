@@ -93,11 +93,11 @@ def jsruntime(p: argparse.ArgumentParser) -> None:
 
 
 def change_scope(p: argparse.ArgumentParser, *, default_all: bool) -> None:
-    """The `--dirty-only` / `--commit` pair that narrows a lint or format run to one change set.
+    """The flags that narrow a lint or format run to one change set.
 
     `default_all` says what no flag at all means: True for a command that sweeps the whole tree by default (`format`, `lint`),
-    False for one that is already dirty-only by default (`check`, which spells the whole tree `--all` instead).
-    Both flags replace the default scope, so they go in a mutually exclusive group.
+    False for one that scopes itself (`check`, which spells the whole tree `--all` instead).
+    Every flag replaces the default scope, so they go in a mutually exclusive group.
     """
     group = p.add_mutually_exclusive_group()
     if default_all:
@@ -105,19 +105,34 @@ def change_scope(p: argparse.ArgumentParser, *, default_all: bool) -> None:
                            help="Only the next commit's files — git-dirty and untracked")
     else:
         group.add_argument("--all", action="store_true",
-                           help="Widen from dirty-only to the whole tree")
+                           help="Widen to the whole tree")
+        group.add_argument("--dirty-only", action="store_true",
+                           help="Narrow to git-dirty and untracked files alone, ignoring what is already committed")
     group.add_argument("--commit", metavar="REV", default=None,
                        help="Use a commit or `A..B` range instead of the working tree; "
                             "a single commit means its first-parent diff, so a merge yields everything it brought in")
+    group.add_argument("--since", metavar="REV", default=None,
+                       help="Everything changed since REV, working tree included — a branch's whole contribution")
 
 
-def scope_from_args(args: argparse.Namespace) -> dev.ChangeScope | None:
-    """The ChangeScope a `change_scope` flag pair asked for, where None means the whole tree.
+def scope_from_args(args: argparse.Namespace, *, default_since: str | None = None) -> dev.ChangeScope | None:
+    """The ChangeScope the `change_scope` flags asked for, where None means the whole tree.
+
+    `default_since` is what no flag at all means for a command that scopes itself to a branch — `check` passes the
+    merge base with the default branch, so its gates see the branch's commits and its uncommitted edits together.
+    Without it the default stays the working tree, which is what `format` and `lint` want.
 
     Does not validate the revision — the caller decides where a bad one should surface.
     """
+    if getattr(args, "since", None) is not None:
+        return dev.ChangeScope(since=args.since)
     if args.commit is not None:
         return dev.ChangeScope(args.commit)
-    if hasattr(args, "dirty_only"):
-        return dev.ChangeScope() if args.dirty_only else None
-    return None if args.all else dev.ChangeScope()
+    if getattr(args, "all", False):
+        return None
+    if getattr(args, "dirty_only", False):
+        return dev.ChangeScope()
+    if default_since is not None:
+        return dev.ChangeScope(since=default_since)
+    # A command with no `--all` (format, lint) sweeps the whole tree by default; one that has it scopes itself.
+    return None if not hasattr(args, "all") else dev.ChangeScope()
