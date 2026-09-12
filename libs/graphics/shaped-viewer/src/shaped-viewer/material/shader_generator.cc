@@ -347,13 +347,16 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
     cc::format_append(src, "#include \"{}\"\n\n", opts.runtime_include);
 
-    // Only the tables this permutation touches, so the reflection a caller binds against stays as small as the material is.
-    if (declares_buffers(r, opts))
-        cc::format_append(src, "ByteAddressBuffer {}[{}] : register(t0, space{});\n", name_of(bindless_table::buffers),
-                          count_of(bindless, bindless_table::buffers), space_of(bindless_table::buffers));
-    if (samples_texture(r))
-        cc::format_append(src, "Texture2D {}[{}] : register(t0, space{});\n", name_of(bindless_table::textures_2d),
-                          count_of(bindless, bindless_table::textures_2d), space_of(bindless_table::textures_2d));
+    // EVERY budgeted table, whether this material touches it or not, and no address on any of them.
+    //
+    // The whole set rather than a subset, because the pass numbers a group by declaration order and an array
+    // consumes one index per element: a permutation declaring two of the eight would put gBindlessTextures2D at
+    // t0 where the layout -- built from the same text, with all eight -- put it at t96.
+    // The shader would read the wrong descriptors and nothing would say so, which is Q8's own failure.
+    //
+    // Declaring one it never references costs nothing: an unreferenced declaration reaches no bytecode, and the
+    // trace filters every table out of its merged reflection by name in any case.
+    cc::format_append(src, "{}\n", bindless_declarations(bindless));
     // The permutation's samplers are a group of its own, so nothing here writes an address.
     //
     // They used to be hand-numbered `s{i}` in space 0, which only worked because pt_common.hlsli declared no

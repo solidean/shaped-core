@@ -249,9 +249,25 @@ TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
         if (b.name == sv::name_of(sv::bindless_table::buffers))
         {
             saw_buffers = true;
-            // Reflection must agree with the layout the manager declares, or the two groups cannot be bound together.
-            CHECK(b.space.value() == sv::space_of(sv::bindless_table::buffers));
             CHECK(b.is_array());
+
+            // Reflection must agree with the layout the manager declares, or the two groups cannot be bound
+            // together — and the address is the whole of that agreement, not just the space.
+            //
+            // Both sides come from one text now (`sv::bindless_declarations`), so this is what says the
+            // permutation embedded the same declarations the layout was parsed from.
+            // It is the check that would catch a permutation declaring a SUBSET of the tables: the pass numbers
+            // a group by declaration order, so a short list moves every table after it.
+            auto const declared = sv::make_bindless_bindings(sv::bindless_config{});
+            auto const* match = static_cast<sg::binding const*>(nullptr);
+            for (auto const& d : declared)
+                if (d.name == b.name)
+                    match = &d;
+
+            REQUIRE(match != nullptr);
+            CHECK(b.space.value() == match->space.value());
+            CHECK(b.index == match->index);
+            CHECK(b.count == match->count);
         }
     }
     CHECK(saw_instances);
