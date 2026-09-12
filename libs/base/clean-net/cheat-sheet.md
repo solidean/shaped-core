@@ -128,11 +128,15 @@ io->has_reactor_thread();                               // false on a threads-of
 io->time_source();                                      // cnet::clock& — what deadlines are measured against
 io->pending_count();                                    // a snapshot, readable from any thread
 
-// Transport layer only. Submitting is TWO steps, and the guard is the second one.
-auto const in_flight = io->submit(op);                  // impl::submission, [[nodiscard]]; the operation is inert
-op->cancellation.attach(token, *io, op);                // ... so everything still to be wired onto it goes HERE
-                                                        // Past the guard's scope the reactor may complete and free
-                                                        // `op` at any moment: a write to it there is a UAF.
+// Transport layer only. Submitting hands back a guard, and ATTACH TAKES IT -- so attach goes last.
+auto in_flight = io->submit(op);                        // impl::submission; the reactor holds `op` inert
+op->parked_somewhere = op;                              // ... so everything to be wired onto it goes HERE
+op->cancellation.attach(cc::move(in_flight), token);    // ... and this is last: the guard dies here
+                                                        // Past that the reactor may complete and free `op` at any
+                                                        // moment, so a write to it is a UAF.
+                                                        // An EMPTY guard (io_system shutting down) means `op` is
+                                                        // already completed and gone; attach then does nothing.
+op->cancellation.attach(io->submit(op), token);         // the common shape, with nothing else to wire
 io->cancel(op);                                         // harmless if it already completed
 io->signal(op);                                         // a `manual` operation is done
 ```

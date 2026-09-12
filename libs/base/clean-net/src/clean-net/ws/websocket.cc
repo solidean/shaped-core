@@ -313,8 +313,7 @@ struct send_watch final : impl::io_operation
         auto* const raw = watch.get();
         raw->self = cc::move(watch);
 
-        auto const in_flight = ws->io->submit(raw);
-        raw->registration.attach(token, *ws->io, raw);
+        auto in_flight = ws->io->submit(raw);
 
         // The frame may already have gone out while this was being armed, in which case there is nothing left to
         // cancel and the watch is signalled rather than left pending.
@@ -332,6 +331,10 @@ struct send_watch final : impl::io_operation
 
         if (!still_queued)
             ws->io->signal(raw);
+
+        // Last, so the guard outlives the outbox store above: `raw` goes into shared state there, and a completion
+        // between the two would put a freed pointer in it.
+        raw->registration.attach(cc::move(in_flight), token);
     }
 
     pump_writes(ws);
@@ -867,8 +870,7 @@ cc::shared_async<websocket_message> websocket::receive(deadline d, cancel_token 
 
         _state->state.lock([&](websocket_state::data& d_state) { d_state.receive_watch = raw; });
 
-        auto const in_flight = _state->io->submit(raw);
-        raw->registration.attach(token, *_state->io, raw);
+        raw->registration.attach(_state->io->submit(raw), token);
     }
 
     // Whatever already arrived is parsed first, so a message that was waiting is handed over without another read.

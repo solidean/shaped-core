@@ -90,6 +90,8 @@ void run_after(io_system& io, i64 delay_ms, F fn)
 
     auto* const raw = op.get();
     raw->self = cc::move(op);
+
+    // Nothing to wire onto a timer, so the guard is discarded and the operation arms at the end of this statement.
     io.submit(raw);
 }
 

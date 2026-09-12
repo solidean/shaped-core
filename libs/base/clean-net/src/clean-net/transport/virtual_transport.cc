@@ -251,8 +251,7 @@ public:
         // reader to signal and the bytes sit in the pipe with nobody coming for them.
         // Looking again is what covers the gap that is left: if something arrived while we were submitting, nothing
         // parked in time to be signalled, so we wake ourselves.
-        auto const in_flight = _io.submit(raw);
-        raw->cancellation.attach(token, _io, raw);
+        auto in_flight = _io.submit(raw);
 
         auto const arrived_meanwhile = _inbox->lock(
             [raw](pipe_data& d)
@@ -266,6 +265,10 @@ public:
 
         if (arrived_meanwhile)
             _io.signal(raw);
+
+        // Last, so the guard outlives the park above: `d.parked = raw` puts the operation in shared state, and a
+        // completion between the two would leave a freed pointer there.
+        raw->cancellation.attach(cc::move(in_flight), token);
 
         return promise;
     }
@@ -414,8 +417,7 @@ public:
         // An accept has two mutexes and cannot, so `incoming` is read INSIDE `parked_accept` -- and the connect side
         // takes them one after the other rather than nested, which is what makes that order safe.
         // Reading them the other way round would leave the window this is here to close.
-        auto const in_flight = _net->io.submit(raw);
-        raw->cancellation.attach(token, _net->io, raw);
+        auto in_flight = _net->io.submit(raw);
 
         auto const arrived_meanwhile = _state->parked_accept.lock(
             [raw, this](impl::io_operation*& slot)
@@ -430,6 +432,10 @@ public:
 
         if (arrived_meanwhile)
             _net->io.signal(raw);
+
+        // Last, for the same reason the receive attaches last: `slot = raw` is the park, and the guard has to outlive
+        // it.
+        raw->cancellation.attach(cc::move(in_flight), token);
 
         return promise;
     }

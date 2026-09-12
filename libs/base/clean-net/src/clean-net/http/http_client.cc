@@ -510,7 +510,7 @@ void pause_for_sink(cc::shared_ptr<exchange> const& ex)
     ex->paused = true;
 
     // Submitted BEFORE the operation is published, so a resume can never be posted ahead of what it wakes.
-    auto const in_flight = ex->r.io().submit(raw);
+    auto in_flight = ex->r.io().submit(raw);
 
     auto const already_resumed = ex->gate->state.lock(
         [raw](impl::body_gate::data& d)
@@ -524,7 +524,7 @@ void pause_for_sink(cc::shared_ptr<exchange> const& ex)
     if (already_resumed)
         ex->r.io().signal(raw);
 
-    raw->registration.attach(ex->token, ex->r.io(), raw);
+    raw->registration.attach(cc::move(in_flight), ex->token);
 }
 
 void read_more(cc::shared_ptr<exchange> const& ex)

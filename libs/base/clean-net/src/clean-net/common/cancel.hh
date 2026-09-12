@@ -5,6 +5,7 @@
 namespace cnet::impl
 {
 struct io_operation;
+struct submission;
 class cancel_state;
 
 // The control block is opaque on purpose: it holds a cc::mutex, whose header reaches MSVC's <xutility> and the whole
@@ -88,18 +89,22 @@ namespace cnet::impl
 {
 /// Keeps an operation registered with a token for exactly as long as the operation exists.
 ///
-/// **Attach after submitting, not before, and inside the submission guard.**
+/// **Attach LAST, and hand it the submission guard.**
 /// A cancel arriving before the submit would be posted ahead of the operation it means to cancel, and the reactor
 /// would have nothing to match it against -- so `attach` re-reads the token afterwards and cancels the operation
 /// itself if it has to.
-/// The guard `io_system::submit` returns is what makes "afterwards" safe: until it dies the reactor holds the
-/// operation inert, so this attach cannot race the completion that would free it.
+/// Taking the guard by value is what orders the rest: it dies here, so everything else the submitter does to the
+/// operation has to have happened already, while the reactor was still holding it inert.
+///
+/// An empty guard means `submit` answered the operation itself and destroyed it, and then this does nothing at all.
+/// That case is invisible to the caller, which is the reason the guard carries the `io_system` and the operation
+/// rather than the caller passing them alongside.
 ///
 /// **Detach first thing in `on_complete`**, so a cancel racing that completion finds a registration that is still
 /// alive rather than an operation that has already freed itself.
 struct cancel_registration
 {
-    void attach(cancel_token const& token, io_system& io, io_operation* op);
+    void attach(submission in_flight, cancel_token const& token);
     void detach();
 
     cancel_registration() = default;

@@ -71,7 +71,7 @@ template <class T>
 }
 } // namespace
 
-CNET_IO_TEST("cnet - the default token cancels nothing and allocates nothing")
+TEST("cnet - the default token cancels nothing and allocates nothing")
 {
     auto const none = cancel_token();
     CHECK(!none.is_valid());

@@ -5,6 +5,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/common/cancel.hh>
 #include <clean-net/impl/native_socket.hh>
 #include <clean-net/impl/reactor.hh>
 #include <clean-net/io/io_system.hh>
@@ -275,4 +276,55 @@ CNET_IO_TEST("cnet - cancelling through the io_system completes the operation as
     CHECK(wait_for([&] { return receive_op.completed.load(); }));
     CHECK(receive_op.code == error_code::cancelled);
     CHECK(wait_for([&] { return io.value()->pending_count() == 0; }));
+}
+
+CNET_IO_TEST("cnet - submitting into a stopped io_system answers the operation, and the attach that follows is inert")
+{
+    // The one path where `submit` completes the operation itself, so `raw` is destroyed before the call returns.
+    // Every transport attaches a token right after submitting, and reading `raw` there would be a use-after-free --
+    // which is why `attach` takes the submission guard rather than the operation: an empty guard means "already gone".
+    auto io = io_system::try_create({.unthreaded = true});
+    if (io.has_error())
+        SKIP("this platform has no sockets");
+    io.value()->stop();
+
+    struct self_owning_op final : impl::io_operation
+    {
+        cc::unique_ptr<self_owning_op> self;
+        impl::cancel_registration cancellation;
+        bool* destroyed = nullptr;
+        error_code* code = nullptr;
+
+        void on_complete(cc::optional<error> failure) override
+        {
+            auto const keep_alive_until_return = cc::move(self);
+            cancellation.detach();
+            if (failure.has_value())
+                *code = failure.value().code;
+        }
+
+        ~self_owning_op() override { *destroyed = true; }
+    };
+
+    bool destroyed = false;
+    auto code = error_code::unknown;
+
+    auto op = cc::make_unique<self_owning_op>();
+    op->kind = impl::io_op_kind::manual;
+    op->destroyed = &destroyed;
+    op->code = &code;
+
+    auto* const raw = op.get();
+    raw->self = cc::move(op);
+
+    auto const token = cancel_token::create();
+    raw->cancellation.attach(io.value()->submit(raw), token);
+
+    CHECK(destroyed);
+    CHECK(code == error_code::cancelled);
+    CHECK(io.value()->pending_count() == 0);
+
+    // Nothing was registered, so the token has no reference to an operation that no longer exists.
+    token.cancel();
+    CHECK(token.is_cancelled());
 }

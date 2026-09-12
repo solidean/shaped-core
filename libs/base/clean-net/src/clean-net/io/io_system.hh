@@ -104,11 +104,15 @@ public:
     /// woken so it does not sit on a wait it could have ended.
     /// The operation must stay alive until its `on_complete` has run.
     ///
-    /// **Everything the submitter still has to do to the operation belongs in the guard's scope** -- registering it
-    /// with a cancel token, publishing it to a pipe, signalling it.
+    /// **Everything the submitter still has to do to the operation belongs in the guard's scope** -- publishing it to
+    /// a pipe, signalling it, and registering it with a cancel token last of all.
     /// Past that scope the operation may complete on the reactor thread and free itself, so a write to it there is a
     /// write to freed memory.
-    [[nodiscard]] impl::submission submit(impl::io_operation* op);
+    ///
+    /// `impl::cancel_registration::attach` takes the guard, which is what makes "last of all" the enforced order: a
+    /// submitter with a token cannot spell the wiring in a way that leaves the guard behind.
+    /// One with nothing to wire discards the guard, and the operation arms at the end of the statement.
+    impl::submission submit(impl::io_operation* op);
 
     /// Ask for an operation to finish as `cancelled`.
     ///
@@ -148,8 +152,11 @@ private:
 ///
 /// Returned by `io_system::submit` and armed when it dies, which is the whole of its job: everything between the two
 /// runs with the reactor holding the operation inert, so the submitter is the only thread touching it.
-/// Move-only, and an empty one (the io_system was already shutting down when the operation was submitted) arms
-/// nothing.
+/// Move-only, and an empty one arms nothing: the io_system was already shutting down, so `submit` completed the
+/// operation itself and it no longer exists.
+/// That is the case a submitter cannot see for itself, which is why `cancel_registration::attach` takes the guard
+/// rather than the `io` and `op` separately -- an empty one makes the attach a no-op instead of a write to freed
+/// memory.
 struct cnet::impl::submission
 {
     submission() = default;
@@ -165,6 +172,12 @@ struct cnet::impl::submission
         if (_io != nullptr)
             _io->arm(_op);
     }
+
+    /// Null on an empty guard -- the io_system was shutting down, so `submit` answered the operation itself and it is
+    /// already destroyed.
+    /// Whoever takes the guard reads this to find out whether there is still anything to wire.
+    [[nodiscard]] io_system* io() const { return _io; }
+    [[nodiscard]] io_operation* operation() const { return _io == nullptr ? nullptr : _op; }
 
 private:
     io_system* _io = nullptr;
