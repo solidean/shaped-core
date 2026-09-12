@@ -250,12 +250,15 @@ The exclusions that are rules, each with its measurement:
 
 The gaps that are gaps:
 
-- **A bindless table**, which is an unbounded array in a space of its own.
-  Nothing in the grammar expresses one, which is what keeps a hand-written address from being an error today — see "What this does not address".
-- **More than one space in a group.**
+- **More than one space in a group**, which is the only thing standing between a bindless table and this pass.
   The pass gives group `n` exactly `space<n>`, so a group cannot hold two things that each want a space of their own.
   Eight bindless tables are exactly that, each numbered from `t0` so that resizing one does not shift the rest.
-  Nothing structural is in the way: `sg::binding` already carries `space` per binding, and `dx12_binding_group_layout.cc` already emits one descriptor range per binding with its own `RegisterSpace`.
+  The array itself is not a gap.
+  A table is a *fixed-size* array, because sg rejects an unbounded one on every backend.
+  A bindless table declares a bounded count and treats it as capacity — see [array bindings](../../shaped-graphics/docs/concepts/bindings.md#array-bindings).
+  So `Type name[N]` already covers it, and unbounded arrays are sg's question rather than this pass's.
+  Nothing structural is in the way either.
+  `sg::binding` already carries `space` per binding, and `dx12_binding_group_layout.cc` already emits one descriptor range per binding with its own `RegisterSpace`.
   What is missing is a derivation that hands out more than one space per group while staying a pure function of the annotations — from `(group, slot)`, say.
   That is also what would let sv's material permutation take a group of its own and delete `sv::space_of`.
 
@@ -628,12 +631,14 @@ The parse is what everything else is built on, and its subset will move once rea
 ## What this does not address
 
 - **sv's bindless tables.**
-  A table is an unbounded array in a space of its own, and the grammar expresses neither the unbounded length nor a space that is not a group's number.
-  One space per group is NOT the obstacle, which an earlier version of this section had wrong.
-  One space per group is exactly one space per table.
+  A table is a fixed-size array in a space of its own, and the grammar expresses the array but not the space.
+  Two earlier versions of this section had the reason wrong, so both are worth naming.
+  One space per group is not the obstacle, since one space per group is exactly one space per table.
   `resources/bindless_tables.cc` already numbers one per table from 1, and `material/shader_generator.cc` emits a fixed-size array into each — byte for byte what an annotated namespace produces.
-  What is missing is a group number to spend.
-  sv's tables hold spaces 1..8 while sitting at group *slot* 1, so no free group number has a free space, and `sg::max_binding_groups` is 4.
+  Nor is a free group number the obstacle: a register space is per register *class*, so a group's `s` registers never meet a table's `t` registers in the same space.
+  That is what `sv_sampler_i` relies on in space 0 today.
+  What is actually missing is the pass handing out more than one space per *group*, since eight tables want eight.
+  `sg::binding` carries `space` per binding and dx12 emits a descriptor range per binding, so this is a derivation to choose rather than a constraint to work around.
 
 - **Native 16-bit types.**
   Not a portability limit — SM 6.2 plus `-enable-16bit-types`, and on Vulkan `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, which is Turing and up, RDNA and up, Intel Xe and most mobile.
