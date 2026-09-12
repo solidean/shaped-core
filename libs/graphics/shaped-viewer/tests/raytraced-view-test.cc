@@ -65,35 +65,35 @@ TEST("sv - flat-PBR raytraced view (headless)")
     // A simple SH environment, so the surfaces get diffuse irradiance (and a missed ray sees a sky).
     auto const bg = sv::background::gradient(tg::vec3f(0.54f, 0.69f, 0.91f), tg::vec3f(0.25f, 0.28f, 0.33f));
 
-    auto cmd = ctx.create_command_list();
+    // Driven as whole frames until the DXR state object lands, rather than asserted on one — see
+    // sv_test::frames_until_executed.
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            auto const frame = ctx.transient.create_buffer<sv::frame_constants_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(frame, fc);
 
-    auto const frame = ctx.transient.create_buffer<sv::frame_constants_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.pod_to_buffer(frame, fc);
+            auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(background, sv::background_gpu::from(bg));
 
-    auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.pod_to_buffer(background, sv::background_gpu::from(bg));
+            auto const target = ctx.transient.create_texture_2d(
+                {.format = sg::pixel_format::rgba16_float, // UAV-writable by the raygen
+                 .width = size[0],
+                 .height = size[1],
+                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
-    auto const target = ctx.transient.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, // UAV-writable by the raygen
-         .width = size[0],
-         .height = size[1],
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-
-    CHECK(sv::pbr_raytrace_routine::execute(*cmd, {.frame = frame,
-                                                   .background = background,
-                                                   .instances = instances,
-                                                   .output = target,
-                                                   .materials = mat_rec->materials,
-                                                   .vertices = mesh_rec->vertices,
-                                                   .indices = mesh_rec->indices,
-                                                   .size = size})
-          == sg::routine_outcome::executed);
-
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+            return sv::pbr_raytrace_routine::execute(cmd, {.frame = frame,
+                                                           .background = background,
+                                                           .instances = instances,
+                                                           .output = target,
+                                                           .materials = mat_rec->materials,
+                                                           .vertices = mesh_rec->vertices,
+                                                           .indices = mesh_rec->indices,
+                                                           .size = size});
+        }));
 
     // Reaching here means the whole flat-PBR pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count > 0);

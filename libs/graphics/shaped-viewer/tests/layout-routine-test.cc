@@ -120,6 +120,12 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
                                  .uv = tg::aabb2f(tg::pos2f(0.25f, 0.25f), tg::pos2f(0.75f, 0.75f))},
                      .blend = sv::layer_blend::replace});
 
+    // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
+    // named here exactly as the test above names it, which couples this test to the routine's parametrization.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
+    (void)ctx.routines.tick_until_idle();
+
     auto cmd = ctx.create_command_list();
     {
         auto scope
@@ -160,6 +166,12 @@ TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
     draws.push_back({.kind = sv::draw_kind::view,
                      .dst_rect = rect_of(0, 0, 16, 16),
                      .primary = {.kind = sv::draw_source_kind::target, .index = 99}});
+
+    // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
+    // named here exactly as the test above names it, which couples this test to the routine's parametrization.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
+    (void)ctx.routines.tick_until_idle();
 
     auto cmd = ctx.create_command_list();
     {

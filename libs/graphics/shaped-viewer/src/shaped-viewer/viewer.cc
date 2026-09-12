@@ -531,6 +531,12 @@ frame viewer::acquire_frame()
     if (!im.config.headless)
         im.window_system->poll_events();
 
+    // Nothing else brings a render routine up, so a viewer that never ticked renders nothing at all and says nothing
+    // about it: every execute declines, every frame is a clear, and a capture writes a blank image.
+    // A frame boundary is where it belongs — after the previous frame's advance_epoch, before this frame's first
+    // acquire, and outside any open command list, which is exactly here.
+    (void)im.ctx->routines.tick();
+
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));

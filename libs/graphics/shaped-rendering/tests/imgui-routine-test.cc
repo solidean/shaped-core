@@ -45,6 +45,19 @@ struct imgui_fixture
         auto* const draw_data = ImGui::GetDrawData();
         draw_data->DisplayPos = ImVec2(display_pos[0], display_pos[1]);
 
+        // What brings the routine up, and the reason a real frame loop calls it too: nothing else does.
+        // Outside the command list below, because a tick opens and submits one of its own.
+        //
+        // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and
+        // `execute` is what registers one — so a caller meeting a parametrization for the first time declines that
+        // frame.
+        // Naming it up front is what lets a test assert on its first call, and it couples the test to a choice the
+        // code under test makes.
+        // It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness — see
+        // libs/graphics/shaped-graphics/docs/TODO.md.
+        sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
+        (void)ctx->routines.tick_until_idle();
+
         auto cmd = ctx->create_command_list();
         {
             auto pass = cmd->raster.render_to(

@@ -87,6 +87,14 @@ TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclus
     // Half the base black and half white, and a sentinel in the level being generated — so "wrote nothing" fails
     // rather than reading back as a plausible number.
     constexpr u8 sentinel = 77;
+    // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
+    // is what registers one — so a caller meeting a format for the first time declines that frame.
+    // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
+    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
+    sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
+    (void)ctx.routines.tick_until_idle();
+
     auto up = ctx.create_command_list();
     for (auto const& tex : {tex_srgb, tex_unorm})
     {
@@ -152,6 +160,14 @@ TEST("sr - raster box filter mipmap fills a tail of the chain", exclusive("slib-
     // Levels 0 and 1 supplied, 2 and 3 left as a sentinel for the routine to overwrite.
     constexpr u8 supplied = 200;
     constexpr u8 sentinel = 13;
+    // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
+    // is what registers one — so a caller meeting a format for the first time declines that frame.
+    // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
+    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
+    sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
+    (void)ctx.routines.tick_until_idle();
+
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), rgba8_constant(8 * 8, supplied), {.mip_level = 0});
     up->upload.bytes_to_texture(tex.raw(), rgba8_constant(4 * 4, supplied), {.mip_level = 1});

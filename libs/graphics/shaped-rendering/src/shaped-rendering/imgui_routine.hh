@@ -8,25 +8,6 @@
 #include <shaped-rendering/impl/imgui_texture_registry.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-/// Renders one frame of Dear ImGui draw data through sg — the renderer half of an imgui backend.
-/// Everything goes through sg; there are no native graphics calls.
-///
-/// Pair it with sr::imgui_context, which owns the ImGui context and the frame bracket:
-///
-///     auto imgui = sr::imgui_context::create();
-///     // per frame, after imgui.end_frame():
-///     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
-///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
-///
-/// The routine owns one raster pipeline for its target format; the GPU textures behind imgui's atlas belong to the
-/// texture routine above, which every format shares.
-/// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
-/// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
-///
-/// This frame's geometry is deliberately *not* state:
-/// it is allocated from the transient scope and lives on the stack for one execute(), so the call is re-entrant across imgui's viewports.
-///
-/// `draw_data` is non-const because imgui's 1.92 texture protocol writes back into it:
 /// Owns the GPU textures behind imgui's atlas, for every imgui_routine parametrization to share.
 ///
 /// It exists because imgui_routine is parametrized on its target's pixel format and the atlas is not: a multi-viewport
@@ -52,6 +33,25 @@ private:
     impl::imgui_texture_registry _textures;
 };
 
+/// Renders one frame of Dear ImGui draw data through sg — the renderer half of an imgui backend.
+/// Everything goes through sg; there are no native graphics calls.
+///
+/// Pair it with sr::imgui_context, which owns the ImGui context and the frame bracket:
+///
+///     auto imgui = sr::imgui_context::create();
+///     // per frame, after imgui.end_frame():
+///     auto pass = cmd->raster.render_to({.color_targets = {backbuffer.preserved()}});
+///     sr::imgui_routine::execute(pass, ImGui::GetDrawData());
+///
+/// The routine owns one raster pipeline for its target format; the GPU textures behind imgui's atlas belong to the
+/// texture routine above, which every format shares.
+/// execute() runs under acquire_exclusive for its whole length, so two threads recording imgui against the same context serialize rather than race.
+/// The atlas deliberately survives a shader reload — it has nothing to do with our shaders.
+///
+/// This frame's geometry is deliberately *not* state:
+/// it is allocated from the transient scope and lives on the stack for one execute(), so the call is re-entrant across imgui's viewports.
+///
+/// `draw_data` is non-const because imgui's 1.92 texture protocol writes back into it:
 /// the backend reports each texture's new id and status on ImTextureData.
 class sr::imgui_routine : public sg::render_routine<imgui_routine, sg::pixel_format>
 {

@@ -93,51 +93,54 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     // reads it). Zero coefficients = black background.
     auto const bg = sv::background{};
 
-    auto cmd = ctx.create_command_list();
-
     // Built on the list that traces with it: every bindless index it names is minted here, for this epoch.
+    // Declared out here because the checks below read it back.
     auto records = cc::vector<sv::instance_gpu>();
-    records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
-
-    auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.pod_to_buffer(frame, fc);
-
-    auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.pod_to_buffer(background, sv::background_gpu::from(bg));
-
-    // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
-    auto const target = ctx.transient.create_texture_2d(
-        {.format = sg::pixel_format::rgba32_float,
-         .width = size[0],
-         .height = size[1],
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
-
-    // One `sv::instance` per TLAS instance: where this item's material parameters live, and where its geometry does.
-    auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-        records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.data_to_buffer(instance_table, records);
-
-    // The tables the closest-hit reaches all of that through, locked for the recording.
-    auto const bindless = resources.freeze();
-
-    auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                                              .background = background,
-                                                              .instances = instances,
-                                                              .output = target,
-                                                              .instance_table = instance_table,
-                                                              .hit_groups = hit_groups,
-                                                              .bindless = &bindless});
 
     // The routine degrades to a no-op when its shaders do not build, so without this every CPU-side check below
     // still passes against a target nothing ever wrote.
     // That silence is expensive: a shader break shows up as a debugging session on the image, not a failing test.
-    REQUIRE(traced == sg::routine_outcome::executed);
+    //
+    // Driven as whole frames rather than asserted on one: the trace additionally waits on a DXR state object that is
+    // built asynchronously and polled across frames — see sv_test::frames_until_executed.
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            records.clear();
+            records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+            auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(frame, fc);
+
+            auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(background, sv::background_gpu::from(bg));
+
+            // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
+            auto const target = ctx.transient.create_texture_2d(
+                {.format = sg::pixel_format::rgba32_float,
+                 .width = size[0],
+                 .height = size[1],
+                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+
+            // One `sv::instance` per TLAS instance: where this item's material parameters live, and its geometry.
+            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.data_to_buffer(instance_table, records);
+
+            // The tables the closest-hit reaches all of that through, locked for the recording.
+            auto const bindless = resources.freeze();
+
+            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                        .background = background,
+                                                        .instances = instances,
+                                                        .output = target,
+                                                        .instance_table = instance_table,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
+        }));
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count == box.materials.size());
@@ -194,20 +197,20 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
 
     auto const size = tg::vec2i(16, 16); // nothing here reads the image, so it is as small as a dispatch can be
 
-    auto const trace = [&](sv::material_permutation const* fallback)
+    // Records one trace into `cmd` and reports what it decided; the caller owns the frame around it, so the same body
+    // serves a one-shot check and a driven one.
+    auto const trace = [&](sg::command_list& cmd, sv::material_permutation const* fallback)
     {
-        auto cmd = ctx.create_command_list();
-
         auto records = cc::vector<sv::instance_gpu>();
-        records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
+        records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
         auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
             1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.pod_to_buffer(frame, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1});
+        cmd.upload.pod_to_buffer(frame, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1});
 
         auto const background = ctx.transient.create_buffer<sv::background_gpu>(
             1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+        cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -217,23 +220,17 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
 
         auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
             records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.data_to_buffer(instance_table, records);
+        cmd.upload.data_to_buffer(instance_table, records);
 
         auto const bindless = resources.freeze();
-        auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                                                  .background = background,
-                                                                  .instances = instances,
-                                                                  .output = target,
-                                                                  .instance_table = instance_table,
-                                                                  .hit_groups = hit_groups,
-                                                                  .fallback = fallback,
-                                                                  .bindless = &bindless});
-
-        auto const ready = traced == sg::routine_outcome::executed;
-        ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch();
-        ctx.block_until_idle();
-        return ready;
+        return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                    .background = background,
+                                                    .instances = instances,
+                                                    .output = target,
+                                                    .instance_table = instance_table,
+                                                    .hit_groups = hit_groups,
+                                                    .fallback = fallback,
+                                                    .bindless = &bindless});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
@@ -242,8 +239,17 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
 
     // With nothing to stand in for it the trace is a no-op — the old all-or-nothing behavior, still what a caller
     // supplying no fallback gets.
-    CHECK(!trace(nullptr));
+    // One frame is enough for a decline, and it must stay a decline however long anything else takes.
+    {
+        auto cmd = ctx.create_command_list();
+        CHECK(trace(*cmd, nullptr) == sg::routine_outcome::declined);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        ctx.block_until_idle();
+    }
 
     // With the neutral hit group it dispatches: the mesh is placed and shaded grey rather than the view going dark.
-    CHECK(trace(&resources.shaders.acquire_fallback()));
+    // Driven, because the fallback's own state object is built asynchronously — see sv_test::frames_until_executed.
+    CHECK(sv_test::frames_until_executed(
+        ctx, [&](sg::command_list& cmd) { return trace(cmd, &resources.shaders.acquire_fallback()); }));
 }

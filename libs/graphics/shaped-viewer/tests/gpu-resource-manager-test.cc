@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/linalg/pos_ops.hh> // tg::distance
@@ -406,6 +407,13 @@ TEST("sv - mip generation is queued, not done inline")
     m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
 
+    // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
+    // declines until its variant is built, and a tick drives only what is already registered.
+    // So the shape is named here rather than discovered.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    (void)ctx.routines.tick_until_idle();
+
     auto cmd = ctx.create_command_list();
     auto const spent = m.record_pending_work(*cmd);
     ctx.submit_command_list(cc::move(cmd));
@@ -442,6 +450,13 @@ TEST("sv - the work budget spreads mip generation across epochs")
             sv::texture_data::create(make_pixels(16, 16, u8(20 + seed), false), sg::pixel_format::rgba8_unorm, 16, 16));
     m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 3);
+
+    // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
+    // declines until its variant is built, and a tick drives only what is already registered.
+    // So the shape is named here rather than discovered.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    (void)ctx.routines.tick_until_idle();
 
     auto const drain = [&]
     {

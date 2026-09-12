@@ -1,6 +1,7 @@
 #include "viewer_test_env.hh"
 
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
+#include <clean-core/common/time.hh>
 #include <clean-core/container/array.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
@@ -133,8 +134,15 @@ image_stats trace_furnace(sg::context& ctx,
                                                                  | sg::texture_usage::readwrite_texture
                                                                  | sg::texture_usage::copy_src});
 
-    for (auto f = 0; f < frames; ++f)
+    // A declined frame integrated nothing, so it must not count as one of the `frames` being accumulated: a trace
+    // declines until its DXR state object lands, which is built asynchronously.
+    // Same workaround as sv_test::frames_until_executed, spelled inline because this loop owns its frame index.
+    auto const loop_start = cc::current_time_steady_secs();
+    for (auto f = 0; f < frames;)
     {
+        // What brings the routine up; nothing else does, and this loop is the frame loop.
+        (void)ctx.routines.tick();
+
         auto fc = sv::pt_frame_constants_gpu{};
         fc.camera = sv::camera_gpu::from(cam);
 
@@ -193,21 +201,29 @@ image_stats trace_furnace(sg::context& ctx,
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
         // intermediate ones say nothing the final one does not.
         auto readback = sg::data_future<tg::vec4f>();
-        if (f == frames - 1)
+        if (ready && f == frames - 1)
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(target.raw()));
 
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
         ctx.block_until_idle();
 
-        REQUIRE(ready);
+        if (!ready)
+        {
+            // Not a failure yet — the state object has not landed.
+            // The deadline is what turns a hang into a message.
+            REQUIRE(cc::current_time_steady_secs() - loop_start < 45.0);
+            sv_test::drive_ambient_work(); // under SC_THREADS=OFF this thread is the only one that can build it
+            continue;
+        }
+        ++f;
 
         if (!readback.is_valid())
             continue;
 
         // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
         ctx.block_until_idle();
-        auto const delivered = readback.try_get_bytes();
+        auto const delivered = readback.try_get_data();
         REQUIRE(delivered.has_value());
 
         auto const pixels = delivered.value();

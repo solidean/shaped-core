@@ -116,15 +116,16 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
                                                           .height = output_size[1],
                                                           .usage = sg::texture_usage::render_target});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch()); // the frame's job, not a routine's
-    auto store = sv::view_store{};             // and so is what its views keep across frames
-    CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
-          == sg::routine_outcome::executed);
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+    auto store = sv::view_store{}; // what its views keep across frames
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            // Driven until the trace's state object lands, rather than asserted on one frame — see sv_test::frames_until_executed.
+            resources.advance_to(ctx.current_epoch()); // the frame's job, not a routine's
+            return sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                                output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        }));
 
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
@@ -150,15 +151,16 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
     auto const output = ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::bgra8_unorm, .width = 64, .height = 64, .usage = sg::texture_usage::render_target});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
-    CHECK(sv::viewer_renderer::execute(*cmd, {}, {}, resources, store,
-                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
-          == sg::routine_outcome::executed);
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               // Driven until the trace's state object lands, rather than asserted on one frame — see sv_test::frames_until_executed.
+                                               resources.advance_to(ctx.current_epoch());
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, {}, {}, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
 
     CHECK(true); // the pass opened and closed with no draws, so the begin-op ran
 }
@@ -221,23 +223,27 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
          .height = 8,
          .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
-    CHECK(sv::viewer_renderer::execute(*cmd, def, plan_for(def, output_size), resources, store,
-                                       rt.cleared(tg::vec4f(0, 0, 0, 1)))
-          == sg::routine_outcome::executed);
 
-    {
-        // The second pass keeps what the frame just wrote, and starts from a full-target viewport of its own.
-        auto scope = cmd->raster.render_to({.color_targets = {rt.preserved()}});
-        // The blit is fallible: it declines until its pipeline for this target format is built.
-        CHECK(sr::blit_routine::execute(scope, overlay) == sg::routine_outcome::executed);
-    }
+    // BOTH passes have to land on the same frame for this to prove anything, so the frame reports executed only when
+    // the overlay did too — see sv_test::frames_until_executed.
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            resources.advance_to(ctx.current_epoch());
+            auto const frame_pass = sv::viewer_renderer::execute(cmd, def, plan_for(def, output_size), resources, store,
+                                                                 rt.cleared(tg::vec4f(0, 0, 0, 1)));
 
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+            // The second pass keeps what the frame just wrote, and starts from a full-target viewport of its own.
+            auto scope = cmd.raster.render_to({.color_targets = {rt.preserved()}});
+            // The blit is fallible: it declines until its pipeline for this target format is built.
+            auto const overlay_pass = sr::blit_routine::execute(scope, overlay);
+
+            return frame_pass == sg::routine_outcome::executed && overlay_pass == sg::routine_outcome::executed
+                     ? sg::routine_outcome::executed
+                     : sg::routine_outcome::declined;
+        }));
 
     CHECK(true); // frame pass + overlay pass recorded onto one command list without a device / barrier error
 }
@@ -346,16 +352,17 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
                                                           .height = output_size[1],
                                                           .usage = sg::texture_usage::render_target});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch());
     auto store = sv::view_store{};
-    store.begin_frame(u64(ctx.current_epoch()));
-    CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                       output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
-          == sg::routine_outcome::executed);
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
-    ctx.block_until_idle();
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               // Driven until the two traces' state objects land — see sv_test::frames_until_executed.
+                                               resources.advance_to(ctx.current_epoch());
+                                               store.begin_frame(u64(ctx.current_epoch()));
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
 
     // Two traces and three passes on one command list, with the debug layer validating every transition from a UAV
     // write to a sampled read and from a render target to a sampled read.

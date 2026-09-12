@@ -22,6 +22,22 @@ namespace
 {
 constexpr auto mip_usage
     = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture | sg::texture_usage::copy_dst;
+
+/// Brings every variant up before a command list opens.
+///
+/// **A workaround, and here to be found again.**
+/// A tick drives only routines that are already REGISTERED, and `execute` is what registers one — so a caller meeting
+/// a shape for the first time declines that frame and draws on the next.
+/// An app absorbs that; a test asserting on the first call cannot, so it names the variants up front — which couples
+/// this test to a choice the code under test makes.
+/// It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness; see
+/// libs/graphics/shaped-graphics/docs/TODO.md.
+void prewarm_every_variant(sg::context& ctx)
+{
+    for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)
+        sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant(v));
+    (void)ctx.routines.tick_until_idle();
+}
 } // namespace
 
 // Only one slib::shader_library may exist at a time — the generated package symbols are process-wide
@@ -72,6 +88,7 @@ TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-sha
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 5) == 0);
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 3) == 2);
 
+    prewarm_every_variant(ctx);
     auto cmd = ctx.create_command_list();
     CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_1d) == sg::routine_outcome::executed);
     CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d) == sg::routine_outcome::executed);
@@ -160,6 +177,7 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
     constexpr u8 sentinel = 255;
     auto const face_value = [](int slice) { return u8(20 * (slice + 1)); };
 
+    prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     for (auto face = 0; face < 6; ++face)
     {
@@ -237,6 +255,7 @@ TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive
         for (auto c = 0; c < 4; ++c)
             base.push_back(byte(u8(8 * x)));
 
+    prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);

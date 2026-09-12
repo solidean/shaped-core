@@ -96,14 +96,6 @@ cc::unique_ptr<app> app::create(cc::string_view title)
 
     out->_imgui = sr::imgui_context::create();
 
-    auto scene_renderer = renderer::create(*out->_ctx, out->_lib);
-    if (scene_renderer.has_error())
-    {
-        cc::eprintln("{}", scene_renderer.error().to_string());
-        return nullptr;
-    }
-    out->_renderer = cc::move(scene_renderer.value());
-
     out->_last_time = now_seconds();
     return out;
 }
@@ -111,8 +103,10 @@ cc::unique_ptr<app> app::create(cc::string_view title)
 app::~app()
 {
     if (_ctx != nullptr)
+    {
         _ctx->advance_epoch();
         _ctx->block_until_idle(); // the last frames are still in flight
+    }
 }
 
 bool app::begin_frame()
@@ -131,6 +125,13 @@ bool app::begin_frame()
     auto const now = now_seconds();
     _delta_time = float(now - _last_time);
     _last_time = now;
+
+    // Nothing else brings a render routine up, so this is not optional: without it the cube pass and imgui both stay
+    // pending forever and the window shows a cleared background.
+    // A frame boundary is where it belongs — after the previous frame's advance_epoch, before this frame's first
+    // acquire, and outside any open command list.
+    // Ticked even on a minimized frame, so compiles keep progressing while nothing is drawn.
+    (void)_ctx->routines.tick();
 
     // A minimized window is 0x0, and acquire_backbuffer's auto-resize would size the swapchain to zero.
     // A headless window is never minimized, and its size is the one the capture asked for.
@@ -169,7 +170,8 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
 
         auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.043f, 0.051f, 0.071f, 1.0f))},
                                            .depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f)});
-        _renderer->draw(pass, doc, this->view_projection(cam), selected);
+        // Declines while the cube shaders are still building, which on the first frames is ordinary.
+        (void)cube_routine::execute(pass, doc, this->view_projection(cam), selected);
     }
     {
         // imgui gets its own scope, with no depth target: a pipeline bakes in the formats it was built against, and
