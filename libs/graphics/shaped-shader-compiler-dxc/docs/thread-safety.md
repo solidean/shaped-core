@@ -29,9 +29,18 @@ The way to tell them apart is to read what libdxcompiler actually does around th
 ## The lock
 
 `SSC_DXC_SERIALIZE_INVOCATIONS` in [compiler.cc](../src/shaped-shader-compiler-dxc/compiler.cc), default `1`.
-It puts `compiler::create()`, `preprocess()` and `compile()` behind one `cc::mutex`, so only one thread is inside libdxcompiler at a time.
+It puts `compiler::create()`, `preprocess()`, `compile()` and `~compiler()` behind one `cc::mutex`, so only one thread is inside libdxcompiler at a time.
+
+**The destructor is on that list because releasing a COM pointer is a call into the library.**
+`~compiler` releases `IDxcUtils` and `IDxcCompiler3`, and the last release of a blob frees memory libdxcompiler allocated — which is the half of the observed race that is a free.
+The same reasoning is what puts the whole of `preprocess` and `compile` under the lock rather than the `Compile` call alone.
+`GetOutput`, `IDxcUtils::CreateReflection` and every `ComPtr` destructor on the way out are entries too.
 
 **Set it to `0` to get the un-serialized behaviour back** — which is what the investigation above needs, and the reason it is a define rather than a quietly-added lock.
+
+**Take the `libdxcompiler.so` entry out of [tools/cmake/tsan-suppressions.txt](../../../../tools/cmake/tsan-suppressions.txt) as well**, or the un-serialized run reports nothing.
+`dev.py` applies that list to every sanitized test run, and `called_from_lib` drops the report silently rather than counting it somewhere visible.
+The investigation then reads as a clean run when it has only been muted.
 
 The cost is real: shader compilation is the most expensive thing this library does, and the cache in front of it exists precisely because of that.
 Serializing removes the parallelism `slib`'s async compilation was built for, and leaves the cache's concurrency buying only its hits.
