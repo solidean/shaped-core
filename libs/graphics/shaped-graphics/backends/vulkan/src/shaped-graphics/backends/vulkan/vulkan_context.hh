@@ -585,6 +585,9 @@ public:
 
     // The inline ring budgets.
     // Recorded here and applied at the next advance_epoch, never synchronously.
+    // Re-exposed for the debug messenger, which is a free callback rather than a member.
+    using sg::context::report_device_error;
+
     void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
     void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
 

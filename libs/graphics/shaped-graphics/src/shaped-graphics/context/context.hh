@@ -15,6 +15,7 @@
 #include <shaped-graphics/context/adapter_info.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/capabilities.hh>
+#include <shaped-graphics/context/device_error.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
@@ -113,6 +114,15 @@ public:
 
     /// Backend-provided reason the device was lost; empty while the device is healthy.
     [[nodiscard]] cc::string_view device_loss_reason() const { return _device_loss_reason; }
+
+    /// Take everything the backend reported since the last call, in the order it saw them.
+    ///
+    /// **The deferred half of error reporting**, for failures that arrive after the call that caused them — see
+    /// sg::device_error.
+    /// Drain it once a frame: entries accumulate until taken, so a caller that never asks grows a list rather than
+    /// losing anything.
+    /// Safe from any thread; the backends push into it from wherever they observe the failure.
+    [[nodiscard]] cc::vector<device_error> take_pending_errors();
 
     /// Long-lived GPU resources: `ctx.persistent.create_raw_buffer(...)`.
     context_persistent_scope persistent;
@@ -351,6 +361,11 @@ protected:
     /// The public wrapper turns the former into a throw and the latter into a fatal.
     [[nodiscard]] virtual cc::result<std::unique_ptr<command_list>> try_create_command_list() = 0;
 
+    /// Report a deferred error to the caller's next take_pending_errors().
+    /// Backends call this from wherever they observe one — a device-removal notice, a validation callback, an async
+    /// creation that settled as a failure.
+    void report_device_error(device_error error);
+
     /// Marks the device permanently lost with a backend-provided reason; idempotent, the first reason sticks.
     /// Backends call this the moment they observe removal — a create failure, a bad submit signal, or a failed fence wait.
     /// They then raise sg::device_lost_exception at the public boundary.
@@ -572,6 +587,10 @@ protected:
 
     // The portable floors a caller sizes against, raised by a backend that has actually measured them.
     device_limits _limits;
+
+    // What take_pending_errors hands out.
+    // Guarded: a backend may report from its own threads.
+    cc::mutex<cc::vector<device_error>> _pending_errors;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     bool _device_lost = false;

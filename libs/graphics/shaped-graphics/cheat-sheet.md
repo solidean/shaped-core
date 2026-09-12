@@ -15,7 +15,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
-> A throwing default `create_*` returns the handle and raises a typed `sg::exception` on failure; a fallible `try_create_*` returns `cc::result`, for exception-free callers and local fallback.
+> `create_*` returns the handle and raises a typed `sg::exception` on failure — one spelling, because exhaustion is not something a call site can act on.
+> A `try_create_*` twin survives only where a caller demonstrably acts on the error: swapchains and windows (environment), and the pipeline surface sg's own cache builds on.
 > `create_command_list()` is infallible — it returns the list, and throws only on device loss.
 > Contract violations `CC_ASSERT`: a bad size, a missing usage, a null argument, a transient resource used past its epoch.
 > Those are bugs, not runtime failures.
@@ -108,10 +109,9 @@ ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain
 // PREFER the typed factories below (create_buffer<T> / create_texture_2d) — raw_* is the byte-level escape hatch.
 // PREFER ctx.transient for anything sized by the current frame; ctx.persistent only for what outlives it.
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
-ctx.persistent.try_create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (fallible core; every create_* has a try_ twin)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
-ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into; try_create_memory_heap for the result form)
+ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
@@ -189,7 +189,8 @@ sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_by
 sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()
 sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
 sg::swapchain_creation_exception // create_swapchain failure (bad window / format / DXGI error)
-// only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
+// create_*, submit and advance raise these; the remaining try_create_* (swapchain, window, pipelines) never throw
+// and ctx.take_pending_errors() carries what a backend could only report after the call (see epochs)
 ```
 
 ## epochs — frame-level GPU lifetime + CPU↔GPU sync  (see docs/concepts/epochs.md)
@@ -204,6 +205,10 @@ ctx.advance_epoch()                     // void — close current epoch, open ne
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
 ctx.block_until_epochs_in_flight(N)     // void — the PER-FRAME back-pressure wait: park until <= N are in flight
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
+ctx.take_pending_errors()               // -> cc::vector<sg::device_error> — failures that arrived AFTER their call:
+                                        //   device_lost | creation_failed | validation. Drain once a frame; entries
+                                        //   accumulate until taken. Device loss lands here too, so draining this
+                                        //   means never polling is_device_lost().
 ctx.in_flight_epoch_count()             // int — epochs advanced past but not yet retired; the depth a throttle bounds
 ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
 

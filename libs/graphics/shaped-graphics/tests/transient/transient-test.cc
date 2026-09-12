@@ -6,6 +6,7 @@
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
@@ -248,8 +249,9 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
     REQUIRE(buf != nullptr);
 
     // A view bound to a name the layout does not declare is rejected, not silently ignored.
-    // The fallible core surfaces it as an error; the throwing façade (create_binding_group) would raise sg::binding_group_exception instead (see tests/error-handling).
+    // It raises sg::binding_group_exception rather than returning an error: a binding that names nothing is a
+    // programming mistake, and the one spelling says so at the call site (see tests/error-handling).
     sg::named_view const wrong = {.name = "Nope", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
-    auto group = ctx->transient.try_create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1));
-    CHECK(group.has_error());
+    CHECK_THROWS_AS(ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1)),
+                    sg::binding_group_exception);
 }

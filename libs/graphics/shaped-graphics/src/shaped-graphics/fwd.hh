@@ -39,16 +39,18 @@ struct stream_poll;                   // value type — a source poll's status a
 class stream_source;                  // the lazy chunk sequence feeding a streaming upload
 
 class context;
-struct adapter_info;        // which GPU a context runs on (see context/adapter_info.hh)
-enum class feature;         // a capability a context has or has not (see context/capabilities.hh)
-enum class execution_model; // whether a caller may block on this context at all (see context/capabilities.hh)
-struct device_limits;       // the portable floors a caller sizes against (see context/capabilities.hh)
-struct gpu_memory_usage;    // GPU memory as this process sees it (context/gpu_metrics.hh)
-struct gpu_load;            // how busy the GPU was over a sampling interval
-struct gpu_engine_counter;  // monotone busy time on one engine class
-struct gpu_counters;        // those counters, per engine class
-struct gpu_engine_load;     // one engine's share of a sampled load
-class gpu_load_sampler;     // GPU load, differenced against its own previous reading
+struct adapter_info;          // which GPU a context runs on (see context/adapter_info.hh)
+enum class feature;           // a capability a context has or has not (see context/capabilities.hh)
+enum class execution_model;   // whether a caller may block on this context at all (see context/capabilities.hh)
+enum class device_error_kind; // what kind of deferred error a backend reported (see context/device_error.hh)
+struct device_error;          // one entry on the deferred error channel (see context/device_error.hh)
+struct device_limits;         // the portable floors a caller sizes against (see context/capabilities.hh)
+struct gpu_memory_usage;      // GPU memory as this process sees it (context/gpu_metrics.hh)
+struct gpu_load;              // how busy the GPU was over a sampling interval
+struct gpu_engine_counter;    // monotone busy time on one engine class
+struct gpu_counters;          // those counters, per engine class
+struct gpu_engine_load;       // one engine's share of a sampled load
+class gpu_load_sampler;       // GPU load, differenced against its own previous reading
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;

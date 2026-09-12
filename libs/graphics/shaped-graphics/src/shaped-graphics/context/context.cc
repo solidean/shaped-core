@@ -73,7 +73,11 @@ void context::mark_device_lost(cc::string reason)
     if (_device_lost)
         return;
     _device_lost = true;
-    _device_loss_reason = cc::move(reason);
+    _device_loss_reason = reason;
+
+    // And onto the deferred channel, so a frame loop that drains errors sees it without polling is_device_lost().
+    // Once, because the flag above is sticky — a caller draining every frame would otherwise get it every frame.
+    report_device_error({.kind = device_error_kind::device_lost, .message = cc::move(reason)});
 }
 
 context::context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats)
@@ -114,6 +118,22 @@ void context::release_cached_pipelines()
 pipeline_cache& context::pipeline_cache_ref()
 {
     return *_pipeline_cache;
+}
+
+cc::vector<device_error> context::take_pending_errors()
+{
+    return _pending_errors.lock(
+        [](cc::vector<device_error>& pending)
+        {
+            auto out = cc::move(pending);
+            pending.clear();
+            return out;
+        });
+}
+
+void context::report_device_error(device_error error)
+{
+    _pending_errors.lock([&](cc::vector<device_error>& pending) { pending.push_back(cc::move(error)); });
 }
 
 void context::process_completed_epochs()

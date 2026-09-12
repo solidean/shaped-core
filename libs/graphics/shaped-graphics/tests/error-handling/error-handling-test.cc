@@ -44,8 +44,8 @@ INVOCABLE_TEST("sg error handling - buffer creation validates its size", (sg::co
     REQUIRE(ctx != nullptr);
 
     // Size must be >= 0. The check lives in the backend; the public entry must reach it.
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_buffer(-1, {}));
-    CHECK_ASSERTS(ctx->transient.try_create_raw_buffer(-16, {}));
+    CHECK_ASSERTS(ctx->persistent.create_raw_buffer(-1, {}));
+    CHECK_ASSERTS(ctx->transient.create_raw_buffer(-16, {}));
 }
 
 INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bounds", (sg::context_handle const& ctx))
@@ -85,18 +85,18 @@ INVOCABLE_TEST("sg error handling - texture creation validates its shape", (sg::
     using td = sg::texture_description;
     auto const usage = sg::texture_usage::copy_dst;
 
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_texture(td{.format = sg::pixel_format::undefined, .usage = usage}));
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_texture(
+    CHECK_ASSERTS(ctx->persistent.create_raw_texture(td{.format = sg::pixel_format::undefined, .usage = usage}));
+    CHECK_ASSERTS(ctx->persistent.create_raw_texture(
         td{.format = sg::pixel_format::rgba8_unorm, .width = 0, .usage = usage})); // extent must be >= 1
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_texture(
+    CHECK_ASSERTS(ctx->persistent.create_raw_texture(
         td{.format = sg::pixel_format::rgba8_unorm, .mip_levels = 0, .usage = usage})); // mip >= 1
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_texture(
+    CHECK_ASSERTS(ctx->persistent.create_raw_texture(
         td{.format = sg::pixel_format::rgba8_unorm, .sample_count = 0, .usage = usage})); // sample_count >= 1
     // Multisampling is 2D only: a 3D MSAA texture is a shape contradiction.
-    CHECK_ASSERTS(ctx->persistent.try_create_raw_texture(td{.format = sg::pixel_format::rgba8_unorm,
-                                                            .dimension = sg::texture_dimension::d3,
-                                                            .sample_count = 4,
-                                                            .usage = usage}));
+    CHECK_ASSERTS(ctx->persistent.create_raw_texture(td{.format = sg::pixel_format::rgba8_unorm,
+                                                        .dimension = sg::texture_dimension::d3,
+                                                        .sample_count = 4,
+                                                        .usage = usage}));
 }
 
 INVOCABLE_TEST("sg error handling - inline upload validates its arguments", (sg::context_handle const& ctx))
@@ -245,9 +245,6 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     sg::named_view const unknown_name = {.name = "Nope", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)),
                     sg::binding_group_exception);
-    // The fallible core surfaces the same failure as an error rather than throwing.
-    CHECK(ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&unknown_name, 1)).has_error());
-
     // A read-only view bound to a read-write binding: right name, wrong kind.
     sg::named_view const wrong_kind = {.name = "Data", .view = sg::buffer<u32>::from_raw(buf).as_readonly_buffer()};
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&wrong_kind, 1)),
@@ -256,5 +253,27 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
     // The layout's "Data" binding is never provided.
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>()),
                     sg::binding_group_exception);
-    CHECK(ctx->transient.try_create_binding_group(layout, cc::span<sg::named_view const>()).has_error());
+    CHECK_THROWS_AS(ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>()),
+                    sg::binding_group_exception);
+}
+
+// The deferred half of error reporting: failures that arrive after the call that caused them.
+//
+// Nothing here forces one: provoking a validation error on purpose would make the test assert on backend wording.
+// What it pins is the channel's contract, which is what a frame loop depends on — draining is idempotent, a healthy
+// context reports nothing, and taking clears.
+INVOCABLE_TEST("sg error handling - the deferred error channel drains and clears", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // Whatever earlier tests left on it, so this starts from a known state rather than assuming an empty one.
+    (void)ctx->take_pending_errors();
+
+    // A healthy context accumulates nothing, and asking twice is not different from asking once.
+    CHECK(ctx->take_pending_errors().empty());
+    CHECK(ctx->take_pending_errors().empty());
+
+    // Device loss is the one kind sg raises itself rather than relaying, and it is reported here too — so a caller
+    // that drains this channel never has to also poll is_device_lost().
+    CHECK(!ctx->is_device_lost());
 }
