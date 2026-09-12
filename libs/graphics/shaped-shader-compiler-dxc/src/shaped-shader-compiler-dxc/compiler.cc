@@ -1,6 +1,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 #include <shaped-shader-compiler-dxc/impl/command_line_args.hh>
 #include <shaped-shader-compiler-dxc/impl/dxc_common.hh>
@@ -51,12 +52,13 @@ struct dxc_invocation
 
 /// Compiles `desc.source` with the given argv + include handler, returning the raw DXC result (after
 /// checking GetStatus). Shared by preprocess() and compile().
-[[nodiscard]] cc::result<dxc_invocation> invoke_dxc(IDxcUtils* utils,
-                                                    IDxcCompiler3* dxc,
-                                                    cc::string_view source,
-                                                    impl::arg_storage const& args,
-                                                    IDxcIncludeHandler* include_handler,
-                                                    char const* what)
+/// Called with the DXC lock held; see it.
+[[nodiscard]] cc::result<dxc_invocation> invoke_dxc_locked(IDxcUtils* utils,
+                                                           IDxcCompiler3* dxc,
+                                                           cc::string_view source,
+                                                           impl::arg_storage const& args,
+                                                           IDxcIncludeHandler* include_handler,
+                                                           char const* what)
 {
     auto src = impl::make_source_blob(utils, source);
     CC_RETURN_IF_ERROR(src);
@@ -78,17 +80,60 @@ struct dxc_invocation
 
     return out;
 }
+
+// ---- DXC's process-global state ------------------------------------------------------------------
+//
+// The vendored libdxcompiler carries state of its own, BELOW the IDxcCompiler3 instance.
+// ThreadSanitizer catches it directly: two concurrent compiles, one per instance and one per thread exactly as
+// compiler.hh prescribes, allocate in one thread and free in the other through DXC's own WideCharToMultiByte shim.
+// So "one compiler per thread" does not buy what it says it does, and this lock is what actually holds today.
+//
+// It is a holding position rather than an answer -- the finding is unresolved, and
+// libs/graphics/shaped-shader-compiler-dxc/docs/thread-safety.md is the write-up: what was observed, what is still
+// unknown, and what a real fix would look like.
+// Flip this to 0 to get the un-serialized behaviour back for that investigation.
+#define SSC_DXC_SERIALIZE_INVOCATIONS 1
+
+#if SSC_DXC_SERIALIZE_INVOCATIONS
+cc::mutex<cc::unit> g_dxc_lock;
+#endif
+
+/// Runs `f` with DXC's global state to itself.
+/// Every entry into libdxcompiler goes through here -- instance creation included, since that touches the same state.
+template <class F>
+auto with_dxc_serialized(F&& f)
+{
+#if SSC_DXC_SERIALIZE_INVOCATIONS
+    return g_dxc_lock.lock([&](cc::unit&) { return cc::invoke(f); });
+#else
+    return cc::invoke(f);
+#endif
+}
+
+[[nodiscard]] cc::result<dxc_invocation> invoke_dxc(IDxcUtils* utils,
+                                                    IDxcCompiler3* dxc,
+                                                    cc::string_view source,
+                                                    impl::arg_storage const& args,
+                                                    IDxcIncludeHandler* include_handler,
+                                                    char const* what)
+{
+    return with_dxc_serialized([&] { return invoke_dxc_locked(utils, dxc, source, args, include_handler, what); });
+}
 } // namespace
 
 cc::result<compiler> compiler::create()
 {
-    auto i = std::make_unique<state>();
-    if (HRESULT hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(i->utils.GetAddressOf())); FAILED(hr))
-        return impl::dxc_error(hr, "DxcCreateInstance(DxcUtils)");
-    if (HRESULT hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(i->compiler.GetAddressOf())); FAILED(hr))
-        return impl::dxc_error(hr, "DxcCreateInstance(DxcCompiler)");
-    i->version = query_version(i->compiler.Get());
-    return compiler(cc::move(i));
+    return with_dxc_serialized(
+        [&]() -> cc::result<compiler>
+        {
+            auto i = std::make_unique<state>();
+            if (HRESULT hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(i->utils.GetAddressOf())); FAILED(hr))
+                return impl::dxc_error(hr, "DxcCreateInstance(DxcUtils)");
+            if (HRESULT hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(i->compiler.GetAddressOf())); FAILED(hr))
+                return impl::dxc_error(hr, "DxcCreateInstance(DxcCompiler)");
+            i->version = query_version(i->compiler.Get());
+            return compiler(cc::move(i));
+        });
 }
 
 cc::string_view compiler::version() const
