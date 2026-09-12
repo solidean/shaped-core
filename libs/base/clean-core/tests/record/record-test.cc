@@ -67,7 +67,7 @@ REC_TEST("record - an event round-trips through a listener")
     CHECK(c.count_named("alpha") == 2);
     CHECK(c.count_named("beta") == 1);
 
-    for (auto const& e : c.events)
+    for (auto const& e : c.snapshot())
         if (cc::string_view(e.name) == "alpha")
             CHECK(e.kind == cc::rec::event_kind::marker);
 }
@@ -84,9 +84,10 @@ REC_TEST("record - timestamps within a thread do not go backwards")
         cc::rec::flush_blocking();
     }
 
-    REQUIRE(c.events.size() >= 64);
-    for (isize i = 1; i < c.events.size(); ++i)
-        CHECK(c.events[i].cycles >= c.events[i - 1].cycles);
+    auto const events = c.snapshot();
+    REQUIRE(events.size() >= 64);
+    for (isize i = 1; i < events.size(); ++i)
+        CHECK(events[i].cycles >= events[i - 1].cycles);
 }
 
 REC_TEST("record - payload fields read back generically")
