@@ -765,10 +765,17 @@ pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provi
 #include <shaped-graphics/routine/render_routine.hh>
 // A routine is a per-context singleton reached BY TYPE. Derive from the CRTP base:
 class my_routine : public sg::render_routine<my_routine> { ... };
-// protected virtuals (all default to no-ops) — three-phase init, split so async compiles start early:
-void init_once(sg::context& ctx)          // first init only, NEVER on reload — persistent, shader-independent work
-void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
-void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
+// protected virtuals (both default to a no-op) — two phases, both COROUTINES so a phase awaits instead of blocking:
+cc::shared_async<cc::unit> init_once(sg::routine_init_scope)  // first init only, NEVER on reload; never cancelled
+cc::shared_async<cc::unit> init(sg::routine_init_scope)       // first init + at every reload generation
+//   The scope is taken BY VALUE: a coroutine's reference parameter dangles across its first suspend.
+scope.context() / scope.generation() / scope.is_cancelled()
+co_await scope.with_cmd([&](sg::command_list& cmd) { ... })  // record GPU init work into the TICK's shared list
+//   AWAITED, not just called: a phase may resume long after its tick returned, so this parks until a window is open.
+//   `f` is not a coroutine, which is what keeps a list from being held across an await.
+co_await scope.yield()                     // a budget boundary inside one phase, and a cancellation check
+co_await cc::async_settled(node)           // await WITHOUT short-circuiting — a bad shader is the routine's verdict
+fail_init()                                // void — "will not come good until a reload"; readiness reports `failed`
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
 my_routine::try_acquire_exclusive(cmd[, params])  // -> sg::routine_guard<my_routine>  HOLDS the routine's lock; self-> is mutable
 my_routine::try_acquire(cmd[, params])           // -> sg::routine_scope<my_routine>  NO lock held; read-only
@@ -790,15 +797,24 @@ auto other = self.acquire_exclusive(_token);        // the same, for a dependenc
 //   ONE readiness check per entry into the routine system, not one per routine — that is what the token buys.
 //   A cycle asserts where the edge is declared: it would be a deadlock, not just a hang.
 
+// What a FALLIBLE routine's execute returns — one whose dependencies are not all static tokens:
+[[nodiscard]] sg::routine_outcome   // executed | declined; a routine with only static tokens returns void instead
+
 // Threading:
 //   registry guarded (acquiring from parallel recording is fine);
 //   initialization runs ONLY inside a tick, so the phases are never concurrent and a reload cannot land mid-frame;
+//   _init guards the phase bookkeeping ONLY — a cc::mutex cannot be held across a co_await, so a routine's members
+//     are written by init without it and the pending -> ready transition is the publication barrier;
 //   the read-only scope takes no lock, so what it reaches must be immutable after init or self-guarded.
-// re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
+// re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads,
+//   and an `init` in flight when the generation moves is cancelled and restarted at the new one.
 
 ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initialized, pending, budget_exhausted, is_idle()}
 //   THE driver. A frame-boundary call: it opens and submits its own command list, so never inside one —
-//   after advance_epoch, before the frame's first acquire. Budget is advisory PACING (checked between routines), not a deadline.
+//   after advance_epoch, before the frame's first acquire.
+//   Runs the phases on the AMBIENT async scheduler and asserts if none is installed; it participates while driving,
+//   so a cc::singlethreaded_scheduler works and the phases then run inline on the ticking thread.
+//   Budget is advisory PACING: it bounds how long the TICK drives, not how long an initialization takes.
 ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP

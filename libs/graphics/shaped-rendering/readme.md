@@ -81,7 +81,7 @@ sr also hosts the **Dear ImGui backend** — both halves, drawn entirely through
 `sr::imgui_routine` is the render routine that draws it.
 See [docs/imgui.md](docs/imgui.md).
 
-The render-routine **framework** (the `sg::render_routine` base with 3-phase, hot-reload-aware init, and the per-context `ctx.routines` registry) lives in **shaped-graphics** —
+The render-routine **framework** (the `sg::render_routine` base with its two coroutine init phases, and the per-context `ctx.routines` registry) lives in **shaped-graphics** —
 see its [docs/render-routines.md](../shaped-graphics/docs/render-routines.md).
 `sr` hosts the **concrete** routines built on top of it; they land as they are implemented.
 See [docs/render-routines.md](docs/render-routines.md) for the sr-side overview and [docs/structure.md](docs/structure.md) for the wider roadmap.

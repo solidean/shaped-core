@@ -1,6 +1,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -34,6 +35,8 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     // Asserts where there is none rather than standing up a private one: a phase nothing can drive would leave every
     // routine pending forever, which is a configuration error and not a state to report.
     auto& scheduler = cc::ambient_async_scheduler();
+
+    ++_ticks;
 
     auto result = routine_tick_result();
 
@@ -205,9 +208,29 @@ void routine_registry::drop_edges_from(render_routine_base const* routine)
     _edges.lock([routine](edge_map& edges) { edges.erase(routine); });
 }
 
+void routine_registry::warn_if_never_ticked()
+{
+    // Threshold rather than the first acquire: a routine registered and asked about in the same frame is ordinary, and
+    // the tick that would bring it up has simply not come round yet.
+    static constexpr auto k_acquires_before_warning = u64(1000);
+
+    if (_ticks.load(cc::memory_order_relaxed) != 0)
+        return;
+    if (++_pending_acquires < k_acquires_before_warning)
+        return;
+    if (_warned_never_ticked.exchange(true))
+        return;
+
+    CC_LOG_WARNING("routines have been asked for {} times and ctx.routines.tick() has never run — nothing will ever "
+                   "be ready. Call it once per frame, after advance_epoch and before the frame's first acquire",
+                   k_acquires_before_warning);
+}
+
 routine_readiness routine_registry::readiness_of(render_routine_base& routine)
 {
     auto const own = routine.own_readiness();
+    if (own == routine_readiness::pending)
+        warn_if_never_ticked();
     if (own == routine_readiness::failed)
         return routine_readiness::failed;
 

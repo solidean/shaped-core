@@ -244,11 +244,12 @@ Parametrize it; the registry holds one instance per value.
 ```cpp
 class sr::blit_routine : public sg::render_routine<blit_routine, sg::pixel_format>   // the format IS the parameter
 {
-    void init_declare(sg::context& ctx) override
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
     {
-        // one pipeline, for params() — built here, where waiting is allowed
-        _pipeline = ctx.cached.acquire_raster_pipeline({.layout = ..., .color_targets = {{.format = params()}}});
-        (void)cc::try_async_blocking_get(_pipeline);   // so `ready` means ready
+        // one pipeline, for params() — built here, where the waiting is allowed to be
+        _pipeline = scope.context().cached.acquire_raster_pipeline(
+            {.layout = ..., .color_targets = {{.format = params()}}});
+        co_await cc::async_settled(_pipeline);   // so `ready` means ready
     }
     sg::async_raster_pipeline _pipeline;
 };
@@ -333,15 +334,22 @@ Those belong in routines of their own rather than behind a flag here.
 class my_routine : public sg::render_routine<my_routine>   // CRTP base; override the phases you need
 {
 public:
-    static void execute(sg::command_list& cmd, /* args */)  // acquire_exclusive(cmd) + record work
-    { auto self = acquire_exclusive(cmd); /* self->... is mutable, under the routine's lock */ }
+    static void execute(sg::command_list& cmd, /* args */)  // try_acquire_exclusive(cmd), branch once, record
+    {
+        auto self = try_acquire_exclusive(cmd);
+        if (!self.is_ready())
+            return;                                 // pending or failed — the tick brings it up, not this
+        /* self->... is mutable, under the routine's lock */
+    }
 protected:
-    void init_declare(sg::context& ctx) override { /* acquire shaders (slib) + pipelines; already locked */ }
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override
+    { /* await shaders (slib) + pipelines; NOT under the lock — readiness publishes what this writes */ }
 private:
-    sg::binding_group_layout_handle _group_layout;   // plain members — the framework guards them
+    sg::binding_group_layout_handle _group_layout;   // plain members — the guard covers them during execute
 };
 // call site: my_routine::execute(cmd, args);   // reached by type — no handle, no registration
-// acquire(cmd) is the other entry point: -> my_routine const&, no lock, for a routine that only reads.
+// try_acquire(cmd) is the other entry point: -> a read-only scope, no lock, for a routine that only reads.
+// ctx.routines.tick() is what initializes; neither entry point does.
 ```
 
 See the [shaped-graphics cheat sheet](../shaped-graphics/cheat-sheet.md) for the full framework surface

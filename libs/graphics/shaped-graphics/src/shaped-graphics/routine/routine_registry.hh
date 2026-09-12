@@ -4,6 +4,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context
 #include <shaped-graphics/routine/render_routine_base.hh>
@@ -141,6 +142,9 @@ private:
     /// the check exists to prevent.
     void add_dependency(render_routine_base const* from, std::shared_ptr<render_routine_base> to);
 
+    /// Say so, once, when routines are being asked for and nothing has ever ticked.
+    void warn_if_never_ticked();
+
     /// Forget what an evicted routine depended on.
     /// Edges pointing AT it are left alone: they belong to routines that still hold a token, and the strong reference
     /// in that token is what keeps it alive — which is exactly the promise a token makes.
@@ -242,6 +246,13 @@ private:
     // One window at a time, and one mutex around it: every routine initialized in a tick records into the same list,
     // from whichever worker its coroutine happens to be on.
     cc::mutex<window_state> _window;
+
+    // How many ticks have run, and whether the never-ticked diagnostic has already fired.
+    // An application that never ticks gets a renderer where nothing is ever ready, and nothing else would say so:
+    // every acquire reads pending, every draw is skipped, and the screen is empty with no error anywhere.
+    cc::atomic<u64> _ticks = 0;
+    cc::atomic<u64> _pending_acquires = 0;
+    cc::atomic<bool> _warned_never_ticked = false;
 };
 
 // routine_init_scope's bodies live here because they reach the registry, which is declared above it.
