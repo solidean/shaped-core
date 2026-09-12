@@ -11,6 +11,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
@@ -25,6 +26,14 @@
 /// `copy_fence_value` is reserved synchronously at enqueue, and the completion fence reaches it once the copy has run or the job was dropped.
 struct sg::backend::dx12::dx12_async_upload_job
 {
+    /// Counts this upload as outstanding until the copy has actually run on the GPU.
+    ///
+    /// This actor is two-stage like its download twin: the job leaves `_active` when its last chunk is PACKED, which
+    /// is well before the window carrying it executes.
+    /// So the token is handed on to a record keyed on the completion value, and released when the GPU passes it —
+    /// see sg::impl::transfer_drain, which says why the job object's own lifetime is the wrong span.
+    sg::impl::transfer_drain::token drain;
+
     // Exactly one destination is set: a buffer (`buffer_target` + `dst_offset`) or a texture (`texture_target` + `footprint`).
     // Both are weak refs, locked at stage time — see stage_job.
     std::weak_ptr<dx12_buffer const> buffer_target;   // destination buffer, or empty for a texture copy
@@ -164,6 +173,9 @@ public:
     /// Then releases the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
+    /// Blocks until every upload handed to the actor has run on the GPU, been cancelled or been dropped.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.
     // _staging / _mapped / _window_bytes are also rebuilt by the actor when a set_window_bytes is applied.
     dx12_context& _ctx;
@@ -197,6 +209,9 @@ public:
     // Actor-thread state like the window bookkeeping around it, so it needs no lock.
     // It lives here rather than in the actor only because the actor type is file-local to the .cc.
     sg::impl::transfer_scheduler _scheduler;
+
+    /// Outstanding uploads, counted from enqueue to the completion of the copy that carried them.
+    sg::impl::transfer_drain _drain;
 
     // Handed to every stream source, and detached before the actor dies.
     // Public alongside the other actor-facing members: the actor installs it on each source it admits.

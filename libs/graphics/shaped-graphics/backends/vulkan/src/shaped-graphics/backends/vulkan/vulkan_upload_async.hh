@@ -13,6 +13,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
@@ -26,6 +27,13 @@
 /// stamped with it never hang.
 struct sg::backend::vulkan::vulkan_async_upload_job
 {
+    /// Counts this upload as outstanding until its copy has actually run on the GPU.
+    ///
+    /// Handed on to the `_awaiting` entry when the job leaves `_pending`, because an upload is not delivered when it
+    /// is staged — it is delivered when the window carrying it completes.
+    /// That is what makes ctx.block_until_idle() true of the upload half as well; see sg::impl::transfer_drain.
+    sg::impl::transfer_drain::token drain;
+
     // Exactly one destination is set.
     std::weak_ptr<vulkan_buffer const> buffer_target;
     std::weak_ptr<vulkan_texture const> texture_target;
@@ -201,6 +209,9 @@ public:
 
     void shutdown();
 
+    /// Blocks until every upload handed to the actor has run on the GPU, been cancelled or been dropped.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 
     // --- actor-facing ------------------------------------------------------------------------------
@@ -237,6 +248,10 @@ private:
     /// One finished transfer waiting for its last copy to land before its completion node is settled.
     struct awaiting_settle
     {
+        /// The originating job's drain token, so the count drops when this entry retires — which is when the GPU has
+        /// actually run the copy.
+        sg::impl::transfer_drain::token drain;
+
         /// On the window timeline: reaching it means every copy this transfer queued has landed, which is when its
         /// stream control may be settled.
         /// The completion *value* is already queued by then — see signal_on_queue.
@@ -291,6 +306,9 @@ private:
 
     /// Which job fills the open window next, and how windows are shared between the two tiers.
     sg::impl::transfer_scheduler _scheduler;
+
+    /// Outstanding uploads, counted from admission to the completion of the window that carried them.
+    sg::impl::transfer_drain _drain;
 
     /// Handed to every stream source, and detached before the actor dies.
     std::shared_ptr<vulkan_upload_waker> _waker;

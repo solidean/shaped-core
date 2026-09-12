@@ -151,6 +151,11 @@ void dx12_context::block_until_transfers_drained()
     }
     _download_inline.wait_until_submitted_drained();
     _download_async.wait_until_idle();
+
+    // Uploads too, which is what makes the doc comment on block_until_transfers_drained true: "every transfer actor"
+    // meant the two download ones until now.
+    // An upload is drained when its copy has RUN, not when it was staged — the drain records carry that.
+    _upload_async.wait_until_idle();
 }
 
 void dx12_context::retire_completed_epochs()

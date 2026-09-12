@@ -169,6 +169,9 @@ void vulkan_context::block_until_transfers_drained()
     }
     _download_inline.wait_until_idle();
     _download_async.wait_until_idle();
+
+    // Uploads too — see the dx12 twin. An upload is drained when its copy has run, not when it was staged.
+    _upload_async.wait_until_idle();
 }
 
 void vulkan_context::retire_completed_epochs()
