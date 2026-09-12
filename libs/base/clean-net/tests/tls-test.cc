@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -64,7 +66,7 @@ struct tls_fixture
 };
 } // namespace
 
-TEST("cnet - TLS reports whether this build has it")
+CNET_IO_TEST("cnet - TLS reports whether this build has it")
 {
     // NOT an assertion that it is supported.
     // The wasm build has no backend and says so rather than pretending, which is the whole reason this is a runtime
@@ -84,7 +86,7 @@ TEST("cnet - TLS reports whether this build has it")
     CHECK(says_so);
 }
 
-TEST("cnet - a handshake over a virtual network carries bytes both ways")
+CNET_IO_TEST("cnet - a handshake over a virtual network carries bytes both ways")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -136,7 +138,7 @@ TEST("cnet - a handshake over a virtual network carries bytes both ways")
     CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
 }
 
-TEST("cnet - an untrusted certificate is refused")
+CNET_IO_TEST("cnet - an untrusted certificate is refused")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -158,7 +160,7 @@ TEST("cnet - an untrusted certificate is refused")
     CHECK(pump_until([&] { return server_side->is_ready(); }));
 }
 
-TEST("cnet - a certificate for the wrong host is refused")
+CNET_IO_TEST("cnet - a certificate for the wrong host is refused")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -180,7 +182,7 @@ TEST("cnet - a certificate for the wrong host is refused")
     CHECK(pump_until([&] { return server_side->is_ready(); }));
 }
 
-TEST("cnet - allow_any_certificate is the one way past verification")
+CNET_IO_TEST("cnet - allow_any_certificate is the one way past verification")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -200,7 +202,7 @@ TEST("cnet - allow_any_certificate is the one way past verification")
     CHECK(server_side->try_error() == nullptr);
 }
 
-TEST("cnet - the two ends agree on an application protocol")
+CNET_IO_TEST("cnet - the two ends agree on an application protocol")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -227,7 +229,7 @@ TEST("cnet - the two ends agree on an application protocol")
     CHECK(tls_negotiated_alpn(*fixture.connected->value()).empty());
 }
 
-TEST("cnet - a large payload crosses the record boundary intact")
+CNET_IO_TEST("cnet - a large payload crosses the record boundary intact")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");
@@ -282,7 +284,7 @@ TEST("cnet - a large payload crosses the record boundary intact")
     CHECK(identical);
 }
 
-TEST("cnet - the platform trust store answers, or says it cannot")
+CNET_IO_TEST("cnet - the platform trust store answers, or says it cannot")
 {
     auto const roots = cnet::impl::system_root_certificates();
 
@@ -302,7 +304,7 @@ TEST("cnet - the platform trust store answers, or says it cannot")
         CHECK(!bundle.empty());
 }
 
-TEST("cnet - a self-signed certificate is refused by the machine's own roots")
+CNET_IO_TEST("cnet - a self-signed certificate is refused by the machine's own roots")
 {
     if (!tls_is_supported())
         SKIP("this build has no TLS backend");

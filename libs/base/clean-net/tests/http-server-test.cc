@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
@@ -104,7 +106,7 @@ struct server_fixture
 };
 } // namespace
 
-TEST("cnet - a server answers a route")
+CNET_IO_TEST("cnet - a server answers a route")
 {
     auto fixture = server_fixture();
 
@@ -124,7 +126,7 @@ TEST("cnet - a server answers a route")
     CHECK(fixture.server->routed_requests() == 1);
 }
 
-TEST("cnet - a path nothing serves is a 404, and a method nothing serves is a 405")
+CNET_IO_TEST("cnet - a path nothing serves is a 404, and a method nothing serves is a 405")
 {
     auto fixture = server_fixture();
 
@@ -145,7 +147,7 @@ TEST("cnet - a path nothing serves is a 404, and a method nothing serves is a 40
     CHECK(wrong_method->value().status() == 405);
 }
 
-TEST("cnet - a handler sees the request it was sent")
+CNET_IO_TEST("cnet - a handler sees the request it was sent")
 {
     auto fixture = server_fixture();
 
@@ -180,7 +182,7 @@ TEST("cnet - a handler sees the request it was sent")
     CHECK(seen->target == "/echo?a=1&b=2");
 }
 
-TEST("cnet - a wildcard route matches everything under it, and a specific one added first wins")
+CNET_IO_TEST("cnet - a wildcard route matches everything under it, and a specific one added first wins")
 {
     auto fixture = server_fixture();
 
@@ -198,7 +200,7 @@ TEST("cnet - a wildcard route matches everything under it, and a specific one ad
     CHECK(under->value().body_text() == "/files/a/b/c");
 }
 
-TEST("cnet - a HEAD gets the head and none of the body")
+CNET_IO_TEST("cnet - a HEAD gets the head and none of the body")
 {
     auto fixture = server_fixture();
 
@@ -219,7 +221,7 @@ TEST("cnet - a HEAD gets the head and none of the body")
     CHECK(response->value().body.empty());
 }
 
-TEST("cnet - two requests share one connection")
+CNET_IO_TEST("cnet - two requests share one connection")
 {
     auto fixture = server_fixture();
 
@@ -241,7 +243,7 @@ TEST("cnet - two requests share one connection")
     CHECK(fixture.server->routed_requests() == 2);
 }
 
-TEST("cnet - a body over the limit is refused rather than buffered")
+CNET_IO_TEST("cnet - a body over the limit is refused rather than buffered")
 {
     auto fixture = server_fixture({.max_body_bytes = 16});
 
@@ -265,7 +267,7 @@ TEST("cnet - a body over the limit is refused rather than buffered")
     CHECK(fixture.server->routed_requests() == 0);
 }
 
-TEST("cnet - a request nothing can parse gets a 400 and the connection ends")
+CNET_IO_TEST("cnet - a request nothing can parse gets a 400 and the connection ends")
 {
     auto fixture = server_fixture();
     fixture.server->route(http_method::get, "/",
@@ -290,7 +292,7 @@ TEST("cnet - a request nothing can parse gets a 400 and the connection ends")
     CHECK(answer.contains("Connection: close"));
 }
 
-TEST("cnet - a connection past the limit is closed rather than queued")
+CNET_IO_TEST("cnet - a connection past the limit is closed rather than queued")
 {
     auto fixture = server_fixture({.max_connections = 1});
     fixture.server->route(http_method::get, "/",
@@ -313,7 +315,7 @@ TEST("cnet - a connection past the limit is closed rather than queued")
     CHECK(fixture.server->open_connections() == 1);
 }
 
-TEST("cnet - stopping the server ends everything in flight")
+CNET_IO_TEST("cnet - stopping the server ends everything in flight")
 {
     auto fixture = server_fixture();
     fixture.server->route(http_method::get, "/",
@@ -338,7 +340,7 @@ TEST("cnet - stopping the server ends everything in flight")
     CHECK(late->try_error() != nullptr);
 }
 
-TEST("cnet - a server on a real socket answers a real client")
+CNET_IO_TEST("cnet - a server on a real socket answers a real client")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
@@ -369,7 +371,7 @@ TEST("cnet - a server on a real socket answers a real client")
 
 // ---- streaming responses -------------------------------------------------------------------------------
 
-TEST("cnet - a streamed response arrives as chunks and keeps the connection")
+CNET_IO_TEST("cnet - a streamed response arrives as chunks and keeps the connection")
 {
     auto fixture = server_fixture();
 
@@ -417,7 +419,7 @@ TEST("cnet - a streamed response arrives as chunks and keeps the connection")
     CHECK(second->value().body_text() == "still here");
 }
 
-TEST("cnet - an abandoned stream ends the response rather than hanging it")
+CNET_IO_TEST("cnet - an abandoned stream ends the response rather than hanging it")
 {
     auto fixture = server_fixture();
 
@@ -444,7 +446,7 @@ TEST("cnet - an abandoned stream ends the response rather than hanging it")
     CHECK(response->value().body_text() == "partial");
 }
 
-TEST("cnet - an empty chunk is dropped rather than ending the body")
+CNET_IO_TEST("cnet - an empty chunk is dropped rather than ending the body")
 {
     auto fixture = server_fixture();
 
@@ -530,7 +532,7 @@ struct static_files
 // The two file-serving tests wait on a generous wall budget rather than a tight one.
 // They share a machine with every other test in this binary, and a slow answer here is the scheduler rather than a
 // defect worth failing on -- while a real hang still fails, just later.
-TEST("cnet - a served directory hands back its files")
+CNET_IO_TEST("cnet - a served directory hands back its files")
 {
     auto const files = static_files();
     if (!files.written)
@@ -560,7 +562,7 @@ TEST("cnet - a served directory hands back its files")
     CHECK(missing->value().status() == 404);
 }
 
-TEST("cnet - a served directory refuses every way out of itself")
+CNET_IO_TEST("cnet - a served directory refuses every way out of itself")
 {
     auto const files = static_files();
     auto fixture = server_fixture();
@@ -586,7 +588,7 @@ TEST("cnet - a served directory refuses every way out of itself")
     }
 }
 
-TEST("cnet - a request body arrives, and the connection is still usable afterwards")
+CNET_IO_TEST("cnet - a request body arrives, and the connection is still usable afterwards")
 {
     auto fixture = server_fixture();
 

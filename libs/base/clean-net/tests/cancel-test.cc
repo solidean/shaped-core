@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -69,7 +71,7 @@ template <class T>
 }
 } // namespace
 
-TEST("cnet - the default token cancels nothing and allocates nothing")
+CNET_IO_TEST("cnet - the default token cancels nothing and allocates nothing")
 {
     auto const none = cancel_token();
     CHECK(!none.is_valid());
@@ -95,7 +97,7 @@ TEST("cnet - the default token cancels nothing and allocates nothing")
     CHECK(real.is_cancelled());
 }
 
-TEST("cnet - a cancelled token fails an operation before it starts")
+CNET_IO_TEST("cnet - a cancelled token fails an operation before it starts")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -112,7 +114,7 @@ TEST("cnet - a cancelled token fails an operation before it starts")
     CHECK(io->pending_count() == 0);
 }
 
-TEST("cnet - cancelling ends a parked virtual read")
+CNET_IO_TEST("cnet - cancelling ends a parked virtual read")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -135,7 +137,7 @@ TEST("cnet - cancelling ends a parked virtual read")
     CHECK(pump_until([&] { return io->pending_count() == 0; }));
 }
 
-TEST("cnet - one token cancels every operation it was given to")
+CNET_IO_TEST("cnet - one token cancels every operation it was given to")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -167,7 +169,7 @@ TEST("cnet - one token cancels every operation it was given to")
     CHECK(reads_as_cancelled(second_accept));
 }
 
-TEST("cnet - cancelling after an operation finished is harmless")
+CNET_IO_TEST("cnet - cancelling after an operation finished is harmless")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -191,7 +193,7 @@ TEST("cnet - cancelling after an operation finished is harmless")
     CHECK(sent->try_error() == nullptr);
 }
 
-TEST("cnet - cancelling a simulated link does not wait its latency out")
+CNET_IO_TEST("cnet - cancelling a simulated link does not wait its latency out")
 {
     auto clk = manual_clock(0);
     auto io = io_system::create({.unthreaded = true, .time_source = &clk});
@@ -212,7 +214,7 @@ TEST("cnet - cancelling a simulated link does not wait its latency out")
     CHECK(reads_as_cancelled(connected));
 }
 
-TEST("cnet - cancelling ends a parked read on a real socket")
+CNET_IO_TEST("cnet - cancelling ends a parked read on a real socket")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())

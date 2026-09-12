@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/common/macros.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
@@ -151,7 +153,7 @@ struct listener_fixture
 }
 } // namespace
 
-TEST("cnet - an io_system comes up and reports which mode it got")
+CNET_IO_TEST("cnet - an io_system comes up and reports which mode it got")
 {
     auto io = io_system::try_create();
     if (io.has_error())
@@ -170,7 +172,7 @@ TEST("cnet - an io_system comes up and reports which mode it got")
     CHECK(&io.value()->time_source() == &system_clock());
 }
 
-TEST("cnet - the io_system carries a connect and an accept to completion")
+CNET_IO_TEST("cnet - the io_system carries a connect and an accept to completion")
 {
     auto io = io_system::try_create();
     if (io.has_error())
@@ -180,7 +182,7 @@ TEST("cnet - the io_system carries a connect and an accept to completion")
         SKIP("this platform has no sockets");
 }
 
-TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
+CNET_IO_TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
 {
     // The mode a threads-off build and wasm always get, reproduced on a native host so it is debuggable here.
     auto io = io_system::try_create({.unthreaded = true});
@@ -196,7 +198,7 @@ TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
         SKIP("this platform has no sockets");
 }
 
-TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted")
+CNET_IO_TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
@@ -213,7 +215,7 @@ TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted"
     CHECK(io.value()->pending_count() == 0);
 }
 
-TEST("cnet - a deadline is measured against the clock the io_system was given")
+CNET_IO_TEST("cnet - a deadline is measured against the clock the io_system was given")
 {
     auto clk = manual_clock(0);
     auto io = io_system::try_create({.unthreaded = true, .time_source = &clk});
@@ -247,7 +249,7 @@ TEST("cnet - a deadline is measured against the clock the io_system was given")
     CHECK(receive_op.code == error_code::timed_out);
 }
 
-TEST("cnet - cancelling through the io_system completes the operation as cancelled")
+CNET_IO_TEST("cnet - cancelling through the io_system completes the operation as cancelled")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())

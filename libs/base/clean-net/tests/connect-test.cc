@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/common/time.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -68,7 +70,7 @@ struct host_fixture
 };
 } // namespace
 
-TEST("cnet - connecting to a name resolves and connects")
+CNET_IO_TEST("cnet - connecting to a name resolves and connects")
 {
     auto fixture = host_fixture({addr("10.0.0.1")});
     auto listener = fixture.listen_on(addr("10.0.0.1"), 8080);
@@ -82,7 +84,7 @@ TEST("cnet - connecting to a name resolves and connects")
     CHECK(pump_until([&] { return accepted->is_ready(); }));
 }
 
-TEST("cnet - a port that is not a port is refused before anything happens")
+CNET_IO_TEST("cnet - a port that is not a port is refused before anything happens")
 {
     auto fixture = host_fixture({addr("10.0.0.1")});
 
@@ -95,7 +97,7 @@ TEST("cnet - a port that is not a port is refused before anything happens")
     CHECK(worse->try_error() != nullptr);
 }
 
-TEST("cnet - the race reaches the family that works when the other one does not")
+CNET_IO_TEST("cnet - the race reaches the family that works when the other one does not")
 {
     // The v6 address is a black hole: nothing listens there, so an attempt to it is refused.
     // The v4 address is the one with a server behind it.
@@ -113,7 +115,7 @@ TEST("cnet - the race reaches the family that works when the other one does not"
     CHECK(pump_until([&] { return accepted->is_ready(); }));
 }
 
-TEST("cnet - every address failing reports the first attempt's failure")
+CNET_IO_TEST("cnet - every address failing reports the first attempt's failure")
 {
     auto fixture = host_fixture({addr("2001:db8::1"), addr("10.0.0.1")});
 
@@ -124,7 +126,7 @@ TEST("cnet - every address failing reports the first attempt's failure")
     CHECK(!connected->try_error()->is_cancelled());
 }
 
-TEST("cnet - a name that does not resolve fails the connect")
+CNET_IO_TEST("cnet - a name that does not resolve fails the connect")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = virtual_network(*io);
@@ -140,7 +142,7 @@ TEST("cnet - a name that does not resolve fails the connect")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - cancelling the caller's token cancels the whole race")
+CNET_IO_TEST("cnet - cancelling the caller's token cancels the whole race")
 {
     auto fixture = host_fixture({addr("2001:db8::1")});
 
@@ -155,7 +157,7 @@ TEST("cnet - cancelling the caller's token cancels the whole race")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - a race that wins leaves the caller's token alone")
+CNET_IO_TEST("cnet - a race that wins leaves the caller's token alone")
 {
     auto fixture = host_fixture({addr("10.0.0.1")});
     auto listener = fixture.listen_on(addr("10.0.0.1"), 8080);
@@ -178,7 +180,7 @@ TEST("cnet - a race that wins leaves the caller's token alone")
     CHECK(sent->try_error() == nullptr);
 }
 
-TEST("cnet - a child token cancels with its parent, and alone")
+CNET_IO_TEST("cnet - a child token cancels with its parent, and alone")
 {
     auto const parent = cancel_token::create();
     auto const child = parent.create_child();
@@ -205,7 +207,7 @@ TEST("cnet - a child token cancels with its parent, and alone")
     CHECK(!orphan.is_cancelled());
 }
 
-TEST("cnet - the stagger starts another attempt, and the losers stop when the race is decided")
+CNET_IO_TEST("cnet - the stagger starts another attempt, and the losers stop when the race is decided")
 {
     // Three addresses, all reachable, on a link slow enough that the first attempt is still in flight when the
     // stagger fires -- which is the only way to watch the stagger do its job.
@@ -257,7 +259,7 @@ TEST("cnet - the stagger starts another attempt, and the losers stop when the ra
     CHECK(sent->try_error() == nullptr);
 }
 
-TEST("cnet - stopping an io_system settles what is still in flight")
+CNET_IO_TEST("cnet - stopping an io_system settles what is still in flight")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = cc::make_unique<virtual_network>(*io);
@@ -284,7 +286,7 @@ TEST("cnet - stopping an io_system settles what is still in flight")
     io = {};
 }
 
-TEST("cnet - stopping twice is the same as stopping once")
+CNET_IO_TEST("cnet - stopping twice is the same as stopping once")
 {
     auto io = io_system::create({.unthreaded = true});
     auto net = cc::make_unique<virtual_network>(*io);
