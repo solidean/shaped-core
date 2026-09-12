@@ -116,6 +116,101 @@ pipeline_cache& context::pipeline_cache_ref()
     return *_pipeline_cache;
 }
 
+void context::process_completed_epochs()
+{
+    retire_completed_epochs();
+    settle_due_completions();
+}
+
+bool context::try_advance_epoch(int allowed_in_flight)
+{
+    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
+
+    // Retire first, and only then decide: an epoch the GPU finished but nobody has reclaimed still counts as in flight,
+    // so a caller that skipped this would decline against depth that is no longer there.
+    process_completed_epochs();
+    if (in_flight_epoch_count() > allowed_in_flight)
+        return false;
+
+    advance_epoch({});
+    return true;
+}
+
+cc::shared_async<cc::unit const> context::completion_for(u64 target, bool is_submission)
+{
+    return _pending_completions.lock(
+        [&](cc::vector<pending_completion>& pending) -> cc::shared_async<cc::unit const>
+        {
+            for (auto const& p : pending)
+                if (p.target == target && p.is_submission == is_submission)
+                    return p.node;
+
+            auto node = cc::make_async_manual<cc::unit>();
+            pending.push_back({.target = target, .is_submission = is_submission, .node = node});
+            return node;
+        });
+}
+
+void context::settle_due_completions()
+{
+    // Taken out under the lock and pushed outside it: pushing resumes whoever depended on the node, and a dependent
+    // that reaches back in here would deadlock on a mutex this thread still holds.
+    auto due = _pending_completions.lock(
+        [this](cc::vector<pending_completion>& pending)
+        {
+            auto out = cc::vector<cc::shared_async<cc::unit>>();
+            auto const completed = u64(completed_epoch());
+            for (auto i = pending.size(); i > 0; --i)
+            {
+                auto& p = pending[i - 1];
+                auto const reached
+                    = p.is_submission ? is_submission_complete(submission_token(p.target)) : p.target <= completed;
+                if (!reached)
+                    continue;
+                out.push_back(cc::move(p.node));
+                pending.remove_at_unordered(i - 1);
+            }
+            return out;
+        });
+
+    for (auto const& node : due)
+        node->push_value(cc::unit{});
+}
+
+cc::shared_async<cc::unit const> context::epoch_completion(epoch e)
+{
+    if (u64(e) <= u64(completed_epoch()))
+        return make_ready_completion();
+    return completion_for(u64(e), false);
+}
+
+cc::shared_async<cc::unit const> context::submission_completion(submission_token token)
+{
+    // not_submitted is the one target that never arrives, so it gets a node nothing will ever push — which is what the
+    // poll already reports, rather than a ready node claiming work that was never recorded had finished.
+    if (token != submission_token::not_submitted && is_submission_complete(token))
+        return make_ready_completion();
+    return completion_for(u64(token), true);
+}
+
+void context::block_until_idle()
+{
+    CC_ASSERT(execution() == execution_model::may_block,
+              "block_until_idle() is the one call in sg that waits, and this context cannot — read completion off the "
+              "*_completion() asyncs, or poll across frames");
+
+    // Alternating, because the two halves feed each other: the GPU can be waiting on a copy only an actor will signal,
+    // and an actor delivers a download's bytes only after the GPU finished writing them.
+    // Both halves are cheap once quiet, so this settles in one extra round rather than spinning.
+    while (true)
+    {
+        block_until_submissions_complete();
+        if (!cc::thread_pump_all())
+            break;
+    }
+    process_completed_epochs();
+}
+
 cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
 {
     if (timestamp._heap_future == nullptr)

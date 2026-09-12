@@ -113,7 +113,46 @@ void dx12_context::advance_epoch(cc::optional<int> allowed_in_flight)
     _download_inline.apply_pending_budget();
 }
 
-void dx12_context::process_completed_epochs()
+int dx12_context::in_flight_epoch_count()
+{
+    return _epoch_state.lock([](dx12_epoch_state& s) { return int(s.in_flight.size()); });
+}
+
+void dx12_context::block_until_submissions_complete()
+{
+    CC_RECORD_SCOPE("sg.epoch.block_until_submissions_complete");
+
+    // A submitted list may be waiting on the async-upload completion fence, which only the copy actor signals.
+    // Where that actor has no thread of its own, the GPU would never reach the value below and this would never return.
+    drain_transfers();
+
+    if (!_submission_fence)
+        return;
+
+    // The last token handed out, so this covers everything submitted so far and nothing that has not been.
+    u64 const issued = _next_submission.lock([](sg::submission_token& next) { return u64(next); });
+    if (issued <= u64(sg::submission_token::first))
+        return; // nothing has ever been submitted
+    u64 const target = issued - 1;
+
+    if (_submission_fence->GetCompletedValue() < target)
+    {
+        // A per-call event rather than a shared one, for the same reason wait_for_epoch uses one: this is safe to call
+        // from any thread, and a single reused event cannot serve concurrent waiters.
+        HANDLE const event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        CC_ASSERT(event != nullptr, "CreateEventW failed for the submission fence wait");
+        HRESULT const hr = _submission_fence->SetEventOnCompletion(target, event);
+        CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
+        WaitForSingleObject(event, INFINITE);
+        CloseHandle(event);
+
+        // A removed device completes every pending wait immediately, since the fence jumps to UINT64_MAX.
+        if (note_device_removed_if_lost(S_OK, "submission fence wait"))
+            throw sg::device_lost_exception(device_loss_reason());
+    }
+}
+
+void dx12_context::retire_completed_epochs()
 {
     if (!_epoch_fence)
         return;

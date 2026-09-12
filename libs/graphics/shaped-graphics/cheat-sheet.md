@@ -211,6 +211,20 @@ ctx.wait_for(future)                    // -> cc::optional<cc::pinned_data<...>>
                                         //   the readback actor, so is_ready() can lag them. Waitable once its list is
                                         //   submitted (no advance needed); touches no ctx state, safe from any thread.
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
+ctx.in_flight_epoch_count()             // int — epochs advanced past but not yet retired; the depth a throttle bounds
+ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
+
+// Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
+// and asking twice for the same target hands back the SAME node. They settle on a retire sweep.
+ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — the async form of wait_for_epoch
+ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
+future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
+
+ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
+ctx.block_until_idle()                  // void — GPU idle AND every actor drained. The ONLY blocking spelling in sg,
+                                        //   so `block_until_` greps as the complete inventory of where a thread stops.
+                                        //   Asserts unless execution() == may_block. A bytes_future submitted before
+                                        //   it is delivered after it — no wait_for(future) needed.
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
 // on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
 //   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized

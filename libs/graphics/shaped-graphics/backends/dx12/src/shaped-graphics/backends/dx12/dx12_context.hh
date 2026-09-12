@@ -479,7 +479,9 @@ public:
     [[nodiscard]] sg::epoch completed_epoch() const override;
     void advance_epoch(cc::optional<int> allowed_in_flight) override;
     void advance_epoch_and_wait_for_idle() override { advance_epoch(0); }
-    void process_completed_epochs() override;
+    [[nodiscard]] int in_flight_epoch_count() override;
+    void retire_completed_epochs() override;
+    void block_until_submissions_complete() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;

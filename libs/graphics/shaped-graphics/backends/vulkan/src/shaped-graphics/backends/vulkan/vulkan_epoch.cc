@@ -1,6 +1,7 @@
 // vulkan epoch system: advance/retire, waits, and deferred-deletion staging.
 // The per-epoch bookkeeping types live in vulkan_epoch.hh, device-level teardown in vulkan_context.cc.
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -124,7 +125,47 @@ bool vulkan_context::has_epochs_in_flight()
     return _epoch_state.lock([](vulkan_epoch_state& s) { return !s.in_flight.empty(); });
 }
 
-void vulkan_context::process_completed_epochs()
+int vulkan_context::in_flight_epoch_count()
+{
+    return _epoch_state.lock([](vulkan_epoch_state& s) { return int(s.in_flight.size()); });
+}
+
+void vulkan_context::block_until_submissions_complete()
+{
+    CC_RECORD_SCOPE("sg.epoch.block_until_submissions_complete");
+
+    if (_submission_timeline == VK_NULL_HANDLE)
+        return;
+
+    // The last token handed out, so this covers everything submitted so far and nothing that has not been.
+    u64 const issued = _next_submission.lock([](sg::submission_token& next) { return u64(next); });
+    if (issued <= u64(sg::submission_token::first))
+        return; // nothing has ever been submitted
+    u64 const target = issued - 1;
+
+    u64 current = 0;
+    vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+
+    // Yield before blocking, for the same reason wait_for_epoch does: submitted work may be waiting on an async
+    // transfer's completion value, and without a thread of its own the copy actor runs on whoever sweeps the pump.
+    while (current < target && cc::thread_pump_all())
+        vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+
+    if (current < target)
+    {
+        auto const wait = VkSemaphoreWaitInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+            .semaphoreCount = 1,
+            .pSemaphores = &_submission_timeline,
+            .pValues = &target,
+        };
+        VkResult const wr = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+        if (note_device_lost_if_lost(wr, "submission semaphore wait"))
+            throw sg::device_lost_exception(device_loss_reason());
+    }
+}
+
+void vulkan_context::retire_completed_epochs()
 {
     if (_epoch_timeline == VK_NULL_HANDLE)
         return;

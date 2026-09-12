@@ -3,10 +3,13 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/context/adapter_info.hh>
@@ -68,6 +71,12 @@ public:
 
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
+
+    /// Whether a caller may block on this context at all — see sg::execution_model.
+    ///
+    /// A backend property, not a preference: a browser cannot wait, so nothing a caller sets could make it able to.
+    /// `block_until_idle()` is the only sg call that asks, and it asserts where the answer is `never_block`.
+    [[nodiscard]] virtual execution_model execution() const { return execution_model::may_block; }
 
     /// Which GPU this context is running on, fixed at creation.
     /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
@@ -210,9 +219,45 @@ public:
     /// An inline-download future may still be undelivered right after; use wait_for(future) to be certain.
     virtual void advance_epoch_and_wait_for_idle() = 0;
 
-    /// Reclaims everything owned by epochs the GPU has finished.
+    /// How many epochs have been advanced past but not yet retired.
+    /// The pipelining depth a caller throttles against: 0 means the GPU has caught up with everything closed so far.
+    /// Not const: it reads the epoch FIFO, which lives under the same lock a retire sweep takes.
+    [[nodiscard]] virtual int in_flight_epoch_count() = 0;
+
+    /// Advance only if that would leave at most `allowed_in_flight` epochs in flight; false when it declined.
+    ///
+    /// **The non-blocking throttle.** `advance_epoch`'s `allowed_in_flight` bounds pipelining depth by *waiting*, which
+    /// is the one place per frame a renderer is allowed to — this is the same bound expressed as a decision instead, for
+    /// a caller that would rather do something else with the frame than stall in it.
+    /// A declined advance retires what it can first, so a caller that keeps asking makes progress.
+    [[nodiscard]] bool try_advance_epoch(int allowed_in_flight);
+
+    /// Reclaims everything owned by epochs the GPU has finished, and settles the completion asyncs that are now due.
     /// Safe to call at any time and from any thread, but not concurrently with advance_epoch; also runs implicitly after the waits below.
-    virtual void process_completed_epochs() = 0;
+    void process_completed_epochs();
+
+    /// Settles when `e`'s GPU work has finished — the async form of wait_for_epoch.
+    ///
+    /// An epoch already retired hands back a node that is ready, so a caller never has to special-case the past.
+    /// It settles on a `process_completed_epochs` sweep, which every advance and every wait runs, so a frame loop
+    /// publishes these without doing anything extra.
+    [[nodiscard]] cc::shared_async<cc::unit const> epoch_completion(epoch e);
+
+    /// Settles when the command list behind `token` has finished executing — the async form of is_submission_complete.
+    /// `not_submitted` never settles, matching what the poll reports.
+    [[nodiscard]] cc::shared_async<cc::unit const> submission_completion(submission_token token);
+
+    /// Blocks until the GPU is idle AND every sg actor has drained.
+    ///
+    /// **The only blocking spelling in sg**, which is why it says so in its name: `block_until_` greps as the complete
+    /// inventory of places a thread stops.
+    /// Asserts unless `execution()` is `may_block`.
+    ///
+    /// Draining the GPU is not on its own a completion guarantee — the readback actor delivers a download's bytes on
+    /// its own thread, after the copy the GPU finished.
+    /// So this alternates the two until neither has anything left, and a `bytes_future` submitted before it is
+    /// delivered after it.
+    void block_until_idle();
 
     /// Blocks until the given epoch's GPU work has finished, then retires completed epochs.
     /// Does not advance; safe to call from any thread, and used internally for ring back-pressure during recording.
@@ -280,6 +325,29 @@ protected:
         }
     }
 
+private:
+    /// One outstanding completion async: the epoch or submission it is waiting on, and the node to push.
+    ///
+    /// Kept only until it settles, so a frame loop that never asks for one pays nothing, and one that does pays a
+    /// vector entry until the sweep that retires it.
+    struct pending_completion
+    {
+        u64 target = 0;
+        bool is_submission = false;
+        cc::shared_async<cc::unit> node;
+    };
+
+    /// Hand back the node for `target`, minting one on a miss.
+    /// Already-settled targets never reach here — the public entry points answer those with a ready node.
+    [[nodiscard]] cc::shared_async<cc::unit const> completion_for(u64 target, bool is_submission);
+
+    /// Push every node whose target the GPU has now passed.
+    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
+    void settle_due_completions();
+
+    cc::mutex<cc::vector<pending_completion>> _pending_completions;
+
+protected:
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
     // The try_* virtuals below are the fallible core a backend implements; the public façades add the throwing flavor (see docs/error-handling.md).
     // A backend also implements the public pure virtuals above — submit / drop, the epoch surface, is_submission_complete — and usually overrides shutdown.
@@ -290,6 +358,15 @@ protected:
     friend class context_stream_scope;
     friend class context_uncached_scope;
     friend class context_cached_scope;
+
+    /// A backend's own retire sweep: reclaim everything owned by epochs the GPU has finished.
+    /// The public process_completed_epochs() calls this and then settles the completion asyncs that came due, which is
+    /// why the public one is not the virtual.
+    virtual void retire_completed_epochs() = 0;
+
+    /// Blocks until every command list submitted so far has finished executing.
+    /// The GPU half of block_until_idle: it does NOT advance the epoch and does NOT drain the actors.
+    virtual void block_until_submissions_complete() = 0;
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
     /// Failure must be device loss, in which case mark_device_lost is called, or an internal bug.

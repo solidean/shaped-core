@@ -34,6 +34,27 @@ enum class sg::feature
     tessellation_shader,
 };
 
+/// Whether a caller may block on this context at all.
+///
+/// The rule the whole API is shaped around: **an async call may be converted to a blocking one only where the wait
+/// amortizes over many operations.**
+/// Per-frame yes, per-startup-batch yes, per-object never.
+/// So sg is never-blocking by default everywhere, and `block_until_idle()` is the single exception — the one spelling
+/// that admits to waiting, and the one a target that cannot wait refuses.
+///
+/// A browser cannot wait at all: a promise settles only after the current task's stack unwinds, so a loop waiting on a
+/// callback has taken the only thread that callback could run on.
+/// That is a property of the target rather than a caller's choice, which is why this is reported and not set.
+enum class sg::execution_model
+{
+    /// A caller may block: `block_until_idle()` works, and a test or a tool can drain the device and read the result.
+    may_block,
+
+    /// Nothing may block, and `block_until_idle()` asserts.
+    /// Completion is observed through the `*_completion()` asyncs, or by polling across frames.
+    never_block,
+};
+
 /// Numeric bounds a portable caller has to stay inside.
 ///
 /// Every field is a floor a backend guarantees rather than the most the hardware could do: a caller sizing against it

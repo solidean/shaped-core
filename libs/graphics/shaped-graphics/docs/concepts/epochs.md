@@ -59,13 +59,46 @@ Metal would map it onto shared events.
 
 Idle (and any `wait_for_*`) waits on the **GPU epoch fence** only.
 It does **not** guarantee an inline **download** future is delivered: the readback CPU copy runs on a separate actor thread the epoch machinery does not drain.
-So `future.is_ready()` can briefly lag idle, and `ctx.wait_for(future)` is the completion guarantee — see [inline download](download.inline.md).
+So `future.is_ready()` can briefly lag idle.
+`ctx.block_until_idle()` is the spelling that covers both halves, and `future.completion()` the one that waits for neither — see [inline download](download.inline.md).
 
 **Retire** (`process_completed_epochs`) reclaims what the GPU has finished.
 Read the fence once, drain every in-flight epoch whose value is `<= completed` (oldest first), and for each reclaim its payload — allocators back to the pool, expiring resources freed.
 Retire is safe to call at any time.
+It also settles the completion asyncs that have come due, which is why it is where the non-blocking half below is published.
 `wait_for_epoch` and `wait_for_next_inflight_epoch` block on the fence and then retire, the latter being the standard back-pressure primitive when a pool is exhausted.
 Neither `wait_for_*` advances the epoch — advancing is a deliberate, rationed operation kept distinct from waiting.
+
+## Learning something finished, without waiting for it
+
+Every question the `wait_for_*` family answers by stopping a thread has a form that does not:
+
+| blocking | non-blocking |
+|---|---|
+| `wait_for_epoch(e)` | `epoch_completion(e)` — a `cc::shared_async` that settles when `e`'s GPU work is done |
+| `is_submission_complete(token)` polled | `submission_completion(token)` |
+| `wait_for(future)` | `future.completion()` |
+| `wait_for_ticks(timestamp)` | `timestamp.completion()` |
+| `advance_epoch(N)`, which waits to stay within N | `try_advance_epoch(N)`, which declines instead |
+
+A completion node for something already finished comes back ready, so a caller never special-cases the past, and asking twice for the same target hands back the same node rather than two.
+They settle on a retire sweep — which every advance and every wait already runs — so a frame loop publishes them without doing anything extra.
+
+`in_flight_epoch_count()` is the depth those decisions are made against: 0 means the GPU has caught up with everything closed so far.
+
+This matters beyond tidiness because **the browser cannot block at all**.
+A promise settles only after the current task's stack unwinds, so a loop waiting on a callback has taken the only thread that callback could run on.
+`ctx.execution()` reports which world a context is in (`sg::execution_model`), and it is a property of the target rather than a caller's choice.
+
+## `block_until_idle()`: the one place a thread stops
+
+`ctx.block_until_idle()` is the only blocking spelling sg keeps, which is why it says so in its name — `block_until_` greps as the complete inventory.
+It asserts unless `execution()` is `may_block`.
+
+It means **the GPU is idle AND every sg actor has drained**, and the second half is not a refinement.
+Draining the GPU does not deliver a download: the readback CPU copy runs on an actor thread the epoch machinery does not touch, so a future can be undelivered at the instant the fence says idle.
+So this alternates the two — wait out the submissions, pump the actors, repeat — until neither has anything left.
+A `bytes_future` submitted before it is delivered after it, with no `wait_for(future)` anywhere, and a test pins exactly that.
 
 ## Deferred deletion and finalizers
 

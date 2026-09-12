@@ -111,3 +111,102 @@ INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle con
     CHECK(limits.max_binding_groups == sg::max_binding_groups);
     CHECK(limits.max_sample_count >= 1);
 }
+
+// The async forms of the two completion questions, and the one blocking spelling that is left.
+//
+// The point of each is that a caller can learn a thing has finished WITHOUT a thread stopping, which is the whole
+// reason the blocking family is going away: a browser cannot stop a thread at all.
+INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // An epoch already retired answers with a node that is ready, so a caller never special-cases the past.
+    auto const past = ctx->epoch_completion(ctx->completed_epoch());
+    REQUIRE(past != nullptr);
+    CHECK(past->is_ready());
+
+    // One that has not closed yet cannot be ready, and asking twice hands back the same node rather than two.
+    auto const open = ctx->current_epoch();
+    auto const pending = ctx->epoch_completion(open);
+    REQUIRE(pending != nullptr);
+    CHECK(!pending->is_ready());
+    CHECK(ctx->epoch_completion(open) == pending);
+
+    // Closing it and draining settles that node — no wait_for_epoch anywhere in sight.
+    ctx->advance_epoch(0);
+    ctx->process_completed_epochs();
+    CHECK(pending->is_ready());
+}
+
+INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // Never submitted, so its completion never arrives — matching what the poll reports rather than claiming done.
+    auto const never = ctx->submission_completion(sg::submission_token::not_submitted);
+    REQUIRE(never != nullptr);
+    CHECK(!never->is_ready());
+    CHECK(!ctx->is_submission_complete(sg::submission_token::not_submitted));
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto const token = ctx->submit_command_list(cc::move(cmd));
+
+    auto const done = ctx->submission_completion(token);
+    REQUIRE(done != nullptr);
+
+    ctx->block_until_idle();
+    CHECK(ctx->is_submission_complete(token));
+    CHECK(done->is_ready());
+}
+
+// The non-blocking throttle: the same pipelining bound advance_epoch expresses by waiting, expressed as a decision.
+INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // Drained, so nothing is in flight and any budget admits an advance.
+    ctx->advance_epoch(0);
+    CHECK(ctx->in_flight_epoch_count() == 0);
+
+    auto const before = ctx->current_epoch();
+    CHECK(ctx->try_advance_epoch(2));
+    CHECK(u64(ctx->current_epoch()) > u64(before));
+
+    // A budget of zero admits an advance only while nothing is in flight, and the advance above left one epoch there
+    // unless the GPU has already retired it -- so this is allowed to go either way, and what must hold is that it
+    // never blocks and never advances past its own bound.
+    auto const at_budget = ctx->current_epoch();
+    if (!ctx->try_advance_epoch(0))
+        CHECK(ctx->current_epoch() == at_budget);
+
+    ctx->block_until_idle();
+}
+
+// block_until_idle is the only blocking spelling left, and it has to mean more than "the GPU is idle": the readback
+// actor delivers a download's bytes on its own thread, after the copy the GPU already finished.
+INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    REQUIRE(ctx->execution() == sg::execution_model::may_block);
+
+    auto const src = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+
+    auto cmd = ctx->create_command_list();
+    u32 const values[] = {1, 2, 3, 4};
+    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
+    auto const future = cmd->download.data_from_buffer(src);
+    (void)ctx->submit_command_list(cc::move(cmd));
+
+    ctx->advance_epoch(0);
+    ctx->block_until_idle();
+
+    // Delivered, without any wait_for(future) — which is the guarantee the blocking download API used to be the only
+    // source of.
+    REQUIRE(future.is_ready());
+    auto const data = future.try_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == 4);
+    CHECK(data.value()[0] == 1);
+    CHECK(data.value()[3] == 4);
+}
