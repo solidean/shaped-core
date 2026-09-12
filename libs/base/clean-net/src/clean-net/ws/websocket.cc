@@ -313,7 +313,7 @@ struct send_watch final : impl::io_operation
         auto* const raw = watch.get();
         raw->self = cc::move(watch);
 
-        ws->io->submit(raw);
+        auto const in_flight = ws->io->submit(raw);
         raw->registration.attach(token, *ws->io, raw);
 
         // The frame may already have gone out while this was being armed, in which case there is nothing left to
@@ -867,7 +867,7 @@ cc::shared_async<websocket_message> websocket::receive(deadline d, cancel_token 
 
         _state->state.lock([&](websocket_state::data& d_state) { d_state.receive_watch = raw; });
 
-        _state->io->submit(raw);
+        auto const in_flight = _state->io->submit(raw);
         raw->registration.attach(token, *_state->io, raw);
     }
 

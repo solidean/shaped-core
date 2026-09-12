@@ -88,9 +88,12 @@ namespace cnet::impl
 {
 /// Keeps an operation registered with a token for exactly as long as the operation exists.
 ///
-/// **Attach after submitting, not before.**
-/// A cancel arriving in between would otherwise be posted ahead of the operation it means to cancel, so `attach`
-/// re-reads the token afterwards and cancels the operation itself if it has to.
+/// **Attach after submitting, not before, and inside the submission guard.**
+/// A cancel arriving before the submit would be posted ahead of the operation it means to cancel, and the reactor
+/// would have nothing to match it against -- so `attach` re-reads the token afterwards and cancels the operation
+/// itself if it has to.
+/// The guard `io_system::submit` returns is what makes "afterwards" safe: until it dies the reactor holds the
+/// operation inert, so this attach cannot race the completion that would free it.
 ///
 /// **Detach first thing in `on_complete`**, so a cancel racing that completion finds a registration that is still
 /// alive rather than an operation that has already freed itself.

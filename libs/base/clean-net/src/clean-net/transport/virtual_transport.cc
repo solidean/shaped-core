@@ -251,7 +251,7 @@ public:
         // reader to signal and the bytes sit in the pipe with nobody coming for them.
         // Looking again is what covers the gap that is left: if something arrived while we were submitting, nothing
         // parked in time to be signalled, so we wake ourselves.
-        _io.submit(raw);
+        auto const in_flight = _io.submit(raw);
         raw->cancellation.attach(token, _io, raw);
 
         auto const arrived_meanwhile = _inbox->lock(
@@ -414,7 +414,7 @@ public:
         // An accept has two mutexes and cannot, so `incoming` is read INSIDE `parked_accept` -- and the connect side
         // takes them one after the other rather than nested, which is what makes that order safe.
         // Reading them the other way round would leave the window this is here to close.
-        _net->io.submit(raw);
+        auto const in_flight = _net->io.submit(raw);
         raw->cancellation.attach(token, _net->io, raw);
 
         auto const arrived_meanwhile = _state->parked_accept.lock(

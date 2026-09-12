@@ -355,8 +355,11 @@ cc::shared_async<cc::vector<ip_address>> resolver::resolve(cc::string_view host,
     raw->self = cc::move(op);
 
     slot->lock([raw](slot_data& d) { d.op = raw; });
-    state.io.submit(raw);
-    raw->cancellation.attach(token, state.io, raw);
+
+    {
+        auto const in_flight = state.io.submit(raw);
+        raw->cancellation.attach(token, state.io, raw);
+    }
 
     // Handed over only once the operation is in the reactor, so an answer that arrives at once has something to
     // signal.

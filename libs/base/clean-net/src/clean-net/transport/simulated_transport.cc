@@ -135,7 +135,7 @@ void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, cancel_
 
     auto* const raw = op.get();
     raw->self = cc::move(op);
-    s.io.submit(raw);
+    auto const in_flight = s.io.submit(raw);
     raw->cancellation.attach(token, s.io, raw);
 }
 
