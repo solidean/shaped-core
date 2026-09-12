@@ -38,6 +38,13 @@ struct download_mem_job
     cc::shared_async<cc::unit> completion;        // set only on a job's last chunk; settles the future
     std::shared_ptr<void const> source_keepalive; // holds the source (buffer or texture) alive across the read
     std::shared_ptr<dx12_download_sink> sink;     // set for a sink-driven read; its `failed` decides how this settles
+
+    /// The originating job's drain token, one copy per chunk.
+    ///
+    /// It has to live HERE and not only on the active_download, because this actor is two-stage: a read leaves _active
+    /// the moment its last chunk is PACKED, while its bytes are delivered later, when the window it landed in drains.
+    /// A token that died with the active_download would let block_until_idle() return before any memcpy had run.
+    sg::impl::transfer_drain::token drain;
 };
 
 // A submitted-but-not-yet-drained window.
@@ -208,7 +215,7 @@ private:
             if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
                 continue;
             fold_cancelled_completion(a.job); // settles the shared node, so the future fails rather than hanging
-            _active.remove_from_to(i, i + 1);
+            _active.remove_at(i);
         }
     }
 
@@ -286,7 +293,7 @@ private:
             }
 
             if (_active[index].packer->is_finished())
-                _active.remove_from_to(index, index + 1);
+                _active.remove_at(index);
 
             // Independent of whether that finished the read: one ending exactly on the window boundary still leaves
             // a full window, and the next pick would be handed a zero-byte allocation.
@@ -335,7 +342,7 @@ private:
         // Only the last chunk settles the future: windows drain in order, so every earlier chunk is copied by then.
         _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), a.job.pin,
                                                   last ? a.job.completion : cc::shared_async<cc::unit>(), a.keepalive,
-                                                  a.job.sink});
+                                                  a.job.sink, a.job.drain});
         return true;
     }
 
