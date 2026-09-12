@@ -62,7 +62,8 @@ TEST("sv - a view accumulates across frames under its id")
         store.begin_frame(u64(ctx.current_epoch()));
         auto const target = sv::view_renderer::execute(*cmd, view, resources, store);
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
         return target;
     };
     auto const accumulated = [&](sv::view_id id) { return store.accumulated_frames(id); };
@@ -260,7 +261,8 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
         // A dead shader traces nothing and would pass every check below.
         // The frame's own outcome is what says it did not, and it is checked above rather than read off the routine.
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
     };
 
     // The regression this exists for: `resolve` stamped the *declaration's* reset rule onto the slot, `trace` then

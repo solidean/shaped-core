@@ -92,7 +92,8 @@ TEST("sv - flat-PBR raytraced view (headless)")
           == sg::routine_outcome::executed);
 
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Reaching here means the whole flat-PBR pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count > 0);

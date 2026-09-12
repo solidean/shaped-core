@@ -135,10 +135,12 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
                                            rt.cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)));
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx.advance_epoch(sc->buffer_count());
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(sc->buffer_count());
         ++frame_index;
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly
 }

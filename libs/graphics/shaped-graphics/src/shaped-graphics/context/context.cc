@@ -132,7 +132,7 @@ bool context::try_advance_epoch(int allowed_in_flight)
     if (in_flight_epoch_count() > allowed_in_flight)
         return false;
 
-    advance_epoch({});
+    advance_epoch();
     return true;
 }
 
@@ -193,45 +193,38 @@ cc::shared_async<cc::unit const> context::submission_completion(submission_token
     return completion_for(u64(token), true);
 }
 
+void context::block_until_epochs_in_flight(int allowed_in_flight)
+{
+    CC_ASSERT(execution() == execution_model::may_block,
+              "block_until_epochs_in_flight() waits, and this context cannot — bound the depth with "
+              "try_advance_epoch() instead");
+    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
+
+    // Retire before waiting: an epoch the GPU already finished still counts as in flight until someone reclaims it,
+    // so a caller that skipped this would park against depth that is no longer there.
+    process_completed_epochs();
+    while (in_flight_epoch_count() > allowed_in_flight)
+        wait_for_next_inflight_epoch(); // retires as it goes, so this terminates
+}
+
 void context::block_until_idle()
 {
     CC_ASSERT(execution() == execution_model::may_block,
               "block_until_idle() is the one call in sg that waits, and this context cannot — read completion off the "
               "*_completion() asyncs, or poll across frames");
 
-    // Alternating, because the two halves feed each other: the GPU can be waiting on a copy only an actor will signal,
-    // and an actor delivers a download's bytes only after the GPU finished writing them.
-    // Both halves are cheap once quiet, so this settles in one extra round rather than spinning.
-    while (true)
-    {
-        block_until_submissions_complete();
-        if (!cc::thread_pump_all())
-            break;
-    }
-    process_completed_epochs();
+    // Three things, in this order, and the order is the point.
+    // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first
+    // would let a copy land behind us.
+    block_until_submissions_complete();
+    block_until_transfers_drained();
+
+    // And the epoch fence last, which the submission timeline does NOT cover: an epoch signals after the work it
+    // gates, so everything submitted can be done while the epoch that owns it has not retired — and its command
+    // allocators, its staged deletions and its finalizers would still be outstanding.
+    block_until_epochs_in_flight(0);
 }
 
-cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
-{
-    if (timestamp._heap_future == nullptr)
-        return {};
-    // Its heap is delivered by the readback actor like any other download, so this blocks on the actor exactly as wait_for(future) does.
-    // It needs the same pump to make progress without threads.
-    drive_transfers_until_ready(*timestamp._heap_future);
-    auto const data = timestamp._heap_future->wait_get_data();
-    if (!data.has_value())
-        return {};
-    CC_ASSERT(timestamp._index < data.value().size(), "timestamp index out of range for its heap download");
-    return data.value()[timestamp._index];
-}
-
-cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
-{
-    auto const ticks = wait_for_ticks(timestamp);
-    if (!ticks.has_value())
-        return {};
-    return double(ticks.value()) * timestamp._tick_to_seconds;
-}
 
 namespace
 {

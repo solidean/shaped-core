@@ -25,7 +25,8 @@ TEST("sg dx12 - epoch advance and retire")
     // Nothing has finished yet, so the completed epoch is first-1.
     CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
@@ -46,7 +47,8 @@ INVOCABLE_TEST("sg dx12 - deferred deletion runs finalizers only after the ownin
     // The owning epoch has not advanced/retired yet, so the resource is still (potentially) in use.
     CHECK(!finalized);
 
-    c.advance_epoch_and_wait_for_idle(); // closes + drains the epoch the buffer died in
+    c.advance_epoch();
+    c.block_until_idle(); // closes + drains the epoch the buffer died in
     CHECK(finalized);
 }
 
@@ -59,7 +61,8 @@ INVOCABLE_TEST("sg dx12 - submission token reports completion", (dx12::dx12_cont
     REQUIRE(cmd != nullptr);
     auto const token = c.submit_command_list(cc::move(cmd));
 
-    c.advance_epoch_and_wait_for_idle(); // forces the GPU to catch up
+    c.advance_epoch();
+    c.block_until_idle(); // forces the GPU to catch up
     CHECK(c.is_submission_complete(token));
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
@@ -71,7 +74,8 @@ INVOCABLE_TEST("sg dx12 - throttle bounds epochs in flight", (dx12::dx12_context
 
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)
-        c.advance_epoch(1);
+        c.advance_epoch();
+    c.block_until_epochs_in_flight(1);
 
     auto const in_flight = c._epoch_state.lock([](dx12::dx12_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);

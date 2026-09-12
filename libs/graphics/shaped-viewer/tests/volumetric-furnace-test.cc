@@ -197,7 +197,8 @@ image_stats trace_furnace(sg::context& ctx,
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(target.raw()));
 
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
 
         REQUIRE(ready);
 
@@ -205,7 +206,8 @@ image_stats trace_furnace(sg::context& ctx,
             continue;
 
         // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
-        auto const delivered = ctx.wait_for(readback);
+        ctx.block_until_idle();
+        auto const delivered = readback.try_get_bytes();
         REQUIRE(delivered.has_value());
 
         auto const pixels = delivered.value();
@@ -236,7 +238,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
-    // The binary dies through `__fastfail` inside `ctx.advance_epoch_and_wait_for_idle()`, after a trivial dispatch whose
+    // The binary dies through `__fastfail` inside `ctx.block_until_idle()`, after a trivial dispatch whose
     // command list also recorded an inline readback.
     // Not an assertion and not a lost device: both were instrumented and neither fires, and a fastfail bypasses the SEH
     // filter and the SIGABRT handler nexus installs — which is why it arrived as an exit code with no output at all.

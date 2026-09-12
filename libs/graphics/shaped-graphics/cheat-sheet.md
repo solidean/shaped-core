@@ -56,7 +56,7 @@ f.completion()                      // -> cc::shared_async<cc::unit const> — d
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
 sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
-// to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
+// to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
 // sg REQUIRES an installed ambient async scheduler (cc::install_default_async_scheduler, or a nexus run's)
 ```
@@ -199,35 +199,27 @@ sg::epoch                 // enum class : u64 — invalid=0, first=10000; monoto
 sg::submission_token      // enum class : u64 — invalid=0, first=30000, not_submitted=~0; per-command-list token
 ctx.current_epoch()                     // sg::epoch — epoch new work records into
 ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
-ctx.advance_epoch(allowed_in_flight)    // void — close current epoch, open next; cc::optional<int>:
-                                        //   nullopt=never wait, 0=full drain, N=keep <=N epochs in flight
-ctx.advance_epoch_and_wait_for_idle()   // void — spelled-out advance_epoch(0); advance never hidden
+ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
-ctx.wait_for_epoch(e)                   // void — block until epoch e done, then retire (does NOT advance)
-ctx.wait_for_next_inflight_epoch()      // void — block on oldest in-flight epoch (back-pressure; no advance)
-ctx.wait_for(future)                    // -> cc::optional<cc::pinned_data<...>> (bytes/typed) — BLOCK until a download is
-                                        //   delivered, then return it; nullopt if invalid/unsubmitted/cancelled. The ONLY
-                                        //   guaranteed-complete call: advance_epoch* / wait_for_idle drain the GPU but NOT
-                                        //   the readback actor, so is_ready() can lag them. Waitable once its list is
-                                        //   submitted (no advance needed); touches no ctx state, safe from any thread.
+ctx.block_until_epochs_in_flight(N)     // void — the PER-FRAME back-pressure wait: park until <= N are in flight
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
 ctx.in_flight_epoch_count()             // int — epochs advanced past but not yet retired; the depth a throttle bounds
 ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
 
 // Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
 // and asking twice for the same target hands back the SAME node. They settle on a retire sweep.
-ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — the async form of wait_for_epoch
+ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 
 ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
-ctx.block_until_idle()                  // void — GPU idle AND every actor drained. The ONLY blocking spelling in sg,
-                                        //   so `block_until_` greps as the complete inventory of where a thread stops.
-                                        //   Asserts unless execution() == may_block. A bytes_future submitted before
-                                        //   it is delivered after it — no wait_for(future) needed.
+ctx.block_until_idle()                  // void — submissions done, every transfer actor drained, every epoch retired.
+                                        //   `block_until_` greps as the complete inventory of where a thread stops.
+                                        //   Asserts unless execution() == may_block. A bytes_future SUBMITTED before it
+                                        //   is delivered after it; one still in an unsubmitted list is yours to submit.
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
-// on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
-//   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
+// on multi_threaded backends: create/submit/drop, process_completed_epochs and the completion queries are all
+//   concurrency-safe (any thread); only advance_epoch / block_until_* / shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
 cmd.context()                           // sg::context& — the context that created the list (outlives it); reach it without threading ctx separately
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
@@ -260,8 +252,9 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
-// no advance_epoch is needed for that — but advance_epoch* / wait_for_idle do not force it either;
-//   ctx.wait_for(future) is the only completion guarantee. See docs/concepts/download.inline.md.
+// no advance_epoch is needed for that, and advancing does not force it either: the readback actor is what delivers.
+//   future.completion() is the non-blocking answer, ctx.block_until_idle() the blocking one.
+//   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // both backends real.
@@ -303,8 +296,8 @@ t.is_valid()                    // bool — backed by a real query (false = defa
 t.is_ready()                    // bool — NON-BLOCKING poll; true once the tick landed (false before submit / forever if dropped)
 t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
 t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
-ctx.wait_for_ticks(t)           // -> cc::optional<cc::u64>  — BLOCK until delivered, returns the tick
-ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns seconds
+t.completion()                  // -> cc::shared_async<cc::unit const> — settles when the tick lands
+// to block: ctx.block_until_idle(), then t.try_get_ticks() / t.try_get_seconds()
 // normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
 

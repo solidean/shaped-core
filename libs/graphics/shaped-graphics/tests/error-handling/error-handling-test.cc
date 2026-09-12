@@ -25,7 +25,7 @@ using namespace cc::primitive_defines;
 //   - Out-of-memory sg::allocation_exception and descriptor-heap exhaustion: provoking them is expensive or non-deterministic.
 //     The recoverable persistent-descriptor-exhaustion path is exercised on the GPU by backends/dx12/tests/dx12-compute-test.cc ("persistent binding groups free and reuse ...").
 //   - compute dispatch / bind validation: needs a full pipeline + shader; covered by dx12-compute-test.
-//   - wrong-epoch submit/drop and negative advance_epoch(allowed_in_flight): the latter asserts only
+//   - wrong-epoch submit/drop and a negative block_until_epochs_in_flight bound: the latter asserts only
 //     after mutating epoch state, so it isn't cleanly catchable by CHECK_ASSERTS; both are lifecycle
 //     contracts left to the per-backend suites.
 //   - On the vulkan stub, the recording ops are not implemented yet (they CC_UNREACHABLE), so on a vulkan
@@ -190,7 +190,7 @@ INVOCABLE_TEST("sg error handling - advance rejects an epoch with open command l
     auto cmd = ctx->create_command_list();
     // A command list opened this epoch must be submitted or dropped before advancing.
     // The assert is at the top of advance_epoch, before any state change, so it is cleanly catchable here.
-    CHECK_ASSERTS(ctx->advance_epoch_and_wait_for_idle());
+    CHECK_ASSERTS(ctx->advance_epoch());
     ctx->drop_command_list(cc::move(cmd)); // clean up so the context stays usable
 }
 

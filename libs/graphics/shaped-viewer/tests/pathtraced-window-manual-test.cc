@@ -320,11 +320,13 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
             (void)sr::blit_routine::execute(pass, color);
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx.advance_epoch(sc->buffer_count());
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(sc->buffer_count());
 
         ++accum; // uncapped: a full-float mean goes on converging for as long as the view is left alone
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly
 }

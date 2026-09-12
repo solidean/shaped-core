@@ -209,15 +209,10 @@ public:
     /// Every command list opened this epoch must already be submitted or dropped.
     /// This epoch's garbage becomes reclaimable once that fence signals.
     ///
-    /// `allowed_in_flight` throttles pipelining depth, and so bounds how far the CPU runs ahead of the GPU.
-    /// nullopt never waits; 0 fully drains the GPU before returning; N keeps at most N prior epochs in flight.
-    /// A windowed renderer typically passes its swapchain back-buffer count.
-    virtual void advance_epoch(cc::optional<int> allowed_in_flight) = 0;
-
-    /// Advance the epoch and block until the GPU is fully idle — equivalent to advance_epoch(0).
-    /// Idle drains GPU work but not the readback actor.
-    /// An inline-download future may still be undelivered right after; use wait_for(future) to be certain.
-    virtual void advance_epoch_and_wait_for_idle() = 0;
+    /// **It never waits.** Bounding pipelining depth is a separate decision, and it is spelled either way:
+    /// `try_advance_epoch(N)` declines instead of advancing, and `block_until_epochs_in_flight(N)` parks until the
+    /// depth is back inside the bound.
+    virtual void advance_epoch() = 0;
 
     /// How many epochs have been advanced past but not yet retired.
     /// The pipelining depth a caller throttles against: 0 means the GPU has caught up with everything closed so far.
@@ -226,9 +221,9 @@ public:
 
     /// Advance only if that would leave at most `allowed_in_flight` epochs in flight; false when it declined.
     ///
-    /// **The non-blocking throttle.** `advance_epoch`'s `allowed_in_flight` bounds pipelining depth by *waiting*, which
-    /// is the one place per frame a renderer is allowed to — this is the same bound expressed as a decision instead, for
-    /// a caller that would rather do something else with the frame than stall in it.
+    /// **The non-blocking throttle**, and the twin of `block_until_epochs_in_flight`: the same bound expressed as a
+    /// decision rather than a wait, for a caller that would rather do something else with the frame than stall in it —
+    /// or one that cannot stall at all.
     /// A declined advance retires what it can first, so a caller that keeps asking makes progress.
     [[nodiscard]] bool try_advance_epoch(int allowed_in_flight);
 
@@ -236,7 +231,7 @@ public:
     /// Safe to call at any time and from any thread, but not concurrently with advance_epoch; also runs implicitly after the waits below.
     void process_completed_epochs();
 
-    /// Settles when `e`'s GPU work has finished — the async form of wait_for_epoch.
+    /// Settles when `e`'s GPU work has finished — how a caller learns an epoch is done without waiting for it.
     ///
     /// An epoch already retired hands back a node that is ready, so a caller never has to special-case the past.
     /// It settles on a `process_completed_epochs` sweep, which every advance and every wait runs, so a frame loop
@@ -259,39 +254,13 @@ public:
     /// delivered after it.
     void block_until_idle();
 
-    /// Blocks until the given epoch's GPU work has finished, then retires completed epochs.
-    /// Does not advance; safe to call from any thread, and used internally for ring back-pressure during recording.
-    virtual void wait_for_epoch(epoch e) = 0;
-
-    /// Blocks on the oldest in-flight epoch, then retires — the standard back-pressure primitive when a resource pool is exhausted.
-    /// Returns immediately if nothing is in flight.
-    /// Does not advance; safe to call from any thread.
-    virtual void wait_for_next_inflight_epoch() = 0;
-
-    /// Blocks until a download future is delivered, then returns its bytes.
-    /// nullopt if the future is invalid, unsubmitted, or cancelled.
-    /// The only completion guarantee for a download — advance_epoch* drain GPU work but not the readback actor.
-    /// Waitable once submitted; safe to call from any thread.
-    [[nodiscard]] cc::optional<cc::pinned_data<byte const>> wait_for(bytes_future const& future)
-    {
-        drive_transfers_until_ready(future);
-        return future.wait_get_bytes();
-    }
-
-    template <class T>
-    [[nodiscard]] cc::optional<cc::pinned_data<T const>> wait_for(data_future<T> const& future)
-    {
-        drive_transfers_until_ready(future);
-        return future.wait_get_data();
-    }
-
-    /// Blocks until `timestamp`'s tick is delivered, then returns the raw GPU tick.
-    /// nullopt if the timestamp is invalid, unsubmitted, or cancelled; waitable once the recording list is submitted.
-    /// Only differences are meaningful; normal per-frame usage polls gpu_timestamp::is_ready() instead.
-    [[nodiscard]] cc::optional<u64> wait_for_ticks(gpu_timestamp const& timestamp);
-
-    /// Like wait_for_ticks, but returns the tick converted to seconds (1 / timestamp frequency).
-    [[nodiscard]] cc::optional<double> wait_for_seconds(gpu_timestamp const& timestamp);
+    /// Blocks until at most `allowed_in_flight` epochs are still in flight, retiring as it goes.
+    ///
+    /// **The per-frame back-pressure spelling**, and the reason it is allowed to block at all: a windowed renderer
+    /// calls it once a frame with its swapchain's back-buffer count, so the wait amortizes over the whole frame.
+    /// That is the rule the whole API is shaped by — a wait may exist only where it amortizes over many operations.
+    /// Asserts unless `execution()` is `may_block`; `try_advance_epoch` is the same bound for a caller that cannot.
+    void block_until_epochs_in_flight(int allowed_in_flight);
 
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
@@ -313,17 +282,6 @@ protected:
     /// The stamp registration happens here rather than at backend start-up because this is the one point every backend
     /// already goes through, and the first adapter to arrive is the one a recording describes.
     void set_adapter_info(adapter_info info);
-
-    /// Drives cooperative work until `future` is ready or nothing anywhere reports more.
-    /// Collapses to a single false test where every semantic thread has an OS thread of its own; without them it is what makes a blocking wait terminate.
-    /// Leaving the future unready is fine — the wait below it reports the cancelled / not-yet-submitted cases rather than blocking.
-    template <class FutureT>
-    void drive_transfers_until_ready(FutureT const& future)
-    {
-        while (!future.is_ready() && cc::thread_pump_all())
-        {
-        }
-    }
 
 private:
     /// One outstanding completion async: the epoch or submission it is waiting on, and the node to push.
@@ -359,6 +317,18 @@ protected:
     friend class context_uncached_scope;
     friend class context_cached_scope;
 
+    /// Blocks until `e`'s GPU work has finished, then retires.
+    ///
+    /// **Internal**, and no longer a caller's API: it is a wait per *resource* wherever a pool runs dry, which is the
+    /// shape the amortization rule refuses.
+    /// What a caller reaches for instead is `epoch_completion(e)`, or one of the two `block_until_` spellings.
+    /// A backend still needs it for ring back-pressure during recording, and implements it here.
+    virtual void wait_for_epoch(epoch e) = 0;
+
+    /// Blocks on the oldest in-flight epoch, then retires — the back-pressure primitive behind a ring that is full.
+    /// Returns immediately if nothing is in flight; internal for the same reason as wait_for_epoch.
+    virtual void wait_for_next_inflight_epoch() = 0;
+
     /// A backend's own retire sweep: reclaim everything owned by epochs the GPU has finished.
     /// The public process_completed_epochs() calls this and then settles the completion asyncs that came due, which is
     /// why the public one is not the virtual.
@@ -367,6 +337,14 @@ protected:
     /// Blocks until every command list submitted so far has finished executing.
     /// The GPU half of block_until_idle: it does NOT advance the epoch and does NOT drain the actors.
     virtual void block_until_submissions_complete() = 0;
+
+    /// Blocks until every transfer actor has drained what it was given.
+    ///
+    /// The CPU half of block_until_idle, and the half that makes it a DELIVERY guarantee: a readback the GPU has
+    /// finished still has to be copied into the caller's destination, and only the actor does that.
+    /// Pumping is not enough to observe it — an actor with a thread of its own reports no pumpable work while it is
+    /// still busy — so a backend waits on its own outstanding-copy accounting here.
+    virtual void block_until_transfers_drained() = 0;
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
     /// Failure must be device loss, in which case mark_device_lost is called, or an internal bug.

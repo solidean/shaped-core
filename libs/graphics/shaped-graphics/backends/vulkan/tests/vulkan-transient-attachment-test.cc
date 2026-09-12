@@ -62,10 +62,12 @@ TEST("sg vulkan - a transient attachment recreated every pipelined epoch")
         }
         ctx.submit_command_list(cc::move(cmd));
 
-        ctx.advance_epoch(k_epochs_in_flight);
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(k_epochs_in_flight);
         REQUIRE(!ctx.is_device_lost()).context(cc::format("frame {}", frame));
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(!ctx.is_device_lost());
 }

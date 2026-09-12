@@ -64,7 +64,8 @@ TEST("sv - view renderer end to end (headless)")
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
 
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 // The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
@@ -128,7 +129,8 @@ TEST("sv - view renderer renders indexed geometry (headless)")
     auto store = sv::view_store{};
     (void)sv::view_renderer::execute(*cmd, v, resources, store);
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));

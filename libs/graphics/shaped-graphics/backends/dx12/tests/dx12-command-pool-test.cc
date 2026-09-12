@@ -26,7 +26,8 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     c.submit_dx12_command_list(cc::move(cmd.value()));
     CHECK(free_count() == 0); // still in flight — captured by the current epoch
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(free_count() == 1); // reset and returned to the free pool on retire
 
     // The next list reuses the pooled allocator rather than creating a new one.
@@ -34,7 +35,8 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     REQUIRE(cmd2.has_value());
     CHECK(free_count() == 0);
     c.submit_dx12_command_list(cc::move(cmd2.value()));
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(free_count() == 1);
 }
 

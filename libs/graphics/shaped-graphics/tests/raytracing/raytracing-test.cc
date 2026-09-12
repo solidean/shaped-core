@@ -75,7 +75,8 @@ INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle con
     CHECK(!tlas->is_expired());
 
     // Persistent: the handles outlive the epoch that built them.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(!blas->is_expired());
     CHECK(!tlas->is_expired());
 }

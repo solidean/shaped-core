@@ -76,7 +76,9 @@ INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg::conte
     // Fire-and-forget in both directions: no wait between them, so the readback has to order itself behind the copy.
     ctx->upload.bytes_to_texture(tex, pinned_pattern(k_bytes, 11));
 
-    auto const back = ctx->wait_for(ctx->download.bytes_from_texture(tex));
+    auto const back_future = ctx->download.bytes_from_texture(tex);
+    ctx->block_until_idle();
+    auto const back = back_future.try_get_bytes();
     REQUIRE(back.has_value());
     CHECK(matches(back.value(), 11));
 }
@@ -101,11 +103,15 @@ INVOCABLE_TEST("sg - async upload to a dropped texture still releases it", (sg::
     } // last handle gone: storage scheduled for deferred deletion, gated on the copy's completion value
 
     ctx->upload.bytes_to_texture(keep, pinned_pattern(k_bytes, 47));
-    REQUIRE(ctx->wait_for(ctx->download.bytes_from_texture(keep)).has_value());
+    auto const kept = ctx->download.bytes_from_texture(keep);
+    ctx->block_until_idle();
+    REQUIRE(kept.try_get_bytes().has_value());
 
     // Two advances, so the epoch the dropped texture died in is fully retired and swept.
-    ctx->advance_epoch_and_wait_for_idle();
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     ctx->process_completed_epochs();
 
     CHECK(released->load(std::memory_order_acquire));

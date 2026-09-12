@@ -111,7 +111,8 @@ cc::unique_ptr<app> app::create(cc::string_view title)
 app::~app()
 {
     if (_ctx != nullptr)
-        _ctx->advance_epoch_and_wait_for_idle(); // the last frames are still in flight
+        _ctx->advance_epoch();
+        _ctx->block_until_idle(); // the last frames are still in flight
 }
 
 bool app::begin_frame()
@@ -181,12 +182,14 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
     if (!_capture.active)
     {
         _ctx->submit_command_list_and_present(*_swapchain, cc::move(cmd));
-        _ctx->advance_epoch(_swapchain->buffer_count());
+        _ctx->advance_epoch();
+        _ctx->block_until_epochs_in_flight(_swapchain->buffer_count());
         return;
     }
 
     _ctx->submit_command_list(cc::move(cmd));
-    _ctx->advance_epoch(2);
+    _ctx->advance_epoch();
+    _ctx->block_until_epochs_in_flight(2);
     ++_captured_frames;
 
     // Written on the last frame rather than after the loop, because the loop is the caller's and this is the only

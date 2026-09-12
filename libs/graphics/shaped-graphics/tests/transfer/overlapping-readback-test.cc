@@ -74,8 +74,10 @@ INVOCABLE_TEST("sg - two readbacks recorded concurrently each get their own byte
     ctx->submit_command_list(cc::move(b));
     ctx->submit_command_list(cc::move(a));
 
-    auto const bytes_a = ctx->wait_for(future_a);
-    auto const bytes_b = ctx->wait_for(future_b);
+    ctx->block_until_idle();
+    auto const bytes_a = future_a.try_get_bytes();
+    ctx->block_until_idle();
+    auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
 
@@ -83,5 +85,6 @@ INVOCABLE_TEST("sg - two readbacks recorded concurrently each get their own byte
     CHECK(matches(bytes_a.value(), first_data)).context("the first list's readback did not return the first buffer");
     CHECK(matches(bytes_b.value(), second_data)).context("the second list's readback did not return the second buffer");
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }

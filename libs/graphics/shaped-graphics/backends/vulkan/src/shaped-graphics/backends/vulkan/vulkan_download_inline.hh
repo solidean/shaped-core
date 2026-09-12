@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 
 #include <atomic>
 
@@ -40,6 +41,11 @@ struct sg::backend::vulkan::vulkan_download_copy_job
 
     /// The reserving epoch's outstanding-copy count, released when this job is done or discarded.
     std::shared_ptr<std::atomic<isize>> epoch_copies;
+
+    /// Counts this job as outstanding for as long as it exists, and only once it has been SUBMITTED.
+    /// A job still sitting in an unsubmitted command list is the caller's to submit, so it must not hold a drain
+    /// waiter — see vulkan_download_inline_system::wait_until_idle.
+    sg::impl::transfer_drain::token drain;
 };
 
 /// Drains readbacks in enqueue order, which is also ring-allocation order.
@@ -103,6 +109,14 @@ public:
     /// Blocks until `token`'s list has finished.
     void wait_for_submission(sg::submission_token token);
 
+    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
+    ///
+    /// This is what makes ctx.block_until_idle() a delivery guarantee and not just a GPU one: the copy the GPU
+    /// finished still has to be memcpy'd into the caller's destination, and only the actor does that.
+    /// Submitted-only on purpose — a download recorded into a list the caller has not submitted yet can never
+    /// progress, so counting it would turn this into a hang rather than a wait.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
     void on_epoch_advance(sg::epoch closed);
     void on_epochs_completed(sg::epoch completed);
 
@@ -132,5 +146,6 @@ private:
     isize _capacity = 0;
     sg::epoch _last_completed = sg::epoch::first;
     cc::mutex<ring_state> _state;
+    sg::impl::transfer_drain _drain;
     cc::unique_ptr<cc::threaded_actor<vulkan_download_copy_job>> _actor;
 };

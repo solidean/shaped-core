@@ -49,7 +49,8 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     if (!bytes.has_value() || bytes.value().size() != 256)
         return false;
     for (int i = 0; i < 256; ++i)
@@ -120,8 +121,10 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     auto future_b = down->download.bytes_from_buffer(b, 0, 128);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes_a = ctx->wait_for(future_a);
-    auto const bytes_b = ctx->wait_for(future_b);
+    ctx->block_until_idle();
+    auto const bytes_a = future_a.try_get_bytes();
+    ctx->block_until_idle();
+    auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
     bool ok = true;
@@ -144,8 +147,9 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
     CHECK(buf->is_valid());
     CHECK(!buf->is_expired());
 
-    ctx->advance_epoch_and_wait_for_idle(); // its epoch has passed -> auto-expired at advance
-    CHECK(buf->is_expired());               // using it now (transfer / binding) would be a hard error
+    ctx->advance_epoch();
+    ctx->block_until_idle();  // its epoch has passed -> auto-expired at advance
+    CHECK(buf->is_expired()); // using it now (transfer / binding) would be a hard error
     CHECK(!buf->is_valid());
 }
 
@@ -158,7 +162,8 @@ INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::con
     for (int e = 0; e < 8; ++e)
     {
         CHECK(transient_round_trip(ctx, e * 7 + 1));
-        ctx->advance_epoch(2); // keep at most 2 epochs in flight
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2); // keep at most 2 epochs in flight
     }
 }
 
@@ -173,14 +178,16 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
     ctx->transient.set_budget(isize(512) * 1024);
     for (int e = 1; e <= 4; ++e)
     {
-        ctx->advance_epoch(2); // first advance drains + resizes to the pending 512 KiB
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2); // first advance drains + resizes to the pending 512 KiB
         CHECK(transient_round_trip(ctx, e));
     }
 
     ctx->transient.set_budget(isize(2) * 1024 * 1024);
     for (int e = 5; e <= 8; ++e)
     {
-        ctx->advance_epoch(2);
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2);
         CHECK(transient_round_trip(ctx, e));
     }
 }
@@ -195,7 +202,8 @@ INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (
     ctx->transient.set_budget(isize(256) * 1024);
     ctx->transient.set_budget(isize(768) * 1024); // last write wins at the next advance
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(transient_round_trip(ctx, 3));
 }
 

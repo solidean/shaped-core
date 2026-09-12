@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 
 #include <atomic>
 
@@ -33,6 +34,11 @@ struct sg::backend::dx12::dx12_download_copy_job
     /// The reserving epoch's outstanding-copy counter, held until this job is drained or its list is dropped.
     /// The epoch's ring span frees once the counter reaches zero.
     std::shared_ptr<std::atomic<isize>> epoch_copies;
+
+    /// Counts this job as outstanding for as long as it exists, and only once it has been SUBMITTED.
+    /// A job still sitting in an unsubmitted command list is the caller's to submit, so it must not hold a drain
+    /// waiter — see wait_until_submitted_drained.
+    sg::impl::transfer_drain::token drain;
 };
 
 /// Inline READBACK path: copies GPU buffer bytes back to the host through a persistently-mapped READBACK-heap ring on the direct queue.
@@ -139,6 +145,12 @@ private:
     /// Call exactly once per pushed dx12_download_copy_job; on_copy_done / discard_unsubmitted release it.
     void account_pending_copy(std::shared_ptr<std::atomic<isize>> const& epoch_copies);
 
+    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
+    ///
+    /// What ctx.block_until_idle() waits on, and distinct from wait_until_idle below: this counts a job only from its
+    /// submission, so a download recorded into a list the caller has not submitted yet cannot turn a wait into a hang.
+    void wait_until_submitted_drained() { _drain.wait_until_idle(); }
+
     /// Blocks the calling thread until the actor has drained every outstanding readback copy.
     /// That is, until every accounted copy has been matched by an on_copy_done or a discard.
     /// Used by apply_pending_budget before it frees the ring the actor's copies read from.
@@ -173,6 +185,8 @@ private:
     HANDLE _wait_event = nullptr;
 
     std::atomic<u64> _freed_pos = 0; // reclaim watermark; advanced by reclaim, waited on by reserve
+
+    sg::impl::transfer_drain _drain;
 
     // Total readback copies reserved but not yet drained, across all epochs.
     // Bumped by account_pending_copy, dropped in on_copy_done / discard.

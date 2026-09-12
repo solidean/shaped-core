@@ -14,7 +14,8 @@ The result surfaces as a small, copyable value type (the query analogue of a `by
 - `is_ready()` — the tick has been read back to the host.
   Poll it; the normal per-frame usage is to read a timestamp a frame or two after recording, not to block on it.
 - `try_get_ticks()` / `try_get_seconds()` — the raw GPU tick, and the tick converted to seconds by dividing by the timestamp frequency, once ready.
-- `ctx.wait_for_ticks(timestamp)` / `ctx.wait_for_seconds(timestamp)` — the blocking path, mirroring `wait_for` on a download, returning the raw tick or seconds once delivered.
+- `timestamp.completion()` — the node that settles when the tick lands, mirroring `completion()` on a download.
+- `ctx.block_until_idle()` then `try_get_ticks()` / `try_get_seconds()` — the blocking path, where blocking is allowed at all.
   Waitable only after the recording list is submitted.
 
 ## How the dx12 backend implements it (the load-bearing decisions)

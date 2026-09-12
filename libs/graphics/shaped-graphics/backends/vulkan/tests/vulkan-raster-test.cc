@@ -127,7 +127,8 @@ TEST("sg vulkan - a rendering scope clears, draws and stores")
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    auto const pixels = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const pixels = future.try_get_bytes();
     REQUIRE(pixels.has_value());
     REQUIRE(pixels.value().size() == isize(k_extent) * isize(k_extent) * 4);
 
@@ -257,7 +258,8 @@ TEST("sg vulkan - a draw depending on a dispatch in the same list")
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    auto const pixels = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const pixels = future.try_get_bytes();
     REQUIRE(pixels.has_value());
 
     // The triangle covers every pixel, and each carries Values[3] == 6 in its red channel.

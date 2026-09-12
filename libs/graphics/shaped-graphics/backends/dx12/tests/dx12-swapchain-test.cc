@@ -121,7 +121,8 @@ INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden wi
         ctx->submit_command_list_and_present(*sc, cc::move(cmd));
     }
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_context_handle const& ctx))
@@ -149,12 +150,14 @@ INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_con
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(color)}});
         }
         ctx->submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx->advance_epoch(sc->buffer_count());
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(sc->buffer_count());
     };
 
     frame(tg::vec2i(win.client_w, win.client_h), tg::vec4f(0, 0, 1, 1)); // initial size
     frame(win.resize_client(320, 240), tg::vec4f(1, 0, 0, 1));           // grow — the chain follows
     frame(win.resize_client(128, 96), tg::vec4f(0, 1, 0, 1));            // shrink — and again
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }

@@ -38,7 +38,8 @@ TEST("sg dx12 - inline upload splits across the ring seam")
     REQUIRE(buf != nullptr);
 
     // Drain, then park the upload ring cursor `seam_gap` bytes before the physical seam.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     c._upload_inline.debug_set_cursor(u64(ring_bytes - seam_gap));
 
     auto const before = c._upload_inline.debug_cursor();
@@ -65,7 +66,8 @@ TEST("sg dx12 - inline upload splits across the ring seam")
     auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
     ctx->submit_command_list(cc::move(down));
 
-    auto bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)
@@ -92,7 +94,8 @@ TEST("sg dx12 - inline download splits across the ring seam")
     ctx->submit_command_list(cc::move(up));
 
     // Drain (so the readback ring is empty), then park its cursor `seam_gap` bytes before the seam.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     c._download_inline.debug_set_cursor(u64(ring_bytes - seam_gap));
 
     auto const before = c._download_inline.debug_cursor();
@@ -109,7 +112,8 @@ TEST("sg dx12 - inline download splits across the ring seam")
 
     ctx->submit_command_list(cc::move(down));
 
-    auto bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)

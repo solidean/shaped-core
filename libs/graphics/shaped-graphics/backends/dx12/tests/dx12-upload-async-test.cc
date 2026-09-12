@@ -45,7 +45,8 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
     auto future = down->download.bytes_from_buffer(buf, 0, n);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == n);
     bool matches = true;
@@ -84,7 +85,8 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
         auto future = down->download.bytes_from_buffer(bufs[k], 0, each);
         c.submit_command_list(cc::move(down));
 
-        auto const bytes = c.wait_for(future);
+        c.block_until_idle();
+        auto const bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         for (isize i = 0; i < each; ++i)
             if (bytes.value()[i] != byte(i + k))
@@ -126,7 +128,8 @@ TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
         auto future = down->download.bytes_from_buffer(bufs[k], 0, n);
         c.submit_command_list(cc::move(down));
 
-        auto const bytes = c.wait_for(future);
+        c.block_until_idle();
+        auto const bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         REQUIRE(bytes.value().size() == n);
         for (isize i = 0; i < n; ++i)

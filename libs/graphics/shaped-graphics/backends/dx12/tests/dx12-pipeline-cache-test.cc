@@ -89,7 +89,8 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));
     bool ok = true;

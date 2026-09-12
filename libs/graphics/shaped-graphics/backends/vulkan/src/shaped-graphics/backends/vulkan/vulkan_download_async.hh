@@ -15,6 +15,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-graphics/transfer/stream_sink.hh>
 
@@ -43,6 +44,11 @@ struct sg::backend::vulkan::vulkan_async_download_job
     /// signals the completion value so a later writer never hangs.
     cc::span<byte> destination;
     std::weak_ptr<void const> pin;
+
+    /// Counts this job as outstanding for as long as it exists.
+    /// Destroyed with the job on every exit path — delivered, cancelled, or abandoned at shutdown — which is what
+    /// makes ctx.block_until_idle() a delivery guarantee rather than a GPU one.
+    sg::impl::transfer_drain::token drain;
     cc::shared_async<cc::unit> completion;
 
     /// This readback's value on the source's own download timeline.
@@ -123,6 +129,9 @@ public:
 
     void shutdown();
 
+    /// Blocks until every job handed to the actor has been delivered, cancelled or dropped.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
     /// Runs one job on the actor thread: submits the copy, waits for it, then delivers.
     void process(vulkan_async_download_job& job);
 
@@ -147,6 +156,8 @@ private:
     VkCommandPool _window_pools[k_window_count] = {};
     VkCommandBuffer _window_buffers[k_window_count] = {};
     int _next_window = 0;
+
+    sg::impl::transfer_drain _drain;
 
     cc::unique_ptr<cc::threaded_actor<vulkan_async_download_job>> _actor;
 };

@@ -430,7 +430,8 @@ EXAMPLE("shaped-graphics/rotating-cube")
         else
             ctx->submit_command_list_and_present(*swapchain, cc::move(cmd));
 
-        ctx->advance_epoch(2);
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2);
         ++frames;
 
         // Timestamps are read after the submit, and only when both landed — an unsupported backend hands back
@@ -457,5 +458,6 @@ EXAMPLE("shaped-graphics/rotating-cube")
         }
     }
 
-    ctx->advance_epoch_and_wait_for_idle(); // the last frames are still in flight
+    ctx->advance_epoch();
+    ctx->block_until_idle(); // the last frames are still in flight
 }

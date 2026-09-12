@@ -55,7 +55,8 @@ struct imgui_fixture
 
         // What a real frame ends with.
         // Draining here also keeps each test self-contained: transient geometry is recycled, and no GPU work is left in flight when the fixture is torn down.
-        ctx->advance_epoch_and_wait_for_idle();
+        ctx->advance_epoch();
+        ctx->block_until_idle();
     }
 
     [[nodiscard]] cc::pinned_data<byte const> read_back()
@@ -64,7 +65,8 @@ struct imgui_fixture
         auto const future = cmd->download.bytes_from_texture(target.raw());
         ctx->submit_command_list(cc::move(cmd));
 
-        auto bytes = ctx->wait_for(future);
+        ctx->block_until_idle();
+        auto bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         return cc::move(bytes).value();
     }

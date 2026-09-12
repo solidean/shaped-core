@@ -136,7 +136,8 @@ TEST("sv - path-traced Cornell box (headless)", nx::config::main_thread)
     REQUIRE(traced == sg::routine_outcome::executed);
 
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count == box.materials.size());
@@ -230,7 +231,8 @@ TEST("sv::pathtrace_routine - a material that does not compile costs its own mes
 
         auto const ready = traced == sg::routine_outcome::executed;
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
         return ready;
     };
 

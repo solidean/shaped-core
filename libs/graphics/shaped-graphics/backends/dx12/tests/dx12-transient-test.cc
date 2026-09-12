@@ -47,7 +47,8 @@ INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (
         auto future = down->download.bytes_from_buffer(buf, 0, 256);
         c.submit_command_list(cc::move(down));
 
-        auto const bytes = c.wait_for(future);
+        c.block_until_idle();
+        auto const bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 256; ++i)
@@ -55,6 +56,7 @@ INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (
                 matches = false;
         CHECK(matches);
 
-        c.advance_epoch(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
+        c.advance_epoch();
+        c.block_until_epochs_in_flight(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
     }
 }

@@ -79,18 +79,21 @@ INVOCABLE_TEST("sg - an unchanged bindless working set serves the same snapshot"
 
     // Next epoch, same working set: same indices, no descriptor touched — so the group is not dirty and the
     // cached snapshot is served again.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(buffers.transient.acquire(buf) == buf_index);
     CHECK(textures.transient.acquire(tex.as_readonly_view()) == tex_index);
     CHECK(group->snapshot().get() == snapshot.get());
 
     // A new view mints an index and writes its descriptor: the next snapshot is a new group.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     auto const tex2 = make_texture(ctx);
     CHECK(textures.transient.acquire(tex2.as_readonly_view()) != tex_index);
     CHECK(group->snapshot().get() != snapshot.get());
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - two bindless arrays over one group are independent", (sg::context_handle const& ctx))
@@ -110,7 +113,8 @@ INVOCABLE_TEST("sg - two bindless arrays over one group are independent", (sg::c
     CHECK(u32(textures.transient.acquire(make_texture(ctx).as_readonly_view())) == 1);
     CHECK(buffers.occupied_count() == 1);
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - a full bindless array clears the descriptors it reclaims", (sg::context_handle const& ctx))
@@ -133,7 +137,8 @@ INVOCABLE_TEST("sg - a full bindless array clears the descriptors it reclaims", 
 
     // Next epoch, a third view into a full array: both stale elements are cleared on the group, and the new
     // view takes one of them.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     auto const c = make_texture(ctx);
     auto const c_index = textures.transient.acquire(c.as_readonly_view());
     CHECK(u32(c_index) < textures.capacity());
@@ -144,7 +149,8 @@ INVOCABLE_TEST("sg - a full bindless array clears the descriptors it reclaims", 
     CHECK(after != nullptr);
     CHECK(after.get() != before.get());
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - a moved bindless array keeps its binding and its table", (sg::context_handle const& ctx))
@@ -171,7 +177,8 @@ INVOCABLE_TEST("sg - a moved bindless array keeps its binding and its table", (s
     CHECK(arrays[0].occupied_count() == 1);
     CHECK(arrays[0].transient.acquire(tex.as_readonly_view()) == tex_index);
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acquired it", (sg::context_handle const& ctx))
@@ -198,7 +205,8 @@ INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acquired 
     // Several epochs of churn through the one free slot never reclaim the pinned one.
     for (auto i = 0; i < 4; ++i)
     {
-        ctx->advance_epoch_and_wait_for_idle();
+        ctx->advance_epoch();
+        ctx->block_until_idle();
         auto const churn = make_texture(ctx);
         CHECK(u32(textures.transient.acquire(churn.as_readonly_view())) != pinned_index);
         CHECK(textures.pinned_count() == 1);
@@ -207,7 +215,8 @@ INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acquired 
     // Re-acquiring it after all that churn still lands on the element it was pinned to.
     CHECK(u32(textures.transient.acquire(kept.as_readonly_view())) == pinned_index);
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (sg::context_handle const& ctx))
@@ -236,13 +245,15 @@ INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (sg::co
     CHECK(textures.occupied_count() == 1);
 
     // Next epoch it is an ordinary stale slot again, and the sweep may take it.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     auto const pin2 = textures.persistent.acquire(make_texture(ctx).as_readonly_view());
     {
         auto const doomed = textures.persistent.acquire(make_texture(ctx).as_readonly_view());
         CHECK(textures.pinned_count() == 2);
     }
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 
     // Dropped in the epoch it was pinned in, so it lingered; a later release frees the slot at once.
     auto const before = textures.occupied_count();
@@ -251,7 +262,8 @@ INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (sg::co
         CHECK(textures.occupied_count() == before + 1);
     }
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }
 
 INVOCABLE_TEST("sg - a bindless element survives the array that minted it", (sg::context_handle const& ctx))
@@ -274,8 +286,10 @@ INVOCABLE_TEST("sg - a bindless element survives the array that minted it", (sg:
     REQUIRE(pin != nullptr);
     CHECK(pin->index() < 4);
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     pin.reset(); // must not touch freed memory, and must clear the descriptor it held
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }

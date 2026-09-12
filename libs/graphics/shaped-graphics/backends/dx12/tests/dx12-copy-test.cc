@@ -43,7 +43,8 @@ INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle c
     auto future = down->download.bytes_from_buffer(dst, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -84,7 +85,8 @@ INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle 
     auto future = down->download.bytes_from_buffer(dst, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
@@ -121,7 +123,8 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_ha
     auto future = down->download.data_from_buffer<int>(dst, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    auto const data = c.wait_for(future);
+    c.block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -156,7 +159,8 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets", (
     auto future = down->download.data_from_buffer<int>(dst, 4, 3);
     c.submit_command_list(cc::move(down));
 
-    auto const data = c.wait_for(future);
+    c.block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 3);
     CHECK(data.value()[0] == 12); // src[2]
@@ -193,7 +197,8 @@ INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context
     auto future = down->download.bytes_from_buffer(buf, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;

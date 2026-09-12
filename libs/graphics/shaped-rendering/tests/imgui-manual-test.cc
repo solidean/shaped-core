@@ -145,11 +145,13 @@ TEST("sr - imgui window (manual)", nx::config::manual)
         // See sr::imgui_routine::execute for the compositing path.
         // The #0b0d12 brand ground, so the central dockspace matches the theme's window backgrounds.
         sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.043f, 0.051f, 0.071f, 1.0f));
-        ctx->advance_epoch(sc->buffer_count());
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(sc->buffer_count());
     }
 
     // Drain before the swapchain and the window go away: the last frames are still in flight.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     cc::println("close requested — shutting down");
 }
 

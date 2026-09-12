@@ -12,6 +12,7 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-graphics/transfer/stream_sink.hh>
@@ -48,6 +49,9 @@ struct sg::backend::dx12::dx12_async_download_job
     std::shared_ptr<dx12_download_sink> sink;
 
     // Set only for a STREAMING readback; null marks the job as the async tier.
+    /// Counts this job as outstanding for as long as it exists — delivered, cancelled, or abandoned at shutdown.
+    sg::impl::transfer_drain::token drain;
+
     // Carries the priority and cancel flag the actor reads when picking, plus the completion node it must settle.
     std::shared_ptr<sg::impl::stream_control> stream;
 };
@@ -120,6 +124,9 @@ public:
     /// Then releases the copy queue and unmaps + releases the staging buffer.
     void shutdown();
 
+    /// Blocks until every job handed to the actor has been delivered, cancelled or dropped.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.
     // _staging / _mapped / _window_bytes are also rebuilt by the actor when a set_window_bytes is applied.
@@ -146,5 +153,6 @@ public:
     sg::impl::transfer_scheduler _scheduler;
 
 private:
+    sg::impl::transfer_drain _drain;
     cc::unique_ptr<cc::threaded_actor<dx12_async_download_job>> _actor;
 };

@@ -88,7 +88,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     auto const tlas = build->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
     REQUIRE(tlas != nullptr);
     ctx.submit_command_list(cc::move(build));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Compile the inline-RT compute shader and build a pipeline over its reflected bindings (scene + Out).
     ssc::dxc::shader_description sd;
@@ -137,7 +138,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
     cc::vector<u32> result;
     for (auto const v : data.value())

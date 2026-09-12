@@ -123,7 +123,8 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
                                        output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
           == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
@@ -156,7 +157,8 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
                                        output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
           == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     CHECK(true); // the pass opened and closed with no draws, so the begin-op ran
 }
@@ -234,7 +236,8 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
     }
 
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     CHECK(true); // frame pass + overlay pass recorded onto one command list without a device / barrier error
 }
@@ -351,7 +354,8 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
                                        output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
           == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Two traces and three passes on one command list, with the debug layer validating every transition from a UAV
     // write to a sampled read and from a render target to a sampled read.

@@ -167,7 +167,7 @@ They are the only two tests in sv that use `cmd.download`.
 
 **What happens.**
 `shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
-Bisected with flushed markers to `ctx.advance_epoch_and_wait_for_idle()`, on the probe's ECHO dispatch.
+Bisected with flushed markers to the advance-and-drain (now `ctx.block_until_idle()`), on the probe's ECHO dispatch.
 That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
 The workload is therefore not the cause, and neither is the closure.
 

@@ -260,6 +260,7 @@ namespace impl
 template <class Key>
 class slot_table;           // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
 class bindless_array_state; // what a bindless_array owns, shared so an element may outlive it
+class transfer_drain; // outstanding-job count a transfer system is drained against (transfer/impl/transfer_drain.hh)
 } // namespace impl
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the

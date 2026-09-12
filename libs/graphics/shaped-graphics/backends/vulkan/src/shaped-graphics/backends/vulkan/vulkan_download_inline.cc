@@ -194,6 +194,7 @@ void vulkan_download_inline_system::enqueue_submitted(sg::submission_token token
         job.token = token;
         if (job.gate)
             job.gate->mark_submitted();
+        job.drain = _drain.start(); // counted from HERE: before this, nothing could have driven it
         _actor->enqueue_message(cc::move(job));
     }
     jobs.clear();

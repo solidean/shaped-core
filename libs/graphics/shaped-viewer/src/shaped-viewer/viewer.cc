@@ -296,7 +296,8 @@ viewer::~viewer()
         // handed back before anything drains — so it presents, exactly as if end_frame had been reached.
         end_frame();
 
-        _impl->ctx->advance_epoch_and_wait_for_idle();
+        _impl->ctx->advance_epoch();
+        _impl->ctx->block_until_idle();
     }
     catch (sg::device_lost_exception const&)
     {
@@ -846,12 +847,14 @@ void viewer::finish_frame(frame& f)
         if (im.config.headless)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
-            im.ctx->advance_epoch(im.config.buffer_count);
+            im.ctx->advance_epoch();
+            im.ctx->block_until_epochs_in_flight(im.config.buffer_count);
         }
         else
         {
             im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
-            im.ctx->advance_epoch(im.swapchain->buffer_count());
+            im.ctx->advance_epoch();
+            im.ctx->block_until_epochs_in_flight(im.swapchain->buffer_count());
         }
     }
     catch (sg::device_lost_exception const& e)

@@ -127,7 +127,8 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
         CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, textures) == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Reaching here means every pipeline variant built and the whole list recorded and ran.
     CHECK(output.width() == output_size[0]);
@@ -168,7 +169,8 @@ TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
               == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     CHECK(output.width() == 32);
 }

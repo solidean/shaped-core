@@ -53,7 +53,8 @@ INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
     REQUIRE(ctx != nullptr);
 
     auto const before = ctx->current_epoch();
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(u64(ctx->current_epoch()) > u64(before));
     CHECK(u64(ctx->completed_epoch()) >= u64(before)); // the epoch we started in is now done
 }
@@ -62,12 +63,13 @@ INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::conte
 {
     REQUIRE(ctx != nullptr);
 
-    // Draining (advance_epoch(0)) leaves nothing in flight: the just-closed epoch is completed, and
+    // Draining leaves nothing in flight: the just-closed epoch is completed, and
     // completed never overtakes current.
     for (int i = 0; i < 3; ++i)
     {
         auto const closing = ctx->current_epoch();
-        ctx->advance_epoch(0); // fully drain the GPU
+        ctx->advance_epoch();
+        ctx->block_until_idle(); // fully drain the GPU
         CHECK(u64(ctx->current_epoch()) > u64(closing));
         CHECK(u64(ctx->completed_epoch()) >= u64(closing));
         CHECK(u64(ctx->completed_epoch()) < u64(ctx->current_epoch()));
@@ -80,8 +82,8 @@ INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_han
 
     // With nothing in flight these are no-ops, but must not fault or move the epoch backwards.
     ctx->process_completed_epochs();
-    ctx->wait_for_next_inflight_epoch();
-    ctx->wait_for_epoch(ctx->completed_epoch());
+    ctx->block_until_epochs_in_flight(0);
+    ctx->block_until_idle();
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }
 
@@ -132,8 +134,9 @@ INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::contex
     CHECK(!pending->is_ready());
     CHECK(ctx->epoch_completion(open) == pending);
 
-    // Closing it and draining settles that node — no wait_for_epoch anywhere in sight.
-    ctx->advance_epoch(0);
+    // Closing it and draining settles that node — nothing waited on the epoch directly.
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     ctx->process_completed_epochs();
     CHECK(pending->is_ready());
 }
@@ -166,7 +169,8 @@ INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::contex
     REQUIRE(ctx != nullptr);
 
     // Drained, so nothing is in flight and any budget admits an advance.
-    ctx->advance_epoch(0);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(ctx->in_flight_epoch_count() == 0);
 
     auto const before = ctx->current_epoch();
@@ -198,10 +202,11 @@ INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg:
     auto const future = cmd->download.data_from_buffer(src);
     (void)ctx->submit_command_list(cc::move(cmd));
 
-    ctx->advance_epoch(0);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     ctx->block_until_idle();
 
-    // Delivered, without any wait_for(future) — which is the guarantee the blocking download API used to be the only
+    // Delivered, without any blocking read on the future — which is the guarantee the download API used to be the only
     // source of.
     REQUIRE(future.is_ready());
     auto const data = future.try_get_data();

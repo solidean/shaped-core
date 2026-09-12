@@ -61,8 +61,10 @@ INVOCABLE_TEST("sg dx12 - two placed buffers share one heap without aliasing", (
     auto future_b = down->download.bytes_from_buffer(buf_b, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes_a = c.wait_for(future_a);
-    auto const bytes_b = c.wait_for(future_b);
+    c.block_until_idle();
+    auto const bytes_a = future_a.try_get_bytes();
+    c.block_until_idle();
+    auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
 
@@ -110,7 +112,8 @@ INVOCABLE_TEST("sg dx12 - placed buffer keeps its heap alive", (dx12::dx12_conte
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[100] == byte(100));
 }

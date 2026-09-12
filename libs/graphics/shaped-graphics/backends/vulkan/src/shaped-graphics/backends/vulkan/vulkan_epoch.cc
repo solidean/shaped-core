@@ -20,7 +20,7 @@ sg::epoch vulkan_context::completed_epoch() const
     return sg::epoch(value < u64(sg::epoch::first) ? first_minus_one : value);
 }
 
-void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
+void vulkan_context::advance_epoch()
 {
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists.load(std::memory_order_relaxed) == 0, "all command lists opened this epoch must be "
@@ -102,18 +102,6 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
             s.in_flight.push_back(cc::move(data));
         });
 
-    // Throttle pipelining depth: keep at most `allowed_in_flight` epochs in flight.
-    if (allowed_in_flight.has_value())
-    {
-        int const a = allowed_in_flight.value();
-        CC_ASSERT(a >= 0, "allowed_in_flight must be non-negative");
-        u64 const allowed = u64(a);
-        u64 const last_u = u64(last);
-        if (last_u >= u64(sg::epoch::first) + allowed)
-            wait_for_epoch(sg::epoch(last_u - allowed)); // this also retires
-        else
-            process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
-    }
 
     // Apply a pending ctx.transient.set_budget() now that the new epoch is open: it drains all in-flight epochs and resizes the transient heap.
     // Rare — only after a set_budget — so the stall is acceptable.
@@ -163,6 +151,19 @@ void vulkan_context::block_until_submissions_complete()
         if (note_device_lost_if_lost(wr, "submission semaphore wait"))
             throw sg::device_lost_exception(device_loss_reason());
     }
+}
+
+void vulkan_context::block_until_transfers_drained()
+{
+    CC_RECORD_SCOPE("sg.epoch.block_until_transfers_drained");
+
+    // Everything an actor could still be holding, in the order the work flows: the pump releases whatever runs on the
+    // calling thread, and the ring's own accounting is what an actor with a thread of its own is observed through.
+    while (cc::thread_pump_all())
+    {
+    }
+    _download_inline.wait_until_idle();
+    _download_async.wait_until_idle();
 }
 
 void vulkan_context::retire_completed_epochs()

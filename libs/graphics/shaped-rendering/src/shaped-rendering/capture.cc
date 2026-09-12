@@ -92,7 +92,8 @@ cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const&
     auto const size = tg::vec2i(texture.width(), texture.height());
 
     auto future = ctx.download.bytes_from_texture(texture.raw());
-    auto const bytes = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     if (!bytes.has_value())
         return cc::error("capture: reading the image back from the GPU failed");
 

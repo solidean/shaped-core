@@ -68,7 +68,8 @@ INVOCABLE_TEST("sg - a texture written while another list is open keeps its cont
     auto future = reader->download.bytes_from_texture(target.raw());
     ctx->submit_command_list(cc::move(reader));
 
-    auto const pixels = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const pixels = future.try_get_bytes();
     REQUIRE(pixels.has_value());
     REQUIRE(pixels.value().size() == isize(k_pixels) * 4);
 
@@ -90,5 +91,6 @@ INVOCABLE_TEST("sg - a texture written while another list is open keeps its cont
     CHECK(zeroed == 0).context("the texture was discarded, not preserved, when the other list was still open");
     CHECK(written == k_pixels);
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }

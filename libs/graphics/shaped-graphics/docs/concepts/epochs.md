@@ -34,7 +34,7 @@ Epochs also give sg a natural place to throttle how far the CPU runs ahead of th
 ## Only the concept is shared; the machinery is per-backend
 
 What sg fixes is the vocabulary: the `epoch` / `submission_token` types and the epoch contract on [`sg::context`](context.md).
-That is `current_epoch`, `advance_epoch`, `process_completed_epochs`, the `wait_for_*` family, and `completed_epoch`.
+That is `current_epoch`, `advance_epoch`, `process_completed_epochs`, `completed_epoch`, and the two `block_until_*` waits.
 **How** a backend realizes them is its own business.
 A backend may even uphold the contract **without** tracking real in-flight epochs.
 An opengl backend, whose driver already manages resource lifetimes, could validate the contract against the counter alone.
@@ -53,14 +53,13 @@ Metal would map it onto shared events.
 2. Increment the counter.
 3. Signal the epoch fence with the *old* value on the direct queue (the core invariant above).
 4. Package everything the old epoch owns — its command allocators and its expiring resources — into a per-epoch payload and push it onto the in-flight FIFO.
-5. Optionally **throttle**: `allowed_in_flight` bounds how many epochs may remain in flight.
-   `nullopt` never waits, `0` fully drains the GPU, and `N` keeps at most N — a windowed renderer typically passes its swapchain back-buffer count.
-   `advance_epoch_and_wait_for_idle()` is the spelled-out `advance(0)`, named in full so an advance is never hidden behind a "wait" call.
+**Advance never waits.** Bounding pipelining depth is a separate decision, spelled either way:
+`ctx.block_until_epochs_in_flight(N)` parks until at most N remain, and `ctx.try_advance_epoch(N)` declines instead of advancing.
+A windowed renderer calls the first once a frame with its swapchain's back-buffer count; a caller that cannot block calls the second.
 
-Idle (and any `wait_for_*`) waits on the **GPU epoch fence** only.
-It does **not** guarantee an inline **download** future is delivered: the readback CPU copy runs on a separate actor thread the epoch machinery does not drain.
-So `future.is_ready()` can briefly lag idle.
-`ctx.block_until_idle()` is the spelling that covers both halves, and `future.completion()` the one that waits for neither — see [inline download](download.inline.md).
+An epoch fence says nothing about an inline **download** being delivered: the readback CPU copy runs on an actor thread the epoch machinery does not drain.
+So `future.is_ready()` can lag the fence.
+`ctx.block_until_idle()` is the spelling that covers every half, and `future.completion()` the one that waits for none — see [inline download](download.inline.md).
 
 **Retire** (`process_completed_epochs`) reclaims what the GPU has finished.
 Read the fence once, drain every in-flight epoch whose value is `<= completed` (oldest first), and for each reclaim its payload — allocators back to the pool, expiring resources freed.
@@ -75,11 +74,11 @@ Every question the `wait_for_*` family answers by stopping a thread has a form t
 
 | blocking | non-blocking |
 |---|---|
-| `wait_for_epoch(e)` | `epoch_completion(e)` — a `cc::shared_async` that settles when `e`'s GPU work is done |
+| an epoch fence wait | `epoch_completion(e)` — a `cc::shared_async` that settles when `e`'s GPU work is done |
 | `is_submission_complete(token)` polled | `submission_completion(token)` |
-| `wait_for(future)` | `future.completion()` |
-| `wait_for_ticks(timestamp)` | `timestamp.completion()` |
-| `advance_epoch(N)`, which waits to stay within N | `try_advance_epoch(N)`, which declines instead |
+| a download's blocking read | `future.completion()` |
+| a timestamp's blocking read | `timestamp.completion()` |
+| `block_until_epochs_in_flight(N)` | `try_advance_epoch(N)`, which declines instead |
 
 A completion node for something already finished comes back ready, so a caller never special-cases the past, and asking twice for the same target hands back the same node rather than two.
 They settle on a retire sweep — which every advance and every wait already runs — so a frame loop publishes them without doing anything extra.
@@ -92,13 +91,25 @@ A promise settles only after the current task's stack unwinds, so a loop waiting
 
 ## `block_until_idle()`: the one place a thread stops
 
-`ctx.block_until_idle()` is the only blocking spelling sg keeps, which is why it says so in its name — `block_until_` greps as the complete inventory.
-It asserts unless `execution()` is `may_block`.
+`block_until_` is the complete inventory of places a thread stops in sg, and it has exactly two entries:
+`ctx.block_until_epochs_in_flight(N)`, the per-frame back-pressure above, and `ctx.block_until_idle()`.
+Both assert unless `execution()` is `may_block`.
 
-It means **the GPU is idle AND every sg actor has drained**, and the second half is not a refinement.
-Draining the GPU does not deliver a download: the readback CPU copy runs on an actor thread the epoch machinery does not touch, so a future can be undelivered at the instant the fence says idle.
-So this alternates the two — wait out the submissions, pump the actors, repeat — until neither has anything left.
-A `bytes_future` submitted before it is delivered after it, with no `wait_for(future)` anywhere, and a test pins exactly that.
+`block_until_idle()` does three things, and the order is the point:
+
+1. **Wait out every submission.** The GPU has finished everything recorded so far.
+2. **Drain every transfer actor.** A readback the GPU finished still has to be copied into the caller's destination, and only the actor does that — so draining first would let a copy land behind us.
+3. **Retire every epoch.** The epoch fence signals *after* the work it gates.
+   So everything submitted can be done while the epoch owning it has not retired, with its allocators, staged deletions and finalizers still outstanding.
+
+The result is that a `bytes_future` **submitted** before it is readable after it, with no blocking read on the future anywhere, and a test pins exactly that.
+
+Submitted is the operative word.
+A download recorded into a command list the caller has not submitted yet cannot progress at all, so counting it would turn this into a hang rather than a wait — that work is the caller's to submit.
+
+Draining an actor is not "wait for its inbox to empty", which would never terminate under a steady stream of messages.
+Each transfer system counts **outstanding jobs** instead, from the moment one is submitted until the job object is destroyed — delivered, cancelled, or abandoned at shutdown.
+A waiter then leaves as soon as that count reaches zero.
 
 ## Deferred deletion and finalizers
 

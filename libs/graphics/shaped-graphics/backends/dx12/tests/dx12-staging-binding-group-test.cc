@@ -67,7 +67,8 @@ bool holds_doubled(sg::context_handle const& ctx, sg::raw_buffer_handle const& b
     auto future = down->download.data_from_buffer<u32>(buf, 0, k_count);
     ctx->submit_command_list(cc::move(down));
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(k_count));
     for (int i = 0; i < k_count; ++i)
@@ -141,7 +142,8 @@ INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it",
     // A snapshot is a PERSISTENT group: binding one several epochs later is fine, where a transient group's
     // descriptors would have been recycled and the bind would trip its epoch tripwire.
     for (int i = 0; i < 3; ++i)
-        ctx->advance_epoch_and_wait_for_idle();
+        ctx->advance_epoch();
+    ctx->block_until_idle();
 
     dispatch_through(ctx, *pipeline, *group);
     CHECK(holds_doubled(ctx, buf));
@@ -178,7 +180,8 @@ TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
         auto group = staging->snapshot();
         REQUIRE(group != nullptr); // never exhausts: released ranges are reclaimed
         group.reset();
-        ctx->advance_epoch_and_wait_for_idle();
+        ctx->advance_epoch();
+        ctx->block_until_idle();
     }
     CHECK(true);
 }

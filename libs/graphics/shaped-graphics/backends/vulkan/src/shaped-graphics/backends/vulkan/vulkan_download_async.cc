@@ -417,6 +417,7 @@ sg::bytes_future vulkan_download_async_system::download_buffer(sg::raw_buffer_ha
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     // No wait gate: it exists to say whether blocking could make progress at all, and an async readback's progress
@@ -555,6 +556,7 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
     return sg::stream_download_handle(cc::move(control), cc::move(future));
 }
@@ -631,6 +633,7 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(dst)), cc::move(completion), nullptr);
 }
@@ -703,6 +706,7 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
     if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
     return sg::stream_download_handle(cc::move(control), cc::move(future));
 }

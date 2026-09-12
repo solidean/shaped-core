@@ -38,8 +38,10 @@ INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle
 
     c.submit_command_list(cc::move(cmd));
 
-    auto const tick1 = c.wait_for_ticks(t1);
-    auto const tick0 = c.wait_for_ticks(t0);
+    c.block_until_idle();
+    auto const tick1 = t1.try_get_ticks();
+    c.block_until_idle();
+    auto const tick0 = t0.try_get_ticks();
     REQUIRE(tick0.has_value());
     REQUIRE(tick1.has_value());
     CHECK(tick1.value() >= tick0.value()); // non-decreasing on a single queue
@@ -75,7 +77,8 @@ INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_co
 
     // The last query lives in the second heap; the actor drains heaps in submission order, so waiting on
     // it implies the first heap's readback has landed too.
-    REQUIRE(c.wait_for_ticks(ts.back()).has_value());
+    c.block_until_idle();
+    REQUIRE(ts.back().try_get_ticks().has_value());
 
     // Sample across the heap boundary: last slot of heap 0, first slot of heap 1, and the final slot.
     int const sample[] = {0, per_heap - 1, per_heap, n - 1};
@@ -108,13 +111,14 @@ INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::
     // A dropped list never resolves: the handle stays valid but never becomes ready, and blocking fails
     // instead of hanging (like a cancelled download).
     CHECK(!t.is_ready());
+    c.block_until_idle();
     CHECK(!t.try_get_ticks().has_value());
-    CHECK(!c.wait_for_ticks(t).has_value());
 
     // The heap returned to the pool: a subsequent list records + reads back fine.
     auto cmd2 = c.create_command_list();
     REQUIRE(cmd2 != nullptr);
     auto t2 = cmd2->query.record_gpu_timestamp();
     c.submit_command_list(cc::move(cmd2));
-    REQUIRE(c.wait_for_ticks(t2).has_value());
+    c.block_until_idle();
+    REQUIRE(t2.try_get_ticks().has_value());
 }

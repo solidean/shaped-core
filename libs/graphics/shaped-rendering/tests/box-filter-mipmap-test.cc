@@ -83,7 +83,8 @@ TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-sha
     CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d, 3) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 namespace
@@ -109,7 +110,8 @@ namespace
 /// reads are left in the layouts the generating dispatch put them in rather than in the common one that queue expects.
 [[nodiscard]] cc::vector<u8> read_back(sg::context& ctx, sg::bytes_future const& future)
 {
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_bytes();
     if (!data.has_value())
         return {};
     return red_channel(data.value().span());
@@ -179,7 +181,8 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_cube) == sg::routine_outcome::executed);
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_1d_array) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Every generated level of every slice, read back in one list.
     auto dl = ctx.create_command_list();
@@ -192,7 +195,8 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
             futures.push_back(
                 dl->download.bytes_from_texture(tex_1d_array.raw(), {.mip_level = level, .array_layer = slice}));
     ctx.submit_command_list(cc::move(dl));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Averaging equal texels reproduces them exactly, so every generated level of a face is that face's own value —
     // and a face the dispatch never covered still holds the sentinel.
@@ -237,13 +241,15 @@ TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive
     up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     auto dl = ctx.create_command_list();
     auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
     auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     ctx.submit_command_list(cc::move(dl));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Level 1 averages each pair of the base level; level 2 has one texel left over three, so its second tap
     // clamps to the level's last texel and the third is dropped.

@@ -151,7 +151,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample 
     auto future = down->download.data_from_buffer<float>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_bytes();
     REQUIRE(data.has_value());
 
     // Point-sampling texel centers reproduces exactly what pass 1 wrote: Out[i] == i.
