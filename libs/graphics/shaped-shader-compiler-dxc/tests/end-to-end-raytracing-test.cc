@@ -184,7 +184,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
     ctx.block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     cc::vector<u32> result;
     for (auto const v : data.value())

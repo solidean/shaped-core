@@ -128,13 +128,11 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
     REQUIRE(layout != nullptr);
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
-    auto group = c.persistent.try_create_binding_group(layout, {}, {});
-    CHECK(!group.has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, {}, {}), sg::binding_group_exception);
 
     // A sampler named for a binding that does not exist is also rejected.
     sg::named_sampler const wrong[] = {{.name = "Ghost", .sampler = {}}};
-    auto group2 = c.persistent.try_create_binding_group(layout, {}, wrong);
-    CHECK(!group2.has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, {}, wrong), sg::binding_group_exception);
 }
 
 INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP",

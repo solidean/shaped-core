@@ -131,7 +131,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
         ctx.submit_command_list(cc::move(down));
 
         ctx.block_until_idle();
-        auto const data = future.try_get_bytes();
+        auto const data = future.try_get_data();
         cc::vector<u32> result;
         for (auto const v : data.value())
             result.push_back(v);

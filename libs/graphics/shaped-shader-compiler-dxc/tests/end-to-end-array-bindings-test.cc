@@ -163,7 +163,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     ctx.submit_command_list(cc::move(down));
 
     ctx.block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.value().size() == 2);
     CHECK(data.value()[0] == b0_value + b3_value);
     CHECK(data.value()[1] == u32(texel_value));

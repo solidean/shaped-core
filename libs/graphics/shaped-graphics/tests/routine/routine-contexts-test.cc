@@ -56,9 +56,13 @@ TEST("sg - routines are per-context: each context builds its own instance from s
             SKIP("no dx12 WARP device");
 
         auto cmd_a = ctx_a->create_command_list();
-        auto const& ra = counting_routine::acquire(*cmd_a);
-        CHECK(ra.once == 1);
-        CHECK(ra.inits == 1);
+        // Asking registers it; the tick is what runs the phases.
+        (void)counting_routine::try_acquire(*cmd_a);
+        (void)ctx_a->routines.tick_until_idle();
+        auto const ra = counting_routine::try_acquire(*cmd_a);
+        REQUIRE(ra.is_ready());
+        CHECK(ra->once == 1);
+        CHECK(ra->inits == 1);
         ctx_a->drop_command_list(cc::move(cmd_a));
     } // ctx_a shuts down here — its routine instance (and cached GPU state) is released with it.
 
@@ -70,9 +74,12 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     REQUIRE(ctx_b != nullptr);
 
     auto cmd_b = ctx_b->create_command_list();
-    auto const& rb = counting_routine::acquire(*cmd_b);
-    CHECK(rb.once == 1); // ran again on ctx_b: the instance is per-context, not a process singleton
-    CHECK(rb.inits == 1);
+    (void)counting_routine::try_acquire(*cmd_b);
+    (void)ctx_b->routines.tick_until_idle();
+    auto const rb = counting_routine::try_acquire(*cmd_b);
+    REQUIRE(rb.is_ready());
+    CHECK(rb->once == 1); // ran again on ctx_b: the instance is per-context, not a process singleton
+    CHECK(rb->inits == 1);
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
@@ -87,19 +94,26 @@ TEST("sg - two live contexts keep separate routine instances")
     auto cmd_a = ctx_a->create_command_list();
     auto cmd_b = ctx_b->create_command_list();
 
-    auto const& ra = counting_routine::acquire(*cmd_a);
-    auto const& rb = counting_routine::acquire(*cmd_b);
-    CHECK(&ra != &rb);
+    (void)counting_routine::try_acquire(*cmd_a);
+    (void)counting_routine::try_acquire(*cmd_b);
+    (void)ctx_a->routines.tick_until_idle();
+    (void)ctx_b->routines.tick_until_idle();
+
+    auto const ra = counting_routine::try_acquire(*cmd_a);
+    auto const rb = counting_routine::try_acquire(*cmd_b);
+    REQUIRE(ra.is_ready());
+    REQUIRE(rb.is_ready());
+    CHECK(&*ra != &*rb);
 
     // Interleaved acquires must keep landing on the right instance — neither context may be served the other's routine, however the per-thread acquire cache ping-pongs between them.
-    (void)counting_routine::acquire(*cmd_a);
-    (void)counting_routine::acquire(*cmd_b);
-    (void)counting_routine::acquire(*cmd_a);
+    (void)counting_routine::try_acquire(*cmd_a);
+    (void)counting_routine::try_acquire(*cmd_b);
+    (void)counting_routine::try_acquire(*cmd_a);
 
-    CHECK(ra.once == 1);
-    CHECK(ra.inits == 1);
-    CHECK(rb.once == 1);
-    CHECK(rb.inits == 1);
+    CHECK(ra->once == 1);
+    CHECK(ra->inits == 1);
+    CHECK(rb->once == 1);
+    CHECK(rb->inits == 1);
 
     ctx_a->drop_command_list(cc::move(cmd_a));
     ctx_b->drop_command_list(cc::move(cmd_b));

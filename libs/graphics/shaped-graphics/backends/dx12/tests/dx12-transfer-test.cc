@@ -69,7 +69,7 @@ INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_contex
     c.submit_command_list(cc::move(down));
 
     c.block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);

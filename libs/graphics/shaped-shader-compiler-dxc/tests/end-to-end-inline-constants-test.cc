@@ -121,7 +121,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx.submit_command_list(cc::move(down));
         ctx.block_until_idle();
-        auto const data = future.try_get_bytes();
+        auto const data = future.try_get_data();
         cc::vector<u32> result;
         for (auto const v : data.value())
             result.push_back(v);

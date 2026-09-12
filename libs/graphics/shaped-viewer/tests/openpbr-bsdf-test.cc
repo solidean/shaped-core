@@ -191,7 +191,7 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     ctx.block_until_idle();
     // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
     ctx.block_until_idle();
-    auto const delivered = readback.try_get_bytes();
+    auto const delivered = readback.try_get_data();
     REQUIRE(delivered.has_value());
 
     auto const items = delivered.value();

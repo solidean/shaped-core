@@ -126,7 +126,7 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     c.submit_command_list(cc::move(down));
 
     c.block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     bool ok = true;
     for (int i = 0; i < count; ++i)

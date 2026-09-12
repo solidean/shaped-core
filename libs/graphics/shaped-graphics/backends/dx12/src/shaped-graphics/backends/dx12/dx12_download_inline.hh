@@ -106,6 +106,12 @@ public:
     /// Shuts the actor down (draining pending copies), then unmaps + releases the ring buffer.
     void shutdown();
 
+    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
+    ///
+    /// What ctx.block_until_idle() waits on, and distinct from the private wait_until_idle: this counts a job only from
+    /// its submission, so a download recorded into a list the caller has not submitted yet cannot turn a wait into a hang.
+    void wait_until_submitted_drained() { _drain.wait_until_idle(); }
+
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // --- test-only escape hatches --------------------------------------------------------------------
     // Backend tests peel the abstraction to assert ring-cursor behavior, e.g. seam-splitting.
@@ -167,12 +173,6 @@ private:
     /// Counts one copy against the open epoch's tally (`epoch_copies`) and the global drain gate.
     /// Call exactly once per pushed dx12_download_copy_job; on_copy_done / discard_unsubmitted release it.
     void account_pending_copy(std::shared_ptr<std::atomic<isize>> const& epoch_copies);
-
-    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
-    ///
-    /// What ctx.block_until_idle() waits on, and distinct from wait_until_idle below: this counts a job only from its
-    /// submission, so a download recorded into a list the caller has not submitted yet cannot turn a wait into a hang.
-    void wait_until_submitted_drained() { _drain.wait_until_idle(); }
 
     /// Blocks the calling thread until the actor has drained every outstanding readback copy.
     /// That is, until every accounted copy has been matched by an on_copy_done or a discard.

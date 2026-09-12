@@ -68,7 +68,7 @@ bool holds_doubled(sg::context_handle const& ctx, sg::raw_buffer_handle const& b
     ctx->submit_command_list(cc::move(down));
 
     ctx->block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(k_count));
     for (int i = 0; i < k_count; ++i)

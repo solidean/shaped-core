@@ -90,7 +90,7 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     ctx.submit_command_list(cc::move(down));
 
     ctx.block_until_idle();
-    auto const data = future.try_get_bytes();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));
     bool ok = true;
