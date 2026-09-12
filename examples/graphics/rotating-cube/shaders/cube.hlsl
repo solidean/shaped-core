@@ -24,14 +24,15 @@ struct vs_output
     float3 color : COLOR;
 };
 
-// `column_major` is stated rather than left to the default, and it is load-bearing twice over.
-// It decides the layout, which is what the generated mirror reproduces -- and it decides whether those sixteen
-// floats are read as rows or as columns, which is what `mul` does with them.
-// The default it would otherwise take comes from `#pragma pack_matrix` / `-Zpr`, so without this word a flag set
-// anywhere could transpose the cube with the mirror's size still correct.
+// The matrix is declared bare, and the pass writes `column_major` in front of it before the compiler sees this
+// — the same thing it does with an address, and for the same reason.
+// The orientation decides the layout the generated mirror reproduces, and whether those sixteen floats are read
+// as rows or as columns, which is what `mul` does with them.
+// Left to the default it would come from a `#pragma pack_matrix` or a `-Zpr` set somewhere this file cannot see,
+// and such a flag would transpose the cube with the mirror's size still correct.
 struct cube_constants
 {
-    column_major float4x4 view_projection;
+    float4x4 view_projection;
 };
 
 #pragma sc push_constants

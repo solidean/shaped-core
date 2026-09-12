@@ -42,24 +42,24 @@ constexpr table_entry k_table[] = {
     // Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
     {"bool", "unsigned", 4, 4, 4},
 
-    // A matrix is keyed on its ORIENTATION as well as its shape, because that is what its layout depends on --
-    // and the orientation is part of the declaration rather than something the pass has to guess.
-    // A bare `float4x4` is refused for that reason: its default comes from `#pragma pack_matrix` or `-Zpr`, which
-    // the pass cannot see, and it decides whether the mirror's sixteen floats are read as rows or as columns.
+    // Every matrix is column-major and the PASS writes that, exactly as it writes an address -- see
+    // `matrix_offsets` in binding_groups.cc.
+    // A shader declares `float4x3` and the rewrite makes it `column_major float4x3`, so the declaration is immune
+    // to a `#pragma pack_matrix` or a `-Zpr` set anywhere else, and the mirror's floats are columns by
+    // construction rather than by a default that held when someone last looked.
     //
-    // The shapes admitted are those whose stored vectors are full float4s, so the matrix is exactly V rows of 16
-    // with no partial tail: row-major stores R vectors of C, column-major stores C vectors of R.
-    // Q14g measured what a partial tail costs -- the next member packs into it on DXIL and the SPIR-V validator
-    // calls that an overlap, since it measures the matrix as `stride * V` and DXC does not.
-    {"row_major float1x4", "float[4]", 16, 16, 4},
-    {"row_major float2x4", "float[8]", 32, 16, 4},
-    {"row_major float3x4", "float[12]", 48, 16, 4},
-    {"row_major float4x4", "float[16]", 64, 16, 4},
-
-    {"column_major float4x1", "float[4]", 16, 16, 4},
-    {"column_major float4x2", "float[8]", 32, 16, 4},
-    {"column_major float4x3", "float[12]", 48, 16, 4},
-    {"column_major float4x4", "float[16]", 64, 16, 4},
+    // Column-major is not a preference: MSL and WGSL have no row-major matrices at all, so a row-major HLSL
+    // matrix has no expression on two of the four targets this dialect is for.
+    //
+    // The shapes are those whose columns are FULL float4s, which is what makes one extent true everywhere: a
+    // matrix is C columns at a 16-byte stride, so `float4xC` is exactly 16C bytes on D3D, on SPIR-V, and under
+    // WGSL's and MSL's own rules.
+    // A narrower column pads, and the padding is where the targets stop agreeing -- D3D ends a `float3x3` at 44
+    // where WGSL and MSL size it 48, so the member after it would sit in two different places.
+    {"float4x1", "float[4]", 16, 16, 4},
+    {"float4x2", "float[8]", 32, 16, 4},
+    {"float4x3", "float[12]", 48, 16, 4},
+    {"float4x4", "float[16]", 64, 16, 4},
 
     // `half` and `min16float` are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and
     // nothing in ssc passes it.
@@ -109,13 +109,10 @@ constexpr cc::string_view k_formats[] = {
     return false;
 }
 
-constexpr cc::string_view k_needs_orientation
-    = ", because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the "
-      "default comes from a compile flag the pass cannot see";
-
-constexpr cc::string_view k_partial_row
-    = ", because a matrix must store full float4s (row_major floatRx4, column_major float4xC) — this one leaves a "
-      "partial last row that the next member packs into, and SPIR-V refuses the module (spike Q14g)";
+constexpr cc::string_view k_narrow_column
+    = ", because only a matrix whose columns are full float4s has one extent on every target: `float4xC` is 16C "
+      "bytes everywhere, where a narrower column pads and D3D then ends the matrix sooner than WGSL and MSL do "
+      "(spike Q14g)";
 } // namespace
 
 cc::optional<slib::impl::hlsl_value_type> slib::impl::value_type_of(cc::string_view hlsl_type)
@@ -146,11 +143,12 @@ bool slib::impl::is_vertex_attribute_format(cc::string_view name)
     return false;
 }
 
+bool slib::impl::is_matrix_type(cc::string_view hlsl_type)
+{
+    return is_matrix_spelling(hlsl_type);
+}
+
 cc::string_view slib::impl::rejection_reason_for(cc::string_view hlsl_type)
 {
-    if (!is_matrix_spelling(hlsl_type))
-        return {};
-
-    auto const oriented = hlsl_type.starts_with("row_major ") || hlsl_type.starts_with("column_major ");
-    return oriented ? k_partial_row : k_needs_orientation;
+    return is_matrix_spelling(hlsl_type) ? k_narrow_column : cc::string_view();
 }

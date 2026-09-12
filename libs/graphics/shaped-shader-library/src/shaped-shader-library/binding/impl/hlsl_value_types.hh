@@ -42,10 +42,16 @@ struct hlsl_value_type
 /// The coverage and the exclusions are one list, in
 /// libs/graphics/shaped-shader-library/docs/binding-preprocessor.md's "The supported subset" — every exclusion
 /// naming the measurement behind it rather than a policy.
-/// The two that bite most often: a matrix other than `float4x4` is refused because its layout depends on an
-/// orientation the pass cannot see (Q14g), and `half` is 32-bit storage here because nothing passes
+/// The two that bite most often: only `float4xC` matrices are carried, because only a full float4 column has
+/// one extent on every target (Q14g), and `half` is 32-bit storage here because nothing passes
 /// `-enable-16bit-types` (Q14h).
 [[nodiscard]] cc::optional<hlsl_value_type> value_type_of(cc::string_view hlsl_type);
+
+/// Whether `hlsl_type` names a matrix, whether or not the table carries that shape.
+///
+/// The pass writes `column_major` before every matrix it parses, so it has to recognise one before deciding
+/// whether it knows it — see `matrix_offsets` in binding_groups.cc.
+[[nodiscard]] bool is_matrix_type(cc::string_view hlsl_type);
 
 /// Whether `name` is an sg::vertex_attribute_format enumerator, spelled exactly.
 ///

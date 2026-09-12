@@ -102,6 +102,14 @@ struct parsed_source
     /// The rewrite deletes them: DXC ignores an unknown pragma today, but `-Wall` promotes it to
     /// `-Wunknown-pragmas` and `-WX` makes that an error, so the compiler is never given the chance.
     cc::vector<source_span> annotations;
+
+    /// Where a `column_major ` has to be written, one offset per matrix member the pass parsed.
+    ///
+    /// The orientation is the pass's to write for the same reason an address is: it decides the layout, it
+    /// decides whether the mirror's floats are columns or rows, and left to the source it comes from a
+    /// `#pragma pack_matrix` or a `-Zpr` that the declaration never mentions.
+    /// Only members the pass actually parsed are listed, so a matrix in a function body is left alone.
+    cc::vector<isize> matrix_offsets;
 };
 
 /// The parse of one translation unit.
@@ -113,6 +121,7 @@ struct parser
     isize at = 0;
 
     cc::vector<source_span> annotations;
+    cc::vector<isize> matrix_offsets;
     cc::optional<parsed_inline_constants> inline_constants;
     cc::vector<parsed_vertex_input> vertex_inputs;
     cc::vector<slib::shader_payload> payloads;
@@ -589,9 +598,12 @@ struct parser
         auto const location = type_token.location;
         auto const type_offset = type_token.offset;
 
-        auto spelling = read_type_spelling();
-        CC_RETURN_IF_ERROR(spelling);
-        auto const type_name = cc::string_view(spelling.value());
+        auto name_result = read_type_name();
+        CC_RETURN_IF_ERROR(name_result);
+        auto const type_name = name_result.value();
+
+        if (slib::impl::is_matrix_type(type_name))
+            matrix_offsets.push_back(type_offset);
 
         auto const value_type = slib::impl::value_type_of(type_name);
         if (!value_type.has_value())
@@ -706,26 +718,27 @@ struct parser
         return cc::unit();
     }
 
-    /// The type spelling at the cursor, with a matrix's orientation qualifier folded into it.
+    /// The type name at the cursor, refusing an orientation the author wrote by hand.
     ///
-    /// `row_major` and `column_major` are part of the type the table is keyed on rather than modifiers walked
-    /// past, because a matrix's layout is exactly what they decide -- and the default they would otherwise fall
-    /// back to is a compile flag that never reaches the source.
-    [[nodiscard]] cc::result<cc::string> read_type_spelling()
+    /// A matrix's orientation belongs to the pass exactly as an address does, and for the same reason: it is a
+    /// number nobody should have to keep true in two places.
+    /// `row_major` has no expression at all on two of the targets this dialect is for, and `column_major` is
+    /// what the rewrite writes anyway -- so neither is something to accept from the source.
+    [[nodiscard]] cc::result<cc::string_view> read_type_name()
     {
         auto const location = current().location;
-        auto spelling = cc::string::create_copy_of(current().text);
+        auto const name = current().text;
+
+        if (name == "row_major")
+            return cc::error(cc::format("{}: a matrix may not be declared 'row_major' — MSL and WGSL have no "
+                                        "row-major matrices at all, so the pass makes every matrix column-major",
+                                        to_string(location)));
+        if (name == "column_major")
+            return cc::error(cc::format("{}: the pass writes 'column_major' itself, so declare the matrix bare",
+                                        to_string(location)));
+
         ++at;
-
-        if (spelling != "row_major" && spelling != "column_major")
-            return spelling;
-
-        if (at_end() || current().kind != hlsl_token_kind::identifier)
-            return cc::error(cc::format("{}: expected a matrix type after '{}'", to_string(location), spelling));
-
-        auto qualified = cc::format("{} {}", spelling, current().text);
-        ++at;
-        return qualified;
+        return name;
     }
 
     /// One `<type> <name>;` of a constant block.
@@ -742,9 +755,15 @@ struct parser
                 cc::format("{}: expected a member declaration, found '{}'", to_string(token.location), token.text));
 
         auto const location = token.location;
-        auto spelling = read_type_spelling();
-        CC_RETURN_IF_ERROR(spelling);
-        auto const type_name = cc::string_view(spelling.value());
+        auto const type_offset = token.offset;
+        auto name_result = read_type_name();
+        CC_RETURN_IF_ERROR(name_result);
+        auto const type_name = name_result.value();
+
+        // Recorded before the table is consulted, so an unknown matrix is still refused by name rather than by
+        // the orientation the rewrite would have written in front of it.
+        if (slib::impl::is_matrix_type(type_name))
+            matrix_offsets.push_back(type_offset);
 
         if (at_end() || current().kind != hlsl_token_kind::identifier)
             return cc::error(cc::format("{}: expected a name after '{}'", to_string(location), type_name));
@@ -1042,7 +1061,8 @@ struct parser
                          .inline_constants = cc::move(p.inline_constants),
                          .vertex_inputs = cc::move(p.vertex_inputs),
                          .payloads = cc::move(p.payloads),
-                         .annotations = cc::move(p.annotations)};
+                         .annotations = cc::move(p.annotations),
+                         .matrix_offsets = cc::move(p.matrix_offsets)};
 }
 
 /// One replacement of `length` source bytes at `offset`.
@@ -1157,6 +1177,15 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
         else
             edits.push_back({.offset = constants.type_offset, .text = cc::string("[[vk::push_constant]] ")});
     }
+
+    // Every matrix the pass parsed is made column-major, on BOTH arms.
+    //
+    // DXC's own default is already column-major, so this changes nothing about the bytes today -- which is the
+    // point: it is what keeps them from changing under a `#pragma pack_matrix(row_major)` or a `-Zpr` set
+    // somewhere the declaration cannot see.
+    // The generated mirror reads those floats as columns, and this is what makes that true rather than likely.
+    for (auto const offset : parsed.value().matrix_offsets)
+        edits.push_back({.offset = offset, .text = cc::string("column_major ")});
 
     // Vertex input locations, which only the SPIR-V arm needs: HLSL matches an input by its semantic, and the
     // semantic is already in the source.

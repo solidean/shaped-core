@@ -271,23 +271,20 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
     "uint4": ("unsigned[4]", 16, 4, 4, "vec4u"),
     # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
     "bool": ("unsigned", 4, 4, 4, None),
-    # A matrix is keyed on its ORIENTATION as well as its shape, because that is what its layout depends on --
-    # and the orientation is part of the declaration rather than something the pass has to guess.
-    # A bare `float4x4` is refused for that reason: its default comes from `#pragma pack_matrix` or `-Zpr`, which
-    # the pass cannot see, and it decides whether the mirror's sixteen floats are read as rows or as columns.
+    # Every matrix is column-major and the PASS writes that, exactly as it writes an address.
+    # A shader declares `float4x3` and the rewrite makes it `column_major float4x3`, so the declaration is immune
+    # to a `#pragma pack_matrix` or a `-Zpr` set anywhere else.
     #
-    # The shapes admitted are those whose stored vectors are full float4s, so the matrix is exactly V rows of 16
-    # with no partial tail: row-major stores R vectors of C, column-major stores C vectors of R.
-    # Q14g measured what a partial tail costs -- the next member packs into it on DXIL and the SPIR-V validator
-    # calls that an overlap, since it measures the matrix as `stride * V` and DXC does not.
-    "row_major float1x4": ("float[4]", 16, 16, 4, None),
-    "row_major float2x4": ("float[8]", 32, 16, 4, None),
-    "row_major float3x4": ("float[12]", 48, 16, 4, None),
-    "row_major float4x4": ("float[16]", 64, 16, 4, None),
-    "column_major float4x1": ("float[4]", 16, 16, 4, None),
-    "column_major float4x2": ("float[8]", 32, 16, 4, None),
-    "column_major float4x3": ("float[12]", 48, 16, 4, None),
-    "column_major float4x4": ("float[16]", 64, 16, 4, None),
+    # Column-major is not a preference: MSL and WGSL have no row-major matrices at all.
+    #
+    # The shapes are those whose columns are FULL float4s, which is what makes one extent true everywhere: a
+    # matrix is C columns at a 16-byte stride, so `float4xC` is exactly 16C bytes on D3D, on SPIR-V, and under
+    # WGSL's and MSL's own rules.
+    # A narrower column pads, and D3D then ends a `float3x3` at 44 where WGSL and MSL size it 48.
+    "float4x1": ("float[4]", 16, 16, 4, None),
+    "float4x2": ("float[8]", 32, 16, 4, None),
+    "float4x3": ("float[12]", 48, 16, 4, None),
+    "float4x4": ("float[16]", 64, 16, 4, None),
     # `half` and `min16float` are the same 32 bits as `float` unless `-enable-16bit-types` is passed, and nothing
     # in ssc passes it.
     # Q14h pins that, so adding the flag is a failing test rather than a wrong number.
@@ -321,12 +318,14 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
 # Keep in step with rejection_reason_for in impl/hlsl_value_types.cc.
 MATRIX_SPELLINGS = ("float1x", "float2x", "float3x", "float4x", "matrix")
 
-NEEDS_ORIENTATION = (", because a matrix's layout depends on its orientation \u2014 write `row_major` or "
-                     "`column_major`, since the default comes from a compile flag the pass cannot see")
+NARROW_COLUMN = (", because only a matrix whose columns are full float4s has one extent on every target: "
+                 "`float4xC` is 16C bytes everywhere, where a narrower column pads and D3D then ends the matrix "
+                 "sooner than WGSL and MSL do (spike Q14g)")
 
-PARTIAL_ROW = (", because a matrix must store full float4s (row_major floatRx4, column_major float4xC) \u2014 this "
-               "one leaves a partial last row that the next member packs into, and SPIR-V refuses the module "
-               "(spike Q14g)")
+
+def is_matrix_type(hlsl_type: str) -> bool:
+    """Whether the spelling names a matrix, whether or not the table carries that shape."""
+    return any(needle in hlsl_type for needle in MATRIX_SPELLINGS)
 
 
 # Every sg::vertex_attribute_format enumerator, so a `format=` override can be checked against the real set.
@@ -343,11 +342,7 @@ VERTEX_ATTRIBUTE_FORMATS = (
 
 def rejection_reason_for(hlsl_type: str) -> str:
     """The sentence to append to a refusal, or empty when the pass has nothing more specific to say."""
-    if not any(needle in hlsl_type for needle in MATRIX_SPELLINGS):
-        return ""
-
-    oriented = hlsl_type.startswith("row_major ") or hlsl_type.startswith("column_major ")
-    return PARTIAL_ROW if oriented else NEEDS_ORIENTATION
+    return NARROW_COLUMN if is_matrix_type(hlsl_type) else ""
 
 
 def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
@@ -807,26 +802,23 @@ class _Parser:
         # The block's own total rounds up to a whole row.
         constants.size = offset if offset % 16 == 0 else offset + (16 - offset % 16)
 
-    def read_type_spelling(self) -> str:
-        """The type spelling at the cursor, with a matrix's orientation qualifier folded into it.
+    def read_type_name(self) -> str:
+        """The type name at the cursor, refusing an orientation the author wrote by hand.
 
-        `row_major` and `column_major` are part of the type the table is keyed on rather than modifiers walked
-        past, because a matrix's layout is exactly what they decide -- and the default they would otherwise fall
-        back to is a compile flag that never reaches the source.
+        A matrix's orientation belongs to the pass exactly as an address does, and for the same reason: it is a
+        number nobody should have to keep true in two places.
         """
         location = self.current().location
-        spelling = self.current().text
+        name = self.current().text
+
+        if name == "row_major":
+            raise BindingError(f"{location}: a matrix may not be declared 'row_major' \u2014 MSL and WGSL have no "
+                               f"row-major matrices at all, so the pass makes every matrix column-major")
+        if name == "column_major":
+            raise BindingError(f"{location}: the pass writes 'column_major' itself, so declare the matrix bare")
+
         self.at += 1
-
-        if spelling not in ("row_major", "column_major"):
-            return spelling
-
-        if self.at_end() or self.current().kind != "identifier":
-            raise BindingError(f"{location}: expected a matrix type after '{spelling}'")
-
-        qualified = f"{spelling} {self.current().text}"
-        self.at += 1
-        return qualified
+        return name
 
     def parse_constant_member(self) -> StructMember:
         """One `<type> <name>;` of a constant block.
@@ -840,7 +832,7 @@ class _Parser:
             raise BindingError(f"{token.location}: expected a member declaration, found '{token.text}'")
 
         location = token.location
-        type_name = self.read_type_spelling()
+        type_name = self.read_type_name()
 
         if self.at_end() or self.current().kind != "identifier":
             raise BindingError(f"{location}: expected a name after '{type_name}'")
@@ -1093,7 +1085,7 @@ class _Parser:
 
         location = token.location
         type_offset = token.offset
-        type_name = self.read_type_spelling()
+        type_name = self.read_type_name()
 
         if type_name not in VALUE_TYPES:
             kind = "vertex attribute" if requires_semantic else "payload"

@@ -222,15 +222,16 @@ An exclusion below either names the measurement behind it, in which case it is a
 
 The exclusions that are rules, each with its measurement:
 
-- **A matrix that does not state its orientation** — Q14g.
-  A matrix stores V vectors of M components at a 16-byte stride, and which of R and C plays each part is exactly what `row_major` / `column_major` decides.
-  Left unstated it comes from `#pragma pack_matrix` or `-Zpr`, which never reaches the source, so one shader would mirror to two different structs depending on how it was compiled.
-  It also decides whether the sixteen floats of a `float4x4` are read as rows or as columns.
-  Stating it is one word, and it is required on every matrix including `float4x4`, whose layout is orientation-independent but whose *meaning* is not.
-- **A matrix whose stored vectors are not full `float4`s** — Q14g2.
-  `row_major floatRx4` and `column_major float4xC` are admitted, at `16 * V` bytes and mirrored as `float[4 * V]`.
-  Anything else leaves a partial last row: DXC packs the next member into its tail while the SPIR-V validator measures the matrix as `stride * V` and calls that an overlap.
-  The mirror would need a tail like `float[7]` even in the cases where the two agree.
+- **Any matrix but `float4xC`** — Q14g.
+  A matrix is C columns at a 16-byte stride, so a column of four leaves no padding.
+  `float4xC` is `16C` bytes on D3D, on SPIR-V, and under WGSL's and MSL's own rules alike, which is what lets one CPU struct serve all four targets.
+  A narrower column pads, and the padding is where they part company — D3D ends a `float3x3` at 44 and packs the next member there, where WGSL and MSL size the same matrix 48.
+  Both compile, so this is a portability rule no toolchain will ever report.
+  The portable 3×3 is a `float4x3` with a `(float3x3)` cast at the use site, which is the idiom engines reach for independently.
+- **A hand-written `row_major` or `column_major`** — the orientation belongs to the pass, exactly as an address does.
+  A shader declares `float4x3` and the rewrite makes it `column_major float4x3` on both arms, so the declaration is immune to a `#pragma pack_matrix` or a `-Zpr` set somewhere it cannot see.
+  `row_major` is refused outright rather than merely unwritten: MSL and WGSL have no row-major matrices at all, so it has no expression on half the targets.
+  Q14g2 records what SPIR-V does with one anyway, since that is the part most likely to be re-litigated.
 - **An array in a constant block** — Q14b.
   The member after one packs into its last row's tail, which C++ cannot express.
 - **A nested struct in a constant block** — Q14d.

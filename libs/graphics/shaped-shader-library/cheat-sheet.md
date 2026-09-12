@@ -222,9 +222,10 @@ namespace frame_bindings
 // `#pragma sc payload` before a struct generates its C++ mirror and the max_payload_size a pipeline must
 //   declare. A payload packs at NATURAL alignment, not in a constant buffer's 16-byte rows -- the spike's
 //   Q13 measured that: CreateStateObject accepts the natural size and refuses one field less.
-// a MATRIX must state `row_major` or `column_major` -- that is what its layout depends on, and unstated it
-//   comes from a compile flag the pass never sees. Admitted: row_major floatRx4 and column_major float4xC,
-//   at 16*V bytes, mirrored as float[4*V]. Anything else leaves a partial last row (spike Q14g/Q14g2).
+// a MATRIX is declared BARE and the pass writes `column_major` in front of it, the way it writes an address.
+//   `row_major` / `column_major` by hand are both errors: MSL and WGSL have no row-major matrices at all.
+//   Admitted: float4x1..float4x4, at 16C bytes, mirrored as float[4C] -- a column of four is the only shape
+//   whose extent matches on all four targets, since a narrower one pads (spike Q14g).
 // text carrying no attribute is not interpreted, so the rewrite provably touches only what it parsed.
 //   NOT a way to write addresses by hand: such a shader is not portable, and the pass will come to reject it.
 ```

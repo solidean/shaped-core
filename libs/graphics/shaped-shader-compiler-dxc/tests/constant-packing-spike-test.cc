@@ -172,60 +172,54 @@ TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
 
-TEST("portable-hlsl spike - Q14g a matrix is measured by its orientation, and by what its last row leaves")
+TEST("portable-hlsl spike - Q14g a matrix is columns at a 16-byte stride, so only float4xC has one extent")
 {
-    // A matrix stores V vectors of M components -- row-major stores R vectors of C, column-major stores C of R
-    // -- laid out at a 16-byte stride, so its extent is (V - 1) * 16 + M * 4.
-    //
-    // The orientation is therefore part of the layout rather than a detail of it, and it comes from a compile
-    // flag (`#pragma pack_matrix`, `-Zpr`) unless the declaration states one.
-    // That is why the pass keys its table on the qualifier and refuses a bare matrix: the same source would
-    // otherwise mirror to two different structs depending on how it was compiled.
+    // The pass admits `float4xC` and nothing else, and writes `column_major` in front of it itself.
+    // A matrix is C columns at a 16-byte stride, so a column of four leaves no padding: 16C bytes on D3D,
+    // on SPIR-V, and under WGSL's and MSL's own rules, which is what lets one CPU struct serve all four.
+    check_rule("float4x1 is one column", "    column_major float4x1 m;    float probe;", 32);
+    check_rule("float4x2 is two", "    column_major float4x2 m;    float probe;", 48);
+    check_rule("float4x3 is three", "    column_major float4x3 m;    float probe;", 64);
+    check_rule("float4x4 is four", "    column_major float4x4 m;    float probe;", 80);
 
-    // Row-major, so the COLUMN count is what fills a stored vector.
-    check_rule("row_major float1x4", "    row_major float1x4 m;    float probe;", 32);
-    check_rule("row_major float2x4", "    row_major float2x4 m;    float probe;", 48);
-    check_rule("row_major float3x4", "    row_major float3x4 m;    float probe;", 64);
-    check_rule("row_major float4x4", "    row_major float4x4 m;    float probe;", 80);
-
-    // Column-major, so it is the ROW count instead -- the same eight numbers, transposed.
-    check_rule("column_major float4x1", "    column_major float4x1 m;    float probe;", 32);
-    check_rule("column_major float4x2", "    column_major float4x2 m;    float probe;", 48);
-    check_rule("column_major float4x3", "    column_major float4x3 m;    float probe;", 64);
-    check_rule("column_major float4x4", "    column_major float4x4 m;    float probe;", 80);
-
-    // And a matrix starts a whole row, so what precedes it is padded out to one.
+    // And a matrix starts a whole row, so what precedes one is padded out to a row boundary.
     check_rule("a matrix starts a row", "    float a;    column_major float4x2 m;    float probe;", 64);
+
+    // A narrower column is where the targets part company rather than where DXC does.
+    // D3D ends a float3x3 at 44 and packs the next member there; WGSL and MSL size the same matrix 48.
+    // Both compile -- so this is a portability rule the toolchain will never report, which is exactly the
+    // kind the pass has to carry itself.
+    check_rule("D3D ends a float3x3 at 44", "    column_major float3x3 m;    float probe;", 48);
+    check_rule("and a float2x2 at 24", "    column_major float2x2 m;    float probe;", 32);
 }
 
-TEST("portable-hlsl spike - Q14g2 a partial last row is what SPIR-V refuses, and only with a member after it")
+TEST("portable-hlsl spike - Q14g2 DXC flips the orientation decoration, and spirv-val measures the two differently")
 {
-    // The minimal case, and the whole reason the table admits only full-float4 vectors:
+    // Row-major is refused because MSL and WGSL have no row-major matrices at all, not because SPIR-V
+    // cannot express one -- it can, and this is what it does with it.
     //
-    //     struct block { row_major float2x2 m; float probe; };
+    // HLSL `row_major` becomes SPIR-V `ColMajor` and HLSL `column_major` becomes `RowMajor`: DXC declares
+    // the type in HLSL's shape and flips the decoration to make the storage come out right.
+    // For a 2x2 the two emit IDENTICAL layouts -- same %mat2v2float, same MatrixStride 16, same Offset 24
+    // for the member after it -- and only the decoration differs.
     //
-    // D3D lays the matrix out as two rows at a 16-byte stride with 8 bytes used each, so its extent is 24 and
-    // `probe` packs into the last row's tail at 24.
-    // The SPIR-V validator measures the same matrix as `MatrixStride * V` = 32, so it reads `probe` as landing
-    // INSIDE the matrix and rejects the module:
+    // spirv-val then measures them asymmetrically:
+    //     ColMajor  size = MatrixStride * columns          the last column claims its full stride
+    //     RowMajor  size = MatrixStride * (rows - 1) + row the last row does not
     //
-    //     member 1 at offset 24 overlaps previous member ending at offset 31
-    //
-    // The disagreement is exactly whether the last row claims its full stride.
-    // D3D says no, the validator yes.
+    // So the ColMajor arm reports `member 1 at offset 24 overlaps previous member ending at offset 31`
+    // wherever the last column is partial, and the RowMajor arm never does.
+    // Whether that asymmetry is the spec's or the validator's, it is a tool behaviour rather than a
+    // language one -- another reason not to rest a rule of our dialect on it.
     CHECK(block_size_of("    row_major float2x2 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
     CHECK(block_size_of("    row_major float3x3 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
     CHECK(block_size_of("    row_major float4x3 m;    float probe;", ssc::dxc::compile_target::spirv) == -1);
 
-    // It is the FOLLOWING member that is refused rather than the matrix, which is what says the tail is the
-    // subject: the same matrix last in the block, with nothing to pack into it, compiles.
+    // It takes a member AFTER the matrix: the same matrix last in the block has no tail to dispute.
     CHECK(block_size_of("    float probe;\n    row_major float2x2 m;", ssc::dxc::compile_target::spirv) == 48);
 
-    // Column-major escapes this in practice even where the arithmetic looks identical, and the SPIR-V was not
-    // dumped to find out why the RowMajor decoration is measured differently.
-    // It does not gate anything: the pass admits only vectors of four, where extent and stride * V coincide
-    // and there is no tail to disagree about.
-    check_rule("column_major float2x2 packs its tail", "    column_major float2x2 m;    float probe;", 32);
+    // And a full last column is fine on either decoration, which is the shape the pass admits.
+    check_rule("row_major float3x4 is three full rows", "    row_major float3x4 m;    float probe;", 64);
 }
 
 TEST("portable-hlsl spike - Q14h half is 32-bit storage here, and it is a compile flag that says so")

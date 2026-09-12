@@ -737,6 +737,46 @@ TEST("slib - the DXIL arm leaves a vertex input alone, since the semantic alread
     CHECK(!rewritten.value().contains("#pragma sc"));
 }
 
+namespace
+{
+constexpr char const* k_matrix_shader = R"(
+struct frame_constants
+{
+    float4x4 view_projection;
+    float3 tint;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> gConstants;
+
+float3x3 unannotated_local_helper(float3x3 m) { return m; }
+)";
+} // namespace
+
+TEST("slib - the pass writes column_major before every matrix it parsed, on both arms")
+{
+    // The orientation is the pass's for the same reason an address is: DXC's own default is already
+    // column-major, so this changes no bytes today -- it is what stops them changing under a
+    // `#pragma pack_matrix(row_major)` or a `-Zpr` set somewhere the declaration cannot see.
+    for (auto const target : {sg::shader_format::dxil, sg::shader_format::spirv})
+    {
+        auto const rewritten = slib::rewrite_binding_groups(k_matrix_shader, target);
+        REQUIRE(rewritten.has_value());
+
+        CHECK(rewritten.value().contains("column_major float4x4 view_projection;"));
+
+        // Once, not twice, and not in front of a member that is not a matrix.
+        CHECK(rewritten.value().contains("float3 tint;"));
+        CHECK(!rewritten.value().contains("column_major float3 tint"));
+        CHECK(!rewritten.value().contains("column_major column_major"));
+
+        // And nothing outside what the pass parsed: the helper below the block is left exactly as written,
+        // which is the same invariant that keeps an unannotated `register()` untouched.
+        CHECK(rewritten.value().contains("float3x3 unannotated_local_helper(float3x3 m)"));
+        CHECK(!rewritten.value().contains("column_major float3x3"));
+    }
+}
+
 TEST("slib - the DXIL arm gives an inline-constants block b0 in the reserved space")
 {
     auto const rewritten = slib::rewrite_binding_groups(k_inline_constants_shader, sg::shader_format::dxil);

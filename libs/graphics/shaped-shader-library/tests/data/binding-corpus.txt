@@ -486,11 +486,11 @@ ConstantBuffer<frame_constants> frame;
 line 3: an array is not supported in a constant block, because the member after it packs into its last row
 
 
---- case a matrix states its orientation, and its stored vectors are full float4s
+--- case a matrix is declared bare, and the pass is what makes it column-major
 --- hlsl
 struct frame_constants
 {
-    column_major float4x4 transform;
+    float4x4 transform;
     float exposure;
 };
 
@@ -498,15 +498,15 @@ struct frame_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=80
-  transform column_major float4x4 @0
+  transform float4x4 @0
   exposure float @64
 
 
---- case row_major stores rows, so it is the OTHER dimension that must be four
+--- case a matrix is C columns of four, so float4x3 is three of them
 --- hlsl
 struct frame_constants
 {
-    row_major float3x4 transform;
+    float4x3 transform;
     float exposure;
 };
 
@@ -514,7 +514,7 @@ struct frame_constants
 ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=64
-  transform row_major float3x4 @0
+  transform float4x3 @0
   exposure float @48
 
 
@@ -523,7 +523,7 @@ inline_constants frame space=9 type=frame_constants size=64
 struct frame_constants
 {
     float exposure;
-    column_major float4x4 transform;
+    float4x4 transform;
 };
 
 #pragma sc push_constants
@@ -531,165 +531,46 @@ ConstantBuffer<frame_constants> frame;
 --- groups
 inline_constants frame space=9 type=frame_constants size=80
   exposure float @0
-  transform column_major float4x4 @16
+  transform float4x4 @16
 
 
---- case a matrix with no orientation is refused, since the default is a flag the pass cannot see
+--- case a matrix whose columns are narrower than four is refused, since the targets stop agreeing
 --- hlsl
 struct frame_constants
 {
-    float4x4 transform;
+    float3x3 transform;
 };
 
 #pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
-line 3: 'float4x4' is not a constant block type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
+line 3: 'float3x3' is not a constant block type this pass knows, because only a matrix whose columns are full float4s has one extent on every target: `float4xC` is 16C bytes everywhere, where a narrower column pads and D3D then ends the matrix sooner than WGSL and MSL do (spike Q14g)
 
 
---- case a matrix leaving a partial last row is refused, whatever its orientation
+--- case `row_major` is refused outright, since two of the four targets cannot express it
 --- hlsl
 struct frame_constants
 {
-    column_major float3x4 transform;
+    row_major float4x4 transform;
 };
 
 #pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
-line 3: 'column_major float3x4' is not a constant block type this pass knows, because a matrix must store full float4s (row_major floatRx4, column_major float4xC) — this one leaves a partial last row that the next member packs into, and SPIR-V refuses the module (spike Q14g)
+line 3: a matrix may not be declared 'row_major' — MSL and WGSL have no row-major matrices at all, so the pass makes every matrix column-major
 
 
---- case an orientation standing before nothing is an error
+--- case `column_major` is refused too, because writing it is the pass's job
 --- hlsl
 struct frame_constants
 {
-    row_major;
+    column_major float4x4 transform;
 };
 
 #pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 --- error
-line 3: expected a matrix type after 'row_major'
-
-
---- case a 64-bit scalar aligns to eight, which Q14i measured
---- hlsl
-struct frame_constants
-{
-    float a;
-    double b;
-    float probe;
-};
-
-#pragma sc push_constants
-ConstantBuffer<frame_constants> frame;
---- groups
-inline_constants frame space=9 type=frame_constants size=32
-  a float @0
-  b double @8
-  probe float @16
-
-
---- case a 64-bit vector starts a whole row, and straddles the next one freely
---- hlsl
-struct frame_constants
-{
-    float a;
-    double2 b;
-    float probe;
-};
-
-#pragma sc push_constants
-ConstantBuffer<frame_constants> frame;
---- groups
-inline_constants frame space=9 type=frame_constants size=48
-  a float @0
-  b double2 @16
-  probe float @32
-
-
---- case a double3 crosses a row boundary, which no 32-bit type may do
---- hlsl
-struct frame_constants
-{
-    double3 a;
-    float probe;
-};
-
-#pragma sc push_constants
-ConstantBuffer<frame_constants> frame;
---- groups
-inline_constants frame space=9 type=frame_constants size=32
-  a double3 @0
-  probe float @24
-
-
---- case a half is 32-bit storage here, because nothing passes -enable-16bit-types
---- hlsl
-struct frame_constants
-{
-    float a;
-    half b;
-    float probe;
-};
-
-#pragma sc push_constants
-ConstantBuffer<frame_constants> frame;
---- groups
-inline_constants frame space=9 type=frame_constants size=16
-  a float @0
-  b half @4
-  probe float @8
-
-
---- case a block and a group live in one file, in different spaces
---- hlsl
-struct frame_constants
-{
-    float exposure;
-};
-
-#pragma sc group 0
-namespace frame_bindings
-{
-    Texture2D<float4> albedo;
-}
-
-#pragma sc push_constants
-ConstantBuffer<frame_constants> constants;
---- groups
-frame_bindings group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
-inline_constants constants space=9 type=frame_constants size=16
-  exposure float @0
-
-
---- case `push_constants` describes a ConstantBuffer and nothing else
---- hlsl
-#pragma sc push_constants
-Texture2D<float4> albedo;
---- error
-line 2: 'push_constants' describes a ConstantBuffer, and 'albedo' is not one
-
-
---- case a pipeline layout carries at most one inline-constants block
---- hlsl
-#pragma sc push_constants
-ConstantBuffer<a> first;
-
-#pragma sc push_constants
-ConstantBuffer<b> second;
---- error
-line 4: a second 'push_constants' block, and a pipeline layout carries at most one
-
-
---- case `push_constants` states no space at all, because the space is reserved
---- hlsl
-#pragma sc push_constants space=9
-ConstantBuffer<frame_constants> frame;
---- error
-line 1: 'push_constants' takes no arguments, and its space is reserved
+line 3: the pass writes 'column_major' itself, so declare the matrix bare
 
 
 --- case a `push_constants` attribute standing before nothing is an error
@@ -784,20 +665,20 @@ struct pt_payload
     float3x4 transform;
 };
 --- error
-line 4: 'float3x4' is not a payload type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
+line 4: 'float3x4' is not a payload type this pass knows, because only a matrix whose columns are full float4s has one extent on every target: `float4xC` is 16C bytes everywhere, where a narrower column pads and D3D then ends the matrix sooner than WGSL and MSL do (spike Q14g)
 
 
---- case a payload may hold an oriented matrix, naturally packed
+--- case a payload may hold a matrix, naturally packed
 --- hlsl
 #pragma sc payload
 struct pt_payload
 {
-    column_major float4x4 transform;
+    float4x4 transform;
     uint rng;
 };
 --- groups
 payload pt_payload size=68
-  transform column_major float4x4
+  transform float4x4
   rng uint
 
 
@@ -964,7 +845,7 @@ struct vs_input
     float3x3 basis : NORMAL;
 };
 --- error
-line 4: 'float3x3' is not a vertex attribute type this pass knows, because a matrix's layout depends on its orientation — write `row_major` or `column_major`, since the default comes from a compile flag the pass cannot see
+line 4: 'float3x3' is not a vertex attribute type this pass knows, because only a matrix whose columns are full float4s has one extent on every target: `float4xC` is 16C bytes everywhere, where a narrower column pads and D3D then ends the matrix sooner than WGSL and MSL do (spike Q14g)
 
 
 --- case `vertex_input` takes slot and per_instance and nothing else
