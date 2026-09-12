@@ -481,23 +481,28 @@ What follows is everything else the importer left behind.
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
-- **The material permutation still hand-numbers its samplers, and cannot stop until a group and a space come apart.**
+- **The material permutation still hand-numbers its samplers.**
   `material/shader_generator.cc` emits `SamplerState sv_sampler_{i} : register(s{i}, space0)` at runtime, and
   `pt_common.hlsli` declares no sampler specifically so `s0`.. stay free for it — a coupling between two files maintained by hand.
-  The permutation wants a group of its own, which is what would delete it.
-  It cannot have one: the pass makes a group's number its space, and sv's bindless tables already hold spaces 1..8
-  (`space_of` numbers one per table from 1) while sitting at group *slot* 1.
-  So there is no free group number whose space is also free, and `sg::max_binding_groups` is 4 besides.
-  What would close it is the pass letting a group's space differ from its number — one more optional attribute argument, and a
-  question rather than an obvious yes, since "group `n` occupies `space<n>` and nothing else does" is the invariant the whole design rests on.
+  The permutation wants a group of its own, which is what would delete it, and nothing structural prevents that.
+  A register space is per register *class*, so a samplers-only group at `space<n>` never meets a bindless table's `t` registers there.
+  `sv_sampler_i` already relies on exactly that in space 0 today, alongside `pt_bindings`' own `t`, `u` and `b` registers.
+  Groups 2 and 3 are free under `sg::max_binding_groups`, so the permutation could take one now.
+  What is left is a decision rather than an obstacle.
+  Taking a group *moves* the coupling, since it holds only while that group stays samplers-only and that table stays textures-only.
+  Letting a group's space differ from its number deletes it outright instead.
+  Spaces are ours to assign and reach only the DXIL arm — SPIR-V writes `[[vk::binding(index, group)]]` and never mentions one — so that is a free choice rather than a constraint.
 
-- **A hand-written binding address cannot be made an error yet, for the same reason.**
+- **A hand-written binding address cannot be made an error yet.**
   Every shader in a package is now authored through the pass, so the remaining obstacle is not a shader anyone wrote.
   It is the material permutation: `slib::shader_library::compile_source` routes generated text through
   `rewrite_binding_groups` like any other source, and that text hand-writes a `register()` per bindless table and per sampler.
-  Bindless tables are the harder half — an unbounded array in a space of its own is not something the grammar can express at all.
-  Until both are expressible the error would reject every material, and a dialect whose purpose is portability must not gain an
-  opt-out mark to work around that.
+  The samplers are the entry above.
+  The tables are the other half, and only their *space* is missing — the grammar already has `Type name[N]`, so the array itself is expressible.
+  `sg::binding` carries `space` per BINDING rather than per group — `bindless->layout()` is one group layout holding eight bindings with eight different spaces.
+  So sg's model already covers this, and it is the pass that simplifies.
+  A per-binding space attribute is what closes it, roughly the size of `#pragma sc attribute format=`.
+  Until then the error would reject every material, and a dialect whose purpose is portability must not gain an opt-out mark to work around that.
 
 - **The path tracer cannot use its generated group struct, only the pass's addresses.**
   Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, and

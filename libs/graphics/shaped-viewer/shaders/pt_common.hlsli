@@ -47,10 +47,10 @@ struct FrameConstants
 // The pass assigns no `s` register here, which is what leaves `s0`.. free for the `sv_sampler_i` a material
 // permutation emits at runtime (material/shader_generator.cc).
 //
-// That coupling between two files is maintained by hand, and it should not be: the permutation wants a group of
-// its own. It cannot have one yet, because the pass makes a group's number its space and sv's bindless tables
-// already hold spaces 1..8 at group slot 1 — so there is no free group number whose space is also free.
-// See libs/graphics/shaped-viewer/docs/TODO.md.
+// That coupling between two files is maintained by hand and should not be: the permutation wants a group of its
+// own, and nothing structural prevents one — a register space is per register class, so a samplers-only group
+// would never meet a bindless table's `t` registers.
+// What is left is the decision, in libs/graphics/shaped-viewer/docs/TODO.md.
 //
 // What did change is that nothing here is addressed by hand any more: `frame` below is the group's, not b0's.
 #pragma sc group 0
