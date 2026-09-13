@@ -516,6 +516,9 @@ TEST("slib - the binding corpus parses as it says it does")
                 rendered += cc::format("\n{} {} {}{}", member.name, member.type, member.semantic, member.semantic_index);
                 if (!member.format_override.empty())
                     rendered += cc::format(" format={}", member.format_override);
+
+                // The offset is what a stated format actually changes, so it is what the corpus compares.
+                rendered += cc::format(" @{}", member.offset);
             }
 
             rendered_inputs.push_back(cc::move(rendered));

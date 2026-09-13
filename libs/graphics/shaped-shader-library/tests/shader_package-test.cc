@@ -222,7 +222,7 @@ TEST("slib - a vertex input entry mirrors the struct and describes it to sg", ex
     CHECK(layout.slots[1].stride == isize(sizeof(instance)));
     CHECK(layout.slots[1].per_instance); // the attribute said so
 
-    REQUIRE(layout.attributes.size() == 5);
+    REQUIRE(layout.attributes.size() == 6);
 
     // Declaration order, each attribute naming the slot its struct took in create<>().
     CHECK(layout.attributes[0].semantic == "POSITION");
@@ -240,6 +240,20 @@ TEST("slib - a vertex input entry mirrors the struct and describes it to sg", ex
     CHECK(layout.attributes[4].semantic == "TEXCOORD");
     CHECK(layout.attributes[4].semantic_index == 1);
     CHECK(layout.attributes[4].format == sg::vertex_attribute_format::u32);
+
+    // The packed member: `float4 overlay` fed as four normalized BYTES, which its HLSL type cannot say.
+    //
+    // The stated format has to reach the mirror's storage and not only the layout — a mirror emitting
+    // `float[4]` would reserve 16 bytes where the input assembler reads 4, and every member after it would
+    // then sit at an offset the shader does not use.
+    // Nothing here is a second opinion: `offset` and `stride` are `offsetof` and `sizeof` of the mirror, so
+    // these numbers ARE the mirror's.
+    CHECK(layout.attributes[5].semantic == "TEXCOORD");
+    CHECK(layout.attributes[5].semantic_index == 2);
+    CHECK(layout.attributes[5].format == sg::vertex_attribute_format::rgba8_unorm);
+    CHECK(layout.attributes[5].offset == 16);
+    CHECK(layout.slots[1].stride == 20);
+    static_assert(sizeof(instance::overlay) == 4, "a packed colour is four bytes in the mirror too");
 }
 
 TEST("slib - a payload entry mirrors the struct and sizes it", exclusive("slib-shader-library"))

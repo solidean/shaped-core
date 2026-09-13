@@ -12,6 +12,12 @@ struct instance_input
 {
     float3 center : TEXCOORD0;
     uint tint : TEXCOORD1;
+
+    // A packed colour, which is the one thing an HLSL type cannot say: this is four BYTES the input assembler
+    // normalizes, not four floats, and only the stated format distinguishes the two.
+    // The generated mirror has to carry it as four bytes, which is what the static_asserts below it check.
+#pragma sc attribute format=rgba8_unorm
+    float4 overlay : TEXCOORD2;
 };
 
 struct vs_output

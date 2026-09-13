@@ -95,9 +95,35 @@ constexpr table_entry k_table[] = {
 /// Every sg::vertex_attribute_format enumerator, so a `format=` override can be checked against the real set.
 /// The two a member's type can never reach are the last: `rgba8_unorm` and `rgba8_uint` are what the override
 /// exists for.
-constexpr cc::string_view k_formats[] = {
-    "f32",   "vec2f", "vec3f", "vec4f", "i32",   "vec2i",       "vec3i",
-    "vec4i", "u32",   "vec2u", "vec3u", "vec4u", "rgba8_unorm", "rgba8_uint",
+/// Every sg::vertex_attribute_format, with the component count and the bytes it occupies.
+///
+/// The component count is what a stated `format=` is checked against, since that much the member's HLSL type
+/// does say; the size is what the mirror then carries, because a stated format is what the member actually
+/// holds — `rgba8_unorm` on a `float4` is four BYTES.
+/// Keep in step with cmake/binding_grammar.py's VERTEX_FORMATS.
+struct vertex_format_row
+{
+    cc::string_view name;
+    isize components = 0;
+    isize size = 0;
+};
+
+constexpr vertex_format_row k_formats[] = {
+    {"f32", 1, 4},
+    {"vec2f", 2, 8},
+    {"vec3f", 3, 12},
+    {"vec4f", 4, 16},
+    {"i32", 1, 4},
+    {"vec2i", 2, 8},
+    {"vec3i", 3, 12},
+    {"vec4i", 4, 16},
+    {"u32", 1, 4},
+    {"vec2u", 2, 8},
+    {"vec3u", 3, 12},
+    {"vec4u", 4, 16},
+    // The two a type cannot spell: HLSL has no way to say a `float4` is fed by four normalized bytes.
+    {"rgba8_unorm", 4, 4},
+    {"rgba8_uint", 4, 4},
 };
 
 /// Whether a spelling names a matrix at all, with or without its orientation qualifier.
@@ -138,9 +164,17 @@ cc::optional<slib::impl::hlsl_value_type> slib::impl::value_type_of(cc::string_v
 bool slib::impl::is_vertex_attribute_format(cc::string_view name)
 {
     for (auto const& candidate : k_formats)
-        if (candidate == name)
+        if (candidate.name == name)
             return true;
     return false;
+}
+
+cc::optional<slib::impl::vertex_format_info> slib::impl::vertex_format_of(cc::string_view name)
+{
+    for (auto const& candidate : k_formats)
+        if (candidate.name == name)
+            return vertex_format_info{.components = candidate.components, .size = candidate.size};
+    return cc::nullopt;
 }
 
 bool slib::impl::is_matrix_type(cc::string_view hlsl_type)

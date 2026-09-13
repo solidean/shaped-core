@@ -332,12 +332,33 @@ def is_matrix_type(hlsl_type: str) -> bool:
 # The two a member's type can never reach are the last: `rgba8_unorm` and `rgba8_uint` are what the override
 # exists for.
 # Keep in step with k_formats in impl/hlsl_value_types.cc.
-VERTEX_ATTRIBUTE_FORMATS = (
-    "f32", "vec2f", "vec3f", "vec4f",
-    "i32", "vec2i", "vec3i", "vec4i",
-    "u32", "vec2u", "vec3u", "vec4u",
-    "rgba8_unorm", "rgba8_uint",
-)
+# Every sg::vertex_attribute_format, as (component count, bytes, the C++ storage a mirror member gets).
+#
+# The storage is here rather than derived from the HLSL type because a stated format is what the member actually
+# holds: `rgba8_unorm` on a `float4` is four BYTES, and a mirror emitting `float[4]` describes 16 bytes the
+# vertex layout then decodes as 4.
+# The component count is what a stated format is checked against, since that much the HLSL type does say.
+#
+# Keep in step with impl/hlsl_value_types.cc.
+VERTEX_FORMATS: dict[str, tuple[int, int, str]] = {
+    "f32": (1, 4, "float"),
+    "vec2f": (2, 8, "float[2]"),
+    "vec3f": (3, 12, "float[3]"),
+    "vec4f": (4, 16, "float[4]"),
+    "i32": (1, 4, "int"),
+    "vec2i": (2, 8, "int[2]"),
+    "vec3i": (3, 12, "int[3]"),
+    "vec4i": (4, 16, "int[4]"),
+    "u32": (1, 4, "unsigned"),
+    "vec2u": (2, 8, "unsigned[2]"),
+    "vec3u": (3, 12, "unsigned[3]"),
+    "vec4u": (4, 16, "unsigned[4]"),
+    # The two a type cannot spell: HLSL has no way to say that a `float4` is fed by four normalized bytes.
+    "rgba8_unorm": (4, 4, "unsigned char[4]"),
+    "rgba8_uint": (4, 4, "unsigned char[4]"),
+}
+
+VERTEX_ATTRIBUTE_FORMATS = tuple(VERTEX_FORMATS)
 
 
 def rejection_reason_for(hlsl_type: str) -> str:
@@ -993,10 +1014,19 @@ class _Parser:
             member = self.parse_struct_member()
             if pending_member_attribute is not None:
                 member.format_override = self.format_override_of(pending_member_attribute)
+                natural = VALUE_TYPES[member.type][4]
+                stated = member.format_override
+                if VERTEX_FORMATS[stated][0] != VERTEX_FORMATS[natural][0]:
+                    raise BindingError(
+                        f"{pending_member_attribute.location}: '{stated}' has "
+                        f"{VERTEX_FORMATS[stated][0]} component(s) and '{member.type}' has "
+                        f"{VERTEX_FORMATS[natural][0]}")
                 pending_member_attribute = None
 
+            # A stated format decides the member's storage, since that is what it actually holds.
             member.offset = offset
-            offset += VALUE_TYPES[member.type][1]
+            offset += (VERTEX_FORMATS[member.format_override][1] if member.format_override
+                       else VALUE_TYPES[member.type][1])
             vertex_input.members.append(member)
         self.at += 1  # the '}'
 

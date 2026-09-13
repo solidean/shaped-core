@@ -185,6 +185,8 @@ def check(case: Case) -> list[str]:
             header += " per_instance"
         members = [f"{m.name} {m.type} {m.semantic}{m.semantic_index}"
                    + (f" format={m.format_override}" if m.format_override else "")
+                   # The offset is what a stated format actually changes, so it is what the corpus compares.
+                   + f" @{m.offset}"
                    for m in vertex_input.members]
         rendered_inputs.append((header, members))
 

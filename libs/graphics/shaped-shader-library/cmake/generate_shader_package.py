@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from binding_grammar import (BindingError, DeclaredSampler, Group, InlineConstants, Payload,  # noqa: E402
-                             StructMember, VALUE_TYPES, VertexInput, parse_binding_groups)
+                             StructMember, VALUE_TYPES, VERTEX_FORMATS, VertexInput, parse_binding_groups)
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is load-bearing.
@@ -421,11 +421,28 @@ def embed_literal(text: str) -> str:
     return "".join(f'\n    R"slibsrc({chunk.decode("utf-8", "surrogateescape")})slibsrc"' for chunk in chunks)
 
 
+def storage_of(member: StructMember) -> str:
+    """The C++ storage one mirror member gets.
+
+    A stated vertex format wins over the member's HLSL type, because it is what the member actually holds: a
+    `float4` carrying `rgba8_unorm` is four bytes, and emitting `float[4]` would describe 16 that the vertex
+    layout then decodes as 4.
+    """
+    override = getattr(member, "format_override", "")
+    return VERTEX_FORMATS[override][2] if override else VALUE_TYPES[member.type][0]
+
+
+def size_of(member: StructMember) -> int:
+    """The bytes one mirror member occupies, a stated vertex format winning the same way."""
+    override = getattr(member, "format_override", "")
+    return VERTEX_FORMATS[override][1] if override else VALUE_TYPES[member.type][1]
+
+
 def emit_mirror_members(members: list[StructMember]) -> str:
     """The members of a mirror struct, naturally packed the way both HLSL and C++ pack them."""
     out = []
     for member in members:
-        cpp_type = VALUE_TYPES[member.type][0]
+        cpp_type = storage_of(member)
         if cpp_type.endswith("]"):
             base, _, extent = cpp_type.partition("[")
             out.append(f"    {base} {member.name}[{extent[:-1]}];\n")
@@ -550,7 +567,7 @@ def emit_vertex_input(manifest: Manifest, entry: VertexInputEntry) -> str:
     # The mirror is naturally packed, so its stride is its size -- but say so rather than assume it, since a
     # wrong stride draws geometry rather than failing.
     last = vertex_input.members[-1]
-    stride = last.offset + VALUE_TYPES[last.type][1]
+    stride = last.offset + size_of(last)
     out.append(emit_mirror_asserts(qualified, vertex_input.name, vertex_input.members, "vertex layout", stride))
 
     out.append(f"\n/// What sg::vertex_input_layout::create<{qualified}>() reads.\n")

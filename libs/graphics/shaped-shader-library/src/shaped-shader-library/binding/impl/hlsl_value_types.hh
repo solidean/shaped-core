@@ -60,6 +60,16 @@ struct hlsl_value_type
 /// cannot be derived from the member's type and the author states it.
 [[nodiscard]] bool is_vertex_attribute_format(cc::string_view name);
 
+/// What one sg::vertex_attribute_format holds.
+struct vertex_format_info
+{
+    isize components = 0; ///< checked against the member's HLSL type, which is the one thing that says it
+    isize size = 0;       ///< what the mirror carries, since a stated format is what the member actually holds
+};
+
+/// The entry for one format name, or nothing when it is not one.
+[[nodiscard]] cc::optional<vertex_format_info> vertex_format_of(cc::string_view name);
+
 /// Why a type outside the table is outside it, as a sentence to append to a refusal — or empty when the pass
 /// has nothing more specific to say than "not a type this pass knows".
 ///

@@ -454,6 +454,10 @@ struct parser
 
         cc::vector<isize> offsets;
 
+        // A vertex buffer is a byte stream the input assembler decodes per attribute offset, so the mirror
+        // defines the layout and every member is naturally packed against the one before it.
+        isize member_offset = 0;
+
         // A member may carry its own attribute, which today means one thing: the format it is fed in.
         auto pending_member_attribute = cc::optional<annotation>();
         while (!is_punctuation('}'))
@@ -484,9 +488,29 @@ struct parser
             {
                 auto format = format_override_of(pending_member_attribute.value());
                 CC_RETURN_IF_ERROR(format);
+
+                // The component count is the one thing the member's own type states, so it is what a stated
+                // format is held to: `rgba8_unorm` says four bytes rather than four floats, and that is a
+                // storage the type cannot spell -- but it is still four of something.
+                auto const stated = slib::impl::vertex_format_of(format.value()).value();
+
+                // Every type carrying a vertex format is 32-bit components, so its size is how many it has —
+                // and a member that had none was refused before the parse reached here.
+                auto const natural = slib::impl::value_type_of(member.value().member.type).value().size / 4;
+                if (stated.components != natural)
+                    return cc::error(cc::format("{}: '{}' has {} component(s) and '{}' has {}",
+                                                to_string(pending_member_attribute.value().location), format.value(),
+                                                stated.components, member.value().member.type, natural));
+
                 member.value().member.format_override = cc::move(format.value());
                 pending_member_attribute = cc::nullopt;
             }
+
+            // A stated format decides the member's storage, since that is what it actually holds.
+            member.value().member.offset = member_offset;
+            member_offset += member.value().member.format_override.empty()
+                               ? slib::impl::value_type_of(member.value().member.type).value().size
+                               : slib::impl::vertex_format_of(member.value().member.format_override).value().size;
 
             offsets.push_back(member.value().type_offset);
             input.members.push_back(cc::move(member.value().member));

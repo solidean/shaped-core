@@ -745,9 +745,9 @@ struct vs_input
 };
 --- groups
 vertex_input vs_input slot=0
-  position float3 POSITION0
-  normal float3 NORMAL0
-  color float4 COLOR0
+  position float3 POSITION0 @0
+  normal float3 NORMAL0 @12
+  color float4 COLOR0 @24
 
 
 --- case a semantic's trailing integer is its index, the way HLSL reads it
@@ -761,9 +761,9 @@ struct cube_instance_input
 };
 --- groups
 vertex_input cube_instance_input slot=1 per_instance
-  center float3 TEXCOORD0
-  half_extent float3 TEXCOORD1
-  flags uint TEXCOORD2
+  center float3 TEXCOORD0 @0
+  half_extent float3 TEXCOORD1 @12
+  flags uint TEXCOORD2 @24
 
 
 --- case a vertex input's slot is its declaration order, so no shader states one
@@ -781,9 +781,9 @@ struct instance_input
 };
 --- groups
 vertex_input vs_input slot=0
-  position float3 POSITION0
+  position float3 POSITION0 @0
 vertex_input instance_input slot=1 per_instance
-  transform float4 TEXCOORD0
+  transform float4 TEXCOORD0 @0
 
 
 --- case `slot=` overrides that order, for two shaders sharing a header in a different one
@@ -801,9 +801,9 @@ struct instance_input
 };
 --- groups
 vertex_input vs_input slot=1
-  position float3 POSITION0
+  position float3 POSITION0 @0
 vertex_input instance_input slot=0 per_instance
-  transform float4 TEXCOORD0
+  transform float4 TEXCOORD0 @0
 
 
 --- case two structs claiming one slot is an error, as it is for a group's number
@@ -834,8 +834,32 @@ struct vs_input
 };
 --- groups
 vertex_input vs_input slot=0
-  position float2 POSITION0
-  color float4 COLOR0 format=rgba8_unorm
+  position float2 POSITION0 @0
+  color float4 COLOR0 format=rgba8_unorm @8
+
+
+--- case a stated format with the wrong component count is an error
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+#pragma sc attribute format=rgba8_unorm
+    float3 color : COLOR;
+};
+--- error
+line 4: 'rgba8_unorm' has 4 component(s) and 'float3' has 3
+
+
+--- case a narrower stated format is an error too, not a silent truncation
+--- hlsl
+#pragma sc vertex_input
+struct vs_input
+{
+#pragma sc attribute format=vec2f
+    float4 color : COLOR;
+};
+--- error
+line 4: 'vec2f' has 2 component(s) and 'float4' has 4
 
 
 --- case `attribute` names a format sg actually has
@@ -1180,6 +1204,6 @@ struct instance_input
 };
 --- groups
 vertex_input vs_input slot=0
-  position float3 POSITION0
+  position float3 POSITION0 @0
 vertex_input instance_input slot=1 per_instance
-  center float3 TEXCOORD0
+  center float3 TEXCOORD0 @0

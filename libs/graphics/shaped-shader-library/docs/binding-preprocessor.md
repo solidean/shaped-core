@@ -318,6 +318,13 @@ And one that is neither, because HLSL cannot say it at all:
   `float4` is the same spelling whether four floats or four normalized bytes feed it, so `rgba8_unorm` and `rgba8_uint` cannot be derived from a member's type.
   A `#pragma sc attribute format=<name>` on the member states one instead.
 
+  **A stated format decides the member's storage, not only its layout entry.**
+  It is what the member actually holds, so the mirror carries four bytes for `rgba8_unorm` rather than the sixteen `float4` would imply.
+  Every later member's offset and the struct's stride follow from that.
+  A mirror that emitted `float[4]` would reserve sixteen bytes where the input assembler reads four, and put every member after it where the shader does not look.
+
+  The one thing the member's own type does state is how many components it has, so a format is held to that: `rgba8_unorm` on a `float3`, or `vec2f` on a `float4`, is an error naming both counts.
+
 Inside an annotated namespace the pass understands:
 
 - A declaration `Type name;` and `Type name[N];`.
