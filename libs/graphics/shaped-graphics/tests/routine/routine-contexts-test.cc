@@ -83,7 +83,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
-TEST("sg - two live contexts keep separate routine instances")
+TEST("sg - two live contexts keep separate routine instances", exclusive("sg-reload-generation"))
 {
     auto const ctx_a = make_warp_context();
     if (ctx_a == nullptr)
