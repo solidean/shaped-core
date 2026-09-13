@@ -176,6 +176,44 @@ So `{float2; float3; float}` lands at 0/8/20 on SPIR-V against the 0/16/28 DXIL 
 Nothing reports that difference: both modules compile, both pipelines run, and the shader reads two of its three members from the wrong place.
 So the offsets go into the source as `[[vk::offset(N)]]`, exactly as the addresses and `column_major` do — the pass already computed them to lay the mirror out.
 DXIL never sees them, because `-Werror` turns its `'offset' attribute ignored` into a failed compile.
+
+One source, and the two rewrites of it:
+
+```hlsl
+struct frame_constants { float2 uv_scale; float3 tint; float exposure; };
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> gConstants;
+```
+
+```hlsl
+// DXIL — the struct is untouched, because this is already the layout it uses
+struct frame_constants { float2 uv_scale; float3 tint; float exposure; };
+ConstantBuffer<frame_constants> gConstants : register(b0, space9);
+
+// SPIR-V — the same layout, stated
+struct frame_constants
+{
+    [[vk::offset(0)]] float2 uv_scale;
+    [[vk::offset(16)]] float3 tint;
+    [[vk::offset(28)]] float exposure;
+};
+[[vk::push_constant]] ConstantBuffer<frame_constants> gConstants;
+```
+
+Against the mirror the generator emits for the same struct, which is what a caller fills:
+
+```cpp
+struct frame_constants
+{
+    float uv_scale[2];
+    unsigned _padding0[2]; // the gap `tint` may not straddle into
+    float tint[3];
+    float exposure;
+};
+```
+
+Without the attributes DXC packs that block at 0/8/20 for a total of 24, and every member after the first is read early.
 [done]
 
 ### `payload`
