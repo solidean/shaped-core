@@ -200,8 +200,8 @@ BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
     "RWTexture2D": ("u", "readwrite_texture", "tex_2d"),
     "RWTexture2DArray": ("u", "readwrite_texture", "tex_2d_array"),
     "RWTexture3D": ("u", "readwrite_texture", "tex_3d"),
-    "Buffer": ("t", "readonly_structured_buffer", None),
-    "RWBuffer": ("u", "readwrite_structured_buffer", None),
+    # `Buffer` and `RWBuffer` are deliberately absent: they are TYPED (texel) buffers, which both reflection
+    # paths already refuse, and mapping them onto the structured types said sg could bind something it cannot.
     "StructuredBuffer": ("t", "readonly_structured_buffer", None),
     "RWStructuredBuffer": ("u", "readwrite_structured_buffer", None),
     "ByteAddressBuffer": ("t", "readonly_raw_buffer", None),
@@ -359,6 +359,17 @@ VERTEX_FORMATS: dict[str, tuple[int, int, str]] = {
 }
 
 VERTEX_ATTRIBUTE_FORMATS = tuple(VERTEX_FORMATS)
+
+
+def binding_rejection_reason_for(hlsl_type: str) -> str:
+    """The sentence to append to a resource refusal, or empty when there is nothing more specific to say.
+
+    Today that is the typed buffers, which look like an omission from the table and are not.
+    Keep in step with impl/hlsl_binding_types.cc.
+    """
+    if hlsl_type in ("Buffer", "RWBuffer"):
+        return (", because a typed (texel) buffer is a binding kind sg does not model; declare a StructuredBuffer<T> or RWStructuredBuffer<T> instead")
+    return ""
 
 
 def rejection_reason_for(hlsl_type: str) -> str:
@@ -1343,7 +1354,9 @@ class _Parser:
 
         entry = BINDING_TYPES.get(type_name)
         if entry is None:
-            raise BindingError(f"{location}: '{type_name}' is not a resource type this pass knows")
+            raise BindingError(
+                f"{location}: '{type_name}' is not a resource type this pass knows"
+                f"{binding_rejection_reason_for(type_name)}")
 
         # Reflection reports the bare name, so one name declared in two groups would reach sg as one binding at
         # two addresses -- which a namespace does nothing to prevent.

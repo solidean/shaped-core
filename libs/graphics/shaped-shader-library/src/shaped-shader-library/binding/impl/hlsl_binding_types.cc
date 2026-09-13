@@ -33,8 +33,8 @@ constexpr table_entry k_table[] = {
     {"RWTexture2DArray", 'u', binding_type::readwrite_texture, texture_view_dimension::tex_2d_array},
     {"RWTexture3D", 'u', binding_type::readwrite_texture, texture_view_dimension::tex_3d},
 
-    {"Buffer", 't', binding_type::readonly_structured_buffer},
-    {"RWBuffer", 'u', binding_type::readwrite_structured_buffer},
+    // `Buffer` and `RWBuffer` are deliberately absent: they are TYPED (texel) buffers, which both reflection
+    // paths already refuse, and mapping them onto the structured types said sg could bind something it cannot.
     {"StructuredBuffer", 't', binding_type::readonly_structured_buffer},
     {"RWStructuredBuffer", 'u', binding_type::readwrite_structured_buffer},
     {"ByteAddressBuffer", 't', binding_type::readonly_raw_buffer},
@@ -52,6 +52,14 @@ constexpr table_entry k_table[] = {
     return type == binding_type::readonly_texture || type == binding_type::readwrite_texture;
 }
 } // namespace
+
+cc::string_view slib::impl::binding_rejection_reason_for(cc::string_view hlsl_type)
+{
+    if (hlsl_type == "Buffer" || hlsl_type == "RWBuffer")
+        return ", because a typed (texel) buffer is a binding kind sg does not model; declare a StructuredBuffer<T> or "
+               "RWStructuredBuffer<T> instead";
+    return "";
+}
 
 cc::optional<slib::impl::hlsl_binding_type> slib::impl::binding_type_of(cc::string_view hlsl_type)
 {

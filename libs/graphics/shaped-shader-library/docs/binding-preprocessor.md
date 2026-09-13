@@ -355,7 +355,7 @@ A divergence is a resource bound to the wrong descriptor, with nothing to catch 
 |---|---|---|
 | `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `readonly_texture` |
 | `RWTexture1D/2D/3D` and `*Array` | `u` | `readwrite_texture` |
-| `Buffer`, `StructuredBuffer` | `t` | `readonly_structured_buffer` |
+| `StructuredBuffer` | `t` | `readonly_structured_buffer` |
 | `RWStructuredBuffer` | `u` | `readwrite_structured_buffer` |
 | `ByteAddressBuffer` | `t` | `readonly_raw_buffer` |
 | `RWByteAddressBuffer` | `u` | `readwrite_raw_buffer` |
@@ -365,6 +365,11 @@ A divergence is a resource bound to the wrong descriptor, with nothing to catch 
 | `RaytracingAccelerationStructure` | `t` | `acceleration_structure` |
 
 A texture type also yields the `texture_view_dimension` the generated layout needs.
+
+**`Buffer` and `RWBuffer` are refused, and that is not a table gap.**
+They are typed (texel) buffers, a binding kind sg has no vocabulary for, and both reflection paths already refuse one.
+Mapping them onto the structured types would only have moved the failure later.
+The refusal names `StructuredBuffer<T>` and `RWStructuredBuffer<T>` instead.
 
 **The table is checked against DXC rather than trusted.**
 The generated `acquire_layout` compares its constant table against the compiled shader's reflected bindings — name, type, index, count, texture dimension, and a constant block's `block_size`.

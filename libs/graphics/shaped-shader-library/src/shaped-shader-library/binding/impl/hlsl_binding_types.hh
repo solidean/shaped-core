@@ -25,4 +25,8 @@ struct hlsl_binding_type
 /// `hlsl_type` is the bare name — `Texture2D`, not `Texture2D<float4>` — since the template arguments say what
 /// the resource holds, never where it is bound.
 [[nodiscard]] cc::optional<hlsl_binding_type> binding_type_of(cc::string_view hlsl_type);
+
+/// The sentence to append to a refusal, or empty when the pass has nothing more specific to say.
+/// Today that is the typed buffers, which look like an omission from the table and are not.
+[[nodiscard]] cc::string_view binding_rejection_reason_for(cc::string_view hlsl_type);
 } // namespace slib::impl

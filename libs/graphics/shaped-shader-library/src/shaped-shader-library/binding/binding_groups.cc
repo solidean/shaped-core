@@ -1073,8 +1073,8 @@ struct parser
 
         auto const type = slib::impl::binding_type_of(type_name);
         if (!type.has_value())
-            return cc::error(
-                cc::format("{}: '{}' is not a resource type this pass knows", to_string(location), type_name));
+            return cc::error(cc::format("{}: '{}' is not a resource type this pass knows{}", to_string(location),
+                                        type_name, slib::impl::binding_rejection_reason_for(type_name)));
 
         // Reflection reports the bare name, so one name declared in two groups would reach sg as one binding at
         // two addresses — which a namespace does nothing to prevent.

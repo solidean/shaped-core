@@ -222,7 +222,6 @@ namespace everything
     RWTexture2D<float4> u2d;
     RWTexture2DArray<float4> u2da;
     RWTexture3D<float4> u3d;
-    Buffer<float4> buf;
     StructuredBuffer<vertex> sbuf;
     RWStructuredBuffer<vertex> rwsbuf;
     ByteAddressBuffer rawbuf;
@@ -248,15 +247,36 @@ everything group=7
   u2d index=11 type=readwrite_texture count=1 dim=tex_2d
   u2da index=12 type=readwrite_texture count=1 dim=tex_2d_array
   u3d index=13 type=readwrite_texture count=1 dim=tex_3d
-  buf index=14 type=readonly_structured_buffer count=1
-  sbuf index=15 type=readonly_structured_buffer count=1
-  rwsbuf index=16 type=readwrite_structured_buffer count=1
-  rawbuf index=17 type=readonly_raw_buffer count=1
-  rwrawbuf index=18 type=readwrite_raw_buffer count=1
-  cbuf index=19 type=uniform_buffer count=1
-  samp index=20 type=sampler count=1
-  samp_cmp index=21 type=sampler count=1
-  scene index=22 type=acceleration_structure count=1
+  sbuf index=14 type=readonly_structured_buffer count=1
+  rwsbuf index=15 type=readwrite_structured_buffer count=1
+  rawbuf index=16 type=readonly_raw_buffer count=1
+  rwrawbuf index=17 type=readwrite_raw_buffer count=1
+  cbuf index=18 type=uniform_buffer count=1
+  samp index=19 type=sampler count=1
+  samp_cmp index=20 type=sampler count=1
+  scene index=21 type=acceleration_structure count=1
+
+
+--- case a typed buffer is refused rather than bound as a structured one
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    Buffer<float> texels;
+}
+--- error
+line 4: 'Buffer' is not a resource type this pass knows, because a typed (texel) buffer is a binding kind sg does not model; declare a StructuredBuffer<T> or RWStructuredBuffer<T> instead
+
+
+--- case the writable typed buffer is refused the same way
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+    RWBuffer<float> texels;
+}
+--- error
+line 4: 'RWBuffer' is not a resource type this pass knows, because a typed (texel) buffer is a binding kind sg does not model; declare a StructuredBuffer<T> or RWStructuredBuffer<T> instead
 
 
 --- case a misspelled attribute is an error, never a directive nobody reads
