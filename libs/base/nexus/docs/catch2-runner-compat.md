@@ -224,6 +224,11 @@ The aggregate `<testsuite>` / `<testsuites>` attributes (`tests`, `failures`, `t
 `assertions` — total checks evaluated — is outside the base JUnit schema but understood by common tooling, and `dev.py` reads it for the check counts it prints.
 `dev.py test` passes `--junit-xml` to every nexus binary and prefers this report over its own synthesized single-case sidecar, so `test_diag` and CI see one result per test.
 
+The `<testsuite>` also carries what the run cost the machine, measured around the tests.
+`cpu_load` is this process's load in [0, 1], where 1 is every core busy; `cores_used` is the same as a core count; `peak_resident_bytes` is the OS's own high-water mark.
+A field the platform could not measure is left out.
+The same numbers print after the pass/fail line of a test run, and not of an example run.
+
 ([export/junit.cc, `write_junit_xml`](../src/nexus/tests/export/junit.cc))
 
 ## Known gaps

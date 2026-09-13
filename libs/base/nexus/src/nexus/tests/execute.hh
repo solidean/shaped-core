@@ -16,6 +16,7 @@ struct recorded_metric;
 struct test_error;
 struct test_execution;
 struct test_schedule_execution;
+struct test_run_resources;
 } // namespace nx
 
 // Forward declaration for impl namespace
@@ -123,6 +124,20 @@ struct nx::test_schedule_execution
     [[nodiscard]] int count_failed_tests() const;
     [[nodiscard]] int count_total_checks() const;
     [[nodiscard]] int count_failed_checks() const;
+};
+
+/// What a run cost the machine, measured around execute_tests by nx::run.
+/// A field the platform could not answer stays negative, and a report leaves it out rather than printing a zero.
+struct nx::test_run_resources
+{
+    /// This process's CPU time over the run, in [0, 1] where 1 is every core busy — cc::process_cpu_load's scale.
+    double cpu_machine_fraction = -1;
+
+    /// The same load as a count of cores kept busy.
+    double cpu_cores_used = -1;
+
+    /// The OS's own high-water mark for this process's resident memory, so a spike between samples is not missed.
+    i64 peak_resident_bytes = -1;
 };
 
 namespace nx

@@ -361,6 +361,26 @@ TEST("export - the timings sidecar places every test on the wall clock, in the o
     CHECK(second["failed"].as_bool());
 }
 
+TEST("export - junit report carries what the run cost the machine, and only what was measured", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("A", {}, [] { CHECK(true); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    // An unmeasured field is left out rather than written as a zero dev.py would read as a real reading.
+    auto const unmeasured = nx::write_junit_xml("s", exec);
+    CHECK(!unmeasured.contains("cpu_load="));
+    CHECK(!unmeasured.contains("peak_resident_bytes="));
+
+    auto const measured = nx::write_junit_xml(
+        "s", exec, {.cpu_machine_fraction = 0.25, .cpu_cores_used = 8.0, .peak_resident_bytes = 1 << 20});
+    CHECK(measured.contains("cpu_load=\"0.2500\""));
+    CHECK(measured.contains("cores_used=\"8.00\""));
+    CHECK(measured.contains("peak_resident_bytes=\"1048576\""));
+}
+
 TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)
 {
     nx::test_registry reg;

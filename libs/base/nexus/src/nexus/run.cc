@@ -4,6 +4,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/platform/process_metrics.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -102,6 +103,25 @@ void collect_invoked(nx::test_execution const& exec, std::unordered_set<void con
         out.insert(child.instance.declaration);
         collect_invoked(child, out);
     }
+}
+
+/// "37% avg cpu load (11.8 cores), 1.42 GB peak ram", or what of it the platform could measure.
+cc::string describe_resources(nx::test_run_resources const& r)
+{
+    auto out = cc::string();
+    if (r.cpu_machine_fraction >= 0)
+        out.appendf("{:.0f}% avg cpu load ({:.1f} cores)", r.cpu_machine_fraction * 100, r.cpu_cores_used);
+    if (r.peak_resident_bytes >= 0)
+    {
+        if (!out.empty())
+            out += ", ";
+        auto const gib = double(r.peak_resident_bytes) / double(1ll << 30);
+        if (gib >= 1)
+            out.appendf("{:.2f} GB peak ram", gib);
+        else
+            out.appendf("{:.0f} MB peak ram", double(r.peak_resident_bytes) / double(1ll << 20));
+    }
+    return out;
 }
 
 /// The directory part of `path`, or empty when it has none.
@@ -269,8 +289,23 @@ int nx::run(int argc, char** argv)
         nx::impl::begin_run_capture(config.benchmark_rec_file);
     }
 
+    // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
+    auto cpu_sampler = cc::process_cpu_sampler();
+
     // Execute the scheduled tests
     auto execution = execute_tests(schedule, config);
+
+    auto resources = nx::test_run_resources{};
+    if (auto const load = cpu_sampler.sample(); load.has_value())
+    {
+        resources.cpu_machine_fraction = load.value().machine_fraction;
+        resources.cpu_cores_used = load.value().cores_used;
+    }
+    if (auto const usage = cc::query_process_usage(); usage.has_value())
+        resources.peak_resident_bytes = usage.value().peak_resident_bytes;
+
+    // An example is a program someone is watching rather than a suite being measured, so only tests say what they cost.
+    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example;
 
     // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
     // file's directory rather than inventing a location of its own.
@@ -280,7 +315,8 @@ int nx::run(int argc, char** argv)
     // This is additive: the console output below still runs, whatever the reporting mode.
     if (!config.junit_xml_file.empty())
     {
-        auto const written = write_report_file(config.junit_xml_file, write_junit_xml(suite_name(), execution));
+        auto const written
+            = write_report_file(config.junit_xml_file, write_junit_xml(suite_name(), execution, resources));
         if (!written.has_value())
             cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
                          written.error().to_string());
@@ -452,10 +488,14 @@ int nx::run(int argc, char** argv)
                 cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
             cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
         }
+        if (reports_resources)
+            cc::eprintln("{}", describe_resources(resources));
         return 1;
     }
 
     // All tests passed
     cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
+    if (reports_resources)
+        cc::println("{}", describe_resources(resources));
     return 0;
 }
