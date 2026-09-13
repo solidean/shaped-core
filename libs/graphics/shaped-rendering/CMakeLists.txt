@@ -166,10 +166,11 @@ if(SC_BUILD_TESTS)
         endif()
     endif()
 
-    # The end-to-end imgui test drives a dx12 WARP context directly (create_dx12_context) and compiles the imgui shader through DXC, so it needs both the dx12 backend and a compiler.
+    # The GPU tests run on the dx12 contexts tests/dx12-entry.cc brings up, and compile their shaders through DXC, so they need both the dx12 backend and a compiler.
     # The tests above need neither and run everywhere.
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-rendering-test PRIVATE
+            tests/dx12-entry.cc
             tests/imgui-routine-test.cc
             tests/imgui-manual-test.cc
             tests/box-filter-mipmap-test.cc

@@ -2,7 +2,6 @@
 #include <imgui/imgui.h>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
@@ -13,7 +12,7 @@
 
 using namespace cc::primitive_defines;
 
-// The imgui routine end to end on a dx12 WARP device: build a frame of real imgui draw data, service the texture protocol, record the draws into an offscreen target, and read the pixels back.
+// The imgui routine end to end on a live device: build a frame of real imgui draw data, service the texture protocol, record the draws into an offscreen target, and read the pixels back.
 //
 // No window and no swapchain are involved — the target is a plain rgba8 texture with copy_src, which is how the repo's other raster tests run headless on CI.
 
@@ -85,13 +84,10 @@ struct imgui_fixture
     }
 };
 
-/// Builds a fixture, or null when this machine cannot run the test.
-std::unique_ptr<imgui_fixture> make_fixture()
+/// Builds a fixture over `ctx`, or null when it cannot run the test.
+std::unique_ptr<imgui_fixture> make_fixture(sg::context_handle const& ctx)
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (!ctx_r.has_value())
-        return nullptr;
-    if (!ctx_r.value()->accepts_shader_format(sg::shader_format::dxil))
+    if (ctx == nullptr || !ctx->accepts_shader_format(sg::shader_format::dxil))
         return nullptr;
 
     auto compiler = slib::create_dxc_compiler();
@@ -99,7 +95,7 @@ std::unique_ptr<imgui_fixture> make_fixture()
         return nullptr;
 
     auto fixture = std::make_unique<imgui_fixture>();
-    fixture->ctx = ctx_r.value();
+    fixture->ctx = ctx;
     fixture->shader_lib.add_compiler(cc::move(compiler.value()));
     fixture->shader_lib.add_package(sr::shader_package());
 
@@ -138,13 +134,11 @@ void draw_test_window()
 }
 } // namespace
 
-TEST("sr::imgui_routine - draws a window into an offscreen target",
-     exclusive("sr-imgui-context"),
-     exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target", (sg::context_handle const& ctx))
 {
-    auto const f = make_fixture();
+    auto const f = make_fixture(ctx);
     if (f == nullptr)
-        SKIP("no dx12 WARP device with DXIL + DXC");
+        SKIP("no device accepting DXIL, or no DXC");
 
     f->frame(&draw_test_window);
     auto const pixels = f->read_back();
@@ -160,16 +154,15 @@ TEST("sr::imgui_routine - draws a window into an offscreen target",
     CHECK(pixel_at(pixels, 250, 250) == byte(0));
 }
 
-TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
-     exclusive("sr-imgui-context"),
-     exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
+               (sg::context_handle const& ctx))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
     // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
     // Pinned end-to-end rather than only in compute_ortho_constants, because arithmetic being right is not the same as it reaching the draw.
-    auto const f = make_fixture();
+    auto const f = make_fixture(ctx);
     if (f == nullptr)
-        SKIP("no dx12 WARP device with DXIL + DXC");
+        SKIP("no device accepting DXIL, or no DXC");
 
     auto const draw_box = []
     {
@@ -189,11 +182,11 @@ TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target
     CHECK(pixel_at(shifted, 125, 125) == byte(0));
 }
 
-TEST("sr::imgui_routine - a shader reload keeps drawing", exclusive("sr-imgui-context"), exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing", (sg::context_handle const& ctx))
 {
-    auto const f = make_fixture();
+    auto const f = make_fixture(ctx);
     if (f == nullptr)
-        SKIP("no dx12 WARP device with DXIL + DXC");
+        SKIP("no device accepting DXIL, or no DXC");
 
     f->frame(&draw_test_window);
     CHECK(any_pixel_drawn(f->read_back()));
@@ -206,13 +199,11 @@ TEST("sr::imgui_routine - a shader reload keeps drawing", exclusive("sr-imgui-co
     CHECK(any_pixel_drawn(f->read_back()));
 }
 
-TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
-     exclusive("sr-imgui-context"),
-     exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert", (sg::context_handle const& ctx))
 {
-    auto const f = make_fixture();
+    auto const f = make_fixture(ctx);
     if (f == nullptr)
-        SKIP("no dx12 WARP device with DXIL + DXC");
+        SKIP("no device accepting DXIL, or no DXC");
 
     f->frame([] {}); // no windows at all
 
