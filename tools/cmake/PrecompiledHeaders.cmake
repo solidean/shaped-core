@@ -63,8 +63,9 @@ endfunction()
 # The expensive standard headers ranked in docs/notes/build-times.md, pulled in directly rather than through whichever of ours happens to reach them.
 # Central because they belong to no library of ours.
 # This is the block that HURTS a pure clean-core consumer, which is why it is its own tier rather than part of the clean-core ones.
+# <chrono> is not in it: only time.cc and thread.cc may include it, so forcing it on every TU measured slower, not faster.
 sc_declare_pch_tier(STD HEADERS
-    <chrono> <memory> <mutex> <string> <string_view>
+    <memory> <mutex> <string> <string_view>
     <system_error> <ranges> <atomic> <type_traits> <utility>
 )
 

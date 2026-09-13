@@ -11,7 +11,6 @@ using namespace cc::primitive_defines;
 
 // End-to-end compute bind path: build a compiled_shader from the embedded blob plus hand-authored reflection.
 // Then create the layout / pipeline / binding_group, dispatch, and read the buffer back checking every element.
-// Runs on WARP so it exercises the real GPU paths on headless CI.
 // Everything drives the public sg API; the only dx12-specific piece is the DXIL blob, since shader bytecode is inherently per-backend.
 // The descriptor-ring tests below additionally take a dx12 context with a tiny, hand-sized descriptor heap, which is a dx12 knob.
 

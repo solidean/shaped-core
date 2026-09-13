@@ -16,6 +16,7 @@ struct recorded_metric;
 struct test_error;
 struct test_execution;
 struct test_schedule_execution;
+struct test_run_resources;
 } // namespace nx
 
 // Forward declaration for impl namespace
@@ -84,6 +85,14 @@ struct nx::test_execution
     // note: global stats == root stats
     section root;
 
+    // The interval the test occupied, on cc::current_time_steady_secs(), and 0 for a test that never started.
+    // Unlike root.duration_seconds, which sums the section passes, this is one interval, so it places the test on a timeline.
+    double started_at_steady_s = 0.0;
+    double finished_at_steady_s = 0.0;
+
+    // The thread the body started on — the counter cc::current_thread_id() hands out, not an OS id.
+    u64 thread = 0;
+
     // The --verbose console trace this test produced, buffered instead of printed as it happens.
     // Tests may run concurrently, so printing from the running test's own thread interleaves into noise.
     // A nested (dispatched) execution appends into its top-level ancestor's buffer, which is what keeps a driver's trace and its children's interleaved as they were.
@@ -115,6 +124,20 @@ struct nx::test_schedule_execution
     [[nodiscard]] int count_failed_tests() const;
     [[nodiscard]] int count_total_checks() const;
     [[nodiscard]] int count_failed_checks() const;
+};
+
+/// What a run cost the machine, measured around execute_tests by nx::run.
+/// A field the platform could not answer stays negative, and a report leaves it out rather than printing a zero.
+struct nx::test_run_resources
+{
+    /// This process's CPU time over the run, in [0, 1] where 1 is every core busy — cc::process_cpu_load's scale.
+    double cpu_machine_fraction = -1;
+
+    /// The same load as a count of cores kept busy.
+    double cpu_cores_used = -1;
+
+    /// The OS's own high-water mark for this process's resident memory, so a spike between samples is not missed.
+    i64 peak_resident_bytes = -1;
 };
 
 namespace nx
@@ -151,6 +174,11 @@ cc::span<cc::vector<cc::string> const> current_section_scopes(); // effective se
 // Registry nx::invoke_tests queries for the test running here (nullptr outside a test).
 // Read off the running instance through the ambient chain rather than a thread-local, so it is correct for a test running on any thread and for one dispatched from another.
 nx::test_registry const* active_registry();
+
+// The declaration of the SCHEDULED test the code here runs inside: the running test, or the top-level test that dispatched it.
+// A dispatched child occupies that test's slot in the schedule, so this is whose config says what the child is actually run under.
+// Null outside a test.
+nx::test_declaration const* current_slot_declaration();
 
 // True if `decl` is already running on the current execution chain (an ancestor invoke, or the running test
 // itself). nx::invoke_tests uses this to break invocation cycles rather than recurse forever.

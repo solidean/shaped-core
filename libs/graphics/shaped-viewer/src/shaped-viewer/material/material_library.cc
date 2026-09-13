@@ -14,80 +14,100 @@ material_id default_material(material_library& lib)
 
 material_library material_library::create()
 {
-    return {};
+    auto lib = material_library();
+    lib._state = cc::make_unique<cc::mutex<state>>();
+    return lib;
 }
 
 material_type_id material_library::register_type(material_type type)
 {
-    if (auto const* const resident = _type_by_hash.get_ptr(type.hash); resident != nullptr)
+    auto s = _state->lock_scoped();
+    if (auto const* const resident = s->type_by_hash.get_ptr(type.hash); resident != nullptr)
         return *resident;
 
-    CC_ASSERT(!_type_by_name.contains(type.name), "a material type name is its id — two different types may not share "
-                                                  "one");
+    CC_ASSERT(!s->type_by_name.contains(type.name), "a material type name is its id — two different types may not "
+                                                    "share one");
 
-    auto const id = material_type_id(_next_type++);
-    _type_by_hash[type.hash] = id;
-    _type_by_name[type.name] = id;
-    _types.entry(id).emplace(cc::move(type));
+    auto const id = material_type_id(s->next_type++);
+    s->type_by_hash[type.hash] = id;
+    s->type_by_name[type.name] = id;
+    s->types.entry(id).emplace(cc::move(type));
     return id;
 }
 
 cc::optional<material_type_id> material_library::acquire_type(cc::string_view name) const
 {
-    if (auto const* const id = _type_by_name.get_ptr(name); id != nullptr)
+    auto const s = _state->lock_scoped();
+    if (auto const* const id = s->type_by_name.get_ptr(name); id != nullptr)
         return *id;
     return cc::nullopt;
 }
 
 material_type const& material_library::get_type(material_type_id id) const
 {
-    auto const* const t = _types.get_ptr(id);
+    auto const s = _state->lock_scoped();
+    auto const* const t = s->types.get_ptr(id);
     CC_ASSERT(t != nullptr, "material_library::get_type: unknown id");
     return *t;
 }
 
 bool material_library::contains_type(material_type_id id) const
 {
-    return _types.contains(id);
+    return _state->lock([&](state const& s) { return s.types.contains(id); });
 }
 
 material_id material_library::acquire(material m)
 {
-    auto const& type = get_type(m.type);
+    auto s = _state->lock_scoped();
+
+    auto const* const type = s->types.get_ptr(m.type);
+    CC_ASSERT(type != nullptr, "material_library::acquire: unknown type id");
     for (auto const& o : m.overrides)
     {
-        auto const* const d = type.find(o.name);
+        auto const* const d = type->find(o.name);
         CC_ASSERT(d != nullptr, "a material binds an attribute its type does not declare");
         CC_ASSERT(o.fits(d->format), "a material's constant is not its declaration's size");
     }
 
-    if (auto const* const resident = _material_by_hash.get_ptr(m.hash); resident != nullptr)
+    if (auto const* const resident = s->material_by_hash.get_ptr(m.hash); resident != nullptr)
         return *resident;
 
-    auto const id = material_id(_next_material++);
-    _material_by_hash[m.hash] = id;
-    _material_by_name[m.name] = id;
-    _materials.entry(id).emplace(cc::move(m));
+    auto const id = material_id(s->next_material++);
+    s->material_by_hash[m.hash] = id;
+    s->material_by_name[m.name] = id;
+    s->materials.entry(id).emplace(cc::move(m));
     return id;
 }
 
 cc::optional<material_id> material_library::acquire(cc::string_view name) const
 {
-    if (auto const* const id = _material_by_name.get_ptr(name); id != nullptr)
+    auto const s = _state->lock_scoped();
+    if (auto const* const id = s->material_by_name.get_ptr(name); id != nullptr)
         return *id;
     return cc::nullopt;
 }
 
 material const& material_library::get(material_id id) const
 {
-    auto const* const m = _materials.get_ptr(id);
+    auto const s = _state->lock_scoped();
+    auto const* const m = s->materials.get_ptr(id);
     CC_ASSERT(m != nullptr, "material_library::get: unknown id");
     return *m;
 }
 
 bool material_library::contains(material_id id) const
 {
-    return _materials.contains(id);
+    return _state->lock([&](state const& s) { return s.materials.contains(id); });
+}
+
+isize material_library::type_count() const
+{
+    return _state->lock([](state const& s) { return s.types.size(); });
+}
+
+isize material_library::material_count() const
+{
+    return _state->lock([](state const& s) { return s.materials.size(); });
 }
 
 namespace

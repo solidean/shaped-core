@@ -124,3 +124,40 @@ TEST("fuzz engine - a failing test reports exactly one failed check (no pollutio
     auto exec = nx::execute_tests(sched, {});
     CHECK(exec.count_failed_checks() == 1);
 }
+
+TEST("fuzz engine - an execution cap lowers both bounds")
+{
+    auto t = nx::fuzz::test::create();
+    t->add_value("x", 0);
+    auto* const inc = t->add_op("inc", [](int a) { return a + 1; })->execute_at_least(40);
+    auto* const dec = t->add_op("dec", [](int a) { return a - 1; })->execute_at_most(3);
+    auto* const inv = t->add_invariant("any", [](int) { return true; });
+
+    t->cap_max_executions(5);
+
+    // The at-least is pulled down with the at-most, since a program that owed 40 runs of a 5-capped op would never end.
+    CHECK(inc->execute_at_most_times() == 5);
+    CHECK(inc->execute_at_least_times() == 5);
+
+    // A cap never RAISES a bound that was already below it.
+    CHECK(dec->execute_at_most_times() == 3);
+
+    // An invariant is capped at zero from the start, which is what keeps the cap from ever scheduling one.
+    CHECK(inv->is_invariant());
+    CHECK(inv->execute_at_most_times() == 0);
+}
+
+TEST("fuzz engine - a seed cap is how many programs the search runs")
+{
+    auto programs = 0;
+
+    auto t = nx::fuzz::test::create();
+    t->add_op("start", [&] { return ++programs; })->execute_once();
+    t->add_op("touch", [](int a) { return a; })->execute_at_least(2);
+
+    t->cap_seed_count(7);
+    t->cap_seed_count(100); // a cap only ever lowers
+
+    CHECK(t->execute_fuzz_test());
+    CHECK(programs == 7);
+}

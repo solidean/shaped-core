@@ -213,6 +213,7 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         "sweep the example bucket");
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
+    args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
 
     args.group("recording");
@@ -222,6 +223,8 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.group("reports");
     args.arg({"junit-xml"}, config.junit_xml_file, {.desc = "also write a JUnit XML report here", .metavar = "FILE"});
     args.arg({"pgo-json"}, config.pgo_json_file, {.desc = "also write nx::pgo metrics here", .metavar = "FILE"});
+    args.arg({"timings-json"}, config.timings_json_file,
+             {.desc = "also write each test's wall-clock interval and thread here", .metavar = "FILE"});
     args.arg({"benchmark-json"}, config.benchmark_json_file,
              {.desc = "also write the full benchmark results here", .metavar = "FILE"});
     args.arg({"benchmark-rec"}, config.benchmark_rec_file,

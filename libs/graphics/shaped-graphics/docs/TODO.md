@@ -135,6 +135,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Vulkan has no creation-time equivalent, so it would be a hint one backend honours and the other ignores.
   Acceptable for a pure performance hint, and worth stating in [concepts/views.md](concepts/views.md) if it lands.
   Worth doing only with a measurement behind it: a fast clear is a bandwidth win on a full-screen target and noise on a small one.
+- **The VA-range allowlist entry is wider than the case it is for.**
+  `resources contain the GPU Virtual Address range` in `dx12_expected_messages.hh` is a substring match, shared by every listener.
+  So two persistent placements overlapping through a caller's allocator bug would be muted too, not only the transient heap's reuse.
+  It stays unnarrowed on purpose: real applications raise the message many times per frame, and its text differs between drivers, so parsing each one is unattractive.
+  No sg test provokes it yet; only sv's frame loop does.
 - **Vertex attributes: go location-based, drop the HLSL semantic from the public API.**
   `vertex_attribute` identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that does not survive a change of shader language.
   Every other target matches vertex inputs by a **numeric location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`.

@@ -137,3 +137,9 @@ class TestSummary:
     skipped: int
     time_s: float
     assertions: int = 0
+
+    # What the run cost the machine, as nexus measures it around its tests; None where the runner did not say.
+    # cpu_load is the house scale, in [0, 1] where 1 is every core busy.
+    cpu_load: float | None = None
+    cores_used: float | None = None
+    peak_resident_bytes: int | None = None

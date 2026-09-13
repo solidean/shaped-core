@@ -56,6 +56,22 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexu
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
 
+## Thorough runs (`nx::is_thorough`)
+
+```cpp
+if (!nx::is_thorough())                  // false by default; true under --thorough / `dev.py test --thorough`
+    fuzz->cap_seed_count(24);            // a default run NARROWS the full-strength test: fewer seeds, lower caps,
+                                         //   smaller inputs — never fewer checks. fuzz->cap_max_executions(n) too
+```
+
+```cpp
+TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --thorough; for a test with no narrow
+                                         //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
+```
+
+A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
+[docs/test-runtime.md](docs/test-runtime.md) has the rules.
+
 ## Examples (`EXAMPLE`)
 
 A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.
@@ -269,6 +285,9 @@ TEST("sg backend - vulkan")
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
   One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
+- **Scheduling asks on a child are the driver's to hold**: a child runs in its driver's slot.
+  So `exclusive(tag)`, `main_thread` or a scheduler mode on an `INVOCABLE_TEST` asserts at dispatch unless the scheduled test holds the same.
+  `exclusive()` on the driver covers every tag.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 
 ## Running tests
@@ -292,6 +311,7 @@ uv run dev.py test                       # build + run the whole suite
 // Bucket / perf CLI: --manual (sweep manual bucket), --pgo-benchmarks (sweep pgo-benchmark bucket),
 // --benchmarks (sweep benchmark bucket), --examples (sweep example bucket).
 // --pgo-json <file> (recorded-metric sidecar), --benchmark-json <file> (full results + every sample),
+// --timings-json <file> (every test's wall-clock interval and thread; `dev.py test --profile` draws one slice per test),
 //   --benchmark-rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging

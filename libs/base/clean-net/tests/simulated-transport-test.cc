@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh> // cc::current_time_steady_secs
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
@@ -19,6 +20,9 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Bounded by the WALL CLOCK rather than by a round count, even though the link's latency is on the injected clock.
 /// A fixed number of spins is a budget that shrinks as the machine gets busier: the same 1000 rounds that were seconds
 /// on an idle host are milliseconds when the rest of the suite is running, which made this a flake rather than a test.
@@ -26,6 +30,8 @@ namespace
 /// injected clock does.
 bool pump_until(cc::function_ref<bool()> done, double max_ms = 5000)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     auto const started = cc::current_time_steady_secs();
     while (true)
     {

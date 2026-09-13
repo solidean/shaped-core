@@ -24,4 +24,15 @@ namespace sv
 
 /// The same, on a context the caller owns and keeps alive — for embedding in an application that already has one.
 [[nodiscard]] frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config = {});
+
+/// Takes `capture` instead of reading one from the environment, which is left untouched.
+///
+/// `capture` must be active and name an output path; it overrides `config`'s headless flag and size exactly as the
+/// environment would.
+/// This is what reaches a request field the environment cannot spell, such as `sr::capture_request::clock_seconds`.
+[[nodiscard]] frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture);
+[[nodiscard]] frame_range interactive(sg::context& ctx,
+                                      cc::string_view id,
+                                      viewer_config config,
+                                      sr::capture_request capture);
 } // namespace sv

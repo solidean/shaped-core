@@ -30,11 +30,9 @@ constexpr int k_frames = 120;
 constexpr int k_epochs_in_flight = 2;
 } // namespace
 
-TEST("sg vulkan - a transient attachment recreated every pipelined epoch")
+INVOCABLE_TEST("sg vulkan - a transient attachment recreated every pipelined epoch",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = vulkan::test::make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
     auto& ctx = *handle;
 
     // Persistent, so the loop below has something whose contents outlive a frame — the transient attachment is the

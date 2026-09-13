@@ -44,10 +44,6 @@ rules:
   # When the cc:: replacement lands, the entry moves to the deny block below and the call sites move with it.
 
   - kind: allow-include
-    value: <chrono>
-    reason: no cc:: time vocabulary yet — OS clocks plus unit-safe duration algebra. Use steady_clock for elapsed time, never system_clock
-
-  - kind: allow-include
     value: <limits>
     reason: no cc:: numeric limits yet
 
@@ -72,6 +68,10 @@ rules:
   - kind: deny-include
     value: [<string>, <string_view>]
     reason: use cc::string / cc::string_view
+
+  - kind: deny-include
+    value: <chrono>
+    reason: read clocks through cc::current_time_steady_secs / cc::current_time_wall_secs (clean-core/common/time.hh) and sleep through cc::this_thread_sleep_secs (clean-core/thread/thread.hh). Seconds as a double are the vocabulary; there is no duration type to carry
 
   - kind: deny-include
     value: <optional>

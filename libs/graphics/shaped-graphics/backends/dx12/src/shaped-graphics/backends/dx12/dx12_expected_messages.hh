@@ -28,6 +28,13 @@ inline constexpr cc::string_view k_expected_validation_messages[] = {
 
     // A command list carrying only barriers is a legitimate sg shape — a list opened purely to transition resources.
     "recorded only Barrier commands",
+
+    // The transient bump heap reuses its placed storage the moment an epoch advances, while the last epoch's placed resources
+    // still await their deferred release.
+    // The debug layer then finds two resources over one address range and cannot tell which one a view or a build means.
+    // The queue serializes their GPU use, so this is ambiguity rather than aliasing; see dx12_context::advance_epoch.
+    // It shows only on a frame loop that does not wait for the GPU between epochs, which is what sv::viewer runs.
+    "resources contain the GPU Virtual Address range",
 };
 
 /// Whether this debug-layer message is one of the advisories above.

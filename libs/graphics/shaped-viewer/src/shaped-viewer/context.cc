@@ -25,16 +25,11 @@ void set_acquire_context(context_provider provider)
 cc::result<sg::context_handle> impl::acquire_default_context()
 {
 #if SV_HAS_DEFAULT_BACKEND
-    auto hardware = sg::create_dx12_context({});
-    if (!hardware.has_error())
-        return hardware.value();
-
-    // WARP keeps the viewer usable on a machine with no suitable GPU, which is also what every headless test does.
-    auto warp = sg::create_dx12_context({.use_warp = true});
-    if (!warp.has_error())
-        return warp.value();
-
-    return cc::error("shaped-viewer: could not create a Direct3D 12 context (no adapter, and WARP was refused)");
+    // WARP keeps the viewer usable on a machine with no suitable GPU.
+    auto ctx = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+    if (ctx.has_error())
+        return cc::error("shaped-viewer: could not create a Direct3D 12 context (no adapter, and WARP was refused)");
+    return ctx.value();
 #else
     return cc::error("shaped-viewer: built with no default graphics backend — call sv::set_acquire_context to supply "
                      "one");

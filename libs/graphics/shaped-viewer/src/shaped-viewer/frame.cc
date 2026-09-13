@@ -135,6 +135,12 @@ isize frame::pending_resource_work() const
     return _viewer == nullptr ? 0 : _viewer->pending_resource_work();
 }
 
+cc::shared_async<cc::unit> frame::background_work()
+{
+    CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer whose work to wait on");
+    return _viewer->background_work();
+}
+
 gpu_resource_manager& frame::resources()
 {
     CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer to draw resources from");

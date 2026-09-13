@@ -79,7 +79,7 @@ def summarize_build(
 # ---------------------------------------------------------------------------
 
 def _profile_row(s: TypeStat, *, with_par: bool) -> str:
-    row = f"  {s.type:<14}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
+    row = f"  {s.type:<16}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
     return f"{row}{s.parallelism:>6.1f}x" if with_par else row
 
 
@@ -100,13 +100,13 @@ def print_profile_summary(summary: ProfileSummary, path: str) -> None:
     ui.write_line(console.dim(f"\nProfile written to {path} ({summary.count} job(s))"))
 
     total = summary.leaves[-1] if summary.leaves else None
-    ui.write_line(console.dim(f"  {'leaf jobs':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"))
+    ui.write_line(console.dim(f"  {'leaf jobs':<16}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"))
     for s in summary.leaves:
         line = _profile_row(s, with_par=True)
         ui.write_line(line if s is total else console.dim(line))
 
     if summary.containers:
-        ui.write_line(console.dim(f"\n  {'containers':<14}{'count':>7}{'sum':>11}{'span':>11}"
+        ui.write_line(console.dim(f"\n  {'containers':<16}{'count':>7}{'sum':>11}{'span':>11}"
                           "   (time already counted above)"))
         for s in summary.containers:
             ui.write_line(console.dim(_profile_row(s, with_par=False)))
@@ -116,8 +116,63 @@ def print_profile_summary(summary: ProfileSummary, path: str) -> None:
 # Tests
 # ---------------------------------------------------------------------------
 
-def summarize_tests(records: list[dict], presets: list[Preset], root: Path) -> bool:
-    """Print the pass/fail summary for a set of test runs; return True if all passed."""
+def _fmt_bytes(n: int | None) -> str:
+    if n is None:
+        return "-"
+    return f"{n / (1 << 30):.2f} GiB" if n >= (1 << 30) else f"{n / (1 << 20):.0f} MiB"
+
+
+def _print_test_table(records: list[dict]) -> None:
+    """One row per binary run, longest first: its wall time, and what it cost the machine while it ran.
+
+    The load is what nexus measured around its own tests, so a binary spending its time serialized reads as a low
+    percentage — which is the question this table is for.
+    Wall time is the step's, so it includes process startup the load does not cover.
+    """
+    if not records:
+        return
+
+    presets = {r.get("preset") for r in records}
+    label = (lambda r: f"{r['name']} [{r.get('preset')}]") if len(presets) > 1 else (lambda r: r["name"])
+    rows = sorted(records, key=lambda r: -r["duration_s"])
+    width = max(len("binary"), *(len(label(r)) for r in rows))
+
+    def cells(r: dict) -> tuple[str, str, str, str, str]:
+        junit = r["junit"] or {}
+        load = junit.get("cpu_load")
+        cores = junit.get("cores_used")
+        return (fmt_dur(r["duration_s"]), str(junit.get("tests", "-")),
+                f"{load * 100:.0f}%" if load is not None else "-",
+                f"{cores:.1f}" if cores is not None else "-",
+                _fmt_bytes(junit.get("peak_resident_bytes")))
+
+    ui.write_line(console.dim(f"\n  {'binary':<{width}}  {'wall':>9}  {'tests':>6}  {'cpu':>5}  {'cores':>6}  {'peak ram':>9}"))
+    for r in rows:
+        wall, tests, load, cores, ram = cells(r)
+        line = f"  {label(r):<{width}}  {wall:>9}  {tests:>6}  {load:>5}  {cores:>6}  {ram:>9}"
+        ui.write_line(line if r["returncode"] == 0 else console.red(line))
+
+    # The whole run's load is weighted by each binary's wall time, since binaries run one after another.
+    measured = [r for r in records if r["junit"] and r["junit"].get("cpu_load") is not None]
+    wall = sum(r["duration_s"] for r in measured)
+    if wall > 0:
+        load = sum(r["junit"]["cpu_load"] * r["duration_s"] for r in measured) / wall
+        cores = sum(r["junit"]["cores_used"] * r["duration_s"] for r in measured) / wall
+        peaks = [r["junit"]["peak_resident_bytes"] for r in records
+                 if r["junit"] and r["junit"].get("peak_resident_bytes") is not None]
+        ui.write_line(console.dim(
+            f"  {'total':<{width}}  {fmt_dur(sum(r['duration_s'] for r in records)):>9}  "
+            f"{sum(r['junit']['tests'] for r in records if r['junit']):>6}  {load * 100:>4.0f}%  {cores:>6.1f}  "
+            f"{_fmt_bytes(max(peaks) if peaks else None):>9}"))
+
+
+def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, table: bool = True) -> bool:
+    """Print the pass/fail summary for a set of test runs; return True if all passed.
+
+    `table` adds the per-binary wall time and resource table ahead of the verdict.
+    """
+    if table:
+        _print_test_table(records)
     total_s = sum(r["duration_s"] for r in records)
     failed = sum(1 for r in records if r["returncode"] != 0)
     tests = sum(r["junit"]["tests"] for r in records if r["junit"])

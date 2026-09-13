@@ -4,7 +4,7 @@
 
 using namespace cc::primitive_defines;
 
-// Device→device buffer copy on WARP: cmd.copy.buffer_bytes_region / buffer_data_region.
+// Device→device buffer copy: cmd.copy.buffer_bytes_region / buffer_data_region.
 // These tests split upload → copy → download across separate command lists.
 // Recording all three in one list is equally correct — the list's own access tracking orders them — and tests/copy/ covers that single-list path.
 // See libs/graphics/shaped-graphics/docs/concepts/backends.md.

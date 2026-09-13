@@ -133,6 +133,11 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
 - **Does the abstraction pay for itself?** A "manager" that fixes a layout and hides what its consumer needs is the anti-pattern.
   A small helper over one thing the caller still owns is the pattern.
 - **Which library does this belong in?** Dependency direction is a hard rule; "could live lower" is the more common finding.
+- **Does a new accessor name an internal of a library still in flux?** Then it pins the internal, and the public shape should say only the outcome.
+  pr-170's fix for a test drain needed to wait on sv's fallback shader compile, and first added `sv::frame::fallback_shader_compile()`.
+  The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
+  What landed was `frame::background_work() -> cc::shared_async<cc::unit>`, which covers the fallback today and grows with the internals while its signature stays put.
+  The same holds for a fix a review lands: an accessor added to reach one internal is a finding against the fix.
 
 Report API shape **in symbols**: signatures, the actual type names, and a few lines of call-site code.
 Prose about an API is much harder to judge than the API.
@@ -512,6 +517,14 @@ Two content-addressed pools sat next to each other and only one of them minted t
 The maintainer had already approved the fix before the error was found.
 
 The check is cheap and specific: grep the constructor of the value, not the type that looks like it owns it.
+
+**A recommendation is a mechanism claim too.**
+pr-170 found that `exclusive(...)` on an `INVOCABLE_TEST` is silently ignored, and recommended that nexus union each child's tags onto the drivers that dispatch it.
+That fix assumes a static link from driver to child.
+There is none: a driver calls `nx::invoke_tests` at runtime, and which invocables it reaches is discovered then, so nothing before the schedule is built knows the edge.
+The maintainer's answer was a runtime assert at dispatch instead — a child's flags must be held by whichever test invokes it.
+The finding was right and the fix was unbuildable, and the review had even written "I have not checked how a driver's dispatched parameter type is known to the scheduler" beside it.
+A sentence like that is the check, left undone; do it before recommending, not after.
 
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.

@@ -1,5 +1,6 @@
 #include "cube_app.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
@@ -9,16 +10,13 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <cube_shaders.hh>
 
-#include <chrono>
-
 namespace cube_editor
 {
 namespace
 {
 [[nodiscard]] double now_seconds()
 {
-    auto const t = std::chrono::steady_clock::now().time_since_epoch();
-    return std::chrono::duration<double>(t).count();
+    return cc::current_time_steady_secs();
 }
 } // namespace
 
@@ -52,12 +50,7 @@ cc::unique_ptr<app> app::create(cc::string_view title)
 
     // A real adapter by preference, WARP otherwise: it renders this just as correctly, only slower, so a machine
     // with no usable D3D12 GPU still gets to run the example.
-    auto context = sg::create_dx12_context({});
-    if (context.has_error())
-    {
-        cc::println("no hardware D3D12 adapter ({}) — falling back to WARP", context.error().to_string());
-        context = sg::create_dx12_context({.use_warp = true});
-    }
+    auto context = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     if (context.has_error())
     {
         cc::eprintln("no D3D12 device at all: {}", context.error().to_string());

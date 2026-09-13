@@ -11,12 +11,13 @@ Public API:
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console, ui
+from ..core import console, profile, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset
 from ..core.process import emsdk_env, run_step
@@ -84,6 +85,34 @@ def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
         return {}
     existing = os.environ.get("PATH", "")
     return {"PATH": rtdir + os.pathsep + existing if existing else rtdir}
+
+
+def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
+    """Add one job per test from the timings sidecar nexus wrote under --timings-json.
+
+    A test that dispatched children through nx::invoke_tests is a `testcase-driver` container rather than a `testcase` leaf.
+    Its slice encloses its children's, which are entries of their own, so summing both would count that time twice.
+
+    Silently adds nothing when the file is missing or unreadable — a crash before the report, or a runner that is not nexus.
+    The step itself is still in the profile, so the run's time stays accounted for.
+    """
+    try:
+        doc = json.loads(timings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    jobs = []
+    for t in doc.get("tests", []):
+        if "name" not in t or "start" not in t or "end" not in t:
+            continue
+        children = int(t.get("children", 0))
+        extra = {"binary": binary, "preset": preset, "thread": t.get("thread"), "failed": t.get("failed", False)}
+        if children > 0:
+            extra["children"] = children
+        jobs.append(profile.Job(
+            name=t["name"], type="testcase-driver" if children > 0 else "testcase",
+            start=float(t["start"]), end=float(t["end"]), extra=extra, container=children > 0,
+        ))
+    profile.add_jobs(jobs)
 
 
 def _test_extra(xml_path: Path) -> str:
@@ -185,6 +214,11 @@ def test(
                 if write_xml:
                     xml_path.unlink(missing_ok=True)
                     cmd += ["--junit-xml", str(xml_path)]
+                # Under --profile, nexus also reports where each test sat on the timeline, which becomes one trace slice per test.
+                timings_path = target.artifact.parent / f"{target.artifact.name}.timings.json"
+                if profile.enabled():
+                    timings_path.unlink(missing_ok=True)
+                    cmd += ["--timings-json", str(timings_path)]
                 cmd += extra_args
 
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
@@ -205,6 +239,9 @@ def test(
                     verbose=verbose,
                     summary_extra=(lambda r, xp=xml_path: _test_extra(xp)) if write_xml else None,
                 )
+
+                if profile.enabled():
+                    _harvest_test_timings(timings_path, binary=name, preset=preset.name)
 
                 # With a name filter, "no matching tests in this binary" isn't a failure.
                 if test_name and not result.ok and _selected_no_tests(result.stderr_log):
@@ -236,6 +273,9 @@ def test(
                             "skipped": summary.skipped,
                             "assertions": summary.assertions,
                             "time_s": round(summary.time_s, 3),
+                            "cpu_load": summary.cpu_load,
+                            "cores_used": summary.cores_used,
+                            "peak_resident_bytes": summary.peak_resident_bytes,
                         }
                         if summary
                         else None

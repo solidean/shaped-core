@@ -1,7 +1,6 @@
 #include "record-test-types.hh"
 
 #include <clean-core/common/profiling.hh>
-#include <clean-core/common/time.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
@@ -27,15 +26,10 @@ namespace
     return cc::stack_capture_from_context_available() && CC_HAS_THREADS;
 }
 
-CC_DONT_INLINE void burn_for_secs(f64 secs)
+CC_DONT_INLINE void burn_until_sampled_in_scope(u64 samples)
 {
     CC_RECORD_SCOPE("spliced-region");
-
-    auto const start = cc::current_time_steady_secs();
-    u64 volatile sink = 0;
-    while (cc::current_time_steady_secs() - start < secs)
-        for (int i = 0; i < 4096; ++i)
-            sink = sink + u64(i);
+    burn_until_sampled(samples);
 }
 
 /// Samples that carry an anchor at all.
@@ -103,8 +97,8 @@ REC_TEST("record/splicing - a listener downstream of the splicer sees every even
         scoped_listener const a(raw);
         scoped_listener const b(splicer);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
-            burn_for_secs(0.25);
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            burn_until_sampled_in_scope(20);
         }
         cc::rec::flush_blocking();
     }
@@ -133,8 +127,8 @@ REC_TEST("record/splicing - samples end up among the events of the thread they a
     {
         scoped_listener const reg(splicer);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
-            burn_for_secs(0.25);
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            burn_until_sampled_in_scope(20);
         }
         cc::rec::flush_blocking();
     }
@@ -164,8 +158,8 @@ REC_TEST("record/splicing - live placement agrees with the offline splice")
         scoped_listener const a(raw);
         scoped_listener const b(splicer);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
-            burn_for_secs(0.25);
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            burn_until_sampled_in_scope(20);
         }
         cc::rec::flush_blocking();
     }
@@ -194,8 +188,8 @@ REC_TEST("record/splicing - splicing an already-spliced stream changes nothing")
     {
         scoped_listener const reg(splicer);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
-            burn_for_secs(0.2);
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            burn_until_sampled_in_scope(20);
         }
         cc::rec::flush_blocking();
     }
@@ -255,8 +249,8 @@ REC_TEST("record/splicing - nothing is stranded when the hold expires")
         scoped_listener const a(raw);
         scoped_listener const b(splicer);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
-            burn_for_secs(0.25);
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
+            burn_until_sampled_in_scope(20);
         }
         cc::rec::flush_blocking();
     }
@@ -293,7 +287,7 @@ TEST("record/splicing - how much a live splice places", nx::config::manual, nx::
             scoped_listener const b(splicer);
             {
                 cc::rec::sampling_scope const sampling({.rate_hz = 1000.0});
-                burn_for_secs(0.3);
+                burn_until_sampled_in_scope(300);
             }
             cc::rec::flush_blocking();
         }

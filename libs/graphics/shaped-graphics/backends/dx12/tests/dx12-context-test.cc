@@ -1,3 +1,4 @@
+#include <clean-core/platform/environment.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -72,4 +73,21 @@ INVOCABLE_TEST("sg dx12 - a zero-size buffer allocates no backing resource", (dx
     auto empty = c.create_dx12_buffer(0, {}, sg::allocation_info{});
     REQUIRE(empty.has_value());
     CHECK(empty.value()->_resource == nullptr); // size 0 -> no resource allocated
+}
+
+// The variable is process-wide, so this runs beside nothing: a driver creating its context meanwhile would lose its GPU.
+TEST("sg dx12 - SC_DX12_ADAPTER=warp hides the hardware adapter from every request", exclusive())
+{
+    auto const pin = cc::scoped_environment_variable("SC_DX12_ADAPTER", "warp");
+
+    CHECK(!dx12::has_hardware_adapter());
+
+    // An explicit hardware request is refused too, and the error names the pin as the reason.
+    auto const hardware = sg::create_dx12_context({.adapter = dx12::dx12_adapter::hardware});
+    REQUIRE(hardware.has_error());
+    CHECK(hardware.error().to_string().contains("SC_DX12_ADAPTER"));
+
+    auto const fallback = sg::create_dx12_context({.adapter = dx12::dx12_adapter::hardware_or_warp});
+    REQUIRE(fallback.has_value());
+    CHECK(fallback.value()->adapter().is_software);
 }

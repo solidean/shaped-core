@@ -1,4 +1,5 @@
 #include <blob-cache/blob_cache.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
@@ -110,6 +111,8 @@ TEST("ssc::dxc shader_cache - a compile persists across cache instances")
     // and bounded, so a compile that can never finish fails the test instead of hanging it.
     auto const settle = [&](auto const& node)
     {
+        CC_RECORD_SCOPE("dxc_test.settle");
+
         for (auto i = 0; i < 100000 && !node->is_ready(); ++i)
         {
             (void)cc::thread_pump_all();

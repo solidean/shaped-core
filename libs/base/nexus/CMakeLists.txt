@@ -39,6 +39,7 @@ add_library(nexus
     src/nexus/tests/export/junit.cc
     src/nexus/tests/export/bench_json.cc
     src/nexus/tests/export/pgo_json.cc
+    src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
@@ -105,6 +106,8 @@ target_sources(nexus
     src/nexus/tests/export/junit.hh
     src/nexus/tests/export/bench_json.hh
     src/nexus/tests/export/pgo_json.hh
+    src/nexus/tests/export/timings_json.hh
+    src/nexus/tests/thorough.hh
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
@@ -198,6 +201,7 @@ if(SC_BUILD_TESTS)
         tests/test-parallel-test.cc
         tests/test-async-test.cc
         tests/test-export-test.cc
+        tests/test-thorough-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc
         tests/test-invocable-test.cc

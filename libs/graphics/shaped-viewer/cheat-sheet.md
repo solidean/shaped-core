@@ -197,6 +197,7 @@ sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant 
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
 sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
+                                 //   thread-safe: the process-wide one is shared by every viewer and every parallel test
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
@@ -446,7 +447,7 @@ sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_f
 Gotchas:
 
 - **`load_async` runs on whatever scheduler `cc::async` was given.** With none installed nothing progresses until `wait` drives it — the same degradation every other async here takes.
-- **Minting materials cannot leave the calling thread**, since `material_library` is not thread-safe.
+- **Minting an import's materials happens in `poll`, on the calling thread**, not inside `load_async`'s stages.
   That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
 - **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
   What does arrive progressively is the upload, which the managers stream.
@@ -686,7 +687,7 @@ A frame carries the whole *window* surface, which carries the whole *view* surfa
 
 ```cpp
 sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_function<cc::result<sg::context_handle>()>; unset by default
-                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); }); pass {} to clear
+                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 
@@ -695,6 +696,8 @@ sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = view
                                  //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
                                  //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
+sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
+                                 //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call
@@ -716,6 +719,7 @@ frame.push_id(i) / frame.pop_id()                              // the same, expl
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+frame.background_work() -> cc::shared_async<cc::unit>          // settles once the pool work the viewer started is done; what it covers is internal
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_frames cannot see it
 view.accumulated_frames() -> u32                                // the SLOWEST traced layer's count; 0 for a view with none

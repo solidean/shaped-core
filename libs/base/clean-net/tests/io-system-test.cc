@@ -1,6 +1,7 @@
 #include "cnet-test-types.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
@@ -20,6 +21,9 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// An operation whose completion is readable from another thread, since in threaded mode it lands on the reactor's.
 struct signal_op : impl::io_operation
 {
@@ -76,6 +80,8 @@ struct socket_guard
 /// Five seconds against an expected handful of milliseconds still fails a reactor that has genuinely stalled.
 bool wait_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 {
+    CC_RECORD_SCOPE("cnet_test.wait_for");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 

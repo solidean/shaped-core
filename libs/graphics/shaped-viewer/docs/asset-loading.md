@@ -449,7 +449,8 @@ not yet need would be the wrong order.
    Every record carries a `residency`, an acquire hands its payload to `sg::context_stream_scope` (`ctx.stream`), and `record_pending_work` collects what landed.
    Priority is the transfer's own rather than a drain order, so attributes outrank the geometry that indexes them and a mesh never draws real triangles against attribute bytes still in flight.
    Textures stream too, and a slot sampling one that has not arrived reads its placeholder rather than an empty texture.
-   `asset_loader::load_async` hands back an `sv::asset`, and stages 1 to 3 run off the calling thread — which needed the import split in two, since `material_library` is not thread-safe.
+   `asset_loader::load_async` hands back an `sv::asset`, and stages 1 to 3 run off the calling thread.
+   That needed the import split in two, since `material_library` was not thread-safe when it landed.
    What is NOT here is structure-first parsing, which would make `is_ready` per-mesh rather than whole-asset.
    It was built once and taken out again: it needs a mesh that is a key and a box before it is bytes, which is the
    recipe idea below, and that belongs somewhere else.

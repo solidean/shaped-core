@@ -176,10 +176,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    // Prefer a hardware GPU (this is meant to be watched); fall back to WARP; skip if neither exists.
-    auto ctx_r = sg::create_dx12_context({});
-    if (ctx_r.has_error())
-        ctx_r = sg::create_dx12_context({.use_warp = true});
+    // A hardware GPU where there is one, since this is meant to be watched; skip if there is not even WARP.
+    auto ctx_r = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_handle = ctx_r.value();

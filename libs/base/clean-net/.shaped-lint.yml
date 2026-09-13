@@ -8,8 +8,8 @@
 
 rules:
   - kind: allow-include
-    value: [<winsock2.h>, <ws2tcpip.h>]
-    reason: the Windows socket API. winsock2.h must precede ws2tcpip.h, which is declared in terms of it, so the include block is clang-format-off.
+    value: [<winsock2.h>, <ws2tcpip.h>, <mstcpip.h>]
+    reason: the Windows socket API, and mstcpip.h for SIO_TCP_INITIAL_RTO. winsock2.h must precede the other two, which are declared in terms of it, so the include block is clang-format-off.
     files:
       - src/clean-net/impl/native_socket.cc
 

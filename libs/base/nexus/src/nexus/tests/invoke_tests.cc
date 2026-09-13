@@ -2,7 +2,9 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/asserts.hh>
 #include <clean-core/common/compare.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
@@ -18,6 +20,46 @@ bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std:
         if (a[i] != b[i])
             return false;
     return true;
+}
+
+cc::string nx::impl::find_unhonoured_dispatch_config(config::cfg const& child, config::cfg const& slot)
+{
+    if (child.exclusive_global && !slot.exclusive_global)
+        return "exclusive()";
+
+    if (!slot.exclusive_global)
+    {
+        for (auto i = 0; i < child.exclusion_tag_count && i < config::max_exclusion_tags; ++i)
+        {
+            auto const tag = cc::string_view(child.exclusion_tags[i]);
+            auto held = false;
+            for (auto j = 0; j < slot.exclusion_tag_count && j < config::max_exclusion_tags; ++j)
+                held |= cc::string_view(slot.exclusion_tags[j]) == tag;
+            if (!held)
+                return cc::format("exclusive(\"{}\")", tag);
+        }
+    }
+
+    if (child.main_thread && !slot.main_thread)
+        return "main_thread";
+
+    auto const child_is_default
+        = child.scheduler == config::scheduler_mode::shared && child.ambient == config::ambient_mode::multi_threaded;
+    auto const same_mode
+        = child.scheduler == slot.scheduler && child.ambient == slot.ambient
+       && (child.scheduler != config::scheduler_mode::own_pool || child.scheduler_threads == slot.scheduler_threads);
+    if (!child_is_default && !same_mode)
+    {
+        if (child.scheduler == config::scheduler_mode::own_pool)
+            return cc::format("own_pool({})", child.scheduler_threads);
+        if (child.scheduler == config::scheduler_mode::none && child.ambient == config::ambient_mode::single_threaded)
+            return "singlethreaded";
+        if (child.scheduler == config::scheduler_mode::none && child.ambient == config::ambient_mode::none)
+            return "no_scheduler";
+        return "a non-default scheduler mode";
+    }
+
+    return {};
 }
 
 nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
@@ -94,6 +136,19 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
         {
             report_invocation_cycle(decl);
             continue;
+        }
+
+        // A child's own scheduling asks create no node, so only the slot it runs in can honour them.
+        // Dispatch is discovered at runtime, so this is the one place a missing ask can be caught at all.
+        if (auto const* const slot = current_slot_declaration(); slot != nullptr)
+        {
+            auto const unhonoured = find_unhonoured_dispatch_config(decl->test_config, slot->test_config);
+            auto const* const caller = parent->instance.declaration;
+            auto const via = caller == slot ? cc::string() : cc::format(" (dispatching through \"{}\")", caller->name);
+            CC_ASSERTS(unhonoured.empty(),
+                       cc::format("nx::invoke_tests: \"{}\" declares {}, but \"{}\"{} does not hold it — a dispatched "
+                                  "child runs in the schedule slot of the test it was reached from, so add {} there",
+                                  decl->name, unhonoured, slot->name, via, unhonoured));
         }
 
         test_execution child;

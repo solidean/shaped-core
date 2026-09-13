@@ -1,11 +1,12 @@
+#include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <thread>
 
 // real_filesystem is the only part of slib that touches the disk, so it is also the only part whose tests need a real directory.
 // Everything above it is covered through memory_filesystem instead.
@@ -52,6 +53,8 @@ struct temp_dir
 template <class PredT>
 bool wait_until(PredT&& pred)
 {
+    CC_RECORD_SCOPE("slib_test.wait_until");
+
     constexpr int k_timeout_ms = 5000;
     constexpr int k_slice_ms = 5;
 
@@ -59,7 +62,7 @@ bool wait_until(PredT&& pred)
     {
         if (pred())
             return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(k_slice_ms));
+        cc::this_thread_sleep_secs(k_slice_ms / 1000.0);
     }
     return pred();
 }
@@ -178,12 +181,15 @@ TEST("slib - dropping a real_filesystem watch stops the sink")
     auto fs = slib::real_filesystem(dir.root());
 
     cc::atomic<int> fires = {0};
+    auto notify_secs = 0.0;
     {
         auto const sub = fs.watch("", [&fires] { fires.fetch_add(1); });
 
+        auto const written_secs = cc::current_time_steady_secs();
         dir.write("a.hlsl", "a much longer v2");
 
         bool const notified = sub.has_value() && wait_until([&] { return fires.load() > 0; });
+        notify_secs = cc::current_time_steady_secs() - written_secs;
         CHECK(notified == sub.has_value()); // no backend here, nothing to tear down: see the test above
 
         if (!sub.has_value())
@@ -191,10 +197,12 @@ TEST("slib - dropping a real_filesystem watch stops the sink")
     }
 
     // The subscription is gone, so no notification may follow — the destructor's promise, and the one the OS makes hardest to keep.
-    // There is nothing to wait *for* here, so this waits a short fixed while and checks that nothing happened; a broken teardown moves the count on its own.
+    // There is nothing to wait *for* here, so this waits and checks that nothing happened.
+    // The window is twice what the live subscription above took from write to notification, so a sink that survived would have fired inside it.
+    // That sizing is the negative-check exception in libs/base/nexus/docs/test-runtime.md.
     auto const after_unsubscribe = fires.load();
     dir.write("a.hlsl", "v3");
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    cc::this_thread_sleep_secs(2 * notify_secs);
     CHECK(fires.load() == after_unsubscribe);
 }
 

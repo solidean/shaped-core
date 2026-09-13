@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -20,8 +21,13 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 bool pump_until(cc::function_ref<bool()> done, i32 rounds = 2000)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     for (i32 i = 0; i < rounds; ++i)
     {
         if (done())
@@ -38,6 +44,8 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 2000)
 /// socket, which waits on the world, needs a clock and not a counter.
 bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_for");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 

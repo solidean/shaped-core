@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -18,12 +19,17 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Drive the process pump until `done`, or give up after a bounded number of rounds.
 ///
 /// A round count rather than a wall-clock budget: nothing here waits on the world, so a run that does not finish
 /// promptly is a bug rather than a slow machine.
 bool pump_until(cc::function_ref<bool()> done, i32 rounds = 1000)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     for (i32 i = 0; i < rounds; ++i)
     {
         if (done())

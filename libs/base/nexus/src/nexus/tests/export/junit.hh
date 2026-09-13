@@ -10,5 +10,8 @@ namespace nx
 /// Each nexus test becomes one <testcase> under a single <testsuite> named `suite_name`.
 /// A failing test carries a <failure> element listing its failed expressions and their source locations.
 /// The aggregate <testsuite> / <testsuites> attributes (tests, failures, time) match what the dev.py tooling parses, so this is a drop-in for the synthesized sidecar.
-cc::string write_junit_xml(cc::string_view suite_name, test_schedule_execution const& execution);
+/// A measured `resources` adds cpu_load, cores_used and peak_resident_bytes beside them, which dev.py test's summary reads.
+cc::string write_junit_xml(cc::string_view suite_name,
+                           test_schedule_execution const& execution,
+                           test_run_resources const& resources = {});
 } // namespace nx

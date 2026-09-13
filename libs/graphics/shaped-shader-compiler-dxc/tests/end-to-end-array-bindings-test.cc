@@ -5,7 +5,7 @@
 
 using namespace cc::primitive_defines;
 
-// Array bindings end to end on WARP: reflection yields the array counts, a group binds a partially vacant
+// Array bindings end to end: reflection yields the array counts, a group binds a partially vacant
 // element list (null descriptors for the vacant ones), and the dispatch declares which elements it reads via
 // declare_array_*_access — the accounting rule that every bound array binding must be declared included.
 

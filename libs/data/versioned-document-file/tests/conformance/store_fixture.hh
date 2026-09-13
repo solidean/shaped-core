@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
@@ -149,6 +150,8 @@ namespace vdoc::file::test
 template <class T>
 [[nodiscard]] cc::result<T, cc::async_error> wait_for(cc::shared_async<T> async)
 {
+    CC_RECORD_SCOPE("vdoc_file_test.wait_for");
+
     while (!async->is_ready())
     {
     }
@@ -162,6 +165,8 @@ template <class T>
 template <class T>
 [[nodiscard]] cc::result<T, cc::async_error> wait_for(store& s, cc::shared_async<T> async)
 {
+    CC_RECORD_SCOPE("vdoc_file_test.wait_for");
+
     while (!async->is_ready())
         (void)s.pump();
     return cc::into_result(cc::move(async));
