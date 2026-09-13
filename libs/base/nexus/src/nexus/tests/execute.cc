@@ -1989,6 +1989,10 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             cc::print(execution.verbose_output);
     }
 
+    // Deferred at_home teardowns a test's nodes queued on main after the last pump would otherwise outlive the run.
+    if (cc::current_thread_id() == cc::thread_id::main)
+        cc::main_thread_scheduler().drain();
+
     drain_orphan_checks(result);
 
     // A registered pump outliving the run means a semantic thread was never torn down.

@@ -206,7 +206,9 @@ struct alignas(64) cc::async_scheduler
     /// How many live, unresolved nodes are homed here — a home must outlive every one of them.
     [[nodiscard]] isize homed_node_count() const { return _homed_nodes.load(cc::memory_order_acquire); }
 
-    virtual ~async_scheduler() = default;
+    /// Asserts no live, unresolved node is still homed here: a later wake of one would submit to a destroyed scheduler.
+    /// Runs after a derived destructor has drained its own queues, whose abandoned homed nodes stop counting as they are released.
+    virtual ~async_scheduler();
 
 protected:
     explicit async_scheduler(bool steal_capable_peers, async_inline_deps inline_deps = async_inline_deps::any)

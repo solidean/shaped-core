@@ -941,10 +941,12 @@ co_await cc::async_resume_on_compute();  // / _io() / async_resume_on(h, opts)
 co_await cc::async_set_home_options({.teardown = cc::async_teardown::at_home}); // never suspends; must be homed
 auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); }); // child elsewhere, value moved out
 cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
+home.drain();                            // end of a loop: runs what is left, incl. deferred at_home teardowns
 // inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)
 // teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on the home; resolved values anywhere
 // GOTCHA: children a homed body starts are NOT homed (they go to compute). A home is never re-entered: a blocking wait
-//   inside a homed body does not run that home's other bodies — co_await instead. A home must outlive its homed nodes.
+//   inside a homed body does not run that home's other bodies — co_await instead. EVERY scheduler must outlive the nodes
+//   homed to it (~async_scheduler asserts). same_home_only tries only the FIRST pending dep inline before parking.
 // EXCLUSION (#include <clean-core/thread/async_mutex.hh>) — contention PARKS the node; the thread keeps working.
 cc::async_mutex<T> m;  auto g = co_await m.lock();       // guard: g->..., *g; may be held across co_await, released anywhere
 auto grant = m.lock_async();  /* require(grant) */  auto g2 = grant->take_value(); // raw frame; take EXACTLY once

@@ -1,9 +1,11 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/time.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <nexus/test.hh>
@@ -431,6 +433,126 @@ TEST("async home - a home re-queues itself only behind what one pump cycle alrea
     }
     CHECK(polls.load() > 0);
     CHECK(h.home->homed_node_count() == 0);
+}
+
+namespace
+{
+/// A thread that pushes each gate it is handed after a delay that sweeps through a range, so over many rounds the push
+/// lands before, during and after the moment the home's owner registers to park.
+struct racing_pusher
+{
+    cc::atomic<cc::async<cc::unit>*> pending = {nullptr};
+    cc::atomic<bool> stop = {false};
+    std::thread thread;
+
+    racing_pusher()
+    {
+        thread = std::thread(
+            [this]
+            {
+                auto round = 0;
+                while (!stop.load(cc::memory_order_acquire))
+                {
+                    auto* const gate = pending.load(cc::memory_order_acquire);
+                    if (gate == nullptr)
+                    {
+                        std::this_thread::yield();
+                        continue;
+                    }
+                    for (auto spin = 0; spin < (round % 64) * 40; ++spin)
+                        cc::spin_pause();
+                    ++round;
+                    pending.store(nullptr, cc::memory_order_release);
+                    gate->push_value(cc::unit{});
+                }
+            });
+    }
+
+    ~racing_pusher()
+    {
+        stop.store(true, cc::memory_order_release);
+        thread.join();
+    }
+
+    racing_pusher(racing_pusher const&) = delete;
+    racing_pusher& operator=(racing_pusher const&) = delete;
+};
+
+/// One round on the owner of `home`: a pool-driven root waits on a step homed to the owner, and that step waits on a gate another thread pushes.
+/// The owner blocks in the pool the whole time, so only the home's wake reaches it.
+int race_one_round(cc::async_thread_pool& pool, cc::thread_bound_scheduler& home, racing_pusher& pusher)
+{
+    auto const gate = cc::make_async_manual<cc::unit>();
+    auto const homed = cc::make_async_lazy_on(home, [](cc::unit) { return 1; }, gate);
+    auto const root = cc::make_async_lazy([](int x) { return x + 1; }, homed);
+    pusher.pending.store(gate.get(), cc::memory_order_release);
+    return cc::async_blocking_get_on(pool, root);
+}
+} // namespace
+
+TEST("async home - a push to a home always wakes its owner parked in a pool, however it races the park",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+    racing_pusher pusher;
+
+    cc::atomic<int> completed = {0};
+    std::thread owner(
+        [&]
+        {
+            cc::thread_bound_scheduler home;
+            home.bind_to_current_thread();
+            for (auto round = 0; round < 1000; ++round)
+                if (race_one_round(pool, home, pusher) == 2)
+                    completed.fetch_add(1, cc::memory_order_relaxed);
+        });
+    owner.join(); // a lost wake hangs here, and the run's timeout reports it
+
+    CHECK(completed.load() == 1000);
+}
+
+TEST("async home - an owner that finds every participant slot taken still runs the steps homed to it",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+    racing_pusher pusher;
+
+    // Four foreign threads park in the pool first, which is every external participant slot the pool has.
+    // Nothing observable says the slots are taken, so this waits a moment for them to be claimed; a run that is too
+    // slow for that exercises the ordinary participant path instead, which is still correct.
+    auto const release = cc::make_async_manual<cc::unit>();
+    cc::vector<std::thread> blockers;
+    for (auto i = 0; i < 4; ++i)
+        blockers.push_back(std::thread(
+            [&]
+            {
+                auto const held = cc::make_async_lazy([](cc::unit) { return 0; }, release);
+                (void)cc::async_blocking_get_on(pool, held);
+            }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // The fifth foreign thread owns a home: with no slot it must not take the fallback park that nothing would wake.
+    cc::atomic<int> completed = {0};
+    std::thread owner(
+        [&]
+        {
+            cc::thread_bound_scheduler home;
+            home.bind_to_current_thread();
+            for (auto round = 0; round < 100; ++round)
+                if (race_one_round(pool, home, pusher) == 2)
+                    completed.fetch_add(1, cc::memory_order_relaxed);
+        });
+    owner.join();
+
+    release->push_value(cc::unit{});
+    for (auto& b : blockers)
+        b.join();
+
+    CHECK(completed.load() == 100);
 }
 
 #endif // CC_HAS_THREADS

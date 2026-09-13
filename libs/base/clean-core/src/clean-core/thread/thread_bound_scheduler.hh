@@ -65,6 +65,11 @@ public:
     /// Returns true if work is still pending.
     bool pump_for(double max_ms);
 
+    /// Runs everything queued, including what that work queues in turn, until nothing is left.
+    /// For the end of a loop: a deferred at_home teardown queued after the last pump is otherwise never run, and its node never freed.
+    /// Owner thread only, and never from inside one of this home's bodies.
+    void drain();
+
     /// One bounded cycle, for the blocking waits that service a home between their own steps.
     /// Returns true if anything ran.
     bool pump_cycle();

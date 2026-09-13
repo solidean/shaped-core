@@ -689,11 +689,15 @@ The home word carries a node's options beside the home, so they cost nothing tha
 - **`inline_deps`** — whether a homed node drives a not-yet-started dependency on its own stack.
   `any` is the throughput choice; `same_home_only` sends every unhomed cold dependency to compute and parks, so a main-thread body never decodes on main by accident.
   `home_default` defers to the home: `same_home_only` for a thread home and for the io pool, `any` for a pool.
+  **`same_home_only` tries only the first pending dependency inline before parking.**
+  When that one is unhomed and a later one is homed to the same home, the node parks and the later dependency is run at the home's next pump instead of on this stack.
+  That is correct, only slower than it could be; scanning past the first for a same-home cold dependency is the fix, and it is not built.
 - **`teardown`** — `anywhere` (the default), or `at_home`: a homed node dropped before it ever resolved releases its frame's captures on its home.
   **It covers a never-resolved frame only.**
   A resolved node already destroyed its frame at home, inside its own poll, and its value is built over the home word, so there is no home left to route a value's teardown to.
   A type whose destructor is thread-bound has to handle that itself.
   A deferred teardown needs a live pump: a node abandoned after its home stopped pumping keeps its captures rather than releasing them on the wrong thread.
+  So a loop that stops ends with `home.drain()` — `cc::main_thread_scheduler().drain()` for the main loop, which nexus does at the end of every run.
 
 ### Well-known homes
 
@@ -725,6 +729,10 @@ This is provisional, and worth revisiting with a real use case for nesting.
 It repeats until nothing progresses or the budget is spent, checking between items, so one long body overruns the budget and the return value says work is still pending.
 A cycle runs only what was queued when it started, so a body that yields in a loop cannot pin the loop.
 A user home has the same `pump_for(max_ms)`.
+
+**A scheduler must outlive every node homed to it.**
+Each one counts its live, unresolved homed nodes, and `~async_scheduler` asserts the count is zero once a derived destructor has drained its own queues.
+A resolved node no longer needs its home, so only work still in flight — or held cold — keeps one alive.
 
 ### Strands, not built
 

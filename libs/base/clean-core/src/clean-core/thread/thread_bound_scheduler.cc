@@ -53,10 +53,9 @@ cc::thread_bound_scheduler::thread_bound_scheduler(async_inline_deps default_inl
 cc::thread_bound_scheduler::~thread_bound_scheduler()
 {
     CC_ASSERT(!is_bound() || is_owner_thread(), "a thread_bound_scheduler must be destroyed on its owner thread");
-    CC_ASSERT(homed_node_count() == 0, "a thread_bound_scheduler was destroyed while nodes homed to it are still "
-                                       "alive");
 
-    // Whatever is still queued is torn down here, in place: this IS the owner thread.
+    // Whatever is still queued is run or torn down here, in place: this IS the owner thread.
+    // The base destructor then checks that nothing homed here outlived it.
     auto it = item();
     while (take_one(it))
         run(it);
@@ -208,6 +207,15 @@ bool cc::thread_bound_scheduler::pump_cycle()
     while (_local_next < end)
         run(_local[_local_next++]);
     return true;
+}
+
+void cc::thread_bound_scheduler::drain()
+{
+    CC_ASSERT(is_owner_thread(), "drain runs a thread home's queue, which only its owner thread may do");
+    CC_ASSERT(_body_depth == 0, "drain from inside one of this home's own bodies would re-enter it");
+    while (pump_cycle())
+    {
+    }
 }
 
 bool cc::thread_bound_scheduler::pump_for(double max_ms)

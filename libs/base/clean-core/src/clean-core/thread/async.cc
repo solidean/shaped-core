@@ -101,6 +101,13 @@ cc::async_scheduler* cc::async_scheduler::current_or_null()
     return cc::impl::async_tls().scheduler;
 }
 
+cc::async_scheduler::~async_scheduler()
+{
+    CC_ASSERT(_homed_nodes.load(cc::memory_order_acquire) == 0,
+              "a scheduler was destroyed while nodes homed to it are still alive — a wake would submit to it; resolve "
+              "or drop every node homed to a scheduler before destroying it");
+}
+
 void cc::async_scheduler::set_compute(async_scheduler* sched)
 {
     s_compute_scheduler.store(sched, cc::memory_order_release);
