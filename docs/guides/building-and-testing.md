@@ -634,6 +634,11 @@ So a binary that **crashes before printing anything** is still recorded as a fai
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and result recording stay consistent.
 
+A run ends with one row per binary, longest first: its wall time, its test count, and what it cost the machine.
+That cost is average CPU load, cores kept busy, and peak resident memory, as nexus measured them around its tests.
+A binary with a long wall time and a low load is spending that time serialized, which is usually the thing to fix.
+`check` prints its per-preset timing lines instead.
+
 `uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
 

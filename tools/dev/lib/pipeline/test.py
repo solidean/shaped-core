@@ -265,6 +265,9 @@ def test(
                             "skipped": summary.skipped,
                             "assertions": summary.assertions,
                             "time_s": round(summary.time_s, 3),
+                            "cpu_load": summary.cpu_load,
+                            "cores_used": summary.cores_used,
+                            "peak_resident_bytes": summary.peak_resident_bytes,
                         }
                         if summary
                         else None

@@ -163,7 +163,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             presets, [t.name for t in test_targets], root=ctx.root,
             test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
         )
-        ok = dev.report.summarize_tests(records, presets, ctx.root)
+        ok = dev.report.summarize_tests(records, presets, ctx.root, table=False)
 
         # After the verdict, and never part of it: this is a measurement of the run that just happened.
         # `check` is the longest command anyone here runs, and a single total cannot say which preset or which half.
