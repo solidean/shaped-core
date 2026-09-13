@@ -132,6 +132,27 @@ Name it with `title` as usual, and hand it over the same way.
    ```
    `init` records that path in `review.toml`, so every later command runs bare — the review folder stays under the repo you are standing in either way.
 
+   **A follow-up review starts where the last one stopped, not at the merge base.**
+   When the PR already carries a full review and the author has pushed since, what is owed is the commits after it.
+   Find the head that review read, which is the last commit on the PR before the review comment's timestamp:
+   ```bash
+   gh api repos/<owner>/<repo>/issues/<n>/comments --jq '.[] | {id, user: .user.login, created_at}'
+   gh api repos/<owner>/<repo>/pulls/<n>/commits --paginate --jq '.[] | "\(.sha[0:8]) \(.commit.committer.date) \(.commit.message | split("\n")[0])"'
+   uv run review.py init pr-<n> --repo .tmp/worktrees/pr-<n> --range <reviewed-head>..pr-<n> --goal pr-comment
+   ```
+   Save the earlier comment into your scratchpad and read it before anything else.
+   The new commits are mostly answers to it, so the first question per item is whether it was done, done differently, or not done.
+   A divergence from an earlier instruction is a design choice of its own, and it owes the critique a new one would.
+
+   **A merge of `main` inside that range brings all of main's work with it**, and none of it is this branch's.
+   Bulk each such merge by its sha, then `--rest` as in step 2:
+   ```bash
+   uv run review.py ingest pr-<n> --bulk-commits <merge-sha> --reason "main merged in; each of its PRs was reviewed when it landed"
+   ```
+   The bulk leaves out every file the merge resolved by hand, and names them, because a conflict resolution is the author's work.
+   Those files are then ingested normally, main's side of them included, so read them with `git show --remerge-diff <merge-sha>` beside you.
+   A synthetic base — the reviewed head merged with today's `main` — is the tempting alternative, and it fails exactly where the two conflict.
+
 2. **Account for every change.**
    ```bash
    uv run review.py ingest pr-<n> --stats     # the shape, before committing to reading it
@@ -283,7 +304,7 @@ Name it with `title` as usual, and hand it over the same way.
    The go-ahead to actually post is a separate instruction from the maintainer, never the round answer alone, and never the goal the review was opened with.
 
    `uv run review.py finalize pr-<n>` drafts the artifact for the goal.
-   It is a draft: the tool gathered what was decided, it did not decide which points are worth an afternoon.
+   It is a draft: the tool gathered what was decided, it did not decide which points make the codebase better enough to send.
    Post only on an explicit go-ahead from the maintainer, as one comment.
 
 ## Writing entries that are worth answering

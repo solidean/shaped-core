@@ -74,6 +74,36 @@ def _claim_of(group: list[Hunk], file: FileDiff, net: LineSpace) -> LineSpace:
     return claim
 
 
+def _adopt_residue(groups: list[list[Hunk]], claims: list[LineSpace], file: FileDiff, net: LineSpace) -> None:
+    """Give every atom of this file that no group's span reached to the group nearest it, in place.
+
+    The two diffs do not always align a change the same way.
+    Where the added text repeats text nearby, git's choice of which copy is "new" depends on the context width,
+    so an atom the `--unified=0` diff reports can sit on a line the display diff calls unchanged and shows no hunk for.
+    Without this the default sweep leaves it unaccounted, and `--rest` cannot help, since it draws from the same hunks.
+    """
+    if not groups:
+        return
+    new_path = file.new_path or file.path
+    old_path = file.old_path or file.path
+
+    for side, path, start_of, end_of in (
+        (ADDED, new_path, lambda h: h.new_start, lambda h: h.new_end),
+        (REMOVED, old_path, lambda h: h.old_start, lambda h: h.old_end),
+    ):
+        reached = IntervalList.of([])
+        for claim in claims:
+            reached = reached.union(claim.get(side, path))
+        residue = net.get(side, path).subtract(reached)
+        for start, end in residue:
+            def distance(group: list[Hunk]) -> int:
+                first, last = start_of(group[0]), end_of(group[-1])
+                return max(first - end, start - last, 0)
+
+            nearest = min(range(len(groups)), key=lambda i: distance(groups[i]))
+            claims[nearest].add(side, path, IntervalList.span(start, end))
+
+
 def _summary(path: str, group: list[Hunk], claim: LineSpace) -> str:
     added = sum(len(v) for (side, _), v in claim.lines.items() if side == ADDED)
     removed = sum(len(v) for (side, _), v in claim.lines.items() if side == REMOVED)
@@ -91,8 +121,10 @@ def candidates_for(
 
     for file in display:
         path = file.path
-        for group in group_hunks(file.hunks, gap):
-            claim = _claim_of(group, file, net)
+        groups = group_hunks(file.hunks, gap)
+        claims = [_claim_of(group, file, net) for group in groups]
+        _adopt_residue(groups, claims, file, net)
+        for group, claim in zip(groups, claims):
             if claim.is_empty:
                 continue
             body = "\n".join(h.render() for h in group)

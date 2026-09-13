@@ -41,6 +41,7 @@ from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_s
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
+from tools.review.lib.changeset.ingest import _adopt_residue as adopt_residue, _claim_of as ingest_claim_of  # noqa: E402
 from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
 from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
 from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
@@ -57,7 +58,7 @@ from tools.review.lib.render.media import (  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
-from tools.review.lib.space.netspace import ADDED, REMOVED, build as build_net  # noqa: E402
+from tools.review.lib.space.netspace import ADDED, REMOVED, build as build_net, space_of  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
@@ -466,6 +467,64 @@ def test_bulk_by_commit_narrows_by_path(root: Path) -> None:
     assert only_src is not None
     assert len(only_src.claim) < len(everything.claim)
     assert not only_src.claim.get(ADDED, "docs/b.txt")
+
+
+def test_bulking_a_merge_leaves_its_hand_resolutions_to_be_read(root: Path) -> None:
+    """Bulking `main` merged into a branch claims what main brought, never the conflict the branch author resolved."""
+    git = git_init(root)
+    base = commit(root, "base", {"shared.txt": numbered(10), "theirs.txt": numbered(10)})
+    run = lambda *args: subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+    run("switch", "--quiet", "-c", "upstream")
+    commit(root, "upstream", {
+        "shared.txt": numbered(10).replace("line 5\n", "line 5 upstream\n"),
+        "theirs.txt": numbered(10).replace("line 2\n", "line 2 upstream\n"),
+    })
+    run("switch", "--quiet", "main")
+    commit(root, "branch", {"shared.txt": numbered(10).replace("line 5\n", "line 5 branch\n")})
+    subprocess.run(["git", "merge", "--quiet", "upstream"], cwd=root, capture_output=True)
+    resolved = numbered(10).replace("line 5\n", "line 5 branch and upstream\n")
+    merge = commit(root, "merge upstream", {"shared.txt": resolved})
+
+    assert git.hand_resolved_paths(merge) == {"shared.txt"}
+    assert not git.hand_resolved_paths(base), "a commit that is not a merge resolved nothing"
+
+    net = build_net(git, base, merge)
+    seen: dict[str, set[str]] = {}
+    candidate = commit_ingest.bulk_candidate_for_commits(
+        git, [merge], base=base, head=merge, net=net, reason="upstream", label="merge", hand_resolved=seen,
+    )
+    assert candidate is not None
+    assert candidate.claim.get(ADDED, "theirs.txt"), "what upstream brought is claimed"
+    assert not candidate.claim.get(ADDED, "shared.txt"), "the resolution is the branch author's work and stays unclaimed"
+    assert seen == {merge: {"shared.txt"}}, seen
+
+
+def test_an_atom_the_display_diff_aligned_differently_is_still_claimed(root: Path) -> None:
+    """Where added text repeats nearby text, git aligns it differently per context width; no atom may fall between."""
+    # The zero-context diff calls line 7 added; the display diff aligned the copy so line 7 is unchanged
+    # and split its hunks around it.
+    authority = (
+        "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n"
+        "@@ -2,0 +3,5 @@\n+x\n+x\n+x\n+x\n+x\n"
+    )
+    display = (
+        "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n"
+        "@@ -1,2 +1,6 @@\n a\n b\n+x\n+x\n+x\n+x\n"
+        "@@ -4,2 +8,2 @@\n c\n d\n"
+    )
+
+    net = space_of(parse_diff(authority))
+    file = parse_diff(display)[0]
+    groups = group_hunks(file.hunks, 20)
+    claims = [ingest_claim_of(group, file, net) for group in groups]
+    assert net.subtract(claims[0]), "the fixture must actually leave an atom outside every display hunk"
+
+    adopt_residue(groups, claims, file, net)
+    claimed = net.__class__.empty()
+    for claim in claims:
+        claimed = claimed.union(claim)
+    assert net.subtract(claimed).is_empty, net.subtract(claimed).runs()
 
 
 def test_commit_local_claims_stay_inside_net_space(root: Path) -> None:
