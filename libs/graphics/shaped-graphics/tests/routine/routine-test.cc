@@ -367,8 +367,9 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
 {
     REQUIRE(ctx != nullptr);
 
-    // The exclusion tag is what makes `inits == 1` meaningful: sg::reload_generation() is process-global, and a
-    // concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
+    // The exclusion tag is what makes `inits == 1` meaningful.
+    // sg::reload_generation() is process-global, and a concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
+    // The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
     //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
     // backend in the same process would otherwise carry in.
@@ -454,8 +455,9 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 // A parametrized routine is one instance per distinct parameter value, and each instance knows which value it is for.
 // Serving one instance for two values would mean a pipeline built for the wrong format -- wrong output rather than
 // slow output, which is why the parameter is part of the registry key rather than something execute() re-checks.
-// Holds sg-reload-generation for the same reason as the concurrent-acquire test: `inits == 1` is only meaningful while no
-// other test signals a process-wide reload.
+// Holds sg-reload-generation for the same reason as the concurrent-acquire test.
+// `inits == 1` is only meaningful while no other test signals a process-wide reload.
+// The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
 INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))

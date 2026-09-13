@@ -14,6 +14,9 @@ A test runs as fast as the machine lets it, and never waits a fixed amount of wa
 - **A timeout is tested by injecting a clock, never by waiting it out.**
   Timeout behaviour is worth testing, and the code under test takes a time source the test advances instantly.
   A test that sleeps two seconds to see a two-second timeout fire is wrong, however well it passes.
+- **A negative check sizes its window from a measured positive run.**
+  "Nothing arrives" has no condition to wait on, so the test first times the same thing succeeding, then waits a multiple of that.
+  [record-sampling-test.cc](../../clean-core/tests/record/record-sampling-test.cc) is the model: a stopped sampler is watched for `busy_for_secs(2 * sampled_secs)`, twice what the running one needed.
 - **A green test hits no timeout.** A deadline in a test is a guard that turns a hang into a message, so reaching it is a failure by definition, and a passing run never pays for it.
 
 ## Thorough runs: `nx::is_thorough()`
@@ -40,7 +43,11 @@ uv run dev.py test "sg vulkan backend" --thorough   # the full-strength version,
 ```
 
 - **A flag, not a bucket.** The test runs in both modes and asserts the same things; only how much ground it covers changes.
-  A test that should not run at all by default belongs in the `manual` bucket instead.
+  The `manual` bucket is not where a thorough test goes: it holds one-off tools and the rare machine-dependent test, and no sweep runs it.
+  A test that only makes sense at full strength is a normal test marked `nx::config::thorough_only` — see below.
+  The WARP entry drivers are a different case again.
+  They skip by default only when a hardware adapter covers the same assertions, and run by default on a host without one.
+  So they branch on `nx::is_thorough()` in the body rather than being `thorough_only`.
 - **Write the thorough version first, then narrow it.**
   Size the thorough run to what is worth waiting for — tens of seconds for an expensive fuzz — and cut the default run down to well under a second.
   Narrowing afterwards keeps the full-strength parameters in one place, readable as the intent.
@@ -50,6 +57,29 @@ uv run dev.py test "sg vulkan backend" --thorough   # the full-strength version,
 
 The fuzz narrowing helpers are `cap_seed_count(n)` — each seed is a whole program, so this scales runtime linearly — and `cap_max_executions(n)`, which lowers every operation's at-most.
 [fuzz-testing](fuzz-testing.md) has the engine they narrow.
+
+## Tests with no narrow version: `thorough_only`
+
+Some tests have nothing worth running in a default run — a soak, a sweep whose only point is its size.
+Declare those `thorough_only`, and a default run skips them rather than paying for a version that proves nothing:
+
+```cpp
+TEST("mesh - decimation holds on every model in the corpus", thorough_only)
+{
+    for (auto const& f : list_dir("data/mesh-corpus"))
+        CHECK(decimate(load(f)).is_manifold());
+}
+```
+
+- **Skipped, not left out.** The test is still selected and scheduled, and its body is replaced by a `SKIP("runs only under --thorough")` that passes.
+  A filter naming it in a default run therefore reports it green without running it; add `--thorough` to run it.
+- **Prefer narrowing when a narrow version exists.** A test that proves something on a smaller input keeps running on every commit, which is worth more than a skip.
+- **It holds at dispatch too.** An `INVOCABLE_TEST` marked `thorough_only` is skipped by `nx::invoke_tests` in a default run, whatever its driver carries.
+
+**Not yet: a skip is reported as a pass.**
+nexus has no skipped state, so `SKIP` counts as a passing check and the JUnit writer always writes `skipped="0"`.
+A default run therefore shows every `thorough_only` test as passed, and the reason it did not run appears in no report.
+The fix is a real skipped outcome carried through the result, the console summary and JUnit.
 
 ## Finding the slow test
 

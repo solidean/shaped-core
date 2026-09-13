@@ -175,6 +175,11 @@ cc::span<cc::vector<cc::string> const> current_section_scopes(); // effective se
 // Read off the running instance through the ambient chain rather than a thread-local, so it is correct for a test running on any thread and for one dispatched from another.
 nx::test_registry const* active_registry();
 
+// The declaration of the SCHEDULED test the code here runs inside: the running test, or the top-level test that dispatched it.
+// A dispatched child occupies that test's slot in the schedule, so this is whose config says what the child is actually run under.
+// Null outside a test.
+nx::test_declaration const* current_slot_declaration();
+
 // True if `decl` is already running on the current execution chain (an ancestor invoke, or the running test
 // itself). nx::invoke_tests uses this to break invocation cycles rather than recurse forever.
 bool is_declaration_active(nx::test_declaration const* decl);

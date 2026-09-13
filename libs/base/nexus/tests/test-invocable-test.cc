@@ -347,6 +347,118 @@ TEST("invocable tests - an indirect invocation cycle (A -> B -> A) is caught", n
     CHECK(exec.count_failed_tests() >= 1);
 }
 
+TEST("invocable tests - a dispatched child's scheduling asks are honoured only by the slot it runs in")
+{
+    using nx::config::exclusive;
+    using nx::config::main_thread;
+    using nx::config::own_pool;
+    using nx::config::singlethreaded;
+    auto const make = [](auto&&... items) { return nx::impl::merge_config(items...); };
+    auto const unhonoured = [](nx::config::cfg const& child, nx::config::cfg const& slot)
+    { return nx::impl::find_unhonoured_dispatch_config(child, slot); };
+
+    // A child asking for nothing runs anywhere, whatever the slot holds.
+    CHECK(unhonoured(make(), make()).empty());
+    CHECK(unhonoured(make(), make(exclusive("gpu"), singlethreaded)).empty());
+
+    // Exclusion: every tag must be held by the slot, or the slot must run alone.
+    CHECK(unhonoured(make(exclusive("gpu")), make()) == "exclusive(\"gpu\")");
+    CHECK(unhonoured(make(exclusive("gpu")), make(exclusive("gpu"))).empty());
+    CHECK(unhonoured(make(exclusive("gpu")), make(exclusive("net"), exclusive("gpu"))).empty());
+    CHECK(unhonoured(make(exclusive("gpu"), exclusive("net")), make(exclusive("gpu"))) == "exclusive(\"net\")");
+    CHECK(unhonoured(make(exclusive("gpu")), make(exclusive())).empty());
+    CHECK(unhonoured(make(exclusive()), make(exclusive("gpu"))) == "exclusive()");
+
+    // main_thread is a flag the slot has to carry too.
+    CHECK(unhonoured(make(main_thread), make()) == "main_thread");
+    CHECK(unhonoured(make(main_thread), make(main_thread)).empty());
+
+    // A scheduler mode other than the default must be the slot's exactly.
+    CHECK(unhonoured(make(singlethreaded), make()) == "singlethreaded");
+    CHECK(unhonoured(make(singlethreaded), make(singlethreaded)).empty());
+    CHECK(unhonoured(make(nx::config::no_scheduler), make(singlethreaded)) == "no_scheduler");
+    CHECK(unhonoured(make(own_pool(2)), make(own_pool(4))) == "own_pool(2)");
+    CHECK(unhonoured(make(own_pool(2)), make(own_pool(2))).empty());
+}
+
+#if CC_ASSERT_ENABLED
+TEST("invocable tests - dispatching a child whose exclusion the driver does not hold fails the driver", no_scheduler)
+{
+    struct tagged_key
+    {
+    };
+    auto child_runs = 0;
+
+    nx::test_registry reg;
+    add_invocable(
+        reg, "tagged child",
+        [&](tagged_key)
+        {
+            ++child_runs;
+            CHECK(true);
+        },
+        nx::impl::merge_config(nx::config::exclusive("shared-state")));
+    reg.add_declaration("holding driver", nx::impl::merge_config(nx::config::exclusive("shared-state")),
+                        [&] { nx::invoke_tests("run", tagged_key{}); });
+    reg.add_declaration("bare driver", {}, [&] { nx::invoke_tests("run", tagged_key{}); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(child_runs == 1); // only under the driver holding the tag
+
+    nx::test_execution const* holding = nullptr;
+    nx::test_execution const* bare = nullptr;
+    for (auto const& e : exec.executions)
+    {
+        if (e.instance.declaration->name == "bare driver")
+            bare = &e;
+        else
+            holding = &e;
+    }
+    REQUIRE(holding != nullptr);
+    REQUIRE(bare != nullptr);
+
+    CHECK(!holding->is_considered_failing());
+    CHECK(holding->nested.size() == 1);
+
+    // The assert fires before the child runs, so the driver fails with no child under it.
+    CHECK(bare->is_considered_failing());
+    CHECK(bare->nested.empty());
+}
+
+TEST("invocable tests - a nested dispatch is checked against the scheduled test, not the child between", no_scheduler)
+{
+    struct outer_key
+    {
+    };
+    struct inner_key
+    {
+    };
+    auto leaf_runs = 0;
+
+    nx::test_registry reg;
+    add_invocable(
+        reg, "leaf",
+        [&](inner_key)
+        {
+            ++leaf_runs;
+            CHECK(true);
+        },
+        nx::impl::merge_config(nx::config::singlethreaded));
+    // The middle child asks for nothing, and still dispatches the leaf: what runs the leaf is the driver's slot.
+    add_invocable(reg, "middle", [&](outer_key) { nx::invoke_tests("inner", inner_key{}); });
+    reg.add_declaration("driver", nx::impl::merge_config(nx::config::singlethreaded),
+                        [&] { nx::invoke_tests("outer", outer_key{}); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(leaf_runs == 1);
+    CHECK(exec.count_failed_tests() == 0);
+}
+#endif
+
 // --- static end-to-end smoke of the INVOCABLE_TEST macro + real nx::invoke_tests against the static registry.
 // The driver must invoke this, or a full unfiltered run would report it as an orphan.
 

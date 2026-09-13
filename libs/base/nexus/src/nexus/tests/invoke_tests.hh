@@ -4,8 +4,10 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh>
+#include <nexus/tests/config.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
@@ -39,6 +41,15 @@ invocation_result invoke_tests_impl(cc::string_view name,
 
 // Element-wise equality of two decayed argument-type lists (the invoke_tests / alias join key).
 bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b);
+
+// The first scheduling ask in `child` that running inside `slot`'s schedule slot would silently drop, spelled as declared.
+// Empty when every ask is honoured, including when `child` makes none.
+//
+// A dispatched child creates no node of its own, so only the scheduled test it runs inside can honour one.
+// Exclusion is honoured by a slot holding the same tag or an untagged `exclusive()`, and main_thread by a slot holding it.
+// A scheduler mode other than the default must match the slot's exactly: `singlethreaded`, `no_scheduler`, `own_pool(n)`.
+// nx::invoke_tests asserts on a non-empty answer, so this is the rule that assert enforces.
+cc::string find_unhonoured_dispatch_config(config::cfg const& child, config::cfg const& slot);
 } // namespace impl
 
 /// Runs every INVOCABLE_TEST whose *decayed* argument signature matches `Args...`, passing `args...`.
@@ -49,6 +60,9 @@ bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_inde
 /// The template argument is usually left to deduce (`nx::invoke_tests("case", load(f))`), and the key is the decayed type list.
 /// `name` is authored, never derived from a value, so output and addresses stay stable.
 /// Arguments are boxed by (decayed) value, so prefer cheap-to-copy / handle types, or pass large data behind a handle or pointer.
+///
+/// A child declaring `exclusive(...)`, `main_thread` or a scheduler mode asserts unless the test it runs inside holds the same.
+/// A `thorough_only` child is skipped unless the run is thorough, whatever its driver carries.
 template <class... Args>
 invocation_result invoke_tests(cc::string_view name, Args... args)
 {

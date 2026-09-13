@@ -65,6 +65,7 @@ A body running as a node on the phase's pool inherits it as a bound worker scope
 Touching an async under it asserts, which is the point: the test has taken that decision over.
 `execute_tests` asserts when a scheduler is already bound rather than nesting one, and names the fix.
 `nx::invoke_tests` is unaffected — a dispatched child runs inside its driver's body and creates no scheduler.
+So a child declaring either mode asserts at dispatch unless its driver declares the same — [invocable-tests](invocable-tests.md#scheduling-asks-belong-to-the-driver) has the rule.
 
 Both drive the body directly, so neither composes with a mode that runs it as a node, and asking for both is an assert.
 

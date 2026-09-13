@@ -64,7 +64,12 @@ if (!nx::is_thorough())                  // false by default; true under --thoro
                                          //   smaller inputs — never fewer checks. fuzz->cap_max_executions(n) too
 ```
 
-A flag, not a bucket: the test runs either way.
+```cpp
+TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --thorough; for a test with no narrow
+                                         //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
+```
+
+A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 
 ## Examples (`EXAMPLE`)
@@ -280,6 +285,9 @@ TEST("sg backend - vulkan")
 - **Orphan check**: in a full unfiltered normal run, an enabled `INVOCABLE_TEST` that no driver invoked fails the run.
   One an alias can reach is exempt, so a deliberately `disabled` driver parks its invocables (runnable by name) rather than orphaning them.
 - Args are boxed by (decayed) value, so prefer cheap-to-copy / handle types.
+- **Scheduling asks on a child are the driver's to hold**: a child runs in its driver's slot.
+  So `exclusive(tag)`, `main_thread` or a scheduler mode on an `INVOCABLE_TEST` asserts at dispatch unless the scheduled test holds the same.
+  `exclusive()` on the driver covers every tag.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 
 ## Running tests
