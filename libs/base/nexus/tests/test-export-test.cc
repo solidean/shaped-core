@@ -1,4 +1,5 @@
 #include <babel-data/data/json.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/pgo.hh>
@@ -9,6 +10,7 @@
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/pgo_json.hh>
+#include <nexus/tests/export/timings_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
@@ -321,6 +323,42 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     auto const per_op = entry_named(metrics, "per_op");
     CHECK(per_op["value"].as_double() == 0.25);
     CHECK(per_op["higher_is_better"].as_bool(true) == false);
+}
+
+TEST("export - the timings sidecar places every test on the wall clock, in the order it ran", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("first", {}, [] { CHECK(true); });
+    reg.add_declaration("second", {}, [] { CHECK(false); });
+
+    // One at a time in schedule order, so the second test's interval must start where the first one's ended.
+    auto config = nx::test_schedule_config{};
+    config.jobs = 1;
+
+    auto const wall_before = cc::current_time_wall_secs();
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+    auto const doc = babel::json::read(nx::write_timings_json("my-suite", exec)).value();
+    auto const wall_after = cc::current_time_wall_secs();
+
+    auto const root = doc.root();
+    CHECK(root["suite"].as_string() == "my-suite");
+    REQUIRE(root["tests"].size() == 2);
+
+    auto const first = entry_named(root["tests"], "first");
+    auto const second = entry_named(root["tests"], "second");
+
+    // Epoch seconds, not steady ones: that is what lets dev.py lay them beside its own spans.
+    // The slack covers the gap between the two clock reads the conversion offset is taken from.
+    CHECK(first["start"].as_double() >= wall_before - 0.01);
+    CHECK(second["end"].as_double() <= wall_after + 0.01);
+
+    CHECK(first["start"].as_double() <= first["end"].as_double());
+    CHECK(first["end"].as_double() <= second["start"].as_double());
+    CHECK(first["thread"].as_double() != 0);
+
+    CHECK(first["failed"].as_bool(true) == false);
+    CHECK(second["failed"].as_bool());
 }
 
 TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)

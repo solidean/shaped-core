@@ -3,6 +3,7 @@
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -27,7 +28,6 @@
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/section.hh>
 
-#include <chrono>        // std::chrono: no cc timing yet
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
 
@@ -716,7 +716,6 @@ struct async_test_state
     cc::async_ambient_handle ambient;
 
     cc::shared_async<cc::unit> root;
-    std::chrono::high_resolution_clock::time_point started_at;
     bool started = false;
 
     // The trace this test's recording is bucketed under, minted alongside the ambient link above.
@@ -801,8 +800,7 @@ void finish_async_test(async_test_state& state)
 
     // No section replay here, so everything the body's own thread reported belongs to the root section.
     auto& sec = *ctx.root_section;
-    sec.duration_seconds
-        = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - state.started_at).count();
+    sec.duration_seconds = cc::current_time_steady_secs() - state.execution->started_at_steady_s;
     sec.executed_checks += cc::exchange(ctx.executed_checks, 0);
     sec.failed_checks += cc::exchange(ctx.failed_checks, 0);
     sec.errors.push_back_range(cc::exchange(ctx.errors, {}));
@@ -817,6 +815,7 @@ void finish_async_test(async_test_state& state)
         note_leaked_async_work(ctx, decl, outstanding);
 
     test_execute_end(cc::move(state.ctx), leaked);
+    state.execution->finished_at_steady_s = cc::current_time_steady_secs();
 
     // The run's recorder comes back BEFORE the bucket is closed against it, which is the order the synchronous path
     // gets from scoping alone.
@@ -831,7 +830,8 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
     if (!state.started)
     {
         state.started = true;
-        state.started_at = std::chrono::high_resolution_clock::now();
+        state.execution->started_at_steady_s = cc::current_time_steady_secs();
+        state.execution->thread = u64(cc::current_thread_id());
         state.ctx = test_execute_begin(*state.execution, *state.config, {}, /*filter_offset=*/0);
         state.ctx->allows_sections = false;
 
@@ -1392,6 +1392,8 @@ void nx::impl::run_test_body(nx::test_execution& execution,
 {
     CC_ASSERT(execution.instance.declaration != nullptr, "instances must be valid");
     auto const& decl = *execution.instance.declaration;
+    execution.started_at_steady_s = cc::current_time_steady_secs();
+    execution.thread = u64(cc::current_thread_id());
 
     // Set up test context for check reporting
     auto owned_ctx = test_execute_begin(execution, config, section_scopes, filter_offset);
@@ -1436,7 +1438,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                     *ctx.verbose_sink += cc::format("  - start \"{}\" section {}\n", decl.name, section_num);
             }
             section_num++;
-            auto const t_section_start = std::chrono::high_resolution_clock::now();
+            auto const t_section_start = cc::current_time_steady_secs();
 
             try
             {
@@ -1488,8 +1490,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 sec = ctx.root_section.get();
             CC_ASSERT(sec != nullptr, "should always have a leaf section");
             {
-                auto const t_section_end = std::chrono::high_resolution_clock::now();
-                sec->duration_seconds = std::chrono::duration<double>(t_section_end - t_section_start).count();
+                sec->duration_seconds = cc::current_time_steady_secs() - t_section_start;
                 sec->executed_checks = cc::exchange(ctx.executed_checks, 0);
                 sec->failed_checks = cc::exchange(ctx.failed_checks, 0);
                 sec->errors = cc::exchange(ctx.errors, {});
@@ -1524,6 +1525,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
 
     // Clean up test context (finalizes execution.root)
     test_execute_end(cc::move(owned_ctx), leaked_async_work);
+    execution.finished_at_steady_s = cc::current_time_steady_secs();
 
     // After the link is gone and the verdict is in.
     // A passing test's events are dropped here, which is what returns their chunks to the pool.

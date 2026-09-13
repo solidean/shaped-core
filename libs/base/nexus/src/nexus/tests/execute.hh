@@ -84,6 +84,14 @@ struct nx::test_execution
     // note: global stats == root stats
     section root;
 
+    // The interval the test occupied, on cc::current_time_steady_secs(), and 0 for a test that never started.
+    // Unlike root.duration_seconds, which sums the section passes, this is one interval, so it places the test on a timeline.
+    double started_at_steady_s = 0.0;
+    double finished_at_steady_s = 0.0;
+
+    // The thread the body started on — the counter cc::current_thread_id() hands out, not an OS id.
+    u64 thread = 0;
+
     // The --verbose console trace this test produced, buffered instead of printed as it happens.
     // Tests may run concurrently, so printing from the running test's own thread interleaves into noise.
     // A nested (dispatched) execution appends into its top-level ancestor's buffer, which is what keeps a driver's trace and its children's interleaved as they were.

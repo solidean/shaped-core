@@ -39,6 +39,7 @@ add_library(nexus
     src/nexus/tests/export/junit.cc
     src/nexus/tests/export/bench_json.cc
     src/nexus/tests/export/pgo_json.cc
+    src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/runner.cc
@@ -105,6 +106,7 @@ target_sources(nexus
     src/nexus/tests/export/junit.hh
     src/nexus/tests/export/bench_json.hh
     src/nexus/tests/export/pgo_json.hh
+    src/nexus/tests/export/timings_json.hh
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh

@@ -546,13 +546,14 @@ It is cached on `(toolset, arch)` now and shows up as a single capture, so a run
 ### What becomes a job
 
 A **job** is one thing with a wall-clock start and an end.
-Five sources feed the profile, and none of them needs the build reconfigured:
+Six sources feed the profile, and none of them needs the build reconfigured:
 
 | type | one job per | where it comes from |
 |------|-------------|---------------------|
 | `configure` / `build` / `test` / `lint` / `format` / `run` | captured subprocess | `run_step`, the single choke point every child goes through |
 | `compile` / `link` | translation unit, and linked binary | the `<output>.diag.json` sidecars `diag-launcher` already writes next to every artifact |
 | `clang-tidy` | linted `.cc` | the gate runner's own thread pool, reported back through a fragment file |
+| `testcase` | nexus test, dispatched children included | the `<binary>.timings.json` sidecar `dev.py test` asks each binary for with `--timings-json`, only under `--profile` |
 | `check-gate` | pre-commit gate | the `check` registry |
 | `env` / `git` / `discover` / `fingerprint` / `probe` / `prereq` / `crossrefs` | in-process phase | spans around the work that spends real time without spawning a step |
 
@@ -586,6 +587,16 @@ Only the rendered slice is adjusted, never a recorded job, so the summary's numb
 
 `--profile-lanes global` (the default) packs the fan-out into one pool.
 `--profile-lanes per-type` gives each fanned-out job type its own pool and its own track — worth it once one kind of work is what you are chasing.
+
+A slow test run is the case it was made for:
+
+```bash
+uv run dev.py test --profile .tmp/dev-profile/test.json --profile-type chrome-tracing --profile-lanes per-type
+```
+
+Every test becomes a `testcase` slice under its binary's `test` step, so the question "which test is this binary waiting on" reads straight off the timeline.
+Lanes are packed by overlap, not by thread; the thread a test ran on is in its args, and thread 1 is the main thread.
+That one matters, because nexus runs `main_thread` and `exclusive()` tests one at a time and never beside the pool.
 The `dev.py` process is unaffected either way, since depth is not a thing to allocate.
 
 ### Formats, and composing runs

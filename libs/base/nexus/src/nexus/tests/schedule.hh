@@ -107,6 +107,10 @@ struct nx::test_schedule_config
     // Set via --pgo-json <file>; nx::pgo records the metrics.
     cc::string pgo_json_file;
 
+    // When non-empty, run() writes every test's wall-clock interval and thread to this path.
+    // Set via --timings-json <file>; `dev.py test --profile` turns it into one trace slice per test.
+    cc::string timings_json_file;
+
     // When non-empty, run() writes the benchmark sidecar to this path, additionally to the console output.
     //
     // A different schema from the PGO one and a different consumer, which is why the two files are named apart:

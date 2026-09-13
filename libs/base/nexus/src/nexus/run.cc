@@ -20,6 +20,7 @@
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/pgo_json.hh>
+#include <nexus/tests/export/timings_json.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
@@ -291,6 +292,15 @@ int nx::run(int argc, char** argv)
         auto const written = write_report_file(config.pgo_json_file, write_pgo_json(suite_name(), execution));
         if (!written.has_value())
             cc::eprintln("Error: could not write perf JSON file: {}: {}", config.pgo_json_file,
+                         written.error().to_string());
+    }
+
+    // Additive as well: where each test sat on the timeline, for a trace of the run.
+    if (!config.timings_json_file.empty())
+    {
+        auto const written = write_report_file(config.timings_json_file, write_timings_json(suite_name(), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write timings JSON file: {}: {}", config.timings_json_file,
                          written.error().to_string());
     }
 

@@ -43,6 +43,7 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `--pgo-benchmarks` | Selects the *pgo_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
 | `--benchmarks` | Selects the *benchmark* bucket (see [benchmarking.md](../../../../docs/guides/benchmarking.md)). Not a Catch2 flag |
 | `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
+| `--timings-json <file>` | Writes each test's wall-clock interval (Unix epoch seconds) and thread to `<file>` (additive). Not a Catch2 flag |
 | `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
 | `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
