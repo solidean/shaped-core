@@ -215,6 +215,76 @@ TEST("async semaphore - holds its count, and a large request waits at the head o
     CHECK(small->is_ready());
 }
 
+TEST("async permit core - the queue stays bounded while contention never lets it empty", nx::config::singlethreaded)
+{
+    // Two waiters are always queued when the holder releases, and the new holder re-queues behind them.
+    // The queue then never reaches empty, which is the one moment an uncompacted queue would reset.
+    cc::impl::async_permit_core core(1);
+    auto const acquire
+        = [&] { return cc::impl::async_permit_acquire_async<cc::async_semaphore_permit, void>(core, 1, nullptr); };
+
+    auto holder = acquire();
+    REQUIRE(holder->is_ready());
+    auto held = holder->take_value();
+    auto first = acquire();
+    auto second = acquire();
+
+    auto max_slots = isize(0);
+    for (auto i = 0; i < 1000; ++i)
+    {
+        held.release(); // grants `first`
+        REQUIRE(first->is_ready());
+        CHECK(!second->is_ready());
+        held = first->take_value();
+        first = cc::move(second);
+        second = acquire();
+        max_slots = cc::max(max_slots, core.queued_slots());
+    }
+    CHECK(max_slots <= 4);
+    held.release();
+}
+
+TEST("async shared mutex - a writer dropped while queued does not hold back readers behind it", nx::config::singlethreaded)
+{
+    // The deadlock this pins: a reader holds the lock and waits on a child that wants a shared lock of its own.
+    cc::async_shared_mutex<int> m(3);
+    auto reader = m.try_lock_shared();
+    REQUIRE(reader.has_value());
+
+    auto writer = m.lock_async();
+    CHECK(!writer->is_ready());
+    writer = nullptr; // cancelled before its turn
+
+    auto const child = m.lock_shared_async();
+    CHECK(child->is_ready()); // nothing live is queued, so it shares with the holder at once
+    CHECK(m.try_lock_shared().has_value());
+}
+
+TEST("async semaphore - a dropped request at the head does not strand free permits", nx::config::singlethreaded)
+{
+    cc::async_semaphore s(4);
+    auto a = s.try_acquire(1);
+    REQUIRE(a.has_value());
+
+    auto big = s.acquire_async(4);
+    CHECK(!big->is_ready());
+    CHECK(!s.try_acquire(1).has_value()); // a live head of line: nobody passes it
+    big = nullptr;
+
+    CHECK(s.try_acquire(1).has_value());
+    CHECK(s.acquire_async(1)->is_ready());
+}
+
+TEST("async mutex - a moved-from guard no longer reaches the value", nx::config::singlethreaded)
+{
+    cc::async_mutex<int> m(1);
+    auto g = m.try_lock();
+    REQUIRE(g.has_value());
+    auto moved = cc::move(g.value());
+    CHECK(g.value().operator->() == nullptr);
+    CHECK(*moved == 1);
+}
+
 #if CC_HAS_THREADS
 TEST("async mutex - exclusion holds under contention on a pool", nx::config::no_scheduler)
 {

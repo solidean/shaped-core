@@ -40,26 +40,52 @@ bool cc::impl::async_permit_core::try_acquire(isize permits)
     auto s = _state.load(cc::memory_order_acquire);
     for (;;)
     {
-        // A waiter queued ahead takes precedence over any amount of free permits: nobody barges past the queue.
-        if ((s & waiters_bit) != 0 || (s & available_mask) < u64(permits))
+        if ((s & available_mask) < u64(permits))
             return false;
+        if ((s & waiters_bit) != 0)
+            break;
         if (_state.compare_exchange_weak(s, s - u64(permits), cc::memory_order_acq_rel, cc::memory_order_acquire))
             return true;
     }
+
+    // The permits are free and somebody is queued, which only a dropped waiter at the head can explain for long.
+    // Settle the queue, then look again: a live waiter still takes precedence, so nobody barges past the queue.
+    cc::vector<granted> to_push;
+    auto taken = false;
+    lock_spin();
+    dispatch_locked(to_push);
+    s = _state.load(cc::memory_order_acquire);
+    while ((s & waiters_bit) == 0 && (s & available_mask) >= u64(permits))
+        if (_state.compare_exchange_weak(s, s - u64(permits), cc::memory_order_acq_rel, cc::memory_order_acquire))
+        {
+            taken = true;
+            break;
+        }
+    unlock_spin();
+    push_granted(to_push);
+    return taken;
 }
 
 bool cc::impl::async_permit_core::acquire_or_enqueue(isize permits, async_node_base* grant, push_fn push, void* context)
 {
+    cc::vector<granted> to_push;
     lock_spin();
+
+    // A dropped waiter at the head would otherwise hold this arrival back until the next release, which for a reader
+    // behind a dead writer may never come.
+    if ((_state.load(cc::memory_order_acquire) & waiters_bit) != 0)
+        dispatch_locked(to_push);
+
     auto s = _state.load(cc::memory_order_acquire);
     for (;;)
     {
         if ((s & waiters_bit) == 0 && (s & available_mask) >= u64(permits))
         {
-            // Released between the caller's fast try and this lock: take them after all.
+            // Released between the caller's fast try and this lock, or freed by the dispatch above: take them after all.
             if (_state.compare_exchange_weak(s, s - u64(permits), cc::memory_order_acq_rel, cc::memory_order_acquire))
             {
                 unlock_spin();
+                push_granted(to_push);
                 return true;
             }
             continue;
@@ -74,6 +100,7 @@ bool cc::impl::async_permit_core::acquire_or_enqueue(isize permits, async_node_b
     _queue.push_back(
         waiter{.grant = async_node_weak::from_alive(grant), .permits = permits, .push = push, .context = context});
     unlock_spin();
+    push_granted(to_push);
     return false;
 }
 
@@ -84,13 +111,6 @@ void cc::impl::async_permit_core::release(isize permits)
         if (_state.compare_exchange_weak(s, s + u64(permits), cc::memory_order_acq_rel, cc::memory_order_acquire))
             return;
 
-    struct granted
-    {
-        async_node_ptr grant;
-        isize permits;
-        push_fn push;
-        void* context;
-    };
     cc::vector<granted> to_push;
 
     lock_spin();
@@ -98,8 +118,15 @@ void cc::impl::async_permit_core::release(isize permits)
     while (!_state.compare_exchange_weak(s, s + u64(permits), cc::memory_order_acq_rel, cc::memory_order_acquire))
     {
     }
+    dispatch_locked(to_push);
+    unlock_spin();
 
-    // Hand the freed permits to the oldest live waiters, head of line first.
+    push_granted(to_push);
+}
+
+void cc::impl::async_permit_core::dispatch_locked(cc::vector<granted>& to_push)
+{
+    // Hand the free permits to the oldest live waiters, head of line first.
     // The strong handle taken here is what makes the push safe: a waiter dropped after this still has its grant alive,
     // and dropping that grant later destroys the guard, which releases the permits again.
     while (_head < _queue.size())
@@ -108,11 +135,12 @@ void cc::impl::async_permit_core::release(isize permits)
         auto strong = w.grant.lock();
         if (strong == nullptr)
         {
-            ++_head; // the waiter was dropped before its turn: nothing to hand over
+            w.grant = {}; // the waiter was dropped before its turn: nothing to hand over
+            ++_head;
             continue;
         }
 
-        s = _state.load(cc::memory_order_acquire);
+        auto s = _state.load(cc::memory_order_acquire);
         if ((s & available_mask) < u64(w.permits))
             break; // the head does not fit yet; nobody behind it may jump the queue
 
@@ -120,6 +148,7 @@ void cc::impl::async_permit_core::release(isize permits)
         {
         }
         to_push.push_back(granted{.grant = cc::move(strong), .permits = w.permits, .push = w.push, .context = w.context});
+        w.grant = {}; // a consumed slot's weak count would otherwise pin the grant node's storage until the queue empties
         ++_head;
     }
 
@@ -127,14 +156,31 @@ void cc::impl::async_permit_core::release(isize permits)
     {
         _queue.clear();
         _head = 0;
-        s = _state.load(cc::memory_order_acquire);
+        auto s = _state.load(cc::memory_order_acquire);
         while (!_state.compare_exchange_weak(s, s & ~waiters_bit, cc::memory_order_acq_rel, cc::memory_order_acquire))
         {
         }
     }
-    unlock_spin();
+    else if (_head * 2 >= _queue.size())
+    {
+        // Under steady contention the queue never empties — every release re-queues its releaser — so the consumed
+        // prefix is dropped once it is half the queue, which keeps it within twice the entries still waiting.
+        _queue.remove_at_range({.offset = 0, .size = _head});
+        _head = 0;
+    }
+}
 
+void cc::impl::async_permit_core::push_granted(cc::vector<granted>& to_push)
+{
     // Outside the spinlock: a push wakes the waiter, and dropping a grant whose waiter has gone releases permits again.
     for (auto& g : to_push)
         g.push(g.grant.get(), async_permit_hold(this, g.permits), g.context);
+}
+
+isize cc::impl::async_permit_core::queued_slots()
+{
+    lock_spin();
+    auto const n = _queue.size();
+    unlock_spin();
+    return n;
 }

@@ -63,6 +63,8 @@ private:
 /// A waiter is a grant node the queue holds WEAKLY: unlock pushes a live hold into the oldest one still alive.
 /// A waiter that was dropped simply fails to lock and is skipped, and one dropped after its grant releases the hold
 /// through the grant's value teardown — so cancelling a wait needs no unlinking at all.
+/// Dropped waiters are skipped on every release AND every arrival, so a dead head never holds back a newcomer.
+/// A live waiter queued behind a dead one still waits for the next release or arrival; nothing wakes the queue when a waiter is dropped.
 struct async_permit_core
 {
     explicit async_permit_core(isize capacity);
@@ -71,7 +73,7 @@ struct async_permit_core
     async_permit_core(async_permit_core const&) = delete;
     async_permit_core& operator=(async_permit_core const&) = delete;
 
-    /// One CAS; false when the permits are not free, or anyone is already waiting.
+    /// One CAS when nobody waits; false when the permits are not free, or a live waiter is queued.
     [[nodiscard]] bool try_acquire(isize permits);
 
     using push_fn = void (*)(async_node_base* grant, async_permit_hold hold, void* context);
@@ -85,6 +87,9 @@ struct async_permit_core
 
     [[nodiscard]] isize capacity() const { return _capacity; }
 
+    /// The slots the queue currently holds, consumed or not; for tests pinning that it stays bounded.
+    [[nodiscard]] isize queued_slots();
+
 private:
     struct waiter
     {
@@ -94,8 +99,21 @@ private:
         void* context;
     };
 
+    struct granted
+    {
+        async_node_ptr grant;
+        isize permits;
+        push_fn push;
+        void* context;
+    };
+
     void lock_spin();
     void unlock_spin();
+
+    /// Under the spinlock: hands free permits to the oldest live waiters, skips dead ones, and compacts the queue.
+    /// The pushes are collected rather than made, because a push wakes a waiter and must happen outside the spinlock.
+    void dispatch_locked(cc::vector<granted>& to_push);
+    void push_granted(cc::vector<granted>& to_push);
 
     static constexpr u64 waiters_bit = u64(1) << 63;
     static constexpr u64 available_mask = ~waiters_bit;
@@ -195,8 +213,20 @@ struct cc::async_mutex_guard
     [[nodiscard]] T& operator*() const { return *_value; }
     [[nodiscard]] T* operator->() const { return _value; }
 
-    async_mutex_guard(async_mutex_guard&&) noexcept = default;
-    async_mutex_guard& operator=(async_mutex_guard&&) noexcept = default;
+    async_mutex_guard(async_mutex_guard&& rhs) noexcept : _hold(cc::move(rhs._hold)), _value(rhs._value)
+    {
+        rhs._value = nullptr;
+    }
+    async_mutex_guard& operator=(async_mutex_guard&& rhs) noexcept
+    {
+        if (this != &rhs)
+        {
+            _hold = cc::move(rhs._hold);
+            _value = rhs._value;
+            rhs._value = nullptr;
+        }
+        return *this;
+    }
 
     /// Releases early; the guard no longer reaches the value.
     void unlock()
@@ -220,8 +250,20 @@ struct cc::async_shared_guard
     [[nodiscard]] T const& operator*() const { return *_value; }
     [[nodiscard]] T const* operator->() const { return _value; }
 
-    async_shared_guard(async_shared_guard&&) noexcept = default;
-    async_shared_guard& operator=(async_shared_guard&&) noexcept = default;
+    async_shared_guard(async_shared_guard&& rhs) noexcept : _hold(cc::move(rhs._hold)), _value(rhs._value)
+    {
+        rhs._value = nullptr;
+    }
+    async_shared_guard& operator=(async_shared_guard&& rhs) noexcept
+    {
+        if (this != &rhs)
+        {
+            _hold = cc::move(rhs._hold);
+            _value = rhs._value;
+            rhs._value = nullptr;
+        }
+        return *this;
+    }
 
     void unlock()
     {
