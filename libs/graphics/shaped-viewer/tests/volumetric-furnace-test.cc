@@ -74,6 +74,12 @@ struct furnace_case
 
     /// Whether the object is lossless, and so whether the image must come back AT the environment rather than below it.
     bool lossless = true;
+
+    /// The traced image's extent, over the same view whatever it is, so a smaller one draws fewer paths at the same samples per pixel.
+    ///
+    /// Small, because this runs on a software device: a scattering interior is the most expensive thing the integrator does,
+    /// and the MEAN — which is what the test actually asserts on — converges long before the pixels do.
+    tg::vec2i image_size = tg::vec2i(32, 32);
 };
 
 /// The mean of every pixel, plus the extremes — a flat image is what this test is looking for, so the spread matters as
@@ -98,12 +104,9 @@ image_stats trace_furnace(sg::context& ctx,
                           sv::gpu_resource_manager& resources,
                           sv::mesh const& mesh,
                           tg::vec3f environment,
+                          tg::vec2i size,
                           int frames)
 {
-    // Small and few, because this runs on a software device: a scattering interior is the most expensive thing the
-    // integrator does, and the MEAN — which is what the test actually asserts on — converges long before the pixels do.
-    auto const size = tg::vec2i(32, 32);
-
     auto const item = resources.acquire_scene_item(mesh);
     resources.wait_for_pending_uploads();
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
@@ -340,7 +343,12 @@ TEST("sv - a lossless interior is invisible under a uniform environment")
     dense.push_back(binding::of("transmission_depth", 0.02f));
     dense.push_back(binding::of("transmission_color", tg::vec3f(1, 1, 1)));
     dense.push_back(binding::of("transmission_scatter", tg::vec3f(0.6f, 0.6f, 0.6f)));
-    cases.push_back({.name = "dense scattering interior", .bindings = cc::move(dense)});
+
+    // A quarter of the pixels outside a thorough run, since this case alone is most of the test's time.
+    // Each pixel keeps its samples, so the per-pixel bounds are unchanged, and the mean they lose paths from sits far inside its margin.
+    cases.push_back({.name = "dense scattering interior",
+                     .bindings = cc::move(dense),
+                     .image_size = nx::is_thorough() ? tg::vec2i(32, 32) : tg::vec2i(16, 16)});
 
     // The same walk with absorption, which must come back darker — the control that separates "the medium is lossless"
     // from "the medium was never entered".
@@ -364,7 +372,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment")
                                    .geometry = sv::triangle_geometry::create_from_positions(positions),
                                    .material = id};
 
-        auto const stats = trace_furnace(ctx, resources, mesh, environment, 12);
+        auto const stats = trace_furnace(ctx, resources, mesh, environment, c.image_size, 12);
         auto const mean = luminance_of(stats.mean);
         auto const expected = luminance_of(environment);
 
