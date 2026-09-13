@@ -42,7 +42,7 @@ If it would be posted as markdown with three headings and a table, write three h
 The maintainer is proofreading, and a paraphrase is not proofreadable.
 
 **Say what you left out and why**, in a short paragraph *before* the draft.
-An LGTM entry that produced no instruction, a finding the maintainer rejected, a nit not worth an author's afternoon.
+An LGTM entry that produced no instruction, a finding the maintainer rejected, a nit that would not make the code better.
 The cuts are the editorial judgement, and they are what the maintainer is really being asked to check.
 
 **Keep it in the review's own voice, addressed to the author.**
