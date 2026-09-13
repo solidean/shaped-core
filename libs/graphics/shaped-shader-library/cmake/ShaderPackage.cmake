@@ -175,13 +175,20 @@ function(sc_finalize_shader_packages)
     # Its sibling test is the one place that both links the library and may link nexus, so it gets the include
     # dir and calls self_check() itself.
     # Here rather than in sc_add_shader_package, because a library declares its package before its test exists.
+    #
+    # The `-test-web` mirror needs the same dir stated separately rather than inherited.
+    # sc_add_nexus_web_runner clones INCLUDE_DIRECTORIES off the base test target at the moment it is called --
+    # from inside the library's own CMakeLists, long before this function runs -- so the clone predates the dir
+    # and a wasm build fails to find the generated header while every other platform compiles.
     get_property(_gen_dirs GLOBAL PROPERTY SC_SHADER_PACKAGE_GEN_DIRS)
     foreach(_entry IN LISTS _gen_dirs)
         string(REPLACE "|" ";" _parts "${_entry}")
         list(GET _parts 0 _pkg_target)
         list(GET _parts 1 _pkg_gen_dir)
-        if(TARGET ${_pkg_target}-test)
-            target_include_directories(${_pkg_target}-test PRIVATE "${_pkg_gen_dir}")
-        endif()
+        foreach(_suffix "-test" "-test-web")
+            if(TARGET ${_pkg_target}${_suffix})
+                target_include_directories(${_pkg_target}${_suffix} PRIVATE "${_pkg_gen_dir}")
+            endif()
+        endforeach()
     endforeach()
 endfunction()
