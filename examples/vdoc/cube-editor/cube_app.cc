@@ -1,5 +1,6 @@
 #include "cube_app.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
@@ -9,7 +10,6 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <cube_shaders.hh>
 
-#include <chrono>
 
 namespace cube_editor
 {
@@ -17,8 +17,7 @@ namespace
 {
 [[nodiscard]] double now_seconds()
 {
-    auto const t = std::chrono::steady_clock::now().time_since_epoch();
-    return std::chrono::duration<double>(t).count();
+    return cc::current_time_steady_secs();
 }
 } // namespace
 

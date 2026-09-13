@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::async_blocking_get
 #include <nexus/test.hh>
@@ -10,7 +11,6 @@
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/angle.hh>
 
-#include <chrono>
 
 // Interactive smoke test: a real window with a spinning cube, ray-traced through the DXR pipeline.
 // BLAS/TLAS + raygen/miss/closest-hit shaders + shader table + dispatch_rays — not rasterized.
@@ -369,15 +369,15 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
     auto const cam_buf
         = ctx.persistent.create_buffer<camera_data>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
 
-    auto const start = std::chrono::steady_clock::now();
-    constexpr auto max_duration = std::chrono::seconds(30);
+    auto const start = cc::current_time_steady_secs();
+    constexpr auto max_duration_secs = 30.0;
 
     while (pump_messages())
     {
-        auto const elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > max_duration)
+        auto const elapsed = cc::current_time_steady_secs() - start;
+        if (elapsed > max_duration_secs)
             break;
-        auto const t = std::chrono::duration<float>(elapsed).count();
+        auto const t = float(elapsed);
 
         auto rt = sc->acquire_backbuffer(); // auto-resizes to the window
         auto const size = rt.size();        // the acquired view is this frame's size of record

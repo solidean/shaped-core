@@ -1,11 +1,10 @@
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <thread>
 
 // real_filesystem is the only part of slib that touches the disk, so it is also the only part whose tests need a real directory.
 // Everything above it is covered through memory_filesystem instead.
@@ -59,7 +58,7 @@ bool wait_until(PredT&& pred)
     {
         if (pred())
             return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(k_slice_ms));
+        cc::this_thread_sleep_secs(k_slice_ms / 1000.0);
     }
     return pred();
 }
@@ -194,7 +193,7 @@ TEST("slib - dropping a real_filesystem watch stops the sink")
     // There is nothing to wait *for* here, so this waits a short fixed while and checks that nothing happened; a broken teardown moves the count on its own.
     auto const after_unsubscribe = fires.load();
     dir.write("a.hlsl", "v3");
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    cc::this_thread_sleep_secs(0.1);
     CHECK(fires.load() == after_unsubscribe);
 }
 

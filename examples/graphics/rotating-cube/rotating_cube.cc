@@ -8,6 +8,7 @@
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -30,7 +31,6 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #endif
 
-#include <chrono>
 
 using namespace cc::primitive_defines;
 
@@ -184,8 +184,7 @@ struct orbit_camera
 
 [[nodiscard]] double now_seconds()
 {
-    auto const t = std::chrono::steady_clock::now().time_since_epoch();
-    return std::chrono::duration<double>(t).count();
+    return cc::current_time_steady_secs();
 }
 
 /// Whatever context this build has a backend for.

@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/common/time.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -7,7 +8,6 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-viewer/all.hh>
 
-#include <chrono>
 
 using namespace cc::primitive_defines;
 
@@ -74,8 +74,8 @@ TEST("sv - viewer window (manual)", nx::config::manual)
     // What the views keep across frames, held here because this loop is the frame — a viewer would own it instead.
     auto store = sv::view_store{};
 
-    auto const start = std::chrono::steady_clock::now();
-    constexpr auto max_duration = std::chrono::minutes(10);
+    auto const start = cc::current_time_steady_secs();
+    constexpr auto max_duration_secs = 10.0 * 60.0;
 
     auto frame_index = u64(0);
     while (!win->is_close_requested())
@@ -87,7 +87,7 @@ TEST("sv - viewer window (manual)", nx::config::manual)
         for (auto const& e : wsys->events())
             (void)controller.handle(e);
 
-        if (std::chrono::steady_clock::now() - start > max_duration)
+        if (cc::current_time_steady_secs() - start > max_duration_secs)
             break;
         if (win->is_minimized())
             continue;

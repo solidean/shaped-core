@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
 #include <nexus/test.hh>
@@ -10,7 +11,6 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-#include <chrono>
 
 // The whole stack in one loop, driven by a person: a real window, a real swapchain, imgui rendered through sg.
 //
@@ -113,7 +113,7 @@ TEST("sr - imgui window (manual)", nx::config::manual)
 
     cc::println("opened {}x{}; close the window to end", win->width(), win->height());
 
-    auto last_time = std::chrono::steady_clock::now();
+    auto last_time = cc::current_time_steady_secs();
     auto smoothed_fps = 0.0f;
 
     while (!win->is_close_requested())
@@ -125,8 +125,8 @@ TEST("sr - imgui window (manual)", nx::config::manual)
         if (win->is_minimized())
             continue;
 
-        auto const now = std::chrono::steady_clock::now();
-        auto const delta_time = std::chrono::duration<float>(now - last_time).count();
+        auto const now = cc::current_time_steady_secs();
+        auto const delta_time = float(now - last_time);
         last_time = now;
         smoothed_fps = smoothed_fps == 0.0f ? 1.0f / delta_time : smoothed_fps * 0.95f + (1.0f / delta_time) * 0.05f;
 

@@ -1,6 +1,7 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
@@ -25,7 +26,6 @@
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
 
-#include <chrono>
 
 namespace sv
 {
@@ -136,8 +136,8 @@ struct viewer::impl
     // Both stamped in next_frame: `start_time` gives the frame its elapsed seconds, `last_frame_time` its delta.
     // last_frame_time only advances on frames that were actually drawn, so a skipped (minimized) stretch lands in
     // one delta on resume rather than vanishing.
-    std::chrono::steady_clock::time_point start_time = {};
-    std::chrono::steady_clock::time_point last_frame_time = {};
+    double start_time = 0; // cc::current_time_steady_secs
+    double last_frame_time = 0;
 
     // the frame currently being recorded (one at a time)
     sg::render_target_view current_backbuffer;
@@ -261,7 +261,7 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     im->swapchain = cc::move(sc);
     im->offscreen = cc::move(offscreen);
 
-    im->start_time = std::chrono::steady_clock::now();
+    im->start_time = cc::current_time_steady_secs();
     return viewer(cc::move(im));
 }
 
@@ -307,7 +307,7 @@ viewer::~viewer()
 void viewer::begin_frames()
 {
     _impl->frame_index = 0;
-    _impl->start_time = std::chrono::steady_clock::now();
+    _impl->start_time = cc::current_time_steady_secs();
     _impl->last_frame_time = _impl->start_time;
 }
 
@@ -570,10 +570,10 @@ frame viewer::acquire_frame()
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
     // where the elapsed clock starts — a hand-driven loop opens with begin_frame and nothing else.
-    auto const now = std::chrono::steady_clock::now();
+    auto const now = cc::current_time_steady_secs();
     if (im.frame_index == 0)
         im.start_time = now;
-    auto const delta = im.frame_index == 0 ? 0.0 : std::chrono::duration<double>(now - im.last_frame_time).count();
+    auto const delta = im.frame_index == 0 ? 0.0 : now - im.last_frame_time;
     im.last_frame_time = now;
     ++im.frame_index;
 
@@ -601,7 +601,7 @@ frame viewer::acquire_frame()
     auto f = frame{};
     f._viewer = this;
     f._size = im.config.headless ? tg::vec2i(im.config.width, im.config.height) : im.current_backbuffer.size();
-    f._seconds = std::chrono::duration<double>(now - im.start_time).count();
+    f._seconds = now - im.start_time;
     f._delta_seconds = delta;
     f._id = im.frame_index;
     f._open = true;

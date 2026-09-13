@@ -1,11 +1,11 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread_pump.hh>
 
-#include <chrono>
 
 using namespace cc::primitive_defines;
 
@@ -155,12 +155,12 @@ bool cc::thread_pump_all_for(double max_ms)
     if (max_ms <= 0)
         return thread_pump_all();
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::duration<double, std::milli>(max_ms);
+    auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
     while (true)
     {
         if (!thread_pump_all())
             return false; // idle: nothing left to do
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (cc::current_time_steady_secs() >= deadline)
             return true; // stopped on the budget with work still pending
     }
 }

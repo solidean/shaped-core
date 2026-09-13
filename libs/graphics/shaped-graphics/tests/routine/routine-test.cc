@@ -3,13 +3,13 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-#include <chrono>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -79,7 +79,7 @@ protected:
     // exercises the single-initialization rule rather than passing because the first thread happened to finish first.
     cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        cc::this_thread_sleep_secs(0.002);
         ++inits;
         co_return;
     }
@@ -150,7 +150,7 @@ public:
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        cc::this_thread_sleep_secs(0.005);
         ran = true;
         co_return;
     }
