@@ -6,11 +6,6 @@
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
-#include <chrono>
-#if CC_HAS_THREADS
-#include <thread>
-#endif
-
 using namespace cc::primitive_defines;
 
 namespace
@@ -278,14 +273,14 @@ void cc::thread_bound_scheduler::wait_for_work(double max_ms)
     // Inside one of our own bodies the queue is not ours to run, so queued work is no reason to stop waiting.
     if (_body_depth > 0 && is_owner_thread())
     {
-        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(max_ms));
+        cc::this_thread_sleep_secs(max_ms / 1000.0);
         return;
     }
 
     std::unique_lock lock(_mutex);
     if (!_incoming.empty() || _local_next != _local.size())
         return;
-    _work_cv.wait_for(lock, std::chrono::duration<double, std::milli>(max_ms));
+    cc::impl::condition_wait_secs(_work_cv, lock, max_ms / 1000.0);
 #else
     CC_UNUSED(max_ms); // nothing else can submit while the one thread there is waits
 #endif

@@ -12,7 +12,6 @@
 #include <nexus/test.hh>
 
 #if CC_HAS_THREADS
-#include <chrono>
 #include <thread>
 #endif
 
@@ -62,7 +61,7 @@ struct home_thread
                 }
             });
         while (!ready.load())
-            std::this_thread::yield();
+            cc::this_thread_yield();
     }
 
     ~home_thread()
@@ -81,7 +80,7 @@ cc::shared_async<int> slow_on_pool(cc::async_thread_pool& pool, int value)
     auto node = cc::make_async_lazy(
         [value]
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            cc::this_thread_sleep_secs(0.002);
             return value;
         });
     node->schedule_on(pool);
@@ -301,10 +300,10 @@ TEST("async home - an at_home teardown of an abandoned frame runs on the home", 
         node = nullptr; // dropped cold, on this thread: the capture must not be released here
     }
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    auto const deadline = cc::current_time_steady_secs() + 10.0;
     // The capture is released inside the deferred teardown, and the home's count drops only after it returns.
-    while ((destroyed_on.load() == 0 || h.home->homed_node_count() != 0) && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
+    while ((destroyed_on.load() == 0 || h.home->homed_node_count() != 0) && cc::current_time_steady_secs() < deadline)
+        cc::this_thread_yield();
 
     CHECK(destroyed_on.load() == h.id.load());
     CHECK(h.home->homed_node_count() == 0);
@@ -501,19 +500,19 @@ TEST("async home - a home re-queues itself only behind what one pump cycle alrea
         auto const root = spinner();
         root->schedule_on(*h.home); // a cold coroutine reaches its home by being scheduled there; its hop then keeps it
 
-        auto const busy_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (polls.load() == 0 && std::chrono::steady_clock::now() < busy_deadline)
-            std::this_thread::yield();
+        auto const busy_deadline = cc::current_time_steady_secs() + 10.0;
+        while (polls.load() == 0 && cc::current_time_steady_secs() < busy_deadline)
+            cc::this_thread_yield();
         auto const loops_before = h.loops.load();
-        while (h.loops.load() < loops_before + 100 && std::chrono::steady_clock::now() < busy_deadline)
-            std::this_thread::yield();
+        while (h.loops.load() < loops_before + 100 && cc::current_time_steady_secs() < busy_deadline)
+            cc::this_thread_yield();
         CHECK(h.loops.load() >= loops_before + 100); // the owner keeps getting through its loop while the spinner spins
         CHECK(!root->is_ready());
         release.store(true);
 
-        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (!root->is_ready() && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::yield();
+        auto const deadline = cc::current_time_steady_secs() + 10.0;
+        while (!root->is_ready() && cc::current_time_steady_secs() < deadline)
+            cc::this_thread_yield();
         CHECK(root->is_ready());
     }
     CHECK(polls.load() > 0);
@@ -541,7 +540,7 @@ struct racing_pusher
                     auto* const gate = pending.load(cc::memory_order_acquire);
                     if (gate == nullptr)
                     {
-                        std::this_thread::yield();
+                        cc::this_thread_yield();
                         continue;
                     }
                     for (auto spin = 0; spin < (round % 64) * 40; ++spin)
@@ -618,7 +617,7 @@ TEST("async home - an owner that finds every participant slot taken still runs t
                 auto const held = cc::make_async_lazy([](cc::unit) { return 0; }, release);
                 (void)cc::async_blocking_get_on(pool, held);
             }));
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    cc::this_thread_sleep_secs(0.05);
 
     // The fifth foreign thread owns a home: with no slot it must not take the fallback park that nothing would wake.
     cc::atomic<int> completed = {0};

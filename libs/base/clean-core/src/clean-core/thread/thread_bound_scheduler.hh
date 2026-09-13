@@ -124,6 +124,15 @@ private:
 #endif
 };
 
+#if CC_HAS_THREADS
+namespace cc::impl
+{
+/// Waits on `cv` for at most `secs`, or until notified.
+/// Defined in thread.cc, the one place besides time.cc where <chrono> may be included.
+void condition_wait_secs(std::condition_variable& cv, std::unique_lock<std::mutex>& lock, double secs);
+} // namespace cc::impl
+#endif
+
 namespace cc
 {
 /// The main thread's home: bound by cc::mark_current_thread_as_main(), and never destroyed.
