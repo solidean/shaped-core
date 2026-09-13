@@ -35,7 +35,8 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg vulkan backend")
+// The same exclusions as the dx12 drivers, for the same children: see dx12-entry.cc.
+TEST("sg vulkan backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
 {
     // Synchronization validation is on for the whole tier-1 sweep: it is the only oracle that sees a hazard between
     // two submissions, which is what the cross-list and cross-queue ordering work is about.

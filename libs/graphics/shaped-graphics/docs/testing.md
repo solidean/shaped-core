@@ -60,6 +60,7 @@ It becomes runnable against each backend by two pieces working together:
 - **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
   The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
+  A driver holds every exclusion tag its children need (`slib-shader-library`, `sg-reload-generation`), because a child runs inside its driver's body and its own tags schedule nothing.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.

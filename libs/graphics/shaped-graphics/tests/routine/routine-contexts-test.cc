@@ -11,11 +11,12 @@
 #include <shaped-graphics/routine/render_routine.hh>
 
 // The routine tests that must create their own context, which is why they are not in routine-test.cc.
-// Two of them need TWO live contexts; the cycle test needs `singlethreaded`, which an invocable cannot have.
+// Two of them are about contexts themselves — one outliving another, and two alive at once.
+// The cycle test needs `singlethreaded`, which an invocable cannot have, since a child runs under its driver's scheduler.
 //
 // The backend-agnostic harness hands an invocable ONE context (see tests/backends/vulkan-entry.cc), so a test that
 // compares two of them has to create its own — and creating one means naming a backend.
-// dx12 WARP is the one that is always there on a Windows host, hence this file's gate.
+// dx12 is the one that is always there on a Windows host, hence this file's gate.
 // Making these portable would mean teaching the harness to hand out a context FACTORY; worth doing if a second
 // registry question ever needs it, not for two tests.
 
@@ -41,10 +42,11 @@ protected:
     }
 };
 
-// A dx12 WARP context, or nullptr where none is available (the caller SKIPs).
-sg::context_handle make_warp_context()
+// A dx12 context on the hardware adapter, or WARP where there is none; nullptr where neither comes up (the caller SKIPs).
+sg::context_handle make_context()
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
+    auto ctx = sg::create_dx12_context(
+        {.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     return ctx.has_value() ? ctx.value() : nullptr;
 }
 } // namespace
@@ -54,9 +56,9 @@ TEST("sg - routines are per-context: each context builds its own instance from s
 {
     // Context A initializes the routine, then goes away.
     {
-        auto const ctx_a = make_warp_context();
+        auto const ctx_a = make_context();
         if (ctx_a == nullptr)
-            SKIP("no dx12 WARP device");
+            SKIP("no dx12 device");
 
         auto cmd_a = ctx_a->create_command_list();
         // Asking registers it; the tick is what runs the phases.
@@ -73,7 +75,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     // On A's instance this would only bump inits; a fresh context must instead build its OWN instance from scratch — init_once included.
     sg::signal_reload();
 
-    auto const ctx_b = make_warp_context();
+    auto const ctx_b = make_context();
     REQUIRE(ctx_b != nullptr);
 
     auto cmd_b = ctx_b->create_command_list();
@@ -88,10 +90,10 @@ TEST("sg - routines are per-context: each context builds its own instance from s
 
 TEST("sg - two live contexts keep separate routine instances", exclusive("sg-reload-generation"))
 {
-    auto const ctx_a = make_warp_context();
+    auto const ctx_a = make_context();
     if (ctx_a == nullptr)
-        SKIP("no dx12 WARP device");
-    auto const ctx_b = make_warp_context();
+        SKIP("no dx12 device");
+    auto const ctx_b = make_context();
     REQUIRE(ctx_b != nullptr);
 
     auto cmd_a = ctx_a->create_command_list();
@@ -178,9 +180,9 @@ struct cycle_assert
 // nx::invoke_tests runs under its driver's scheduler, so `singlethreaded` and `exclusive` on it would be ignored.
 TEST("sg - a dependency cycle is refused where it is declared", exclusive("sg-reload-generation"), singlethreaded)
 {
-    auto const ctx = make_warp_context();
+    auto const ctx = make_context();
     if (ctx == nullptr)
-        SKIP("no dx12 WARP device");
+        SKIP("no dx12 device");
 
 #if CC_ASSERT_ENABLED
     auto asserts_seen = 0;
