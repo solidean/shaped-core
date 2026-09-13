@@ -454,7 +454,11 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 // A parametrized routine is one instance per distinct parameter value, and each instance knows which value it is for.
 // Serving one instance for two values would mean a pipeline built for the wrong format -- wrong output rather than
 // slow output, which is why the parameter is part of the registry key rather than something execute() re-checks.
-INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value", (sg::context_handle const& ctx))
+// Holds sg-reload-generation for the same reason as the concurrent-acquire test: `inits == 1` is only meaningful while no
+// other test signals a process-wide reload.
+INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
