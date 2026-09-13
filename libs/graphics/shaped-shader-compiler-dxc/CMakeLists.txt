@@ -60,6 +60,8 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/preprocess-test.cc
         tests/compile-test.cc
+        tests/portable-hlsl-spike-test.cc
+        tests/constant-packing-spike-test.cc
     )
 
     # Both of these compile to DXIL and assert what comes back from its reflection container, which needs the Windows
@@ -89,6 +91,7 @@ if(SC_BUILD_TESTS)
             tests/end-to-end-inline-constants-test.cc
             tests/end-to-end-inline-raytracing-test.cc
             tests/end-to-end-raytracing-test.cc
+            tests/payload-packing-spike-test.cc
             tests/end-to-end-raster-test.cc
             tests/end-to-end-raster-stages-test.cc
             tests/end-to-end-raster-cache-test.cc

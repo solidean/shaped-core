@@ -178,20 +178,37 @@ Every path that resolves becomes a reload dependency of the shader that pulled i
 One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
 What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
 
-**Every one of them goes behind `#ifdef __spirv__`.**
-DXC ignores a `[[vk::…]]` attribute when it is not generating SPIR-V, and it ignores it *with a warning* — `-Wignored-attributes`.
-ssc compiles with `-WX` (`compile_options::warnings_as_errors`, on by default), so on the DXIL target an unguarded attribute is a compile error rather than a no-op.
-Nothing catches it at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
+Two of them are still said by hand today, and the third is what the binding preprocessor is being built for.
 
-- **`[[vk::binding(N, set)]]` on every resource.**
-  There is no `-fvk-*-shift` in our compile line, so an unannotated `b0`/`t0`/`u0` collapse onto the same SPIR-V binding number and collide.
-  The set an annotation names becomes the binding's `group_index`, which pins the slot the group must be bound at.
-  So an annotated shader bakes in its group split, and honouring it is the author's contract.
-  HLSL-for-dx12 leaves that split a runtime choice; both models stay supported.
-- **`[[vk::location(N)]]` on every vertex input**, numbered in the order the sg vertex layout lists its attributes.
+- **Bindings.**
+  SPIR-V needs a set and a binding number on every resource.
+  DXIL only looks like it needs neither: DXC numbers what an entry point references, so two stages of one pipeline can disagree about a resource neither of them numbered.
+  [slib's binding-preprocessor](../../shaped-shader-library/docs/binding-preprocessor.md) takes this over, and it has landed:
+
+  ```hlsl
+  #pragma sc group 0
+  namespace frame_bindings
+  {
+      Texture2D<float4> albedo;      // t0/space0 on DXIL, binding(0, 0) on SPIR-V
+      SamplerState linear_sampler;   // s1/space0 and binding(1, 0) - one counter per group
+  }
+  ```
+
+  A rewriting pass writes every address before the compiler sees the source, so neither target's spelling appears in a shader.
+  The pass rewrites only what it parsed, so text carrying no attribute comes back byte for byte — which is a property of the edit model rather than a way to opt out.
+  In a shader that carries an attribute, writing an address by hand is an **error**: a dialect whose purpose is portability has no supported way to leave it.
+  A shader that wants its own addresses is ordinary HLSL, outside a package.
+- **Vertex input locations.**
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
+  A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
   A mismatch is silent: the pipeline builds and the geometry is wrong.
-  A `#ifdef` per struct member reads badly, so fork the attribute itself once and use the macro on each line:
+  The same design takes this over, numbering an annotated struct's members and generating the `sg::vertex_layout_of` that matches.
+- **Inline constants.**
+  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
+  A shader that does not say so declares a resource the pipeline layout never binds, so the block needs `[[vk::push_constant]]` there and a plain `register(b0)` on DXIL.
+
+**Every `[[vk::…]]` attribute a shader still writes by hand has to be forked on `__spirv__`.**
+DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles with `-WX`, so an unguarded annotation is a compile error on DXIL rather than a no-op:
 
 ```hlsl
 #ifdef __spirv__
@@ -206,30 +223,19 @@ struct vs_input
     VK_LOCATION(1) float3 normal : NORMAL;
 };
 ```
-- **`[[vk::push_constant]]` for inline constants**, which needs a fork with a real DXIL spelling on the other side rather than an empty one.
-  A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
-  A shader that does not say `push_constant` therefore declares a resource the pipeline layout never binds.
-  There is no DXIL spelling of the attribute, and a root constant there is an ordinary `register(b0)`:
-
-```hlsl
-struct cube_constants
-{
-    float4x4 view_projection;
-};
-
-#ifdef __spirv__
-[[vk::push_constant]] ConstantBuffer<cube_constants> gConstants;
-#else
-ConstantBuffer<cube_constants> gConstants : register(b0);
-#endif
-```
 
 `__spirv__` is DXC's own macro, and it works here because **slib flattens a shader's includes once per target rather than once per shader**.
 The preprocess pass is given the same target the compile is, so the fork is resolved against the format actually being built.
-[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example of the last two.
-It declares no descriptor bindings at all, so it demonstrates nothing about the first.
-The worked examples for `[[vk::binding]]` are the vulkan backend's own tier-2 shaders:
-[`triangle.hlsl`](../backends/vulkan/tests/triangle.hlsl) and [`double_compute.hlsl`](../backends/vulkan/tests/double_compute.hlsl).
+That per-target flatten is the same property the binding pass depends on.
+
+Nothing catches a missing fork at build time: shader compilation happens at runtime, so a shader that only ever ran on one backend ships broken on the other.
+Which is the argument for not writing one: the binding pass resolves the same fork per target, from one attribute, with no macro.
+
+[examples/graphics/rotating-cube](../../../../examples/graphics/rotating-cube/shaders/cube.hlsl) is the worked example, and it now writes neither fork.
+The vulkan backend's own tier-2 shaders are where a hand-written `[[vk::binding]]` is still deliberate.
+They are compiled offline into committed SPIR-V headers and belong to no package, so no pass ever reads them.
+The three are [triangle.hlsl](../backends/vulkan/tests/triangle.hlsl), [double_compute.hlsl](../backends/vulkan/tests/double_compute.hlsl) and [raytrace.hlsl](../backends/vulkan/tests/raytrace.hlsl).
+[slib's portable-hlsl](../../shaped-shader-library/docs/portable-hlsl.md) is the design across all three, the validation layers, and what is still open.
 
 ## Adding a shader
 
@@ -237,6 +243,17 @@ The worked examples for `[[vk::binding]]` are the vulkan backend's own tier-2 sh
 2. Add one `path:stage:entry_point` line to that target's `sc_add_shader_package`.
 3. Rebuild — the symbol appears.
 4. `acquire(ctx)` it.
+
+Four more entry kinds generate C++ from what the binding pass reads, rather than an entry point:
+
+| Entry | What it names | What you get |
+|---|---|---|
+| `path:binding:namespace` | an annotated namespace | a group struct satisfying `sg::declared_binding_group` |
+| `path:vertex_input:struct` | an annotated struct | a mirror plus its `sg::vertex_layout_of` |
+| `path:payload:struct` | an annotated struct | a mirror plus its `max_payload_size` |
+| `path:constants:name` | a `push_constants` block | a mirror carrying HLSL's own padding |
+
+A group struct is data rather than an API — `ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
 
 ## More
 

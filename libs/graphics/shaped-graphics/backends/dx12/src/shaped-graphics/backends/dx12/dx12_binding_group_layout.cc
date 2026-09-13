@@ -66,6 +66,9 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
                     layout->static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
                         *sd, UINT(b.index) + UINT(i), b.space.value(), D3D12_SHADER_VISIBILITY_ALL));
                 ++matched_static;
+
+                // In neither table: it lives in the root signature, so a slot naming it has nothing to bind.
+                layout->slot_by_binding.push_back(-1);
             }
             else
             {
@@ -76,6 +79,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
                 range.RegisterSpace = b.space.value();
                 range.OffsetInDescriptorsFromTableStart = UINT(sampler_offset);
                 layout->sampler_ranges.push_back(range);
+                layout->slot_by_binding.push_back(int(layout->sampler_slots.size()));
                 layout->sampler_slots.push_back({b, sampler_offset});
                 sampler_offset += int(b.count);
             }
@@ -89,11 +93,13 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         range.RegisterSpace = b.space.value();
         range.OffsetInDescriptorsFromTableStart = UINT(view_offset);
         layout->view_ranges.push_back(range);
+        layout->slot_by_binding.push_back(int(layout->view_slots.size()));
         layout->view_slots.push_back({b, view_offset});
         view_offset += int(b.count);
     }
     layout->descriptor_count = view_offset;
     layout->sampler_descriptor_count = sampler_offset;
+    CC_ASSERT(layout->slot_by_binding.size() == bindings.size(), "one remap entry per layout binding");
 
     // Every named static sampler must correspond to a sampler binding (unique names assumed).
     if (matched_static != int(static_samplers.size()))

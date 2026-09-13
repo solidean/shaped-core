@@ -36,32 +36,29 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// One corner of the cube, matching slot 0 of shaders/cube.hlsl.
-/// The attribute ORDER here is what the shader's `[[vk::location]]` numbers refer to.
+/// One corner of the cube, in the tg types the mesh builder wants to write.
+///
+/// The LAYOUT is not this struct's: `shaders::vs_input` is generated from cube.hlsl's own annotated struct, and
+/// `sg::vertex_layout_of` comes with it, so the semantics, the formats, the offsets and the stride are all the
+/// shader's rather than a second statement of them here.
+/// This type exists only because filling a cube is more readable in `tg::pos3f` than in `float[3]`, which is
+/// why the two are asserted to be the same bytes rather than kept in step by hand.
 struct cube_vertex
 {
     tg::pos3f position;
     tg::vec3f normal;
     tg::vec3f color;
 };
-} // namespace
 
-template <>
-struct sg::vertex_layout_of<cube_vertex>
-{
-    static sg::vertex_type_layout get()
-    {
-        return {.stride = sizeof(cube_vertex),
-                .attributes = {
-                    {.semantic = "POSITION", .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(cube_vertex, position)},
-                    {.semantic = "NORMAL", .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(cube_vertex, normal)},
-                    {.semantic = "COLOR", .format = sg::vertex_attribute_format::vec3f, .offset = offsetof(cube_vertex, color)},
-                }};
-    }
-};
+static_assert(sizeof(cube_vertex) == sizeof(shaders::vs_input), "cube_vertex is not the stride cube.hlsl states");
+static_assert(offsetof(cube_vertex, position) == offsetof(shaders::vs_input, position), "position moved");
+static_assert(offsetof(cube_vertex, normal) == offsetof(shaders::vs_input, normal), "normal moved");
+static_assert(offsetof(cube_vertex, color) == offsetof(shaders::vs_input, color), "color moved");
 
-namespace
-{
+// The same for the constant block, whose one float4x4 the pass mirrors with HLSL's own packing.
+static_assert(sizeof(tg::mat4f) == sizeof(shaders::cube_constants),
+              "the view-projection matrix is not the size cube.hlsl's block states");
+
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
 
@@ -239,7 +236,7 @@ struct orbit_camera
         {.layout = ctx.cached.acquire_pipeline_layout({.inline_constants = *constants}),
          .vertex_shader = *compiled_vs,
          .fragment_shader = *compiled_ps,
-         .vertex_input = sg::vertex_input_layout::create<cube_vertex>(),
+         .vertex_input = sg::vertex_input_layout::create<shaders::vs_input>(),
          .rasterization = {.cull = sg::cull_mode::back},
          // Both default to OFF, and solid geometry needs both — a cube drawn without them shows whichever face
          // happened to be recorded last.

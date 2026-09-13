@@ -28,6 +28,17 @@ namespace
     return false;
 }
 
+/// Whether `b` is one of a material permutation's own samplers rather than a binding of the trace's own.
+///
+/// A permutation declares them in a group of its own (see `sv::material_sampler_group`), so they reflect back
+/// like anything else and belong in that group's layout rather than merged into the trace's.
+/// Matched by name for the same reason a bindless table is: the name is what the generator wrote and what
+/// `collect_samplers` carries the state under.
+[[nodiscard]] bool is_material_sampler(sg::binding const& b)
+{
+    return b.type == sg::binding_type::sampler && cc::string_view(b.name).starts_with("sv_sampler_");
+}
+
 /// Where one permutation's compiles stand.
 enum class permutation_state
 {
@@ -272,19 +283,45 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         if (h != nullptr)
             stages.push_back(h->bindings);
 
+    // Three groups come out of one merge, and each is owned somewhere else: the manager owns its tables, a
+    // permutation owns its samplers, and what is left is the trace's own.
     auto merged = sg::merge_bindings(stages);
     auto own = cc::vector<sg::binding>();
+    auto sampler_bindings = cc::vector<sg::binding>();
     for (auto& b : merged)
-        if (!is_bindless_table(b))
+    {
+        if (is_bindless_table(b))
+            continue;
+        if (is_material_sampler(b))
+            sampler_bindings.push_back(cc::move(b));
+        else
             own.push_back(cc::move(b));
+    }
 
     auto const samplers = collect_samplers(groups);
 
     auto variant = pipeline_variant{};
-    variant.group_layout = ctx.cached.acquire_binding_group_layout(own, samplers);
+    variant.group_layout = ctx.cached.acquire_binding_group_layout(own);
+
+    // The permutation's samplers are static, so this layout contributes root-signature entries and no descriptor
+    // table at all — which is why nothing ever binds a group at this slot.
+    // A scene whose materials sample nothing declares none, and then there is no third group either.
+    auto const sampler_layout = sampler_bindings.empty()
+                                  ? sg::binding_group_layout_handle()
+                                  : ctx.cached.acquire_binding_group_layout(sampler_bindings, samplers);
+
     // Not a member: the pipeline holds it to keep the root signature alive.
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {variant.group_layout, d.bindless->layout()}});
+    auto groups_for_layout = cc::small_vector<sg::binding_group_layout_handle, sg::max_binding_groups>();
+    groups_for_layout.push_back(variant.group_layout);
+    groups_for_layout.push_back(d.bindless->layout());
+    if (sampler_layout != nullptr)
+    {
+        CC_ASSERT(groups_for_layout.size() == sv::material_sampler_group, "the sampler group's slot is its declared "
+                                                                          "group number");
+        groups_for_layout.push_back(sampler_layout);
+    }
+
+    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups_for_layout)});
 
     // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, five
     // float3 results, and bsdf_pdf + hit_t = 26 lanes.
@@ -379,7 +416,7 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
                                 {.name = "Output", .view = d.output.as_readwrite_view()},
-                                {.name = "FrameConstants", .view = d.frame.as_uniform_buffer()},
+                                {.name = "frame", .view = d.frame.as_uniform_buffer()},
                                 {.name = "background", .view = d.background.as_uniform_buffer()},
                                 {.name = "Instances", .view = d.instance_table.as_readonly_buffer()}});
 

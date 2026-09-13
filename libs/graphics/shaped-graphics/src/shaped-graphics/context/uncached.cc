@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
-#include <clean-core/string/format.hh>                 // cc::format
-#include <shaped-graphics/binding/binding.hh>          // binding::count
+#include <clean-core/string/format.hh>        // cc::format
+#include <shaped-graphics/binding/binding.hh> // binding::count
+#include <shaped-graphics/binding/impl/binding_conflicts.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -82,6 +83,16 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
 {
+    compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
+        return cc::error(cc::move(conflict.value()));
+
     return _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -99,6 +110,27 @@ raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(ra
 cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytracing_pipeline(
     raytracing_pipeline_description const& desc)
 {
+    // Ray tracing is where this earns its keep: a pipeline's shaders naturally live in separate files, so nothing
+    // but a shared header makes them agree about a group's numbering.
+    cc::vector<compiled_shader const*> stages;
+    for (auto const& s : desc.raygen_shaders)
+        stages.push_back(&s);
+    for (auto const& s : desc.miss_shaders)
+        stages.push_back(&s);
+    for (auto const& s : desc.callable_shaders)
+        stages.push_back(&s);
+    for (auto const& g : desc.hit_shaders)
+    {
+        if (g.closest_hit.has_value())
+            stages.push_back(&g.closest_hit.value());
+        if (g.any_hit.has_value())
+            stages.push_back(&g.any_hit.value());
+        if (g.intersection.has_value())
+            stages.push_back(&g.intersection.value());
+    }
+    if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
+        return cc::error(cc::move(conflict.value()));
+
     return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
 }
 

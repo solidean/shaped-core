@@ -1,8 +1,12 @@
 // Fullscreen-triangle blit: sample the ray-traced view target onto a window back buffer.
 // No vertex input — the covering triangle is generated from SV_VertexID (draw 3 vertices).
 
-Texture2D<float4> source_texture : register(t0);
-SamplerState linear_sampler : register(s0);
+#pragma sc group 0
+namespace blit_bindings
+{
+    Texture2D<float4> source_texture;
+    SamplerState linear_sampler;
+}
 
 struct vs_output
 {
@@ -20,5 +24,5 @@ vs_output main_vs(uint vid : SV_VertexID)
 
 float4 main_ps(vs_output i) : SV_Target
 {
-    return source_texture.SampleLevel(linear_sampler, i.uv, 0);
+    return blit_bindings::source_texture.SampleLevel(blit_bindings::linear_sampler, i.uv, 0);
 }

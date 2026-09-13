@@ -51,6 +51,18 @@ struct sg::backend::dx12::dx12_array_binding
     cc::vector<dx12_array_element> elements;
 };
 
+/// One view to bind, already resolved to its position in the layout's `view_slots`.
+///
+/// Both inputs reduce to this before anything is written: a `named_view` by looking the name up, a
+/// `slotted_view` by the layout's `bindings()`-to-split-table remap.
+/// `name` is carried for the error messages, which a slot-keyed caller would otherwise have lost.
+struct sg::backend::dx12::dx12_resolved_view
+{
+    isize slot_index = 0;
+    cc::string_view name;
+    sg::bound_view const* view = nullptr;
+};
+
 /// dx12 binding_group: a contiguous range of descriptors in the context's shader-visible heap, one per layout binding, created from the bound views.
 /// `table_start` is the GPU handle the command list binds as a root descriptor table.
 ///
@@ -65,6 +77,20 @@ public:
                                                                       cc::span<sg::named_view const> views,
                                                                       cc::span<sg::named_sampler const> samplers,
                                                                       sg::lifetime_scope scope);
+
+    /// The same, keyed by layout slot rather than by binding name.
+    [[nodiscard]] static cc::result<dx12_binding_group_handle> create(dx12_context& ctx,
+                                                                      dx12_binding_group_layout_handle const& layout,
+                                                                      cc::span<sg::slotted_view const> views,
+                                                                      cc::span<sg::named_sampler const> samplers,
+                                                                      sg::lifetime_scope scope);
+
+    /// What both overloads run once their input is resolved to slots.
+    [[nodiscard]] static cc::result<dx12_binding_group_handle> create_resolved(dx12_context& ctx,
+                                                                               dx12_binding_group_layout_handle const& layout,
+                                                                               cc::span<dx12_resolved_view const> views,
+                                                                               cc::span<sg::named_sampler const> samplers,
+                                                                               sg::lifetime_scope scope);
 
     dx12_binding_group() = default;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "instance.hlsli" // sv::instance — the table entry the helpers below decode
 #include "openpbr.hlsli" // sv::surface — the OpenPBR parameters a fragment writes — and the BSDF that consumes them
 
 // The contract a GENERATED material shader is written against.
@@ -127,19 +128,6 @@ uint3 corner_elements(shading_context ctx)
     uint base = ctx.primitive * 3;
     return uint3(base + 0, base + 1, base + 2);
 }
-
-/// One scene item, as a closest-hit reads it by `InstanceID()` — mirrors sv::instance_gpu (resources/instance_data.hh).
-///
-/// Keep the two in lockstep: this is a byte layout, not a description of one.
-struct instance
-{
-    uint param_buffer;
-    uint param_offset;
-    uint vertices;
-    uint indices;
-    uint is_indexed;
-    uint3 _padding;
-};
 
 /// The three vertex indices of triangle `primitive` on `inst`.
 ///

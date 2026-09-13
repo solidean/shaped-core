@@ -13,6 +13,11 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/mount_table.cc
     src/shaped-shader-library/filesystem/impl/path.cc
     src/shaped-shader-library/filesystem/impl/watch_registry.cc
+    src/shaped-shader-library/binding/binding_groups.cc
+    src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
+    src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
+    src/shaped-shader-library/binding/impl/hlsl_value_types.cc
+    src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
@@ -35,6 +40,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/filesystem/embedded_filesystem.hh
     src/shaped-shader-library/filesystem/real_filesystem.hh
     src/shaped-shader-library/filesystem/mount_table.hh
+    src/shaped-shader-library/binding/binding_groups.hh
     src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh
@@ -103,7 +109,62 @@ if(SC_BUILD_TESTS)
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc
+        tests/binding/binding_groups-test.cc
     )
+
+    # The binding corpus is one data file both parsers are checked against -- this one, and the build-time
+    # generator's once it exists. Baked in at configure time so the test needs no path into the source tree,
+    # and CMAKE_CONFIGURE_DEPENDS is what makes editing it re-run this.
+    # The delimiter is chosen so nothing in HLSL can close the raw string accidentally.
+    set(_slib_corpus_source "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/binding-corpus.txt")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_slib_corpus_source}")
+    file(READ "${_slib_corpus_source}" _slib_corpus_text)
+
+    # MSVC caps ONE string literal at 16380 bytes and truncates past it with C2026, and the corpus passed that
+    # the moment it grew past a couple of dozen cases.
+    # Adjacent literals are concatenated only AFTER that per-literal limit applies, so the corpus goes out as a
+    # run of chunks -- the same answer sc_add_shader_package reached for an embedded shader.
+    #
+    # Chunks end at a NEWLINE rather than at a byte offset, which matters here in a way it does not there: the
+    # corpus carries the pass's own error messages, em dashes and all, and a split inside a UTF-8 sequence would
+    # leave half a character at the end of one literal and half at the start of the next.
+    set(_slib_corpus_chunk_bytes 8000)
+    string(LENGTH "${_slib_corpus_text}" _slib_corpus_length)
+    set(_slib_corpus_literals "")
+    set(_slib_corpus_at 0)
+    while(_slib_corpus_at LESS _slib_corpus_length)
+        math(EXPR _slib_corpus_remaining "${_slib_corpus_length} - ${_slib_corpus_at}")
+        set(_slib_corpus_take ${_slib_corpus_chunk_bytes})
+        if(NOT _slib_corpus_remaining GREATER _slib_corpus_take)
+            set(_slib_corpus_take ${_slib_corpus_remaining})
+        else()
+            # Back up to the last newline in the candidate chunk, so no boundary lands mid-character.
+            string(SUBSTRING "${_slib_corpus_text}" ${_slib_corpus_at} ${_slib_corpus_take} _slib_corpus_chunk)
+            string(FIND "${_slib_corpus_chunk}" "\n" _slib_corpus_newline REVERSE)
+            if(_slib_corpus_newline GREATER 0)
+                math(EXPR _slib_corpus_take "${_slib_corpus_newline} + 1")
+            endif()
+        endif()
+
+        string(SUBSTRING "${_slib_corpus_text}" ${_slib_corpus_at} ${_slib_corpus_take} _slib_corpus_chunk)
+        string(APPEND _slib_corpus_literals "\n    R\"slibcorpus(${_slib_corpus_chunk})slibcorpus\"")
+        math(EXPR _slib_corpus_at "${_slib_corpus_at} + ${_slib_corpus_take}")
+    endwhile()
+
+    set(_slib_corpus_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/binding_corpus.generated.cc")
+    file(WRITE "${_slib_corpus_generated}"
+"// Generated from tests/data/binding-corpus.txt by shaped-shader-library's CMakeLists. Do not edit.\n"
+"#include <binding/binding_corpus.hh>\n"
+"\n"
+"namespace\n"
+"{\n"
+"constexpr char const* k_corpus =${_slib_corpus_literals};\n"
+"} // namespace\n"
+"\n"
+"cc::string_view slib_test::binding_corpus_text() { return k_corpus; }\n"
+)
+    target_sources(shaped-shader-library-test PRIVATE "${_slib_corpus_generated}")
+    target_include_directories(shaped-shader-library-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
 
@@ -121,6 +182,14 @@ if(SC_BUILD_TESTS)
             invert.hlsl:compute:main
             blit.hlsl:vertex:main_vs
             blit.hlsl:fragment:main_ps
+            shade.hlsl:compute:main
+            mesh.hlsl:vertex:main_vs
+            mesh.hlsl:fragment:main_ps
+            frame_bindings.hlsli:binding:frame_bindings
+            mesh.hlsl:vertex_input:vs_input
+            mesh.hlsl:vertex_input:instance_input
+            mesh.hlsl:payload:trace_payload
+            shade.hlsl:constants:gConstants
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

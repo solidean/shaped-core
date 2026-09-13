@@ -204,6 +204,18 @@ cc::result<sg::binding_group_handle> dx12_context::try_create_binding_group(sg::
         "create_binding_group");
 }
 
+cc::result<sg::binding_group_handle> dx12_context::try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                            cc::span<sg::slotted_view const> views,
+                                                                            cc::span<sg::named_sampler const> samplers,
+                                                                            sg::lifetime_scope scope)
+{
+    auto dx = std::dynamic_pointer_cast<dx12_binding_group_layout const>(cc::move(layout));
+    CC_ASSERT(dx != nullptr, "binding_group_layout is not a dx12 binding_group_layout");
+    return note_device_loss_on_error(
+        cc::result<sg::binding_group_handle>(dx12_binding_group::create(*this, dx, views, samplers, scope)),
+        "create_binding_group");
+}
+
 cc::result<sg::staging_binding_group_handle> dx12_context::try_create_staging_binding_group(
     sg::binding_group_layout_handle layout,
     sg::lifetime_scope scope)

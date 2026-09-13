@@ -2,7 +2,9 @@
 
 #if SLIB_HAS_DXC
 
+#include <clean-core/common/log.hh>
 #include <nexus/test.hh>
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -162,6 +164,256 @@ TEST("slib - dxc hot-reloads a real shader", exclusive("slib-shader-library"))
 
     CHECK(await(asset->acquire(k_target_format)).workgroup_size.value().x == 16);
     CHECK(asset->generation() == 1);
+}
+
+namespace
+{
+// Q8's shape, declared as an annotated namespace instead of numbered by DXC.
+// `pixel_only` is declared FIRST and read only by the pixel stage, so without a written address the vertex stage
+// takes t0 for `both` while the pixel stage takes t1 -- one resource, one name, two addresses, from one source
+// that named neither.
+constexpr char const* k_two_stage_shader = R"(
+#pragma sc group 0
+namespace frame_bindings
+{
+    Texture2D<float4> pixel_only;
+    Texture2D<float4> both;
+    SamplerState samp;
+}
+
+struct vs_out { float4 pos : SV_Position; float2 uv : TEXCOORD; };
+
+vs_out main_vs(uint id : SV_VertexID)
+{
+    vs_out o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.pos = float4(o.uv * 2.0f - 1.0f, frame_bindings::both.SampleLevel(frame_bindings::samp, o.uv, 0).x, 1);
+    return o;
+}
+
+float4 main_ps(vs_out i) : SV_Target
+{
+    return frame_bindings::both.SampleLevel(frame_bindings::samp, i.uv, 0)
+         + frame_bindings::pixel_only.SampleLevel(frame_bindings::samp, i.uv, 0);
+}
+)";
+
+[[nodiscard]] sg::binding const* find_binding(sg::compiled_shader const& shader, cc::string_view name)
+{
+    for (auto const& binding : shader.bindings)
+        if (binding.name == name)
+            return &binding;
+    return nullptr;
+}
+} // namespace
+
+#ifdef CC_OS_WINDOWS
+
+TEST("slib - one annotated source gives every stage and target the same address", exclusive("slib-shader-library"))
+{
+    // The test Q8 could not pass: a shared binding keeps its address across the stages of one pipeline, and
+    // across the two targets, because the rewrite wrote it into the source.
+    slib::shader_library lib;
+    auto dxil = slib::create_dxc_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler();
+    REQUIRE(dxil.has_value());
+    REQUIRE(spirv.has_value());
+    lib.add_compiler(cc::move(dxil.value()));
+    lib.add_compiler(cc::move(spirv.value()));
+
+    for (auto const format : {sg::shader_format::dxil, sg::shader_format::spirv})
+    {
+        auto const vs = lib.compile_source(k_two_stage_shader, sg::shader_stage::vertex, "main_vs", format);
+        auto const ps = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", format);
+
+        // Reflection reports the bare name, so `frame_bindings::both` arrives as `both` -- Q10.
+        auto const* both_vs = find_binding(await(vs), "both");
+        auto const* both_ps = find_binding(await(ps), "both");
+        REQUIRE(both_vs != nullptr);
+        REQUIRE(both_ps != nullptr);
+
+        // The second declaration in its group, whichever stage referenced what.
+        CHECK(both_vs->index == 1);
+        CHECK(both_ps->index == 1);
+
+        // And the sampler shares the group's counter rather than starting its own class at zero.
+        auto const* samp = find_binding(await(ps), "samp");
+        REQUIRE(samp != nullptr);
+        CHECK(samp->index == 2);
+    }
+}
+
+TEST("slib - the group number reaches DXIL as a space and SPIR-V as a set", exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    auto dxil = slib::create_dxc_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler();
+    REQUIRE(dxil.has_value());
+    REQUIRE(spirv.has_value());
+    lib.add_compiler(cc::move(dxil.value()));
+    lib.add_compiler(cc::move(spirv.value()));
+
+    auto const as_dxil
+        = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", sg::shader_format::dxil);
+    auto const as_spirv
+        = lib.compile_source(k_two_stage_shader, sg::shader_stage::fragment, "main_ps", sg::shader_format::spirv);
+
+    auto const* dxil_both = find_binding(await(as_dxil), "both");
+    auto const* spirv_both = find_binding(await(as_spirv), "both");
+    REQUIRE(dxil_both != nullptr);
+    REQUIRE(spirv_both != nullptr);
+
+    // The two ways a shading language namespaces an address, from one number written once.
+    REQUIRE(dxil_both->space.has_value());
+    CHECK(dxil_both->space.value() == 0);
+    REQUIRE(spirv_both->group_index.has_value());
+    CHECK(spirv_both->group_index.value() == 0);
+}
+
+TEST("slib - an attribute the pass cannot honour fails the compile", exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+
+    // The failure a macro prelude could not produce: the marker is a comment, so nothing but the pass can notice it.
+    constexpr char const* k_bad = R"(
+#pragma sc gruop 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+[numthreads(1, 1, 1)]
+void main() {}
+)";
+
+    auto const shader = lib.compile_source(k_bad, sg::shader_stage::compute, "main", k_target_format);
+    (void)cc::try_async_blocking_get(shader);
+    REQUIRE(shader->has_error());
+    CHECK(shader->try_error()->underlying().to_string().contains("is not an attribute this pass knows"));
+}
+
+#endif
+
+TEST("slib - a compiled shader reflects the addresses its generated table declares", exclusive("slib-shader-library"))
+{
+    // The third leg of the design's validation, and the only one that asks DXC rather than another parser:
+    // the constant table the generator produced, against what the compiler actually built.
+    //
+    // shade.hlsl reaches the group through the header that declares it, so this also covers the rewrite
+    // running on a flattened translation unit rather than on one file.
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(k_target_format));
+
+    // One-directional: reflection reports only what the entry point referenced, so its set is a subset of
+    // the declared table.
+    // shade.hlsl reads all three.
+    for (auto const& declared : slib_test::shaders::frame_bindings::declared_bindings())
+    {
+        auto const* reflected = find_binding(compiled, declared.name);
+        if (reflected == nullptr)
+        {
+            CC_LOG_ERROR("[package] '{}' is declared but was not reflected", declared.name);
+            CHECK(false);
+            continue;
+        }
+
+        CHECK(reflected->index == declared.index);
+        CHECK(reflected->count == declared.count);
+        CHECK(reflected->type == declared.type);
+        CHECK(reflected->texture_dimension == declared.texture_dimension);
+    }
+}
+
+TEST("slib - an inline-constants block reflects at b0 in the space it named", exclusive("slib-shader-library"))
+{
+    // Its register is always b0, so a shader that shares a space with a group's `b` registers is exactly the
+    // collision stating a space prevents -- and here the group is in space 0 while the block is in space 9.
+    slib::shader_library lib;
+    auto compiler = make_dxc_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(k_target_format));
+
+    auto const* constants = find_binding(compiled, "gConstants");
+    REQUIRE(constants != nullptr);
+    CHECK(constants->type == sg::binding_type::uniform_buffer);
+
+    // The two targets describe the same block differently, and the difference is the whole point of the feature.
+    //
+    // DXIL gives it a root-constant register in a space, so there is an address to check.
+    // SPIR-V makes it a push-constant block, which lives in no descriptor set and therefore carries neither a
+    // group nor a space — and that absence is exactly what tells a caller an inline-constants block apart from a
+    // `cbuffer` in a set (see ssc's impl/spirv_reflection.cc).
+    if constexpr (k_target_format == sg::shader_format::dxil)
+    {
+        CHECK(constants->index == 0);
+        REQUIRE(constants->space.has_value());
+        CHECK(constants->space.value() == slib::inline_constants_space);
+    }
+    else
+    {
+        CHECK(!constants->space.has_value());
+        CHECK(!constants->group_index.has_value());
+    }
+
+    // block_size keeps coming from reflection, which is how a routine reads it today.
+    //
+    // And this is the check that closes the loop on the generated mirror: the size DXC computed for the block,
+    // against the size the generator computed for the C++ struct a caller fills.
+    // The corpus proves the two halves of the pass agree with each other; only this compares either of them
+    // with the compiler.
+    REQUIRE(constants->block_size.has_value());
+    CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
+}
+
+TEST("slib - a two-slot vertex input compiles to SPIR-V", exclusive("slib-shader-library"))
+{
+    // mesh.hlsl feeds one entry point from two annotated structs, which is what an instanced draw looks like.
+    // A location counter that restarted per struct would put two inputs at location 0, and DXC's validator
+    // rejects the module rather than picking one — so this compiling at all is the property under test.
+    //
+    // SPIR-V explicitly, not k_target_format: the DXIL arm writes no location, so it could never see this.
+    slib::shader_library lib;
+    auto compiler = slib::create_dxc_spirv_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& vs = await(slib_test::shaders::mesh.vertex.main_vs->acquire(sg::shader_format::spirv));
+    CHECK(vs.bytecode.size() > 0);
+}
+
+TEST("slib - a push-constant block is the same size on SPIR-V as the mirror a caller fills",
+     exclusive("slib-shader-library"))
+{
+    // SPIR-V explicitly, not k_target_format: this is the arm that gets it wrong, and a Windows-only run reaches
+    // only the other one — which is how the divergence survived until CI compiled shade.hlsl on Linux.
+    //
+    // `-fvk-use-dx-layout` does not reach a push-constant block, so DXC packs shade_constants scalar-tight at
+    // 0/8/20 for a total of 24, against the 0/16/28 and 32 the mirror is built for.
+    // The pass states the offsets per member to close that, and this is the end-to-end proof it worked: the size
+    // DXC computed against the size the generator did.
+    slib::shader_library lib;
+    auto compiler = slib::create_dxc_spirv_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(sg::shader_format::spirv));
+
+    auto const* constants = find_binding(compiled, "gConstants");
+    REQUIRE(constants != nullptr);
+    REQUIRE(constants->block_size.has_value());
+    CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
 }
 
 #endif

@@ -19,6 +19,22 @@ struct layout_constants_gpu
     tg::vec4f separator_color = tg::vec4f(1, 1, 1, 1);
 };
 
+// "byte for byte" is now checkable: layout.hlsl's block reaches C++ as a generated mirror, so a field moved in
+// the shader is a compile error here rather than a wrong sample.
+// This struct stays because it carries the defaults a draw starts from, which a mirror does not.
+static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout_constants),
+              "the layout constants are not the size layout.hlsl's block states");
+static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_0) == offsetof(layout_constants_gpu, uv_scale_bias_0),
+              "uv_scale_bias_0 moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_1) == offsetof(layout_constants_gpu, uv_scale_bias_1),
+              "uv_scale_bias_1 moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, tint) == offsetof(layout_constants_gpu, tint),
+              "tint moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe),
+              "wipe moved in layout.hlsl");
+static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offsetof(layout_constants_gpu, separator_color),
+              "separator_color moved in layout.hlsl");
+
 /// A uv rect as the shader wants it: a scale and a bias applied to the covering triangle's [0,1] corner.
 [[nodiscard]] tg::vec4f uv_scale_bias(tg::aabb2f const& uv)
 {
@@ -86,11 +102,10 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
         co_return;
     }
 
-    // Group 0 comes from the *wipe* fragment stage, which is the only one binding both sources — so one layout serves
-    // every kind, and a one-source draw simply binds its primary twice.
-    // Built from a fragment stage alone, which is what keeps the vertex stage's b0 out of it: inline constants must be
-    // excluded from every group layout (see pipeline_layout.hh).
-    _group_layout = ctx.cached.acquire_binding_group_layout(compiled_wipe->bindings);
+    // The group is what layout.hlsl declared, so it serves every kind whatever a stage happens to reference:
+    // a one-source draw simply binds its primary twice.
+    // Nothing has to reason about which stage to reflect either — the constants block is not a group member.
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout_bindings>();
 
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
@@ -213,10 +228,9 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
             if (textures.targets.empty())
                 continue;
             group = ctx.transient.create_binding_group(
-                self->_group_layout,
-                {{.name = "source_0", .view = textures.targets[0].as_readonly_view()},
-                 {.name = "source_1", .view = textures.targets[0].as_readonly_view()}},
-                {{.name = "source_sampler", .sampler = {}}});
+                shaders::layout_bindings{.source_0 = textures.targets[0].as_readonly_view(),
+                                         .source_1 = textures.targets[0].as_readonly_view(),
+                                         .source_sampler = {}});
         }
         else
         {
@@ -236,23 +250,21 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
-            group
-                = ctx.transient.create_binding_group(self->_group_layout,
-                                                     {{.name = "source_0", .view = primary->as_readonly_view()},
-                                                      {.name = "source_1", .view = secondary->as_readonly_view()}},
-                                                     {{.name = "source_sampler",
-                                                       .sampler = {.min_filter = filter,
-                                                                   .mag_filter = filter,
-                                                                   .mip_filter = sg::sampler_filter::nearest,
-                                                                   .address_u = sg::sampler_address_mode::clamp_edge,
-                                                                   .address_v = sg::sampler_address_mode::clamp_edge}}});
+            group = ctx.transient.create_binding_group(
+                shaders::layout_bindings{.source_0 = primary->as_readonly_view(),
+                                         .source_1 = secondary->as_readonly_view(),
+                                         .source_sampler = {.min_filter = filter,
+                                                            .mag_filter = filter,
+                                                            .mip_filter = sg::sampler_filter::nearest,
+                                                            .address_u = sg::sampler_address_mode::clamp_edge,
+                                                            .address_v = sg::sampler_address_mode::clamp_edge}});
         }
 
         scope.set_viewport(
             {.offset = tg::pos2f(f32(d.dst_rect.min[0]), f32(d.dst_rect.min[1])), .size = tg::vec2f(f32(w), f32(h))});
         scope.set_scissor(d.dst_rect);
         scope.bind_pipeline(*pipeline);
-        scope.bind_group(0, *group);
+        scope.bind<shaders::layout_bindings>(*group);
         scope.set_inline_constants(cc::span<layout_constants_gpu const>(&constants, 1).as_bytes(), {});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }

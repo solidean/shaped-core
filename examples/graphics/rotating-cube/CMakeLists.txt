@@ -6,7 +6,21 @@
 if(NOT SC_HAS_DXC_COMPILER)
     return()
 endif()
-if(TARGET shaped-graphics-dx12)
+
+# SC_EXAMPLE_BACKEND is declared in the root CMakeLists, with the other SC_* options.
+if(SC_EXAMPLE_BACKEND STREQUAL "vulkan")
+    if(NOT TARGET shaped-graphics-vulkan)
+        message(FATAL_ERROR "SC_EXAMPLE_BACKEND=vulkan but shaped-graphics-vulkan was not built (no Vulkan SDK found)")
+    endif()
+    set(_cube_backend shaped-graphics-vulkan)
+    set(_cube_backend_is_dx12 0)
+elseif(SC_EXAMPLE_BACKEND STREQUAL "dx12")
+    if(NOT TARGET shaped-graphics-dx12)
+        message(FATAL_ERROR "SC_EXAMPLE_BACKEND=dx12 but shaped-graphics-dx12 was not built")
+    endif()
+    set(_cube_backend shaped-graphics-dx12)
+    set(_cube_backend_is_dx12 1)
+elseif(TARGET shaped-graphics-dx12)
     set(_cube_backend shaped-graphics-dx12)
     set(_cube_backend_is_dx12 1)
 elseif(TARGET shaped-graphics-vulkan)
@@ -39,4 +53,6 @@ sc_add_shader_package(
     SHADERS
         cube.hlsl:vertex:main_vs
         cube.hlsl:fragment:main_ps
+        cube.hlsl:vertex_input:vs_input
+        cube.hlsl:constants:gConstants
 )

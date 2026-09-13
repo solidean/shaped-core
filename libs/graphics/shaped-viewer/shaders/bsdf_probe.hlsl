@@ -55,20 +55,6 @@ struct probe_case
     float pad4;
 };
 
-StructuredBuffer<probe_case> Cases : register(t0);
-
-/// One accumulator per work item, summed across a case's blocks by the CPU. What the lanes mean is per mode:
-///
-///   - `probe_albedo`: `xyz` is the summed estimate and `w` the samples that produced it.
-///   - `probe_pdf_norm`: `x` is the summed estimate, `w` the sample count.
-///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
-///   - `probe_medium`: how many samples reported an interior disagreeing with the side they went to, how many entered the
-///     transmissive interior, and how many the subsurface one.
-///   - `probe_transmitted`: the summed estimate over the samples that left on the FAR side only, so its channel RATIOS are
-///     the transmitted lobe's own colour.
-///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
-RWStructuredBuffer<float4> Results : register(u0);
-
 /// A hashed per-lane RNG (PCG-style), seeded per work item so every block draws an independent stream.
 float probe_rand(inout uint state)
 {
@@ -212,22 +198,44 @@ float4 probe_run(probe_case c, uint item)
 }
 } // namespace sv
 
+// A group namespace holds declarations and nothing else, so these do not sit in `sv` beside the probe's own
+// structs and functions.
+// See shaped-shader-library/docs/binding-preprocessor.md.
+#pragma sc group 0
+namespace probe_bindings
+{
+    /// The cases to run, one per block of work items.
+    StructuredBuffer<sv::probe_case> Cases;
+
+    /// One accumulator per work item, summed across a case's blocks by the CPU. What the lanes mean is per mode:
+    ///
+    ///   - `probe_albedo`: `xyz` is the summed estimate and `w` the samples that produced it.
+    ///   - `probe_pdf_norm`: `x` is the summed estimate, `w` the sample count.
+    ///   - `probe_reciprocity`: `x` is the summed absolute difference and `y` the summed magnitude it is relative to.
+    ///   - `probe_medium`: how many samples reported an interior disagreeing with the side they went to, how many entered the
+    ///     transmissive interior, and how many the subsurface one.
+    ///   - `probe_transmitted`: the summed estimate over the samples that left on the FAR side only, so its channel RATIOS are
+    ///     the transmitted lobe's own colour.
+    ///   - `probe_echo`: the decoded fields the CPU checks its own packing against.
+    RWStructuredBuffer<float4> Results;
+}
+
 [numthreads(64, 1, 1)] void BsdfProbe(uint3 tid : SV_DispatchThreadID)
 {
     uint item = tid.x;
 
     uint count = 0u;
     uint stride = 0u;
-    sv::Results.GetDimensions(count, stride);
+    probe_bindings::Results.GetDimensions(count, stride);
     if (item >= count)
         return;
 
     // One case per block of work items, so a case's sample budget is not capped by what one thread can finish.
     uint case_count = 0u;
     uint case_stride = 0u;
-    sv::Cases.GetDimensions(case_count, case_stride);
+    probe_bindings::Cases.GetDimensions(case_count, case_stride);
     uint blocks_per_case = count / max(case_count, 1u);
 
-    sv::probe_case c = sv::Cases[min(item / max(blocks_per_case, 1u), case_count - 1u)];
-    sv::Results[item] = sv::probe_run(c, item);
+    sv::probe_case c = probe_bindings::Cases[min(item / max(blocks_per_case, 1u), case_count - 1u)];
+    probe_bindings::Results[item] = sv::probe_run(c, item);
 }

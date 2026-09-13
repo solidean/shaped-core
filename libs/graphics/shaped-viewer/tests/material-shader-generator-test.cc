@@ -96,14 +96,19 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
     CHECK(g.source.contains("surface.specular_roughness = roughness;"));
     CHECK(g.source.find("float3 base_color") < g.source.find("surface.base_color = base_color;"));
 
-    // No texture is sampled, so no texture table is declared at all — the reflection stays as small as the material is.
-    CHECK(!g.source.contains("gBindlessTextures2D"));
+    // Every table is declared whether the material samples one or not, because the pass numbers a group by
+    // declaration order: a subset would put each table at a different register than the layout did.
+    CHECK(g.source.contains("Texture2D gBindlessTextures2D[4096];"));
 
     // Nothing supplied either attribute, so the fragment's defaults are what came through — and the epilogue can tell.
     CHECK(g.source.contains("#define SV_ATTR_SUPPLIED_roughness 0"));
     CHECK(g.source.contains("#define SV_ATTR_SUPPLIED_base_color 0"));
     CHECK(!g.source.contains("SamplerState"));
-    CHECK(g.source.contains("ByteAddressBuffer gBindlessBuffers[4096] : register(t0, space8);"));
+
+    // Declared, and with no address on it: slib's binding pass writes those.
+    CHECK(g.source.contains("#pragma sc group 1"));
+    CHECK(g.source.contains("ByteAddressBuffer gBindlessBuffers[4096];"));
+    CHECK(!g.source.contains("register(t0"));
 
     // The layout the CPU fills is the one the source reads.
     CHECK(g.layout.slots.size() == 2);
@@ -134,11 +139,12 @@ TEST("sv::generate_material_shader - an attribute-less type still declares the b
     auto const resolved = sv::resolve_material(type, bare_material(), make_mesh());
 
     auto const with_epilogue = sv::generate_material_shader(resolved, {.epilogue_include = "epilogue.hlsli"});
-    CHECK(with_epilogue.source.contains("ByteAddressBuffer gBindlessBuffers[4096] : register(t0, space8);"));
+    CHECK(with_epilogue.source.contains("ByteAddressBuffer gBindlessBuffers[4096];"));
     CHECK(with_epilogue.layout.slots.empty());
 
-    // Without one, nothing in the source reaches a buffer, and the declaration stays out.
-    CHECK(!sv::generate_material_shader(resolved).source.contains("gBindlessBuffers"));
+    // And without one too: the table set does not vary with what a material happens to reach, because varying it
+    // would vary the addresses the pass assigns.
+    CHECK(sv::generate_material_shader(resolved).source.contains("ByteAddressBuffer gBindlessBuffers[4096];"));
 }
 
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")
@@ -191,8 +197,15 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
 
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
 
-    CHECK(g.source.contains("Texture2D gBindlessTextures2D[4096] : register(t0, space3);"));
-    CHECK(g.source.contains("SamplerState sv_sampler_0 : register(s0, space0);"));
+    CHECK(g.source.contains("Texture2D gBindlessTextures2D[4096];"));
+    // The samplers are a group of their own and the binding pass writes their addresses, so the generator
+    // declares them and numbers nothing.
+    // They used to be hand-written `s{i}` in space 0, which only held because pt_common.hlsli declared no sampler.
+    CHECK(g.source.contains("#pragma sc group 2"));
+    CHECK(g.source.contains("namespace sv_material_samplers"));
+    CHECK(g.source.contains("    SamplerState sv_sampler_0;"));
+    CHECK(g.source.contains("using namespace sv_material_samplers;"));
+    CHECK(!g.source.contains("SamplerState sv_sampler_0 : register"));
     CHECK(g.source.contains("float2 uv = sv::interpolate_f2("));
     CHECK(g.source.contains("uint tex = params.Load(ctx.param_offset + "));
     // SampleLevel, because a ray tracing hit shader has no derivatives to pick a mip from.
