@@ -9,6 +9,7 @@
 // Each creates a dx12 context and invokes every sg::context_handle API test against it.
 // Compiled only where the dx12 backend builds, so Windows.
 // They carry the slib-shader-library tag because the invocables they dispatch stand up a slib::shader_library, which is a process-wide singleton.
+// They carry sg-reload-generation because those invocables count routine inits, and sg::signal_reload() elsewhere would re-run them; a tag on an invoked child is ignored.
 // Two adapters are covered, both with the debug layer on:
 //   - WARP (software): present on any Windows host, so it also runs headless on CI.
 //   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI).
@@ -39,7 +40,7 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg dx12 warp backend", exclusive("slib-shader-library"))
+TEST("sg dx12 warp backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx.has_error())
@@ -51,7 +52,7 @@ TEST("sg dx12 warp backend", exclusive("slib-shader-library"))
     }
 }
 
-TEST("sg dx12 hardware backend", exclusive("slib-shader-library"))
+TEST("sg dx12 hardware backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = false});
     if (ctx.has_error())
