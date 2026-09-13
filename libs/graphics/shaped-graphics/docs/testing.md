@@ -113,14 +113,20 @@ Two kinds of test belong here:
 
 ### A tier-2 test is an invocable too, unless it needs its own context
 
-The dx12 suite has the same driver shape as tier 1.
+Both backend suites have the same driver shape as tier 1.
 [`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one hardware and one WARP context, and invokes every `INVOCABLE_TEST` in the binary against each.
 The WARP one runs only where the adapter rules call for it.
-So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`.
+[`vulkan-entry.cc`](../backends/vulkan/tests/vulkan-entry.cc) brings up one context, with validation and synchronization validation on, and SKIPs where there is no Vulkan device.
+So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`, or `vulkan::vulkan_context_handle` for vulkan.
 The parameter is the **backend-typed** handle, unlike tier 1's `sg::context_handle`: a suite committed to one backend should not have to downcast to read its guts.
 
-Write an ordinary `TEST` only when the test needs a context of its own: pristine epoch / pool state, or a `dx12_config` knob it is about.
+The invocables under one driver run in turn on one context, so each leaves it as it found it.
+Every list is submitted or dropped, and a test that swaps the validation callback reinstalls the failing one before it returns.
+An assertion on a counter the context has already advanced — the epoch, a pool's free count — is written against a snapshot taken at the start of the test rather than against zero.
+
+Write an ordinary `TEST` only when the test needs a context of its own: the context itself is the subject, a backend config knob is, or pristine epoch / pool state a snapshot cannot stand in for.
 `dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and such a test carries `exclusive("gpu")`.
+The vulkan one is `vulkan::test::make_context({…})` in [`vulkan-test-common.hh`](../backends/vulkan/tests/vulkan-test-common.hh), and its test carries `exclusive("vulkan-device")`.
 
 ### Drive through the abstract API even though the handle is backend-typed
 

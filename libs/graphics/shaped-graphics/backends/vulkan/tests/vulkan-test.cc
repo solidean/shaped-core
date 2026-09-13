@@ -1,5 +1,6 @@
 #include "vulkan-test-common.hh"
 
+#include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
@@ -9,8 +10,7 @@ using namespace cc::primitive_defines;
 // vulkan backend bring-up test, in its own binary (shaped-graphics-vulkan-test) built only where the vulkan backend builds, so it needs no #ifdef guard.
 // What belongs in a backend suite rather than in the backend-agnostic shaped-graphics-test is libs/graphics/shaped-graphics/docs/concepts/backends.md's call.
 //
-// Vulkan has no guaranteed software device — unlike dx12's WARP adapter — so no context can be created on a driver-less headless host.
-// Every test therefore returns early when creation fails, rather than failing.
+// Most tests here are invocables on the one context vulkan-entry.cc brings up; the few TESTs create their own, and say why.
 // Validation is requested throughout but best-effort: create_vulkan_context proceeds without the layer when it is not installed.
 
 namespace
@@ -64,6 +64,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
 }
 } // namespace
 
+// Owns its context: creation is the subject, and so is the epoch state a fresh context starts in.
 TEST("sg vulkan - context", exclusive("vulkan-device"))
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
@@ -71,9 +72,15 @@ TEST("sg vulkan - context", exclusive("vulkan-device"))
         return; // no Vulkan loader/driver/device (e.g. headless CI) — nothing to exercise.
 
     CHECK(ctx.value()->backend() == sg::backend_kind::vulkan);
+
+    // Nothing has finished yet, so the completed epoch is first-1.
+    CHECK(ctx.value()->current_epoch() == sg::epoch::first);
+    CHECK(u64(ctx.value()->completed_epoch()) == u64(sg::epoch::first) - 1);
+
     exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
 }
 
+// Owns its context: prefer_software_device is a creation knob.
 TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
 {
     // prefer_software picks a CPU device (e.g. lavapipe) when one is present, and falls back to hardware otherwise.
@@ -86,34 +93,25 @@ TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
     exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
 }
 
-namespace
+INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))
 {
-using vulkan::test::make_context; // see vulkan-test-common.hh
-} // namespace
+    auto& c = *handle;
 
-TEST("sg vulkan - epoch advance and retire", exclusive("vulkan-device"))
-{
-    auto handle = make_context();
-    if (handle == nullptr)
-        return; // no Vulkan device (e.g. headless CI).
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
-
-    CHECK(c.current_epoch() == sg::epoch::first);
-    // Nothing has finished yet, so the completed epoch is first-1.
-    CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
+    // The shared context has advanced before this test, so everything is relative to the epoch it finds.
+    // A fresh context's starting epoch is "sg vulkan - context"'s to check.
+    auto const before = u64(c.current_epoch());
+    CHECK(u64(c.completed_epoch()) < before); // the current epoch is still open
 
     c.advance_epoch();
     c.block_until_idle();
-    CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
-    CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
+    CHECK(u64(c.current_epoch()) == before + 1);
+    CHECK(u64(c.completed_epoch()) >= before); // the epoch that was current is now done
 }
 
-TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     bool finalized = false;
     {
@@ -130,41 +128,47 @@ TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch 
     CHECK(finalized);
 }
 
-TEST("sg vulkan - command pools are recycled across epochs", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     auto const free_count
         = [&] { return c._command_pools.lock([](vulkan::vulkan_command_pool_set& p) { return p.free.size(); }); };
 
+    // The shared context has pooled lists before this test, so the counts are relative to where it starts.
+    // Draining returns every in-flight pool, and a dropped list returns its pool at once, so at least one is free.
+    c.advance_epoch();
+    c.block_until_idle();
+    auto seed = c.create_vulkan_command_list();
+    REQUIRE(seed.has_value());
+    c.drop_vulkan_command_list(cc::move(seed.value()));
+    auto const pooled = free_count();
+    REQUIRE(pooled >= 1);
+
+    // A new list takes a pooled command pool rather than creating one.
     auto cmd = c.create_vulkan_command_list();
     REQUIRE(cmd.has_value());
+    CHECK(free_count() == pooled - 1);
     c.submit_vulkan_command_list(cc::move(cmd.value()));
-    CHECK(free_count() == 0); // still in flight — captured by the current epoch
+    CHECK(free_count() == pooled - 1); // still in flight — captured by the current epoch
 
     c.advance_epoch();
     c.block_until_idle();
-    CHECK(free_count() == 1); // reset and returned to the free set on retire
+    CHECK(free_count() == pooled); // reset and returned to the free set on retire
 
-    // The next list reuses the pooled command pool rather than creating a new one.
+    // And the pool it gave back is taken again by the next list.
     auto cmd2 = c.create_vulkan_command_list();
     REQUIRE(cmd2.has_value());
-    CHECK(free_count() == 0);
+    CHECK(free_count() == pooled - 1);
     c.submit_vulkan_command_list(cc::move(cmd2.value()));
     c.advance_epoch();
     c.block_until_idle();
-    CHECK(free_count() == 1);
+    CHECK(free_count() == pooled);
 }
 
-TEST("sg vulkan - submission token reports completion", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - submission token reports completion", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     auto cmd = c.create_vulkan_command_list();
     REQUIRE(cmd.has_value());
@@ -176,12 +180,9 @@ TEST("sg vulkan - submission token reports completion", exclusive("vulkan-device
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-TEST("sg vulkan - throttle bounds epochs in flight", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - throttle bounds epochs in flight", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)
@@ -192,12 +193,10 @@ TEST("sg vulkan - throttle bounds epochs in flight", exclusive("vulkan-device"))
     CHECK(in_flight <= 1);
 }
 
-TEST("sg vulkan - the command list reports the device's ray-tracing answer", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - the command list reports the device's ray-tracing answer",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     // The context records what the device offers; the command list reports what the backend can actually record.
     // They were deliberately allowed to disagree while the build and dispatch seams were stubs — a list that cannot
@@ -211,14 +210,19 @@ TEST("sg vulkan - the command list reports the device's ray-tracing answer", exc
     c.drop_vulkan_command_list(cc::move(cmd.value()));
 }
 
-TEST("sg vulkan - an installed message callback receives validation messages", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - an installed message callback receives validation messages",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
-    if (ctx.has_error())
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+    auto& c = *handle;
 
-    // make_context installs a fail-the-test listener; this one owns its context, so it can install a recording one.
+    // The shared context carries the fail-the-test listener, so a recording one replaces it until this test returns.
+    // set_message_callback is not synchronized against a message raised on another thread, so the swap happens idle.
+    c.block_until_idle();
+    CC_DEFER
+    {
+        vulkan::test::fail_on_validation_messages(c);
+    };
+
     int seen = 0;
     auto last = cc::string();
     auto last_severity = vulkan::vulkan_message_severity::verbose;
@@ -241,12 +245,17 @@ TEST("sg vulkan - an installed message callback receives validation messages", e
     CHECK(seen == 1);
 }
 
-TEST("sg vulkan - the debug messenger reaches the installed callback", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed callback",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
-    if (ctx.has_error())
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+    auto& c = *handle;
+
+    // The provoked message would fail the test through the shared listener, so a counting one replaces it until return.
+    c.block_until_idle();
+    CC_DEFER
+    {
+        vulkan::test::fail_on_validation_messages(c);
+    };
 
     int seen = 0;
     c.set_message_callback([&](vulkan::vulkan_message_severity, cc::string_view) { ++seen; });
@@ -270,16 +279,12 @@ TEST("sg vulkan - the debug messenger reaches the installed callback", exclusive
     // It needs the validation layer installed; without it there is no messenger and nothing to observe.
     if (c._debug_messenger != VK_NULL_HANDLE)
         CHECK(seen > 0);
-
-    c.set_message_callback({});
 }
 
-TEST("sg vulkan - an inline upload records, submits and reclaims its staging", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - an inline upload records, submits and reclaims its staging",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context(); // installs the fail-on-validation listener
-    if (handle == nullptr)
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     auto buffer = c.create_vulkan_buffer(1024, sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buffer.has_value());
@@ -301,6 +306,7 @@ TEST("sg vulkan - an inline upload records, submits and reclaims its staging", e
     CHECK(!c.is_device_lost());
 }
 
+// Owns its context: upload_ring_bytes is a creation knob, and the ring has to be far smaller than the default.
 TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
 {
     // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
@@ -329,12 +335,10 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once", ex
     CHECK(!c.is_device_lost());
 }
 
-TEST("sg vulkan - a texture round-trips through the staging rings", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - a texture round-trips through the staging rings",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context(); // installs the fail-on-validation listener
-    if (handle == nullptr)
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
     auto& base = static_cast<sg::context&>(c);
 
     // 8x8 rgba8: 256 tightly-packed bytes, and small enough to compare byte for byte.
@@ -371,14 +375,12 @@ TEST("sg vulkan - a texture round-trips through the staging rings", exclusive("v
     CHECK(matched);
 }
 
-TEST("sg vulkan - a block-compressed texture stages at its block size", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block size",
+               (vulkan::vulkan_context_handle const& handle))
 {
     // BC formats store whole 4x4 blocks, so an 8x8 BC1 subresource is 4 blocks of 8 bytes rather than 8x8 texels.
     // Getting the staging size or its offset alignment wrong here is a validation error rather than a wrong image,
     // which is what makes this worth pinning separately.
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
     auto& base = static_cast<sg::context&>(*handle);
 
     auto texture = base.persistent.create_texture_2d({
@@ -405,12 +407,10 @@ TEST("sg vulkan - a block-compressed texture stages at its block size", exclusiv
     CHECK(read.value().size() == 32);
 }
 
-TEST("sg vulkan - the device reports descriptor buffer properties", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - the device reports descriptor buffer properties",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
 
     // The bind path sizes every descriptor range from these, so a zero here would silently produce empty ranges.
     // A descriptor's size is a device property rather than something the API fixes, which is the main way the
@@ -427,12 +427,10 @@ TEST("sg vulkan - the device reports descriptor buffer properties", exclusive("v
     CHECK((props.descriptorBufferOffsetAlignment & (props.descriptorBufferOffsetAlignment - 1)) == 0);
 }
 
-TEST("sg vulkan - the descriptor heap allocates, frees and coalesces", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - the descriptor heap allocates, frees and coalesces",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
     auto& heap = c._descriptor_heap;
 
     // A descriptor's size is a device property, so the heap is addressed in bytes and every range is aligned to the
@@ -462,12 +460,10 @@ TEST("sg vulkan - the descriptor heap allocates, frees and coalesces", exclusive
     CHECK(heap.device_address() != 0);
 }
 
-TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch",
+               (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = make_context();
-    if (handle == nullptr)
-        return;
-    auto& c = static_cast<vulkan::vulkan_context&>(*handle);
+    auto& c = *handle;
     auto& heap = c._descriptor_heap;
 
     // Transient descriptors are written by the CPU and read by the GPU during the epoch, so a slot cannot be reused

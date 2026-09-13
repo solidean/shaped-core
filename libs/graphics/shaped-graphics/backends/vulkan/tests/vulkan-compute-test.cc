@@ -45,11 +45,8 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-TEST("sg vulkan - compute dispatch writes a structured buffer", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - compute dispatch writes a structured buffer", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = vulkan::test::make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
     auto& ctx = *handle;
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
@@ -107,7 +104,7 @@ TEST("sg vulkan - compute dispatch writes a structured buffer", exclusive("vulka
 // This is what proves the heap's per-epoch checkpointing rather than its arithmetic: a transient range may only be
 // reused once the epoch that wrote its descriptors has retired, and a GPU reading recycled bytes would show up as
 // wrong data rather than as a validation message.
-// The hand-sized heap is a vulkan knob, so this takes a vulkan config directly; the work itself is all public sg API.
+// Owns its context: the hand-sized heap is a vulkan_config knob, and the work itself is all public sg API.
 TEST("sg vulkan - transient binding groups and buffers recycle across epochs", exclusive("vulkan-device"))
 {
     // Small enough that 40 epochs cannot all fit, large enough for one group's set plus alignment.
@@ -170,6 +167,7 @@ TEST("sg vulkan - transient binding groups and buffers recycle across epochs", e
 // A bump allocator would exhaust after the first handful, which is what this distinguishes.
 // The region is sized so that it does: holding the 50 groups instead of releasing them fails this test, which is what
 // makes the free list load-bearing here rather than merely present.
+// Owns its context for the same reason: the tiny region is a vulkan_config knob.
 TEST("sg vulkan - persistent binding groups free and reuse their descriptor range", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context(

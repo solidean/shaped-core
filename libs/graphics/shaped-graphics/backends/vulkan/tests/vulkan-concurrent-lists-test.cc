@@ -19,8 +19,8 @@ using namespace cc::primitive_defines;
 // from a barrier, and the freebie is the case where none is recorded.
 //
 // A byte comparison proves nothing here: hardware will usually serialize anyway, so a green run is not evidence.
-// SYNCHRONIZATION VALIDATION is the oracle, and make_context turns it on; the listener fails the test on any message
-// it raises.
+// SYNCHRONIZATION VALIDATION is the oracle, and the entry driver's context has it on.
+// The listener fails the test on any message it raises.
 
 namespace
 {
@@ -48,12 +48,9 @@ bool matches(cc::span<byte const> bytes, isize count, int salt)
 }
 } // namespace
 
-TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next",
+               (sg::backend::vulkan::vulkan_context_handle const& ctx))
 {
-    auto const ctx = sg::backend::vulkan::test::make_context();
-    if (ctx == nullptr)
-        SKIP("no vulkan device");
-
     auto const buffer
         = ctx->persistent.create_raw_buffer(k_buffer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buffer != nullptr);
@@ -81,12 +78,9 @@ TEST("sg vulkan - a buffer written by one concurrently recorded list and read by
     ctx->block_until_idle();
 }
 
-TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next", exclusive("vulkan-device"))
+INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next",
+               (sg::backend::vulkan::vulkan_context_handle const& ctx))
 {
-    auto const ctx = sg::backend::vulkan::test::make_context();
-    if (ctx == nullptr)
-        SKIP("no vulkan device");
-
     // Sampled as well as copyable, so the layout the lists rest in is a specific one rather than a transfer layout.
     auto const tex = ctx->persistent.create_raw_texture(
         {.format = sg::pixel_format::rgba8_unorm,
