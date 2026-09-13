@@ -1,4 +1,3 @@
-#include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
@@ -32,6 +31,8 @@ using namespace cc::primitive_defines;
 // backend, so two tests reaching for the same type would see each other's phase counts — and the one that ran second
 // would assert against a routine that was already initialized.
 // Tests needing TWO contexts live in routine-contexts-test.cc, which cannot be backend-agnostic for that reason.
+// So does any test whose `singlethreaded` or `exclusive` must hold: nx::invoke_tests runs a child under its driver's
+// config, so on an INVOCABLE_TEST both are ignored.
 
 namespace
 {
@@ -672,100 +673,6 @@ INVOCABLE_TEST("sg - a routine is not ready until its dependencies are",
     chained_top::evict(*ctx);
     chained_middle::evict(*ctx);
     chained_leaf::evict(*ctx);
-}
-
-namespace
-{
-// Two routines that need each other.
-// Declared apart and defined below, because each init names the other's type.
-class cyclic_b;
-
-class cyclic_a : public sg::render_routine<cyclic_a>
-{
-protected:
-    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
-
-private:
-    sg::routine_dependency<cyclic_b, sg::routine_no_params> _b;
-};
-
-class cyclic_b : public sg::render_routine<cyclic_b>
-{
-protected:
-    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
-
-private:
-    sg::routine_dependency<cyclic_a, sg::routine_no_params> _a;
-};
-
-cc::shared_async<cc::unit> cyclic_a::init(sg::routine_init_scope scope)
-{
-    _b = depend_on<cyclic_b>(scope.context());
-    co_return;
-}
-cc::shared_async<cc::unit> cyclic_b::init(sg::routine_init_scope scope)
-{
-    _a = depend_on<cyclic_a>(scope.context());
-    co_return;
-}
-
-/// What the test's assertion handler throws to unwind out of the phase that closed the cycle.
-struct cycle_assert
-{
-};
-} // namespace
-
-// A cycle is refused where the edge is declared, not discovered later as a hang.
-// It is two failures at once: readiness never settles because each end waits for the other, and initialization would
-// deadlock taking the two routines' locks in opposite orders -- a stack trace naming two mutexes and no routine.
-//
-// CHECK_ASSERTS cannot be used here, and the reason is structural: it works by throwing out of the expression, and the
-// assert fires inside a PHASE, whose promise catches the exception and fails the node instead of unwinding to the tick.
-// So the handler is installed by hand, and what is checked is both halves -- that the assert fired, and that the
-// framework then reports the cycle as a failed routine rather than one pending forever.
-//
-// Singlethreaded for a reason of the same kind: the handler stack is per-thread, so the phases have to run inline on
-// this thread rather than on a pool worker that nobody scoped.
-INVOCABLE_TEST("sg - a dependency cycle is refused where it is declared",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"),
-               singlethreaded)
-{
-    REQUIRE(ctx != nullptr);
-    cyclic_a::evict(*ctx);
-    cyclic_b::evict(*ctx);
-
-#if CC_ASSERT_ENABLED
-    auto asserts_seen = 0;
-    {
-        auto const handler = cc::impl::scoped_assertion_handler(
-            [&](cc::impl::assertion_info const&)
-            {
-                ++asserts_seen;
-                throw cycle_assert{}; // unwinds out of the phase, exactly as nexus's own handler would
-            });
-
-        cyclic_a::prewarm(*ctx);
-        (void)ctx->routines.tick_until_idle();
-    }
-    CHECK(asserts_seen == 1);
-
-    // Both ends are unusable: the one that closed the edge failed outright, and the one above it inherits that
-    // through the subtree fold rather than reporting ready over a dependency that is not coming.
-    CHECK(cyclic_b::try_acquire(*ctx).is_failed());
-    CHECK(cyclic_a::try_acquire(*ctx).is_failed());
-#else
-    // With assertions off the cycle is not refused at all, and both ends come up over an edge that loops.
-    // What still has to hold is that nothing hangs: the readiness walk carries a visited set, so a cycle costs a leak
-    // rather than a spin.
-    cyclic_a::prewarm(*ctx);
-    (void)ctx->routines.tick_until_idle();
-    CHECK(cyclic_a::try_acquire(*ctx).is_ready());
-#endif
-
-    // The registry is left holding the half-built graph, so clear it rather than leaving it for the next test.
-    cyclic_a::evict(*ctx);
-    cyclic_b::evict(*ctx);
 }
 
 namespace
