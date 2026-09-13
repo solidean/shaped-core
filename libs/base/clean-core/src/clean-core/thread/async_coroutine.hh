@@ -15,7 +15,7 @@
 //
 // A coroutine IS a compute frame.
 // The frame contract — re-entrant, polled repeatedly, never moved, resolving through async_context — is exactly a coroutine's shape, so this layer adds no node state at all.
-// The node stores one coroutine_handle, so a coroutine's frame is 8 B and never falls back to the boxed cc::unique_function.
+// The node stores one coroutine_handle behind a reserved home word, so a coroutine's frame is 16 B and never falls back to the boxed cc::unique_function.
 //
 // A graph that does not use co_await pays nothing: no field, no poll-loop branch, and <coroutine> stays out of async.hh.
 // Including THIS header is what makes a function returning shared_async<T, E> a coroutine.

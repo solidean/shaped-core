@@ -92,7 +92,7 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
      exclusive("cc-compute-async-pool"))
 {
     cc::async_thread_pool pool(2);
-    cc::scoped_compute_async_scheduler as_default(pool); // so the foreign push routes the woken dependent back here
+    cc::scoped_compute_async_scheduler as_compute(pool); // so the foreign push routes the woken dependent back here
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -130,8 +130,8 @@ TEST("async - installing a second compute scheduler asserts", nx::config::no_sch
     cc::async_thread_pool pool_a(1);
     cc::async_thread_pool pool_b(1);
 
-    cc::scoped_compute_async_scheduler as_default(pool_a);
-    CHECK_ASSERTS(cc::install_compute_async_scheduler(pool_b)); // a default is already installed
+    cc::scoped_compute_async_scheduler as_compute(pool_a);
+    CHECK_ASSERTS(cc::install_compute_async_scheduler(pool_b)); // a compute scheduler is already installed
 }
 
 TEST("async - io_scheduler falls back to compute until an io scheduler is installed",
@@ -325,7 +325,7 @@ TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked i
     // That is a report, not an abort -- it is not this scheduler's graph to fail.
     // The push then routes the woken dependent to the compute scheduler, which finishes it.
     cc::async_thread_pool pool(1);
-    cc::scoped_compute_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_compute(pool);
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -355,7 +355,7 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     // A wrong value or an abort is not legal.
     // Correctness only: st never publishes, so it may drag a subtree the pool could have parallelized into single-threaded execution.
     cc::async_thread_pool pool(4);
-    cc::scoped_compute_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_compute(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -391,7 +391,7 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
     // try_blocking_get drains its queue before returning, with its worker scope still bound, settling root_mt into a completed or re-parked state.
     // This test must finish, not hang.
     cc::async_thread_pool pool(4);
-    cc::scoped_compute_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_compute(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -418,7 +418,7 @@ TEST("async - a node woken across threads still runs under its own ambient conte
     // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
     // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
     cc::async_thread_pool pool(4);
-    cc::scoped_compute_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_compute(pool);
 
     int scope_value = 7;
     auto gate = cc::make_async_manual<i64>();
@@ -473,7 +473,7 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
     // The pool's one worker is pinned inside `hog` for the whole test, so the parked participant is the only thread
     // left that can run `victim` — the steal is forced rather than raced.
     cc::async_thread_pool pool(1);
-    cc::scoped_compute_async_scheduler as_default(
+    cc::scoped_compute_async_scheduler as_compute(
         pool); // the pusher thread has nothing bound, and resolving `gate` routes a continuation
 
     cc::atomic<bool> hog_running = {false};
@@ -547,7 +547,7 @@ TEST("async - a pool releases a finished graph's value", nx::config::no_schedule
     // It is the COMPUTE scheduler too, because that is what a scheduled async submits itself to at creation — the
     // shape every `cached.acquire_*` in shaped-graphics has.
     cc::async_thread_pool pool(2);
-    cc::scoped_compute_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_compute(pool);
     {
         auto node = cc::make_async_scheduled<std::shared_ptr<int>>(
             [captured = owned](async_context<std::shared_ptr<int>>& actx) -> cc::async_step_status

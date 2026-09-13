@@ -1,5 +1,5 @@
 // TODO(nexus): an ASYNC_EXAMPLE, so the body IS an async<unit> and awaits the cache directly.
-// Everything here is async underneath, and the example has to say so twice: once by installing a default pool, and once by blocking_get on every call.
+// Everything here is async underneath, and the example has to say so twice: once by relying on the installed compute scheduler, and once by blocking_get on every call.
 // Both are scaffolding around the demonstration rather than part of it.
 // ASYNC_TEST already carries the shape (nexus/async-test.hh); the example bucket wants the same.
 

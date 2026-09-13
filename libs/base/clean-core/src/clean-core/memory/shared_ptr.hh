@@ -82,7 +82,7 @@ struct cc::fused_refcount
         // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one, because minting requires already holding one.
         // So there is nobody to race and no RMW is needed, which is the whole point of fusing.
         // The ACQUIRE is load-bearing: it pairs with the release of whoever dropped the second-to-last reference, ordering their writes before our teardown.
-        // Note this leaves the counts reading (1,1) through destroy_object / free_storage; nothing may read them there.
+        // Note this leaves the counts reading (1,1) through destroy_object / free_storage; a teardown that outlives the call must rewrite them first.
         if (c.load(cc::memory_order_acquire) == sole_owner)
             return {true, true};
 

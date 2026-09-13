@@ -1696,7 +1696,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
 
     // Partition by scheduler mode, in first-appearance order.
     // Each partition is one graph under one scheduler, run as its own phase — schedulers do not nest, so they cannot overlap.
-    // Phases being sequential is also what makes exclusivity ACROSS modes free: only within-phase pairs need an edge.
+    // Phases being sequential is also what makes exclusivity ACROSS modes free: a lock is only ever contended within its phase.
     struct run_phase
     {
         nx::config::scheduler_mode mode = nx::config::scheduler_mode::shared;

@@ -830,7 +830,7 @@ cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == sto
 cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
 // thread_pump_all also runs the CALLING thread's own home (thread_bound_scheduler), so every wait loop services it.
 cc::pump_main_thread(4.0);                // the event loop's call (thread_bound_scheduler.hh): main home + registry +
-                                          //   (threads off) compute/io; true == stopped on the budget with work pending
+                                          //   (threads off) compute/io; false == nothing progressed and the main home is empty
 // GOTCHA: a pump must NOT block on another registration - it holds the only thread, so that one never runs.
 //   Sweep from inside a pump instead (this one is skipped, the others run). Blocking on a GPU fence / OS handle is fine.
 ```
@@ -943,15 +943,15 @@ auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(b
 cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
 home.drain();                            // end of a loop: runs what is left, incl. deferred at_home teardowns
 // inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)
-// teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on the home; resolved values anywhere
-// GOTCHA: children a homed body starts are NOT homed (they go to compute). A home is never re-entered: a blocking wait
+// teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on a THREAD home; resolved values anywhere
+// GOTCHA: children a homed body starts are NOT homed (a thread home sends them to compute; a pool home keeps them). A home is never re-entered: a blocking wait
 //   inside a homed body does not run that home's other bodies — co_await instead. EVERY scheduler must outlive the nodes
 //   homed to it (~async_scheduler asserts). same_home_only tries only the FIRST pending dep inline before parking.
 // EXCLUSION (#include <clean-core/thread/async_mutex.hh>) — contention PARKS the node; the thread keeps working.
 cc::async_mutex<T> m;  auto g = co_await m.lock();       // guard: g->..., *g; may be held across co_await, released anywhere
 auto grant = m.lock_async();  /* require(grant) */  auto g2 = grant->take_value(); // raw frame; take EXACTLY once
 auto maybe = m.try_lock();                               // cc::optional<guard>; never waits, never barges a queue
-cc::async_shared_mutex<T> rw;  co_await rw.lock_shared(); co_await rw.lock(); // writer-preferring
+cc::async_shared_mutex<T> rw;  auto r = co_await rw.lock_shared();  // or co_await rw.lock(); writer-preferring
 cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
 // FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame

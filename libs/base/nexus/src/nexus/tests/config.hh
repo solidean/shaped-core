@@ -180,7 +180,7 @@ constexpr struct
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
 // Expressed as locks the test node takes before its body: one async mutex per tag, and a phase-wide shared lock that this holds exclusively.
-// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs the schedule in order.
+// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs each phase in schedule order.
 // Repeat it to hold several tags — they are taken in name order, which keeps two multi-tag tests from deadlocking.
 constexpr auto exclusive(char const* tag = nullptr)
 {
@@ -202,7 +202,7 @@ constexpr auto exclusive(char const* tag = nullptr)
     return excluder{tag};
 }
 
-// Run this test with NO ambient scheduler at all: none bound to its thread, and none installed as the default.
+// Run this test with NO ambient scheduler at all: none bound to its thread, and no compute scheduler installed.
 // Its body is driven directly, in schedule order, alongside the other tests asking for the same.
 //
 // Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.

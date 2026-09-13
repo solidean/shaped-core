@@ -14,6 +14,7 @@ The check-attribution contract this rests on is [threaded-checks](threaded-check
 
 **The default is `-j0`** — every core, because a test suite that only runs correctly one at a time is hiding something.
 `-jN` for N > 1 builds a join over the whole phase and drives it on a `cc::async_thread_pool` of N-1 workers, the caller participating as the Nth.
+In a phase with a `main_thread` test the caller runs the bodies handed to it instead.
 
 `-j1` stays first-class, and is not merely "a pool of one".
 It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order.
@@ -71,7 +72,7 @@ Both drive the body directly, so neither composes with a mode that runs it as a 
 ## Main-thread affinity
 
 Some work must run on the **process main thread** — `sr::window_system` asserts on it, because SDL does.
-No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag orders tests without choosing a thread.
+No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag excludes tests without choosing a thread.
 
 ```cpp
 TEST("sr - window system creates and shuts down", main_thread) { … }
@@ -94,7 +95,8 @@ At loop level the same wait runs that step, exactly as it would in an applicatio
 
 So `main_thread` says **which thread**, not that nothing else runs.
 Main-thread bodies still run one at a time among themselves; add `exclusive()` to run alone, which `EXAMPLE` bakes in.
-Under `-j1`, or when the phase has no `main_thread` test, the run thread participates in the pool as before, and a `main_thread` body reached on it runs in place.
+Under `-j1` the run thread drives the nodes one at a time, and a `main_thread` body runs in place.
+In a `-jN` phase with no `main_thread` test, the run thread participates in the pool as before.
 
 Two combinations are asserts rather than quiet demotions:
 
@@ -120,7 +122,7 @@ That is what lets an `exclusive()` test, an `ASYNC_TEST` and a `main_thread` tes
 - **The phase lock is writer-preferring**: once an `exclusive()` test waits, tests arriving after it wait behind it.
 - **The trade: holders run in arrival order, not schedule order.**
   Under `-jN` two holders of a tag no longer run in the order the schedule lists them.
-  `-j1` still runs the whole schedule in order, so a failure that depends on the order is still reproducible there.
+  `-j1` still runs each phase in schedule order, so a failure that depends on the order is still reproducible there.
 - **Exclusion across scheduler modes is free**, because phases are sequential; a lock is only ever contended within its phase.
 
 A test may carry up to `nx::config::max_exclusion_tags` tags.

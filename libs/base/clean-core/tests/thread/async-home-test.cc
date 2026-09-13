@@ -37,6 +37,7 @@ struct home_thread
     cc::thread_bound_scheduler* home = nullptr;
     cc::atomic<u64> id = {0};
     cc::atomic<bool> stop = {false};
+    cc::atomic<int> loops = {0}; // turns of the owner's pump loop, so a test can tell a pinned owner from a busy one
     std::thread thread;
 
     home_thread()
@@ -53,6 +54,7 @@ struct home_thread
                 while (!stop.load())
                 {
                     (void)h.pump_cycle();
+                    loops.fetch_add(1);
                     h.wait_for_work(1.0);
                 }
                 while (h.pump_cycle())
@@ -500,9 +502,13 @@ TEST("async home - a home re-queues itself only behind what one pump cycle alrea
         root->schedule_on(*h.home); // a cold coroutine reaches its home by being scheduled there; its hop then keeps it
 
         auto const busy_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        while (polls.load() < 100 && std::chrono::steady_clock::now() < busy_deadline)
+        while (polls.load() == 0 && std::chrono::steady_clock::now() < busy_deadline)
             std::this_thread::yield();
-        CHECK(polls.load() >= 100); // the owner keeps getting through its loop, and so is not pinned by the spinner
+        auto const loops_before = h.loops.load();
+        while (h.loops.load() < loops_before + 100 && std::chrono::steady_clock::now() < busy_deadline)
+            std::this_thread::yield();
+        CHECK(h.loops.load() >= loops_before + 100); // the owner keeps getting through its loop while the spinner spins
+        CHECK(!root->is_ready());
         release.store(true);
 
         auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);

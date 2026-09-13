@@ -79,7 +79,7 @@ TEST("parallel - a failing test fails alone, and never poisons the tests behind 
     auto const exec = nx::execute_tests(schedule, with_jobs(4));
 
     // A test node always resolves to a VALUE — a failure is data on the execution, never an async error.
-    // On the error channel it would propagate into every node ordered behind it.
+    // On the error channel it would propagate into the phase's join.
     REQUIRE(exec.executions.size() == 3);
     CHECK(!exec.executions[0].is_considered_failing());
     CHECK(exec.executions[1].is_considered_failing());
@@ -154,15 +154,15 @@ TEST("parallel - exclusive tag holders never overlap", no_scheduler)
 TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
 {
     cc::atomic<int> live = {0};
-    cc::atomic<int> seen_beside_the_barrier = {0};
-    cc::atomic<bool> barrier_running = {false};
+    cc::atomic<int> seen_beside_the_exclusive = {0};
+    cc::atomic<bool> exclusive_running = {false};
 
     nx::test_registry reg;
     auto const busy = [&]
     {
         live.fetch_add(1, cc::memory_order_acq_rel);
-        if (barrier_running.load(cc::memory_order_acquire))
-            seen_beside_the_barrier.fetch_add(1, cc::memory_order_relaxed);
+        if (exclusive_running.load(cc::memory_order_acquire))
+            seen_beside_the_exclusive.fetch_add(1, cc::memory_order_relaxed);
         for (auto spin = 0; spin < 20000; ++spin)
             cc::spin_pause();
         live.fetch_sub(1, cc::memory_order_acq_rel);
@@ -174,11 +174,11 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
     reg.add_declaration("alone", nx::impl::merge_config(nx::config::exclusive()),
                         [&]
                         {
-                            barrier_running.store(true, cc::memory_order_release);
+                            exclusive_running.store(true, cc::memory_order_release);
                             CHECK(live.load(cc::memory_order_acquire) == 0); // nothing before it may still be running
                             for (auto spin = 0; spin < 20000; ++spin)
                                 cc::spin_pause();
-                            barrier_running.store(false, cc::memory_order_release);
+                            exclusive_running.store(false, cc::memory_order_release);
                         });
     for (auto i = 0; i < 4; ++i)
         reg.add_declaration(cc::format("after{}", i), {}, busy);
@@ -187,7 +187,7 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
     auto const exec = nx::execute_tests(schedule, with_jobs(4));
 
     CHECK(exec.count_failed_tests() == 0);
-    CHECK(seen_beside_the_barrier.load(cc::memory_order_acquire) == 0);
+    CHECK(seen_beside_the_exclusive.load(cc::memory_order_acquire) == 0);
 }
 
 // An exclusive ASYNC_TEST holds the phase lock across its suspends, and still has a scheduler to drive the root it hands back.
@@ -206,7 +206,7 @@ ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusiv
 
 TEST("parallel - a main_thread test runs on the process main thread", no_scheduler)
 {
-    // Stronger than the barrier test above, which only pins the body to "whoever called": this compares against cc::thread_id::main.
+    // Compares against cc::thread_id::main, not merely "whoever called".
     REQUIRE(cc::current_thread_id() == cc::thread_id::main);
 
     auto pinned_thread = cc::thread_id::invalid;

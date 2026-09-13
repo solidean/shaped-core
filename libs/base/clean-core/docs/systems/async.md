@@ -214,7 +214,7 @@ A library never creates a compute or io pool of its own: several libraries each 
 `cc::scoped_async_homes` owns and installs both; `scoped_compute_async_scheduler` and `scoped_io_async_scheduler` install a pool the caller already owns.
 `cc::ambient_async_scheduler()` is the lookup, and it asserts rather than falling back, so "nobody installed one" is reported where it happens instead of surfacing as a graph that never runs.
 
-There are two schedulers, and they present the same surface:
+There are two general-purpose schedulers, and they present the same surface — a thread home, [Homes](#homes), is the third:
 
 | | drives | publishes work | use |
 |---|---|---|---|
@@ -598,7 +598,8 @@ So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in 
   The refcount is fused, strong in the high half and weak in the low half, so a handle is one pointer with no separate control block.
   Fusing is what lets the last strong drop test both halves with a **single acquire load** and skip both locked RMWs when it is the sole owner (`cc::fused_refcount`, see [Cost](#cost)).
   The control word is a **tagged pointer**: a 64-aligned `async_type_ops const*` in the high bits, and the homed flag + lifecycle state + wake-pending flag + spinlock bit in the low 6 bits.
-  The homed bit is the whole of what homes cost an unhomed node: every site that reads it already holds the word in a register.
+  The homed bit is almost all of what homes cost an unhomed node, since most sites that read it already hold the word in a register.
+  [The benchmark](../benchmarks/async-benchmark.md#homes) measures the rest.
   There is **no C++ vtable** — `async_type_ops` is a static-constexpr descriptor carrying the typed value/error destructors, the inline frame's invoke/destroy, and the node's size class.
   It is keyed on `(size class, value-teardown, error-teardown, frame-invoke, frame-destroy)` rather than on `(T, E)`, so it **collapses**.
   A trivially-destructible type uses a null teardown.
@@ -641,6 +642,7 @@ The node layout is not, and can change under the hood as the system matures with
 **A node with a home runs every segment of its frame on that home**: its first poll, every resume after a wake, every yield.
 Without one, a woken node runs wherever the scheduler that woke it is, which is right for compute and wrong for a window, a swapchain or an imgui frame.
 A home is any `async_scheduler` — a pool, or a `cc::thread_bound_scheduler` that exactly one thread drains.
+It is a word in the node rather than a wrapper node that posts to an executor, because a wrapper places only the *first* segment: a wake still resumes the frame on the waker.
 
 ```cpp
 // a factory node, homed at creation
@@ -692,7 +694,8 @@ The home word carries a node's options beside the home, so they cost nothing tha
   **`same_home_only` tries only the first pending dependency inline before parking.**
   When that one is unhomed and a later one is homed to the same home, the node parks and the later dependency is run at the home's next pump instead of on this stack.
   That is correct, only slower than it could be; scanning past the first for a same-home cold dependency is the fix, and it is not built.
-- **`teardown`** — `anywhere` (the default), or `at_home`: a homed node dropped before it ever resolved releases its frame's captures on its home.
+- **`teardown`** — `anywhere` (the default), or `at_home`: a node homed to a thread home and dropped before it ever resolved releases its frame's captures on that thread.
+  A pool or singlethreaded home has no one thread to route to, so there `at_home` tears down wherever the last handle drops.
   **It covers a never-resolved frame only.**
   A resolved node already destroyed its frame at home, inside its own poll, and its value is built over the home word, so there is no home left to route a value's teardown to.
   A type whose destructor is thread-bound has to handle that itself.
@@ -706,6 +709,7 @@ cc names the places work runs, and the application sizes them.
 - `cc::main_thread_scheduler()` — a thread home bound by `cc::mark_current_thread_as_main()`, and never destroyed.
 - `cc::compute_scheduler()` — the installed compute pool.
 - `cc::io_scheduler()` — the installed io pool, or compute when there is none.
+  It is a pool of its own rather than a task class inside compute, because a body blocked on io would otherwise hold a compute worker.
 
 A library names these rather than creating a pool of its own, which is what keeps several libraries from oversubscribing one machine.
 It still creates a `thread_bound_scheduler` for a thread it genuinely owns.
@@ -726,7 +730,8 @@ This is provisional, and worth revisiting with a real use case for nesting.
 ### The loop's pump
 
 `cc::pump_main_thread(max_ms)` is the event loop's call on the main thread: the main home, one sweep of the pump registry, and — where compute and io have no threads of their own — a step of each.
-It repeats until nothing progresses or the budget is spent, checking between items, so one long body overruns the budget and the return value says work is still pending.
+It repeats until nothing progresses or the budget is spent, checking between the home's items, so one long body overruns the budget.
+It returns false only when nothing progressed and the main home is empty, which is when a loop may wait.
 A cycle runs only what was queued when it started, so a body that yields in a loop cannot pin the loop.
 A user home has the same `pump_for(max_ms)`.
 
@@ -765,20 +770,23 @@ auto const permit = co_await uploads.acquire();          // at most four at once
   Dropping a `lock_async()` handle untaken, before or after it was granted, gives the lock back.
 - **A guard may be held across a `co_await`** and released on whichever thread the node resumes on.
   That is what `std::mutex` cannot do, and what a test body or a multi-step upload needs.
-- **FIFO handoff.** Release passes the lock straight to the oldest live waiter, so nothing barges past a queue, and `try_lock` succeeds only on a free lock with nobody waiting.
+- **FIFO handoff.** Release passes the lock straight to the oldest live waiter, so nothing barges past a queue, and `try_lock` succeeds only on a free lock with no live waiter.
   Under a single-threaded scheduler the order is arrival order, which keeps tests reproducible.
 - **Writer-preferring.** Once a writer waits, readers arriving after it wait behind it, and when it leaves the readers queued up to the next writer are admitted together.
   So a reader asking for a second shared lock while a writer waits deadlocks: shared locking is not recursive, and neither is exclusive.
 - **Threads off, this is real exclusion.** A holder suspended across an await contends with every other node that wants the lock, on one thread as on many; only the atomics degrade.
 - **Deadlocks are a mutex's deadlocks**, plus one shape of its own: a lock held across a `co_await` of something that needs the same lock.
   Take several locks in a fixed order, as with any mutex.
-  A dying homed coroutine that holds a guard and asks for `at_home` teardown keeps the lock until its home runs that teardown.
+  A dying homed coroutine that holds or awaits a guard and asks for `at_home` teardown keeps the lock until its home runs that teardown.
 
 **How a waiter waits.**
 One counted, FIFO, head-of-line permit core serves all three: a mutex is one permit, a writer takes all of a shared mutex's and a reader one, a semaphore is its count.
 The uncontended acquire and release are one CAS each on the core's own word; contention takes a spinlock.
 A waiter is a manual grant node the queue holds *weakly*, and release pushes a live guard into the oldest one still alive.
 A waiter dropped before its turn fails to lock and is skipped, and one dropped after it releases the guard through the grant's value teardown — so cancelling a wait needs no unlinking at all.
+Dead waiters are skipped on every release and on every arrival, so a dropped writer never holds back the readers that come after it.
+A live waiter queued behind a dead one still waits for the next release or arrival, since nothing wakes the queue when a waiter is dropped.
+Consumed entries are compacted away once they are half the queue, which keeps it bounded under contention that never lets it empty.
 That costs one node allocation per contended wait, which is noise beside the sections this is for.
 
 **The option not taken, recorded for when the allocation matters:** intrusive waiter records living in the coroutine's awaiter.

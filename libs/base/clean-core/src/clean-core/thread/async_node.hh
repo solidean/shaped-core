@@ -1074,7 +1074,7 @@ protected:
     // shared helpers for the typed node
 protected:
     /// Stash this node's type-erased ops, so the base can destroy the typed value and free the right size class through a base-typed pointer.
-    /// Called ONCE from the derived ctor, before the node is shared: it stores the 32-aligned ops pointer into the control word with state=cold.
+    /// Called ONCE from the derived ctor, before the node is shared: it stores the 64-aligned ops pointer into the control word with state=cold.
     /// The ops bits never change afterwards, because free_storage reads them at weak 0 — so teardown_payload never clears them.
     void set_ops(async_type_ops const* ops)
     {
@@ -1083,7 +1083,7 @@ protected:
 
     /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain relaxed store suffices.
     /// It folds set_ops and an initial state transition — the manual/push node births external_pending — that would otherwise not merge across the atomic.
-    /// `ops` must be 32-aligned, leaving bits 0..4 free; wake and lock start clear.
+    /// `ops` must be 64-aligned, leaving bits 0..5 free; wake, lock and homed start clear.
     void init_control_word(async_type_ops const* ops, async_node_state state)
     {
         _state_and_ops.store(reinterpret_cast<u64>(ops) | (u64(state) << state_shift), cc::memory_order_relaxed);
@@ -1123,7 +1123,7 @@ private:
     void reschedule_self();
     async_step_status invoke_frame_step(async_context_base& ctx); // one compute step, with the frame's exceptions contained
 
-    // packed control word (_state_and_ops) — the low 5 bits tag the 32-aligned ops pointer
+    // packed control word (_state_and_ops) — the low 6 bits tag the 64-aligned ops pointer
 private:
     static constexpr u64 lock_bit = 0x1;  // bit 0: the spinlock
     static constexpr u64 wake_bit = 0x2;  // bit 1: re-poll requested for a running node
