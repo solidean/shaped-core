@@ -8,6 +8,7 @@
 // Vulkan has no guaranteed software device, so a context cannot be created on a driver-less headless host and the driver then SKIPs.
 // When a device is present it invokes every sg::context_handle API test against it.
 // Compiled only where the vulkan backend builds, so where the SDK is present.
+// It carries the slib-shader-library tag because the invocables it dispatches stand up a slib::shader_library, which is a process-wide singleton.
 //
 // The driver ran `nx::config::disabled` throughout the build-out, because a seam vulkan had not reached yet aborted
 // rather than failing — which turns a clean skip into a crash that takes the suite with it.
@@ -35,7 +36,7 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sg vulkan backend")
+TEST("sg vulkan backend", exclusive("slib-shader-library"))
 {
     // Synchronization validation is on for the whole tier-1 sweep: it is the only oracle that sees a hazard between
     // two submissions, which is what the cross-list and cross-queue ordering work is about.
