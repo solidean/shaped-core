@@ -731,7 +731,52 @@ A user home has the same `pump_for(max_ms)`.
 A home that any thread may drain, one item at a time, is a strand.
 It would give exclusion for synchronous sections that cannot deadlock.
 Exclusion never outlives a segment, and a node has one home at a time, so nothing ever holds one exclusion while waiting for another.
-It is not built, because the async mutex covers the cases that exist and a strand cannot hold across a suspend.
+It is not built, because the async mutex ([Exclusion](#exclusion)) covers the cases that exist and a strand cannot hold across a suspend.
+
+## Exclusion
+
+**`cc::async_mutex<T>`, `cc::async_shared_mutex<T>` and `cc::async_semaphore` park a waiting async instead of blocking its thread.**
+A pool worker blocked on a `cc::mutex` is a core doing nothing while work queues behind it; a contended async lock suspends the node, and the worker runs something else until the lock is handed over.
+The "tag" a caller wants to be exclusive on is simply the mutex object.
+
+```cpp
+cc::async_mutex<asset_table> assets;                     // owns what it protects, like cc::mutex
+auto const table = co_await assets.lock();               // parks on contention
+table->insert(key, value);                               // may co_await while holding it
+
+cc::async_shared_mutex<config> settings;
+auto const read = co_await settings.lock_shared();       // readers share
+auto const write = co_await settings.lock();             // a writer is alone
+
+cc::async_semaphore uploads(4);
+auto const permit = co_await uploads.acquire();          // at most four at once
+```
+
+- **Spellings.** `co_await m.lock()` in a coroutine, and `m.try_lock()` for an optional guard that never waits.
+  A raw frame uses `m.lock_async()`: a `shared_async<guard>` to require, then `take_value()` exactly once.
+  Dropping a `lock_async()` handle untaken, before or after it was granted, gives the lock back.
+- **A guard may be held across a `co_await`** and released on whichever thread the node resumes on.
+  That is what `std::mutex` cannot do, and what a test body or a multi-step upload needs.
+- **FIFO handoff.** Release passes the lock straight to the oldest live waiter, so nothing barges past a queue, and `try_lock` succeeds only on a free lock with nobody waiting.
+  Under a single-threaded scheduler the order is arrival order, which keeps tests reproducible.
+- **Writer-preferring.** Once a writer waits, readers arriving after it wait behind it, and when it leaves the readers queued up to the next writer are admitted together.
+  So a reader asking for a second shared lock while a writer waits deadlocks: shared locking is not recursive, and neither is exclusive.
+- **Threads off, this is real exclusion.** A holder suspended across an await contends with every other node that wants the lock, on one thread as on many; only the atomics degrade.
+- **Deadlocks are a mutex's deadlocks**, plus one shape of its own: a lock held across a `co_await` of something that needs the same lock.
+  Take several locks in a fixed order, as with any mutex.
+  A dying homed coroutine that holds a guard and asks for `at_home` teardown keeps the lock until its home runs that teardown.
+
+**How a waiter waits.**
+One counted, FIFO, head-of-line permit core serves all three: a mutex is one permit, a writer takes all of a shared mutex's and a reader one, a semaphore is its count.
+The uncontended acquire and release are one CAS each on the core's own word; contention takes a spinlock.
+A waiter is a manual grant node the queue holds *weakly*, and release pushes a live guard into the oldest one still alive.
+A waiter dropped before its turn fails to lock and is skipped, and one dropped after it releases the guard through the grant's value teardown — so cancelling a wait needs no unlinking at all.
+That costs one node allocation per contended wait, which is noise beside the sections this is for.
+
+**The option not taken, recorded for when the allocation matters:** intrusive waiter records living in the coroutine's awaiter.
+They would be parked by a new `async_step_status::park`, which leaves a node `blocked` with no dependencies.
+It removes the allocation, and `park` is the primitive a condition variable or an async event would want too.
+It costs a new switch arm in `poll()` and an unlink that races a concurrent grant, which is why it waits for a measurement that asks for it.
 
 ## Ambient context
 

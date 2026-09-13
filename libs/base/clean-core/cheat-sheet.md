@@ -945,6 +945,13 @@ cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(
 // teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on the home; resolved values anywhere
 // GOTCHA: children a homed body starts are NOT homed (they go to compute). A home is never re-entered: a blocking wait
 //   inside a homed body does not run that home's other bodies — co_await instead. A home must outlive its homed nodes.
+// EXCLUSION (#include <clean-core/thread/async_mutex.hh>) — contention PARKS the node; the thread keeps working.
+cc::async_mutex<T> m;  auto g = co_await m.lock();       // guard: g->..., *g; may be held across co_await, released anywhere
+auto grant = m.lock_async();  /* require(grant) */  auto g2 = grant->take_value(); // raw frame; take EXACTLY once
+auto maybe = m.try_lock();                               // cc::optional<guard>; never waits, never barges a queue
+cc::async_shared_mutex<T> rw;  co_await rw.lock_shared(); co_await rw.lock(); // writer-preferring
+cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
+// FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)

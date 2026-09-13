@@ -370,6 +370,16 @@ struct async_ambient_scope;
 struct async_ambient_handle; // a captured chain head, re-installable on another thread
 struct async_ambient_install_scope;
 struct async_context_base;
+template <class T>
+struct async_mutex; // exclusion that parks a waiting async instead of blocking its thread (thread/async_mutex.hh)
+template <class T>
+struct async_shared_mutex;
+template <class T>
+struct async_mutex_guard;
+template <class T>
+struct async_shared_guard;
+struct async_semaphore;
+struct async_semaphore_permit;
 template <class T, class E = async_error>
 struct async_context;
 template <class T, class E = async_error>
