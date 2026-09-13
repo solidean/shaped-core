@@ -93,8 +93,10 @@ The body runs at loop level rather than as a node homed to `cc::main_thread_sche
 A home is never re-entered from inside one of its own bodies, so a homed body that blocks on a graph with a main-homed step would wait forever.
 At loop level the same wait runs that step, exactly as it would in an application.
 
-So `main_thread` says **which thread**, not that nothing else runs.
-Main-thread bodies still run one at a time among themselves; add `exclusive()` to run alone, which `EXAMPLE` bakes in.
+So `main_thread` says **which thread**, and nothing else.
+It promises no exclusion, not even among main-thread tests: a test that must run alone says `exclusive()`, which `EXAMPLE` bakes in, and one that must not overlap a group says `exclusive(tag)`.
+**A body that blocks may run other tests on its stack**, main-thread ones included, because the wait helps drive whatever is queued.
+That is fair rather than a defect: a test that cannot tolerate it awaits instead of blocking.
 Under `-j1` the run thread drives the nodes one at a time, and a `main_thread` body runs in place.
 In a `-jN` phase with no `main_thread` test, the run thread participates in the pool as before.
 
@@ -102,7 +104,7 @@ Two combinations are asserts rather than quiet demotions:
 
 * **`own_pool(n)`**, because a private pool's worker is never the main thread.
 * **`ASYNC_TEST`**, because the graph it returns is driven by the phase's scheduler and not by the thread the body started on.
-  A coroutine that must run on main says `co_await cc::async_resume_on_main()` instead, and stays there across its awaits.
+  Allowing it is recorded in [TODO](TODO.md); hopping to main from inside an `ASYNC_TEST` is not the workaround, since the `-j1` driver never pumps the main home and aborts.
 
 ## Exclusion is locks
 

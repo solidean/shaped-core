@@ -15,7 +15,7 @@
 
 #if SR_HAS_WINDOW
 
-TEST("sr - window native handle (manual)", nx::config::manual)
+TEST("sr - window native handle (manual)", nx::config::manual, exclusive("sr-window-system"))
 {
     // The claim the whole abstraction rests on: a real window yields the handle sg::swapchain_description wants.
     // Created hidden, so it needs a display but no person.
@@ -31,7 +31,7 @@ TEST("sr - window native handle (manual)", nx::config::manual)
 #endif
 }
 
-TEST("sr - window (manual)", nx::config::manual)
+TEST("sr - window (manual)", nx::config::manual, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create();
     auto const win = wsys->create_window({.title = "shaped-rendering — close this window to end the test"});

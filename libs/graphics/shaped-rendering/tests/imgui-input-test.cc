@@ -191,7 +191,8 @@ TEST("sr::imgui_context - the scroll wheel reaches imgui on the same frame", mai
 
 TEST("sr::imgui_context - a frame driven by a window takes its size and text-input intent",
      main_thread,
-     exclusive("sr-imgui-context"))
+     exclusive("sr-imgui-context"),
+     exclusive("sr-window-system"))
 {
     // The window-driven path end to end, on the dummy video driver.
     // What it pins is the wiring, not the pixels:
@@ -220,7 +221,8 @@ TEST("sr::imgui_context - a frame driven by a window takes its size and text-inp
 
 TEST("sr::imgui_context - imgui drives the window system's cursor, and only when it wants the mouse",
      main_thread,
-     exclusive("sr-imgui-context"))
+     exclusive("sr-imgui-context"),
+     exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.width = 320, .height = 240});
@@ -268,7 +270,8 @@ TEST("sr::imgui_context - imgui drives the window system's cursor, and only when
 
 TEST("sr::imgui_context - viewports are off unless asked for, and then move imgui into desktop space",
      main_thread,
-     exclusive("sr-imgui-context"))
+     exclusive("sr-imgui-context"),
+     exclusive("sr-window-system"))
 {
     // The whole point of the opt-in: enabling viewports changes what an imgui coordinate means, so a caller that did not ask for them must see exactly the single-viewport behaviour pinned above.
     auto const wsys = sr::window_system::create({.headless = true});
@@ -297,7 +300,10 @@ TEST("sr::imgui_context - viewports are off unless asked for, and then move imgu
     CHECK(ImGui::GetIO().MousePos.y == 110.0f);
 }
 
-TEST("sr::imgui_context - a frame that skips update_viewports asserts", main_thread, exclusive("sr-imgui-context"))
+TEST("sr::imgui_context - a frame that skips update_viewports asserts",
+     main_thread,
+     exclusive("sr-imgui-context"),
+     exclusive("sr-window-system"))
 {
     // Without it imgui stops hit-testing the mouse against any viewport, which reads as "nothing hovers any more" rather than as a missing call.
     // Worth an assert instead of a debugging session.
@@ -313,7 +319,10 @@ TEST("sr::imgui_context - a frame that skips update_viewports asserts", main_thr
     CHECK_ASSERTS(imgui.begin_frame(*win, 1.0f / 60.0f));
 }
 
-TEST("sr::imgui_context - copy and paste reach the system clipboard", main_thread, exclusive("sr-imgui-context"))
+TEST("sr::imgui_context - copy and paste reach the system clipboard",
+     main_thread,
+     exclusive("sr-imgui-context"),
+     exclusive("sr-window-system"))
 {
     // Wires imgui's clipboard hooks to sr::window_system, so ctrl+C and ctrl+V in a text field talk to the real clipboard rather than to nothing.
     auto const wsys = sr::window_system::create({.headless = true});

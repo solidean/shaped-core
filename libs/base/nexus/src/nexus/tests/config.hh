@@ -231,7 +231,7 @@ constexpr struct
 // Run this test's body on the process MAIN thread — the one nx::run was entered on.
 // For a test whose subject asserts on it: sr::window_system does, because SDL does.
 // Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound, and not that nothing else runs.
-// A main_thread body runs beside the shared phase, and main_thread bodies run one at a time among themselves; add exclusive() to run alone.
+// It promises no exclusion, not even among main_thread tests: add exclusive() to run alone, or exclusive(tag) to exclude a group.
 // own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
 constexpr struct
 {

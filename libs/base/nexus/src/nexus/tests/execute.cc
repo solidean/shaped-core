@@ -1677,8 +1677,8 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   "with nx::config::benchmark instead");
         CC_ASSERT(!instance.declaration->is_async(), "an ASYNC_TEST cannot use nx::main_thread: the graph it returns "
                                                      "is driven by the phase's scheduler, not by the thread the body "
-                                                     "started on — co_await cc::async_resume_on_main() inside the "
-                                                     "test pins its coroutine to main instead. BENCHMARK bakes "
+                                                     "started on (allowing it is in libs/base/nexus/docs/TODO.md). "
+                                                     "BENCHMARK bakes "
                                                      "main_thread in, so an async benchmark has to be a plain "
                                                      "ASYNC_TEST with nx::config::benchmark instead");
     }
@@ -1754,7 +1754,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
 
     // ONE ambient scheduler for the whole run, and deliberately not one per phase.
     // Work a test left running outlives its phase — an actor thread completing a node is the usual shape — and a completion with nothing installed has nowhere to route.
-    // It is never the scheduler driving the tests either, so a body that blocks on its own graph can never end up running another test's.
+    // It is not the scheduler driving the tests, but a parallel phase installs its own pool over it, so a body that blocks may still run other tests on its stack.
     cc::async_thread_pool run_ambient(config.jobs > 0 ? cc::max(config.jobs - 1, 1)
                                                       : cc::async_thread_pool::default_worker_count());
     cc::scoped_compute_async_scheduler const run_ambient_installed(run_ambient);
