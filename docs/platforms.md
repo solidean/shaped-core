@@ -41,13 +41,15 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
-| WebAssembly + threads | wasm32 | Emscripten (Clang) | 3 | `-pthread`; planned |
-| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 3 | emdawnwebgpu; planned |
+| WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
+| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | No CI — emdawnwebgpu; `emscripten-webgpu-*` presets, and `emscripten-threads-webgpu-*` for both |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
 | Consoles | — | vendor toolchains | 3 | planned |
 
-The Tier-3 WebAssembly variants have configure knobs already: `SC_THREADS`, `SC_WASM_WEBGPU` and `SC_WASM_EXCEPTIONS`.
-They fail configure today with a clear "not yet supported" message rather than building — [requirements.md](requirements.md#emscripten--wasm) owns those knobs.
+Threads and WebGPU are independent knobs — `SC_THREADS` and `SC_WASM_WEBGPU` — so the wasm presets span all four of their combinations.
+All four build and run their suites; only the plain one is gated in CI, which is what keeps the other three at Tier 2.
+They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
 
 ### SteamOS
 
@@ -70,6 +72,10 @@ It is worth naming separately anyway, because its immutable base image ships a r
   The fix is to put those headers where the compiler already looks, which on an immutable image usually means a sysroot rather than `/usr/include`.
 - **The hardware-counter budget is smaller than the PMU's counter count**, because the NMI watchdog holds a PMC.
   `nx::bench` discovers the usable width rather than assuming it, so this costs extra measurement passes and nothing else.
+
+The one toolchain that is *easier* here than a native one is Emscripten.
+It is self-contained under its own checkout, so it needs no sysroot and nothing from `/usr` beyond `git` and a `python3` to bootstrap.
+[requirements.md](requirements.md#emscripten--wasm) has the install steps, and why its directories must stay off `PATH`.
 
 None of this is SteamOS-specific in principle — any Linux without `libstdc++exp`, or with a watchdog on a PMC, behaves the same way.
 
@@ -138,6 +144,7 @@ The standard **Debug / RelWithDebInfo / Release** build types should all work on
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
+The two sanitizer families cannot be combined, so they are separate presets: `sanitize-*` is ASan + UBSan at Debug, `sanitize-thread-*` is ThreadSanitizer at RelWithDebInfo.
 
 **C++20 module scanning is off repo-wide** (`CMAKE_CXX_SCAN_FOR_MODULES`), because nothing here imports a module.
 Left at the default CMP0155 turns on for C++20+, whether a build pays for a per-TU scan comes down to whether a `clang-scan-deps` happens to be installed.

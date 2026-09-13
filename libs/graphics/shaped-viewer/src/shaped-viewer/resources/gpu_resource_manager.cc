@@ -793,10 +793,18 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
 
         // The format decides, and it decided already: `texture_manager::acquire` gave this texture the usage the
         // matching routine needs, so asking the same question here lands on the same answer.
-        if (sg::supports_typed_uav(record->texture.format()))
-            sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
-        else
-            sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        auto const outcome
+            = sg::supports_typed_uav(record->texture.format())
+                ? sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips)
+                : sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
+        if (outcome == sg::routine_outcome::declined)
+        {
+            // The routine is still compiling, so nothing was recorded.
+            // The request stays pending rather than being marked done: marking it would leave the texture without
+            // its mips forever, and nothing downstream would ever ask again.
+            keep.push_back(w);
+            continue;
+        }
         spent += w.dispatches;
         textures.mark_mips_complete(w.texture);
     }

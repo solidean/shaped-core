@@ -169,8 +169,15 @@ Name it with `title` as usual, and hand it over the same way.
    `uv run review.py changes pr-<n>` lists the ledger, which is what `discharges:` is written from.
 
    Read [tools/review/docs/entry-types/_index.md](../../../tools/review/docs/entry-types/_index.md) and open the types that apply.
-   Four anchor a review with a changeset: **orientation** at `010`, **glossary** at `018`, the findings between, and **verdict** at `980`.
+   Six anchor a review with a changeset: **orientation** at `010`, **feature-tour** at `012`, **design-critique** at `014`, **glossary** at `018`, the findings between, and **verdict** at `980`.
    The set is prose rather than code, so it grows by writing a file there — never by teaching the tool a new entry.
+
+   **A changeset that adds a feature owes a [feature-tour](../../../tools/review/docs/entry-types/feature-tour.md) at `012`.**
+   One that makes a design choice outliving it owes a [design-critique](../../../tools/review/docs/entry-types/design-critique.md) at `014`, immediately after the tour.
+   The tour is the smallest real example of using the feature, what it produces, and what it replaced.
+   **Produce it by running the branch, never by writing it out from memory**, and take one entry per feature cluster — one or two is the common case.
+   The critique names the alternatives and prices them, so the maintainer can check the judgement the verdict asserts rather than accept it.
+   Both are easy to skip and both are what a maintainer notices missing: a review can be entirely correct about a change nobody can tell they should want.
 
    **A changeset touching an example, a capture sidecar or a reference image also owes an [example-showcase](../../../tools/review/docs/entry-types/example-showcase.md) at `02x`.**
    The example's body and every image go in inline, so the maintainer judges a demonstration rather than a hunk.
@@ -182,6 +189,17 @@ Name it with `title` as usual, and hand it over the same way.
    uv run review.py serve pr-<n> --no-open &     # background: the shell caps below how long a review takes
    uv run review.py round pr-<n> --wait          # blocks, then prints the round
    ```
+
+   **Prefer `AskUserQuestion` over `round --wait` for the handover itself.**
+   A blocking `round --wait` holds the turn open with nothing on screen, which reads as a stall and carries no
+   notification — so a maintainer answering on a phone, or through remote control, has nothing telling them the
+   round is theirs.
+   Ask instead, with the options the moment actually has: the round is ready and they have done it, or they want to
+   talk about something first.
+   Then collect it with `uv run review.py round pr-<n> --no-wait`, which prints an already-finalized round.
+
+   The blocking form is still right when nobody is being asked — an unattended run, or a second round you are
+   collecting in the same sitting.
    `uv run review.py status pr-<n>` says whether a server is actually up, which round is next, and what is still open —
    it probes the port rather than trusting the marker, so a killed server reads as down.
    `restart` is for after the *tool's* code changed; entry edits need no restart, since the page reloads itself.

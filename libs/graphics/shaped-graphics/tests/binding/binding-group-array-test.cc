@@ -144,8 +144,8 @@ INVOCABLE_TEST("sg - array binding rejects a wrong-size element list", (sg::cont
         elements.push_back(sg::vacant_view{});
     auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
 
-    auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
-    CHECK(group.has_error());
+    CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
+                    sg::binding_group_exception);
 }
 
 INVOCABLE_TEST("sg - scalar binding rejects an element list of the wrong size", (sg::context_handle const& ctx))
@@ -162,8 +162,8 @@ INVOCABLE_TEST("sg - scalar binding rejects an element list of the wrong size", 
     elements.push_back(tex.as_readonly_view());
     auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
 
-    auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
-    CHECK(group.has_error());
+    CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
+                    sg::binding_group_exception);
 }
 
 INVOCABLE_TEST("sg - array binding rejects a mismatched element", (sg::context_handle const& ctx))
@@ -183,8 +183,8 @@ INVOCABLE_TEST("sg - array binding rejects a mismatched element", (sg::context_h
     elements.push_back(sg::buffer<byte>::from_raw(buf).as_readonly_buffer());
     auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
 
-    auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
-    CHECK(group.has_error());
+    CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
+                    sg::binding_group_exception);
 }
 
 INVOCABLE_TEST("sg - scalar binding rejects a vacant element", (sg::context_handle const& ctx))
@@ -198,6 +198,6 @@ INVOCABLE_TEST("sg - scalar binding rejects a vacant element", (sg::context_hand
     // A vacancy is only valid as an ARRAY element; a scalar binding must bind a resource.
     auto const nv = sg::named_view{.name = "Textures", .view = sg::vacant_view{}};
 
-    auto group = ctx->persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
-    CHECK(group.has_error());
+    CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
+                    sg::binding_group_exception);
 }

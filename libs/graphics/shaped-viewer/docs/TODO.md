@@ -46,10 +46,10 @@ What is left is the interaction on top of it, in dependency order:
   it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
   A spatial filter over a moving frame (A-trous / SVGF) buys the same smoothness without touching the estimator, and
   is the direction to take this if flying needs to look better.
-- **The GPU tests may still be passing vacuously.** `pathtrace_routine::init_declare` used to drive its shader compiles
+- **The GPU tests may still be passing vacuously.** `pathtrace_routine`'s init used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.
-  `cc::try_async_blocking_get` waits on the scheduler that owns the node, which removes that failure mode.
+  Init is a coroutine now and awaits those compiles instead of driving them, which removes that failure mode outright.
   What remains is the coverage gap it exposed: every tracing test but `pathtraced-view-test` asserts only CPU-side
   facts, so none of them would notice tracing nothing at all.
   Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
@@ -167,7 +167,7 @@ They are the only two tests in sv that use `cmd.download`.
 
 **What happens.**
 `shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
-Bisected with flushed markers to `ctx.advance_epoch_and_wait_for_idle()`, on the probe's ECHO dispatch.
+Bisected with flushed markers to the advance-and-drain (now `ctx.block_until_idle()`), on the probe's ECHO dispatch.
 That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
 The workload is therefore not the cause, and neither is the closure.
 

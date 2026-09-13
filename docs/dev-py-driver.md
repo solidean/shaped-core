@@ -18,6 +18,19 @@ Two design commitments follow from that, and everything else in this document is
   The flags that override it, and the exact artifact names, are the [guide](guides/building-and-testing.md)'s.
   The job profile is that commitment turned sideways.
   The sidecars each describe one step, while `--profile` records the run *across* steps — the only place a wall-clock question can be answered.
+  The live progress region ([lib/core/ui.py](../tools/dev/lib/core/ui.py)) is the same commitment seen from the other end.
+  It is a second, *ephemeral* view of the record a step is already writing, never a second source of truth — which is exactly why a step that passes erases its rows and leaves only its summary line.
+  The permanent transcript stays the terse trace either way, and it exists only where it can be repainted: piped, redirected or in CI it never runs, so an agent's run and a CI log are unchanged.
+
+  Two alternatives are closed, and are written here so nobody re-proposes them.
+
+  **A progress library — `rich`, `tqdm` — is rejected**, and not on its merits: they solve the column-width, wide-character, cursor-restore and Windows-VT problems properly.
+  `dev.py` declares no Python dependencies, so adopting one is a policy change rather than an import, and the region is not the thing worth spending that on.
+  That is the same reasoning [lib/core/console.py](../tools/dev/lib/core/console.py) hand-rolls SGR under.
+
+  **A single repainted status line, with `\r` and no tail, is the fallback if the region ever proves flaky** — not a rejected design.
+  `\r` needs no up-count, so the invariant `ui.py` is built around and both of its failure modes stop existing.
+  What it gives up is the tail of what a step is saying right now, which is the half that earns the feature, so it is a retreat rather than a simplification.
 - **Collection-oriented.** Presets and targets are selected with comma-lists, repeated flags and wildcards, and configure, build and test operate on *lists* rather than one at a time.
   A toolset matrix is one invocation.
   Operating on lists is also what lets the driver decide *where* concurrency belongs.
@@ -52,7 +65,7 @@ It is grouped by responsibility, with a strict one-way dependency direction — 
 
 | group        | what lives there                                                  | depends on            |
 |--------------|-------------------------------------------------------------------|-----------------------|
-| `core`       | models, console, logs, process, archive, report, profile          | —                     |
+| `core`       | models, console, ui, logs, process, archive, report, profile      | —                     |
 | `project`    | presets, targets, compdb, flags (CMake File API)                  | core                  |
 | `toolchain`  | toolset, llvm_tools, clangd, disasm, doctor                       | core, project         |
 | `pipeline`   | cmake, configure, build, test, fingerprint, eligibility, prereqs  | core, project, toolchain |
@@ -141,6 +154,7 @@ The facade and the `Context` / `Policy` seam mean your commands talk to the same
 ## Design principles, in one place
 
 - **Capture by default, diagnose from sidecars** — terse terminal, full record on disk.
+  The live region repaints over that terse trace on a terminal and is absent everywhere else, so it changes what a human watches and never what a tool reads.
 - **Plain functions over plain data** — `lib/` returns values; printing and exit codes live
   in the command layer.
 - **No hidden global state** — policy is passed in via `Context`, not read from module

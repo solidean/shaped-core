@@ -135,8 +135,7 @@ void run_delayed(sim_state& s, i64 delay_ms, cc::shared_async<T> target, cancel_
 
     auto* const raw = op.get();
     raw->self = cc::move(op);
-    s.io.submit(raw);
-    raw->cancellation.attach(token, s.io, raw);
+    raw->cancellation.attach(s.io.submit(raw), token);
 }
 
 /// Wrap a connection that arrived from the transport underneath, so the conditions apply to it too.

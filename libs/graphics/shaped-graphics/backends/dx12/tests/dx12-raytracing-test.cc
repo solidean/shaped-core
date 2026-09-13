@@ -56,7 +56,8 @@ INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas on WARP", (dx12::d
     auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
     REQUIRE(tlas != nullptr);
     handle->submit_command_list(cc::move(cmd));
-    handle->advance_epoch_and_wait_for_idle(); // let the builds finish on the GPU
+    handle->advance_epoch();
+    handle->block_until_idle(); // let the builds finish on the GPU
 
     // Prebuild sizes and instance count are part of the public sg::blas / sg::tlas contract.
     CHECK(blas->size_in_bytes() > 0);

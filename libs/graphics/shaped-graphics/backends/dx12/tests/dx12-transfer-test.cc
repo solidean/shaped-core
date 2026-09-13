@@ -37,7 +37,8 @@ INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12::dx12_
     c.submit_command_list(cc::move(down));
 
     // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -67,7 +68,8 @@ INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_contex
     auto future = down->download.data_from_buffer<int>(buf, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    auto const data = c.wait_for(future);
+    c.block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -116,7 +118,8 @@ INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_context_han
     auto future = down->download.bytes_from_buffer(buf, 64, 64);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
     bool matches = true;
@@ -153,7 +156,8 @@ INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins", (dx12
     auto future = down->download.bytes_from_buffer(buf, 0, 16);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
@@ -188,14 +192,16 @@ INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims ring s
         // future dropped here without waiting → the actor cancels the memcpy but still frees the space
     }
 
-    c.advance_epoch_and_wait_for_idle(); // let the GPU + actor settle
+    c.advance_epoch();
+    c.block_until_idle(); // let the GPU + actor settle
 
     auto down2 = c.create_command_list();
     REQUIRE(down2 != nullptr);
     auto future = down2->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down2));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().size() == 256);
     CHECK(bytes.value()[100] == byte(100));
@@ -225,7 +231,8 @@ INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_con
         auto future = down->download.bytes_from_buffer(buf, 0, 1024);
         c.submit_command_list(cc::move(down));
 
-        auto const bytes = c.wait_for(future);
+        c.block_until_idle();
+        auto const bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         bool matches = true;
         for (int i = 0; i < 1024; ++i)
@@ -233,7 +240,8 @@ INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_con
                 matches = false;
         CHECK(matches);
 
-        c.advance_epoch(2);
+        c.advance_epoch();
+        c.block_until_epochs_in_flight(2);
     }
 }
 
@@ -278,8 +286,10 @@ INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation orde
     c.submit_command_list(cc::move(list_b));
     c.submit_command_list(cc::move(list_a));
 
-    auto const bytes_a = c.wait_for(future_a);
-    auto const bytes_b = c.wait_for(future_b);
+    c.block_until_idle();
+    auto const bytes_a = future_a.try_get_bytes();
+    c.block_until_idle();
+    auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
     bool ok_a = true;
@@ -325,9 +335,11 @@ INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx1
     // without blocking — the drop pushed cc::async_error::make_cancelled() on its completion.
     CHECK(cancelled.is_ready());
     CHECK(!cancelled.try_get_bytes().has_value());
-    CHECK(!c.wait_for(cancelled).has_value()); // cancelled: fails, does not block
+    c.block_until_idle();
+    CHECK(!cancelled.try_get_bytes().has_value()); // cancelled: fails, does not block
 
-    c.advance_epoch_and_wait_for_idle(); // reclaims the dropped list's ring span with its epoch
+    c.advance_epoch();
+    c.block_until_idle(); // reclaims the dropped list's ring span with its epoch
 
     // The ring is free again: a fresh download round-trips.
     auto down = c.create_command_list();
@@ -335,7 +347,8 @@ INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx1
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[100] == byte(100));
 }

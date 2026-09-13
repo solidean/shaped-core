@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -83,7 +85,7 @@ struct server_fixture
 }
 } // namespace
 
-TEST("cnet - a connection is established and both ends know who they are")
+CNET_IO_TEST("cnet - a connection is established and both ends know who they are")
 {
     auto server = make_server();
     if (!server.up())
@@ -109,7 +111,7 @@ TEST("cnet - a connection is established and both ends know who they are")
     CHECK(peer->local().port == server.where().port);
 }
 
-TEST("cnet - bytes go both ways")
+CNET_IO_TEST("cnet - bytes go both ways")
 {
     auto server = make_server();
     if (!server.up())
@@ -148,7 +150,7 @@ TEST("cnet - bytes go both ways")
     CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
 }
 
-TEST("cnet - a receive reports what arrived rather than filling its buffer")
+CNET_IO_TEST("cnet - a receive reports what arrived rather than filling its buffer")
 {
     auto server = make_server();
     if (!server.up())
@@ -174,7 +176,7 @@ TEST("cnet - a receive reports what arrived rather than filling its buffer")
     CHECK(received->value() == 4);
 }
 
-TEST("cnet - a peer that hangs up fails the read rather than reporting zero bytes")
+CNET_IO_TEST("cnet - a peer that hangs up fails the read rather than reporting zero bytes")
 {
     auto server = make_server();
     if (!server.up())
@@ -198,7 +200,7 @@ TEST("cnet - a peer that hangs up fails the read rather than reporting zero byte
     CHECK(!received->try_error()->is_cancelled());
 }
 
-TEST("cnet - a refused connection fails, and says why")
+CNET_IO_TEST("cnet - a refused connection fails, and says why")
 {
     auto server = make_server();
     if (!server.up())
@@ -213,7 +215,7 @@ TEST("cnet - a refused connection fails, and says why")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - an operation on a closed connection fails without reaching the reactor")
+CNET_IO_TEST("cnet - an operation on a closed connection fails without reaching the reactor")
 {
     auto server = make_server();
     if (!server.up())
@@ -236,7 +238,7 @@ TEST("cnet - an operation on a closed connection fails without reaching the reac
     CHECK(received->try_error() != nullptr);
 }
 
-TEST("cnet - a connect deadline is measured against the io_system's clock")
+CNET_IO_TEST("cnet - a connect deadline is measured against the io_system's clock")
 {
     auto clk = manual_clock(0);
     auto io = io_system::try_create({.unthreaded = true, .time_source = &clk});
@@ -263,7 +265,7 @@ TEST("cnet - a connect deadline is measured against the io_system's clock")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - listening needs an address, and reports what it could not do")
+CNET_IO_TEST("cnet - listening needs an address, and reports what it could not do")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
@@ -288,7 +290,7 @@ TEST("cnet - listening needs an address, and reports what it could not do")
     }
 }
 
-TEST("cnet - a half-close ends the sending half and leaves the answer coming")
+CNET_IO_TEST("cnet - a half-close ends the sending half and leaves the answer coming")
 {
     auto server = make_server();
     if (!server.up())

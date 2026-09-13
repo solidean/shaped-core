@@ -12,6 +12,14 @@ function(cc_detect_linker out_var)
         return()
     endif()
 
+    # emcc always links with wasm-ld, and it ACCEPTS -fuse-ld=<anything> and ignores it with an unused-argument
+    # warning. So the probe below would succeed for any name on a machine that has mold or lld installed, and the
+    # configuration summary would then report a linker that never ran.
+    if(EMSCRIPTEN)
+        set(${out_var} "wasm-ld" CACHE INTERNAL "Detected linker (Emscripten)")
+        return()
+    endif()
+
     set(_src [[
         int main() { return 0; }
     ]])

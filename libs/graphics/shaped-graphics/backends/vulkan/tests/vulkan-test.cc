@@ -102,7 +102,8 @@ TEST("sg vulkan - epoch advance and retire")
     // Nothing has finished yet, so the completed epoch is first-1.
     CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
@@ -124,7 +125,8 @@ TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch 
     // The owning epoch has not advanced/retired yet, so the resource is still (potentially) in use.
     CHECK(!finalized);
 
-    c.advance_epoch_and_wait_for_idle(); // closes + drains the epoch the buffer died in
+    c.advance_epoch();
+    c.block_until_idle(); // closes + drains the epoch the buffer died in
     CHECK(finalized);
 }
 
@@ -143,7 +145,8 @@ TEST("sg vulkan - command pools are recycled across epochs")
     c.submit_vulkan_command_list(cc::move(cmd.value()));
     CHECK(free_count() == 0); // still in flight — captured by the current epoch
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(free_count() == 1); // reset and returned to the free set on retire
 
     // The next list reuses the pooled command pool rather than creating a new one.
@@ -151,7 +154,8 @@ TEST("sg vulkan - command pools are recycled across epochs")
     REQUIRE(cmd2.has_value());
     CHECK(free_count() == 0);
     c.submit_vulkan_command_list(cc::move(cmd2.value()));
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(free_count() == 1);
 }
 
@@ -166,7 +170,8 @@ TEST("sg vulkan - submission token reports completion")
     REQUIRE(cmd.has_value());
     auto const token = c.submit_vulkan_command_list(cc::move(cmd.value()));
 
-    c.advance_epoch_and_wait_for_idle(); // forces the GPU to catch up
+    c.advance_epoch();
+    c.block_until_idle(); // forces the GPU to catch up
     CHECK(c.is_submission_complete(token));
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
@@ -180,7 +185,8 @@ TEST("sg vulkan - throttle bounds epochs in flight")
 
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)
-        c.advance_epoch(1);
+        c.advance_epoch();
+    c.block_until_epochs_in_flight(1);
 
     auto const in_flight = c._epoch_state.lock([](vulkan::vulkan_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);
@@ -290,7 +296,8 @@ TEST("sg vulkan - an inline upload records, submits and reclaims its staging")
     // The validation listener is what makes this meaningful: a wrong barrier, a bad copy region or an unbalanced
     // command buffer would fail the test rather than pass silently.
     // Byte correctness needs a readback, which is what the download path adds.
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(!c.is_device_lost());
 }
 
@@ -313,10 +320,12 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once")
         REQUIRE(cmd.has_value());
         cmd.value()->upload.bytes_to_buffer(buffer.value(), payload);
         c.submit_vulkan_command_list(cc::move(cmd.value()));
-        c.advance_epoch(1); // bounds what is in flight, so the ring must be reclaimed to keep going
+        c.advance_epoch();
+        c.block_until_epochs_in_flight(1); // bounds what is in flight, so the ring must be reclaimed to keep going
     }
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
     CHECK(!c.is_device_lost());
 }
 
@@ -350,7 +359,8 @@ TEST("sg vulkan - a texture round-trips through the staging rings")
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    auto const read = base.wait_for(future);
+    base.block_until_idle();
+    auto const read = future.try_get_bytes();
     REQUIRE(read.has_value());
     REQUIRE(read.value().size() == 256);
 
@@ -389,7 +399,8 @@ TEST("sg vulkan - a block-compressed texture stages at its block size")
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    auto const read = base.wait_for(future);
+    base.block_until_idle();
+    auto const read = future.try_get_bytes();
     REQUIRE(read.has_value());
     CHECK(read.value().size() == 32);
 }
@@ -467,7 +478,8 @@ TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch")
     REQUIRE(!first.is_empty());
     CHECK(first.transient);
 
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
 
     auto const second = heap.allocate_transient(1024);
     REQUIRE(!second.is_empty());

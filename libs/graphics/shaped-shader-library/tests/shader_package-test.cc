@@ -175,9 +175,9 @@ TEST("slib - a `static` sampler reaches the layout rather than the group", exclu
 
 TEST("slib - every scope template a generated group reaches is instantiated", exclusive("slib-shader-library"))
 {
-    // A template nothing calls is a template nothing compiles, and the `try_` twins in particular have no caller
-    // in the tree yet.
-    // Taking the addresses instantiates all six without needing a device, which is what this test is for -- a
+    // A template nothing calls is a template nothing compiles, and the sampler-taking acquire in particular has
+    // no caller in the tree yet.
+    // Taking the addresses instantiates all four without needing a device, which is what this test is for -- a
     // context is not required to find out whether they are well-formed.
     using group = slib_test::shaders::frame_bindings;
 
@@ -188,16 +188,12 @@ TEST("slib - every scope template a generated group reaches is instantiated", ex
             &sg::context_cached_scope::acquire_binding_group_layout<group>);
 
     auto const create_transient = &sg::context_transient_scope::create_binding_group<group>;
-    auto const try_create_transient = &sg::context_transient_scope::try_create_binding_group<group>;
     auto const create_persistent = &sg::context_persistent_scope::create_binding_group<group>;
-    auto const try_create_persistent = &sg::context_persistent_scope::try_create_binding_group<group>;
 
     CHECK(acquire != nullptr);
     CHECK(acquire_with_samplers != nullptr);
     CHECK(create_transient != nullptr);
-    CHECK(try_create_transient != nullptr);
     CHECK(create_persistent != nullptr);
-    CHECK(try_create_persistent != nullptr);
 }
 
 TEST("slib - the generated table and the runtime pass read one shader the same way", exclusive("slib-shader-library"))

@@ -33,8 +33,10 @@ INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_han
 
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const tick0 = ctx->wait_for_ticks(t0);
-    auto const tick1 = ctx->wait_for_ticks(t1);
+    ctx->block_until_idle();
+    auto const tick0 = t0.try_get_ticks();
+    ctx->block_until_idle();
+    auto const tick1 = t1.try_get_ticks();
     REQUIRE(tick0.has_value());
     REQUIRE(tick1.has_value());
     CHECK(tick1.value() >= tick0.value()); // non-decreasing on a single queue

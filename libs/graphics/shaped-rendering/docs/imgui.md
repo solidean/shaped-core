@@ -84,12 +84,13 @@ See the multi-viewport section for the two viewport calls it sequences for you.
 The split is imgui's own platform-backend / renderer-backend line, not an arbitrary one.
 
 Everything the routine mutates — atlas textures, pipelines, and the shader-derived layouts — sits in plain members.
-They are reached through the guard `acquire_exclusive(cmd)` returns at the top of `execute()`.
+They are reached through the guard `try_acquire_exclusive(cmd)` returns at the top of `execute()`.
 That is the contract `sg::render_routine` sets out: the same instance is handed to every caller on the context, so the framework's per-routine lock is what makes writing it safe.
 See [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md#threading).
 
-Note what is *not* rebuilt on reload: `init_declare` clears the pipelines and layouts sitting right next to the texture registry, and deliberately leaves the registry alone.
+Note what is *not* rebuilt on reload: `init` clears the pipelines and layouts, and deliberately does not touch the atlas.
 The atlas has nothing to do with our shaders, and a test pins that.
+It is a routine of its own — `sr::impl::imgui_texture_routine`, unparametrized — reached through a dependency token, so every target format shares the one atlas instead of getting a copy each.
 
 This frame's geometry is deliberately *not* on the routine.
 It comes from the transient scope and lives on the stack for one `execute()`, which is what makes the call re-entrant across viewports —

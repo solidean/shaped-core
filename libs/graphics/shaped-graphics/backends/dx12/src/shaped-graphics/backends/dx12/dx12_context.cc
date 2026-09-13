@@ -17,11 +17,14 @@ void dx12_context::shutdown()
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.
     routines.clear();
 
-    // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing
-    // every resource (in-flight and staged) and running finalizers — before the device is released.
+    // Close the final epoch and drain: this frees every resource (in-flight and staged) and runs finalizers
+    // before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
     if (_queue && _epoch_fence)
-        advance_epoch_and_wait_for_idle();
+    {
+        advance_epoch();
+        block_until_idle();
+    }
 
     // Drain + join the download actor and release the ring buffers while the submission fence is still
     // alive (the actor may block on it). The GPU is idle by now, so pending copies complete promptly.

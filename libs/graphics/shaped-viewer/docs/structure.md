@@ -187,5 +187,6 @@ The whole sv API compiles everywhere, though: without a backend a routine simply
 - **`render_routine` has no per-frame hook**, and no way to reach an instance under its lock without a `command_list`.
   It no longer bites here: the per-frame reclaim moved onto `sv::view_store`, which needs no routine at all.
   A routine that does grow per-frame state would still want an init-free `acquire_exclusive(context&)` in sg.
-- **`render_routine` exposes no reload counter**, so `view_renderer` counts its own `init_declare` calls to know when an accumulated image stopped being comparable.
+- **`render_routine` exposes no reload counter**, so `view_renderer` counts its own `init` calls to know when an accumulated image stopped being comparable.
+  `sg::routine_init_scope::generation()` now hands a phase the generation it belongs to, which is most of what this wanted.
   A `reload_generation()` on the base would be the shared answer, since any routine caching derived results across frames needs the same signal.

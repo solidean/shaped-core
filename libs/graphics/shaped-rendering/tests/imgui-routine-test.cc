@@ -45,17 +45,31 @@ struct imgui_fixture
         auto* const draw_data = ImGui::GetDrawData();
         draw_data->DisplayPos = ImVec2(display_pos[0], display_pos[1]);
 
+        // What brings the routine up, and the reason a real frame loop calls it too: nothing else does.
+        // Outside the command list below, because a tick opens and submits one of its own.
+        //
+        // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and
+        // `execute` is what registers one — so a caller meeting a parametrization for the first time declines that
+        // frame.
+        // Naming it up front is what lets a test assert on its first call, and it couples the test to a choice the
+        // code under test makes.
+        // It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness — see
+        // libs/graphics/shaped-graphics/docs/TODO.md.
+        sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
+        (void)ctx->routines.tick_until_idle();
+
         auto cmd = ctx->create_command_list();
         {
             auto pass = cmd->raster.render_to(
                 {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-            sr::imgui_routine::execute(pass, draw_data);
+            CHECK(sr::imgui_routine::execute(pass, draw_data) == sg::routine_outcome::executed);
         }
         ctx->submit_command_list(cc::move(cmd));
 
         // What a real frame ends with.
         // Draining here also keeps each test self-contained: transient geometry is recycled, and no GPU work is left in flight when the fixture is torn down.
-        ctx->advance_epoch_and_wait_for_idle();
+        ctx->advance_epoch();
+        ctx->block_until_idle();
     }
 
     [[nodiscard]] cc::pinned_data<byte const> read_back()
@@ -64,7 +78,8 @@ struct imgui_fixture
         auto const future = cmd->download.bytes_from_texture(target.raw());
         ctx->submit_command_list(cc::move(cmd));
 
-        auto bytes = ctx->wait_for(future);
+        ctx->block_until_idle();
+        auto bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         return cc::move(bytes).value();
     }

@@ -51,7 +51,11 @@ for root in ("libs", "tools"):
 
 ## What the August 2026 baseline looked like
 
-`check` builds and tests four presets: relwithdebinfo, debug, release, singlethreaded.
+`check` builds and tests four presets here: relwithdebinfo, debug, release, singlethreaded.
+
+That is the set as of this baseline, and it is not the set today.
+The leg count is per platform and has grown since: Windows still has these four, macOS adds the ASan preset, and Linux adds that plus ThreadSanitizer.
+Every number below is therefore a Windows measurement and does not carry over to a Linux `check`.
 
 **Cold — 400 s**
 

@@ -67,7 +67,7 @@
 // Compilation modes
 // =========================================================================================================
 // Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
-// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC
+// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC, CC_HAS_THREAD_SANITIZER
 // From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED, CC_NO_MIMALLOC
 //
 // CMake only ever defines inputs; this header owns every derivation and defines the outputs unconditionally.
@@ -104,6 +104,25 @@
 #define CC_ASSERT_ENABLED 1
 #else
 #define CC_ASSERT_ENABLED 0
+#endif
+
+// CC_HAS_THREAD_SANITIZER - This translation unit is compiled with ThreadSanitizer (0 or 1).
+//
+// Here for the handful of things TSan's instrumentation genuinely changes rather than merely slows: it interposes on
+// thread creation and rewrites every memory access, so a stack walk sees frames that are not the ones the source
+// suggests, and a thread it started has no unwindable top.
+// Not a knob to skip a test with because it is slow under the tool -- that is what the preset is for.
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define CC_HAS_THREAD_SANITIZER 1
+#endif
+#endif
+#if !defined(CC_HAS_THREAD_SANITIZER)
+#if defined(__SANITIZE_THREAD__)
+#define CC_HAS_THREAD_SANITIZER 1
+#else
+#define CC_HAS_THREAD_SANITIZER 0
+#endif
 #endif
 
 // --- Operating system ---

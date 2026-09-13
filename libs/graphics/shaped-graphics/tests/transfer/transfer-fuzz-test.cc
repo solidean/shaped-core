@@ -104,14 +104,15 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                  [&](trace& t)
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
-                     ctx->advance_epoch(cc::nullopt);
+                     ctx->advance_epoch();
                  })
         ->execute_at_least(5);
     test->add_op("advance epoch + wait",
                  [&](trace& t)
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
-                     ctx->advance_epoch_and_wait_for_idle();
+                     ctx->advance_epoch();
+                     ctx->block_until_idle();
                  })
         ->execute_at_least(5);
 
@@ -210,7 +211,8 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto dl = t.cmd->download.data_from_buffer<u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
-                     auto dl_data = ctx->wait_for(dl).value();
+                     ctx->block_until_idle();
+                     auto dl_data = dl.try_get_data().value();
 
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)
@@ -242,7 +244,8 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                          ref[i] = t.data[start + i];
 
                      auto dl = ctx->download.data_from_buffer<u32>(t.buffer, start, cnt);
-                     auto dl_data = ctx->wait_for(dl).value();
+                     ctx->block_until_idle();
+                     auto dl_data = dl.try_get_data().value();
 
                      CHECK(isize(cnt) == dl_data.size());
                      for (auto i = 0; i < cnt; ++i)

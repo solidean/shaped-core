@@ -92,9 +92,13 @@ struct chase_lev_deque
             a = grow(a, b, t);
 
         a->put(b, v);
-        cc::atomic_thread_fence(cc::memory_order_release); // the slot store must land before the publish
-        // The publish below is RELAXED, which is why the pool's wake path needs a fence of its own -- see it.
-        _bottom.store(b + 1, cc::memory_order_relaxed);
+        // The publish, and the one edge a thief gets: its acquire load of _bottom in try_steal is what makes the slot
+        // store above -- and everything the pushed item points at -- visible to it.
+        // A release fence plus a relaxed store would be as correct and generate the same code, but ThreadSanitizer
+        // models no fence at all, so the release has to sit on the store for the deque to be checkable.
+        // Release still permits a later load to be hoisted above it, which is why the pool's wake path carries a
+        // seq_cst fence of its own -- see it.
+        _bottom.store(b + 1, cc::memory_order_release);
     }
 
     /// Owner only; takes the newest entry (LIFO).

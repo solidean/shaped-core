@@ -8,6 +8,7 @@
 #include <clean-core/record/system.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/mutex.hh>
 #include <nexus/test.hh>
 
 // Shared scaffolding for the cc::rec tests.
@@ -109,57 +110,98 @@ struct cc_rec_test::collector final : cc::rec::listener
 
     void on_chunk(cc::rec::chunk_view const& view) override
     {
-        for (auto it = view.begin(); it != view.end(); ++it)
-        {
-            auto const e = *it;
-            events.push_back({
-                .name = cc::string(e.name()),
-                .text = cc::string(e.payload_as_text()),
-                .kind = e.kind(),
-                .level = e.level(),
-                .cycles = e.cycles,
-                .domain = cc::string(e.domain()->name()),
-                .layer = view.layer,
-                .value = e.field_as_double("value"),
-                .depth = e.field_as_int("depth"),
-                .quantity = e.quantity(),
+        _state.lock(
+            [&](state& s)
+            {
+                for (auto it = view.begin(); it != view.end(); ++it)
+                {
+                    auto const e = *it;
+                    s.events.push_back({
+                        .name = cc::string(e.name()),
+                        .text = cc::string(e.payload_as_text()),
+                        .kind = e.kind(),
+                        .level = e.level(),
+                        .cycles = e.cycles,
+                        .domain = cc::string(e.domain()->name()),
+                        .layer = view.layer,
+                        .value = e.field_as_double("value"),
+                        .depth = e.field_as_int("depth"),
+                        .quantity = e.quantity(),
+                    });
+                }
+                ++s.chunk_count;
             });
-        }
-        ++chunk_count;
     }
 
     [[nodiscard]] cc::string_view listener_name() const override { return "collector"; }
 
     [[nodiscard]] isize count_named(cc::string_view n) const
     {
-        isize c = 0;
-        for (auto const& e : events)
-            if (cc::string_view(e.name) == n)
-                ++c;
-        return c;
+        return _state.lock(
+            [&](state const& s)
+            {
+                isize c = 0;
+                for (auto const& e : s.events)
+                    if (cc::string_view(e.name) == n)
+                        ++c;
+                return c;
+            });
     }
 
-    /// The first event with this name, or null.
-    [[nodiscard]] entry const* first_named(cc::string_view n) const
+    [[nodiscard]] isize chunk_count() const
     {
-        for (auto const& e : events)
-            if (cc::string_view(e.name) == n)
-                return &e;
-        return nullptr;
+        return _state.lock([](state const& s) { return s.chunk_count; });
+    }
+
+    /// Everything collected so far, as a copy a caller may hold on to.
+    /// A copy rather than a reference because the worker may append the moment the lock is released, reallocating the
+    /// vector under any reference we handed out.
+    [[nodiscard]] cc::vector<entry> snapshot() const
+    {
+        return _state.lock([](state const& s) { return s.events; });
+    }
+
+    /// The first event with this name, if there is one.
+    /// A copy for the same reason snapshot() is one: the worker may append and reallocate the moment the lock is
+    /// released, so a pointer out of here would outlive what it points at.
+    [[nodiscard]] cc::optional<entry> first_named(cc::string_view n) const
+    {
+        return _state.lock(
+            [&](state const& s) -> cc::optional<entry>
+            {
+                for (auto const& e : s.events)
+                    if (cc::string_view(e.name) == n)
+                        return e;
+                return {};
+            });
     }
 
     /// Every event of one kind, in arrival order.
-    [[nodiscard]] cc::vector<entry const*> of_kind(cc::rec::event_kind k) const
+    [[nodiscard]] cc::vector<entry> of_kind(cc::rec::event_kind k) const
     {
-        cc::vector<entry const*> out;
-        for (auto const& e : events)
-            if (e.kind == k)
-                out.push_back(&e);
-        return out;
+        return _state.lock(
+            [&](state const& s)
+            {
+                cc::vector<entry> out;
+                for (auto const& e : s.events)
+                    if (e.kind == k)
+                        out.push_back(e);
+                return out;
+            });
     }
 
-    cc::vector<entry> events;
-    isize chunk_count = 0;
+private:
+    struct state
+    {
+        cc::vector<entry> events;
+        isize chunk_count = 0;
+    };
+
+    /// Locked on every access, including the reads.
+    /// Under a threaded config the drain runs on the recording worker while the test is still querying, so an
+    /// unguarded count walks a vector the worker is reallocating -- which is a use-after-free, not a stale answer.
+    /// Mutable so the const queries can lock it.
+    mutable cc::mutex<state> _state;
 };
 
 /// Registers a listener for a scope and unregisters it again, so a test never leaves one behind.

@@ -9,15 +9,24 @@ Naming that cost is the whole point of these lines.
 Each check mirrors one CMake gate, and the mirror must stay exact:
 `find_package(Vulkan)` in libs/graphics/shaped-graphics/CMakeLists.txt, the `check_include_file` probes in
 libs/graphics/shaped-graphics/backends/vulkan/CMakeLists.txt and extern/sdl3/CMakeLists.txt, and the `.install/pin.txt` fetch markers.
+
+The per-backend roll-up comes first and the ingredient probes follow it as the evidence.
+The roll-up re-probes nothing — it reads the verdicts the probes already produced, so it cannot disagree with the lines printed under it.
+
+Backend availability is a build-time question plus a run-time one, and both are reported: a backend can compile in and still create no device.
+What is deliberately not answered is ray-tracing capability, which needs a real device and a `CheckFeatureSupport` call, well past what belongs on a doctor's fast path.
 """
 
 from __future__ import annotations
 
+import ctypes
 import ctypes.util
 import os
 import platform
 import subprocess
 from pathlib import Path
+
+from ..project import pins
 
 # The windowing systems a Linux swapchain can present to, each with the header whose presence turns it on.
 # The names are sg::window_platform's, since that is what a failure reports back.
@@ -130,6 +139,48 @@ def _vulkan_runtime_check() -> tuple[str, bool | None, str]:
     return (label, True, f"loader {loader}, driver(s): {', '.join(drivers)}")
 
 
+# D3D_FEATURE_LEVEL_11_0, the level the dx12 backend's device creation asks for.
+_D3D_FEATURE_LEVEL_11_0 = 0xB000
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [("d1", ctypes.c_uint32), ("d2", ctypes.c_uint16), ("d3", ctypes.c_uint16),
+                ("d4", ctypes.c_ubyte * 8)]
+
+
+# IID_ID3D12Device — the riid D3D12CreateDevice is asked for.
+_IID_ID3D12DEVICE = _GUID(0x189819F1, 0x1DB6, 0x4B57, (ctypes.c_ubyte * 8)(0xBE, 0x54, 0x18, 0x21, 0x33, 0x9B, 0x85, 0xF7))
+
+
+def _dx12_runtime_check() -> tuple[str, bool | None, str]:
+    """Whether a D3D12 device can be created here, which the build gate says nothing about.
+
+    dx12 builds on every Windows checkout, so the only thing left to establish is whether the machine has an adapter that
+    supports it — a headless VM or a stripped container routinely does not, and that surfaces as `create_dx12_context`
+    failing far from its cause.
+    This is the dx12 half of what `_vulkan_runtime_check` answers for vulkan.
+
+    A null `ppDevice` is the documented support probe: it returns S_FALSE when the device *would* be created and creates
+    nothing, so nothing has to be released afterwards.
+    """
+    label = "dx12 runtime"
+    if platform.system() != "Windows":
+        return (label, None, "no D3D12 outside Windows")
+    try:
+        d3d12 = ctypes.WinDLL("d3d12")
+    except OSError:
+        return (label, None, "d3d12.dll not loadable — no D3D12 runtime on this machine")
+    try:
+        hr = d3d12.D3D12CreateDevice(None, _D3D_FEATURE_LEVEL_11_0, ctypes.byref(_IID_ID3D12DEVICE), None)
+    except (AttributeError, OSError) as e:
+        return (label, None, f"the D3D12CreateDevice probe could not run ({e})")
+    # S_OK and S_FALSE both mean supported; only a negative HRESULT is a real "no adapter".
+    if hr >= 0:
+        return (label, True, "a D3D12 feature-level 11_0 adapter is present")
+    return (label, None, f"no D3D12 adapter at feature level 11_0 (HRESULT 0x{hr & 0xFFFFFFFF:08X}) — "
+                         f"dx12 compiles in, but creating a context will fail")
+
+
 def _surface_check(cxx: str | None) -> tuple[str, bool | None, str]:
     """Which windowing systems a Vulkan swapchain can present to, mirroring the backend's own header probes.
 
@@ -157,11 +208,13 @@ def _window_backend_check(root: Path, cxx: str | None) -> tuple[str, bool | None
     and they are worth telling apart, since only the first is fixed by running the fetch script.
     """
     label = "sr::window (SDL3)"
-    fetched = (root / "extern" / "sdl3" / ".install" / "pin.txt").is_file()
-    if not fetched:
+    state = pins.install_state(root, "sdl3")
+    if state == "missing":
         return (label, None, "SDL3 not fetched — run: uv run extern/sdl3/fetch-sdl3.py")
+    if state == "stale":
+        return (label, None, "SDL3 installed at the wrong pin — run: uv run extern/sdl3/fetch-sdl3.py")
     if not _is_unix_windowed():
-        return (label, True, "SDL3 fetched")
+        return (label, True, "SDL3 fetched, pin current")
     if cxx is None:
         return (label, None, "SDL3 fetched; no compiler resolved, so the header probe could not run")
 
@@ -178,21 +231,66 @@ def _shader_compiler_check(root: Path) -> tuple[str, bool | None, str]:
     Without it every shader package still compiles, and every consumer of one fails at `acquire`.
     """
     label = "shader compiler (DXC)"
-    if (root / "extern" / "dxc" / ".install" / "pin.txt").is_file():
-        return (label, True, "extern/dxc/.install")
+    state = pins.install_state(root, "dxc")
+    if state == "current":
+        return (label, True, "extern/dxc/.install, pin current")
+    if state == "stale":
+        return (label, None, "DXC installed at the wrong pin — run: uv run extern/dxc/download-dxc.py")
     return (label, None, "DXC not fetched — run: uv run extern/dxc/download-dxc.py")
+
+
+def _backend_rollup(
+    headers: tuple[str, bool | None, str],
+    vk_runtime: tuple[str, bool | None, str],
+    dx12_runtime: tuple[str, bool | None, str],
+    cxx: str | None,
+) -> list[tuple[str, bool | None, str]]:
+    """One line per sg backend: will it build here, and will it create a device.
+
+    Reads the probes' verdicts rather than repeating them, so this section and the evidence below it can never disagree.
+    The build gates mirrored are shaped-graphics/CMakeLists.txt's: dx12 is `WIN32` alone, since the DirectX 12 libs ship
+    with the Windows SDK, and vulkan is `find_package(Vulkan)` on a non-web target.
+    """
+    out: list[tuple[str, bool | None, str]] = []
+
+    if platform.system() != "Windows":
+        out.append(("sg backend dx12", None, "not built off Windows"))
+    elif dx12_runtime[1]:
+        out.append(("sg backend dx12", True, "built (Windows SDK); " + dx12_runtime[2]))
+    else:
+        out.append(("sg backend dx12", None, "built (Windows SDK), but " + dx12_runtime[2]))
+
+    if not headers[1] and cxx is None:
+        # An unaskable question is not a no: MSVC reaches its compiler through an environment rather than a path, so
+        # the header probe never ran and configure may well find Vulkan anyway.
+        out.append(("sg backend vulkan", None, "undetermined — " + headers[2]))
+    elif not headers[1]:
+        out.append(("sg backend vulkan", None, "not built — " + headers[2]))
+    elif vk_runtime[1]:
+        out.append(("sg backend vulkan", True, "built; " + vk_runtime[2]))
+    else:
+        out.append(("sg backend vulkan", None, "built, but " + vk_runtime[2]))
+
+    out.append(("sg backend metal/webgpu", None, "intended tiers, no backend in sg yet"))
+    return out
 
 
 def checks(root: Path, cxx: str | None) -> list[tuple[str, bool | None, str]]:
     """The graphics environment, as (label, ok, detail) triples in the order doctor prints them.
 
+    The per-backend roll-up comes first, then the probes it was derived from as the evidence.
     `cxx` is the compiler the selected preset configures, so the header probes see the same search path CMake will —
     which is the whole answer on a machine whose headers live in a sysroot rather than in /usr/include.
     None where the preset has no resolvable compiler path (MSVC), and the probes then report that rather than guessing.
     """
+    headers = _vulkan_headers_check(cxx)
+    vk_runtime = _vulkan_runtime_check()
+    dx12_runtime = _dx12_runtime_check()
     return [
-        _vulkan_headers_check(cxx),
-        _vulkan_runtime_check(),
+        *_backend_rollup(headers, vk_runtime, dx12_runtime, cxx),
+        headers,
+        vk_runtime,
+        dx12_runtime,
         _surface_check(cxx),
         _window_backend_check(root, cxx),
         _shader_compiler_check(root),

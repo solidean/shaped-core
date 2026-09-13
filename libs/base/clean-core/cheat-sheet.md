@@ -1287,6 +1287,11 @@ cc::scoped_environment_variable const s("K", "v");  // set for a scope, restored
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
 cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
 
+CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) — for the few things TSan's
+                                                    // instrumentation genuinely CHANGES: a stack walk sees frames
+                                                    // that are not the source's, and a thread TSan started has no
+                                                    // unwindable top. Not a way to skip a test that is merely slow.
+
 #include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
 cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)
 auto const g = cc::leak_scope();                    // ...and this for what it OWNS: LSan cannot see through a cc::

@@ -386,7 +386,7 @@ TEST("bench - the system summary is structurally complete even where it cannot b
     CHECK(sys.assertions_enabled == (CC_ASSERT_ENABLED != 0));
 }
 
-TEST("bench - a load reading measures the clock this thread actually ran on")
+TEST("bench - a load reading measures the clock this thread actually ran on", nx::config::exclusive("bench"))
 {
     auto const first = nx::bench::sample_load();
     CHECK(first.ticks_per_ns > 0);

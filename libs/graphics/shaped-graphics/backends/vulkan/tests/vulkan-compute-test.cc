@@ -90,7 +90,8 @@ TEST("sg vulkan - compute dispatch writes a structured buffer")
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));
     bool ok = true;
@@ -149,13 +150,15 @@ TEST("sg vulkan - transient binding groups and buffers recycle across epochs")
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx.submit_command_list(cc::move(down));
 
-        auto const data = ctx.wait_for(future);
+        ctx.block_until_idle();
+        auto const data = future.try_get_data();
         REQUIRE(data.has_value());
         for (int i = 0; i < count; ++i)
             if (data.value()[i] != u32(i) * 2)
                 all_ok = false;
 
-        ctx.advance_epoch(2); // keep at most 2 epochs in flight, so the rings reclaim older windows
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(2); // keep at most 2 epochs in flight, so the rings reclaim older windows
     }
     CHECK(all_ok); // one check for 40 epochs: a per-epoch check would bury the failure that matters
 }
@@ -192,7 +195,8 @@ TEST("sg vulkan - persistent binding groups free and reuse their descriptor rang
 
         // Releasing here stages the range's return; the advance below is what actually runs it.
         group = nullptr;
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
     }
     CHECK(all_created);
 }

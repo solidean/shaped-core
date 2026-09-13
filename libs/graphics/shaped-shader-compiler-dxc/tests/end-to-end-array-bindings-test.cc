@@ -162,7 +162,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
 
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.value().size() == 2);
     CHECK(data.value()[0] == b0_value + b3_value);
     CHECK(data.value()[1] == u32(texel_value));
@@ -247,6 +248,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::con
         disp->compute.declare_array_texture_access("Texs", {});
         disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
     }
 }

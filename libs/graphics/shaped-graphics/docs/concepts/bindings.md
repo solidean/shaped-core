@@ -19,11 +19,33 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
 - **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
+- **`visibility`** — the set of stages that declared this binding, as a `shader_stages`.
+  **Empty means not known**, not "no stage": a hand-written binding that never says is treated as visible everywhere.
+- **`storage_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
+
+## Visibility is accumulated, not reflected
+
+A reflector reports what a shader declares, never which stage it was run for — and it does not have to, because a `compiled_shader` *is* one stage.
+So a compiler calls `apply_stage_visibility` once with its own stage, and `merge_bindings` unions the bits as a pipeline's shaders are folded into one layout.
+First-seen wins on every other field; visibility is the one thing the merge accumulates.
+
+The reason to carry it at all is that **WebGPU cannot be permissive here**, where dx12 and vulkan can.
+Its default limits allow *zero* storage buffers in the vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device rather than merely costing something.
+Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAGE_ALL` — which is what keeps the field true rather than aspirational.
+
+**`storage_format` has no HLSL source.**
+`RWTexture2D<float4>` declares a component type and count, not a concrete texel format, and DXIL carries no format for a typed UAV.
+WGSL does declare one (`texture_storage_2d<rgba8unorm, write>`), so that field is filled by the WGSL path and left absent by the DXC one.
 
 ## A group index binds, a space only numbers
 
 A **group index** is a descriptor set the hardware sees: SPIR-V's `set`, WGSL's `@group`.
 Vulkan guarantees four of them, and binding a descriptor set means naming the very index the shader was compiled against — bind it elsewhere and the shader reads the wrong table.
+WebGPU guarantees four as well, and four is the floor sg budgets against.
+A caller gets three of them, [`sg::max_binding_groups`](../../src/shaped-graphics/fwd.hh).
+The fourth is [`sg::reserved_binding_group`](../../src/shaped-graphics/fwd.hh), which is sg's own — where a backend puts what it has to emulate.
+That reservation holds on every backend, not only the ones that need it.
+A cap that varied per backend would be one a caller exceeds on the backend they develop against, and discovers on another.
 A **space** is HLSL's `space`, and it is only a namespace for register numbers: `t0, space1` and `t0, space2` are two distinct registers.
 Neither of them says anything about which descriptor table they end up in.
 An arbitrary number of spaces is fine, which is exactly why a space could never stand in for a set.

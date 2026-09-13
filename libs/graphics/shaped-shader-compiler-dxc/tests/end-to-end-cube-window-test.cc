@@ -314,10 +314,12 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             cmd->raster.draw({.vertex_range = {.offset = 0, .size = isize(cube.size())}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx.advance_epoch(sc->buffer_count()); // throttle CPU ahead of the GPU + retire finished frames
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(sc->buffer_count()); // throttle CPU ahead of the GPU + retire finished frames
     }
 
-    ctx.advance_epoch_and_wait_for_idle(); // drain before the swapchain / window tear down
+    ctx.advance_epoch();
+    ctx.block_until_idle(); // drain before the swapchain / window tear down
     if (!s_window_closed)
         DestroyWindow(hwnd);
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly

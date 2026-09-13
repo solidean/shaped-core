@@ -9,9 +9,12 @@ namespace
 // The enum ranges this build knows.
 // Anything outside them is a blob from a future build, or a corrupt one; either way it decodes to nothing.
 constexpr u32 k_shader_stage_count = u32(shader_stage::callable) + 1;
-constexpr u32 k_shader_format_count = u32(shader_format::metal_lib) + 1;
+constexpr u32 k_shader_format_count = u32(shader_format::wgsl) + 1;
 constexpr u32 k_binding_type_count = u32(binding_type::acceleration_structure) + 1;
 constexpr u32 k_texture_view_dimension_count = u32(texture_view_dimension::cube_array) + 1;
+constexpr u32 k_pixel_format_count = u32(pixel_format::bc7_rgba_unorm_srgb) + 1;
+constexpr u32 k_texture_sample_type_count = u32(texture_sample_type::uint) + 1;
+constexpr u32 k_sampler_binding_type_count = u32(sampler_binding_type::comparison) + 1;
 
 void put_u32(cc::vector<byte>& out, u32 value)
 {
@@ -55,6 +58,16 @@ void put_optional_u32(cc::vector<byte>& out, cc::optional<u32> const& value)
     put_u32(out, value.value_or(0));
 }
 
+/// An optional enum, as a presence flag plus its value widened to u32.
+/// The decode side range-checks the value before narrowing it back, so a corrupt blob is a miss rather than a
+/// nonsense enumerator.
+template <class EnumT>
+void put_optional_enum(cc::vector<byte>& out, cc::optional<EnumT> const& value)
+{
+    put_bool(out, value.has_value());
+    put_u32(out, value.has_value() ? u32(value.value()) : 0);
+}
+
 void put_binding(cc::vector<byte>& out, binding const& b)
 {
     put_string(out, b.name);
@@ -69,8 +82,11 @@ void put_binding(cc::vector<byte>& out, binding const& b)
     // A texture's shader-declared dimension is what lets a backend synthesize a dimension-correct null
     // descriptor for a vacant array element, so a cached shader that dropped it would bind differently
     // from the one that was compiled.
-    put_bool(out, b.texture_dimension.has_value());
-    put_u32(out, b.texture_dimension.has_value() ? u32(b.texture_dimension.value()) : 0);
+    put_optional_enum(out, b.texture_dimension);
+    put_u32(out, u32(b.visibility.bits));
+    put_optional_enum(out, b.storage_format);
+    put_optional_enum(out, b.sample_type);
+    put_optional_enum(out, b.sampler_type);
 }
 
 /// A cursor that goes sour on the first bad read and stays that way.
@@ -183,13 +199,28 @@ struct reader
         if (has_block_size)
             b.block_size = isize(block_size);
 
-        auto const has_dimension = get_bool();
-        auto const dimension = get_u32();
-        if (has_dimension && dimension < k_texture_view_dimension_count)
-            b.texture_dimension = texture_view_dimension(dimension);
-        else if (has_dimension)
-            ok = false;
+        b.texture_dimension = get_optional_enum<texture_view_dimension>(k_texture_view_dimension_count);
+        b.visibility = shader_stages::create_from_bits(u16(get_u32()));
+        b.storage_format = get_optional_enum<pixel_format>(k_pixel_format_count);
+        b.sample_type = get_optional_enum<texture_sample_type>(k_texture_sample_type_count);
+        b.sampler_type = get_optional_enum<sampler_binding_type>(k_sampler_binding_type_count);
         return b;
+    }
+
+    /// The read side of put_optional_enum: absent stays absent, and a value out of range sours the reader.
+    template <class EnumT>
+    [[nodiscard]] cc::optional<EnumT> get_optional_enum(u32 count)
+    {
+        auto const present = get_bool();
+        auto const value = get_u32();
+        if (!present)
+            return {};
+        if (value >= count)
+        {
+            ok = false;
+            return {};
+        }
+        return EnumT(value);
     }
 };
 } // namespace
@@ -250,7 +281,8 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
 
     // A binding is at least its fixed fields plus two length prefixes, so a claimed count far past what the
     // remaining bytes could hold is rejected before anything is allocated for it.
-    auto const binding_count = r.get_count(34);
+    // The number is a floor on the encoded size, so it only has to stay <= what put_binding actually writes.
+    auto const binding_count = r.get_count(49);
     for (auto i = isize(0); r.ok && i < binding_count; ++i)
         shader.bindings.push_back(r.get_binding());
 

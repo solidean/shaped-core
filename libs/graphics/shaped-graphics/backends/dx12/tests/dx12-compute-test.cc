@@ -82,7 +82,8 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));
     bool ok = true;
@@ -136,7 +137,8 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx->submit_command_list(cc::move(down));
 
-        auto const data = ctx->wait_for(future);
+        ctx->block_until_idle();
+        auto const data = future.try_get_data();
         REQUIRE(data.has_value());
         bool ok = true;
         for (int i = 0; i < count; ++i)
@@ -144,7 +146,8 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
                 ok = false;
         CHECK(ok);
 
-        ctx->advance_epoch(2); // keep at most 2 epochs in flight → the rings reclaim older slots/windows
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2); // keep at most 2 epochs in flight → the rings reclaim older slots/windows
     }
 }
 
@@ -170,9 +173,10 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
     {
         sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
         auto group = ctx->persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
-        REQUIRE(group != nullptr);              // never exhausts: released ranges are reclaimed
-        group.reset();                          // drop -> schedules the range's deferred free
-        ctx->advance_epoch_and_wait_for_idle(); // retire -> the finalizer returns it to the free list
+        REQUIRE(group != nullptr); // never exhausts: released ranges are reclaimed
+        group.reset();             // drop -> schedules the range's deferred free
+        ctx->advance_epoch();
+        ctx->block_until_idle(); // retire -> the finalizer returns it to the free list
     }
     CHECK(true);
 }

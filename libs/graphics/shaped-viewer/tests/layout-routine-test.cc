@@ -35,8 +35,10 @@ namespace
 
 TEST("sv - the layout routine builds its shaders and layouts")
 {
-    // Deliberately the narrowest case: prewarm runs init_declare and nothing else, so a failure here is the shader
-    // package, the group layout or the inline-constants block rather than anything about a draw.
+    // Deliberately the narrowest case: prewarm registers the routine and one tick brings it up, so a failure here is
+    // the shader package, the group layout or the inline-constants block rather than anything about a draw.
+    // The tick is what does the work -- prewarm alone would register the routine and build nothing, and this test
+    // would pass while proving nothing.
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
@@ -46,8 +48,13 @@ TEST("sv - the layout routine builds its shaders and layouts")
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the shaders");
 
-    sv::layout_routine::prewarm(*ctx_h);
-    CHECK(true);
+    // Prewarm names the format, because the routine is one instance per target format — and this is the case that
+    // makes that worth it: an application that knows its swapchain format can have the pipelines built before the
+    // first frame rather than the frame after.
+    sv::layout_routine::prewarm(*ctx_h, sg::pixel_format::bgra8_unorm);
+    auto const tick = ctx_h->routines.tick_until_idle();
+    CHECK(tick.initialized >= 1);
+    CHECK(tick.is_idle());
 }
 
 TEST("sv - the layout routine records borders, views and a wipe in one pass")
@@ -113,14 +120,21 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
                                  .uv = tg::aabb2f(tg::pos2f(0.25f, 0.25f), tg::pos2f(0.75f, 0.75f))},
                      .blend = sv::layer_blend::replace});
 
+    // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
+    // named here exactly as the test above names it, which couples this test to the routine's parametrization.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
+    (void)ctx.routines.tick_until_idle();
+
     auto cmd = ctx.create_command_list();
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-        sv::layout_routine::execute(scope, sv::window_id(0), draws, textures);
+        CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, textures) == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Reaching here means every pipeline variant built and the whole list recorded and ran.
     CHECK(output.width() == output_size[0]);
@@ -153,14 +167,22 @@ TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
                      .dst_rect = rect_of(0, 0, 16, 16),
                      .primary = {.kind = sv::draw_source_kind::target, .index = 99}});
 
+    // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
+    // named here exactly as the test above names it, which couples this test to the routine's parametrization.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
+    (void)ctx.routines.tick_until_idle();
+
     auto cmd = ctx.create_command_list();
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
-        sv::layout_routine::execute(scope, sv::window_id(0), draws, {.targets = sources, .traces = {}});
+        CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, {.targets = sources, .traces = {}})
+              == sg::routine_outcome::executed);
     }
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     CHECK(output.width() == 32);
 }

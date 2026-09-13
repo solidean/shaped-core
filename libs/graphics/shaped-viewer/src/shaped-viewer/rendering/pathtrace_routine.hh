@@ -4,6 +4,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
@@ -95,7 +96,7 @@ struct sv::pt_trace_desc
 ///
 /// A render routine, structured exactly like pbr_raytrace_routine.
 /// It owns the slib-acquired raygen and miss shaders, and one DXR pipeline per **set of material permutations** a trace binds.
-/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init_declare`.
+/// The closest-hit is generated per material rather than authored, so which shaders a pipeline is built from is a property of the scene and cannot be settled in `init`.
 /// What can, and is, are the three shaders every pipeline shares.
 /// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
 ///
@@ -113,23 +114,38 @@ class sv::pathtrace_routine : public sg::render_routine<pathtrace_routine>
 {
 public:
     /// Builds the TLAS from `d.instances`, binds the scene, and integrates one path bundle per pixel over `d.output`'s extent into `d.output`.
-    /// A no-op (leaves the target untouched) if the shaders did not compile, or if any permutation `d` names has not.
-    static void execute(sg::command_list& cmd, pt_trace_desc const& d);
-
-    /// Whether the most recent `execute` on this context actually dispatched.
     ///
-    /// It reports the *last trace* rather than the routine, because there is no longer one pipeline to ask about: a
-    /// pipeline exists per permutation set, so readiness only means anything relative to a trace that named one.
-    /// `execute` degrades to a no-op rather than throwing, which is the right behavior for a live reload and the
-    /// wrong one for a test: a broken shader then leaves an untouched target that no CPU-side assertion notices.
-    /// So a test asserts on this, and a debug overlay can say why the image is empty.
-    /// False before the first execute.
-    [[nodiscard]] static bool is_ready(sg::command_list& cmd);
+    /// **Fallible, and for a reason the other routines do not share.**
+    /// Its pipelines are keyed on the ordered set of hit groups a trace names, which is scene data: unbounded, and
+    /// discovered on the frame path when a material combination is first used.
+    /// That key cannot be a routine parameter, so the permutations stay a map, and this declines and leaves the target
+    /// untouched until the one this trace needs has been built.
+    ///
+    /// Declining is what a caller must look at rather than infer.
+    /// Degrading silently is right for a live reload and wrong for a test, where a broken shader would otherwise leave
+    /// an untouched target no CPU-side assertion notices — so the outcome is nodiscard and the tests assert on it.
+    [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, pt_trace_desc const& d);
 
 protected:
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
+
+    /// Waits out the permutation compiles `execute` started on the frame path.
+    ///
+    /// A declined trace kicks off the compiles it was missing — that is what makes the next frame able to draw — and
+    /// those nodes belong to no phase, so nothing else can collect them.
+    /// See render_routine_base::drain_detached_work.
+    void drain_detached_work() override;
 
 private:
+    /// Append what one trace started to the guarded list; a no-op when it started nothing, which is the steady state.
+    void record_started(cc::vector<sg::async_compiled_shader> started);
+
+    /// Every shader node `execute` called async_start on, so shutdown can wait for them.
+    ///
+    /// Guarded because execute runs under the routine's own lock while a clear does not, and because the whole point
+    /// is to read it from the thread tearing the context down.
+    cc::mutex<cc::vector<sg::async_compiled_shader>> _started_on_frame_path;
+
     /// One pipeline, built over one ordered set of hit groups.
     ///
     /// `group_layout` covers the trace's own bindings alone: the manager's tables are the second group and are
@@ -141,12 +157,35 @@ private:
         sg::raytracing_pipeline_handle pipeline;
         sg::raytracing_shader_table_handle table;
         sg::raygen_index raygen = {};
+
+        /// The state object while it is still being built.
+        /// Held rather than waited on: this permutation is discovered on the frame path, and a build there is the one
+        /// thing that must not stall — so the frames until it lands trace without it.
+        sg::async_raytracing_pipeline pending;
+
+        /// Set when this permutation cannot be built: a shader that will not compile, or a state object that refused.
+        /// Remembered rather than retried every frame, since the same inputs fail the same way until a reload.
+        bool failed = false;
+
+        /// What the shader table is built from, kept until the pipeline it indexes into exists.
+        /// These are positions in the pipeline description rather than objects, so holding them costs nothing.
+        sg::raygen_shader_handle pending_raygen = {};
+        sg::miss_shader_handle pending_miss = {};
+        sg::miss_shader_handle pending_shadow_miss = {};
+        cc::vector<sg::hit_shader_handle> pending_hits;
     };
 
-    /// The variant for `d`'s hit groups, built on a miss, or null when something it needs has not compiled.
+    /// Builds the shader table for a variant whose pipeline has just landed.
+    static void _finish_variant(sg::context& ctx, pipeline_variant& variant);
+
+    /// The variant for `d`'s hit groups, or null while it is still being built or after it failed.
+    ///
+    /// Never waits.
+    /// A permutation is discovered when a frame first uses that material set, which is on the frame path — so this
+    /// starts the work and reports what is ready, and the trace happens a frame or two later.
     [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d);
 
-    // Re-acquired by init_declare on every reload, which is also when every variant built from the old ones is dropped.
+    // Re-acquired by init on every reload, which is also when every variant built from the old ones is dropped.
     sg::async_compiled_shader _raygen_shader;
     sg::async_compiled_shader _miss_shader;
     sg::async_compiled_shader _shadow_miss_shader;
@@ -154,7 +193,4 @@ private:
     /// Keyed on the hit-group set in order, together with the layout the second group is bound through.
     /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.
     cc::map<cc::hash128, pipeline_variant> _variants;
-
-    /// Whether the last `execute` dispatched — what `is_ready` reports.
-    bool _traced = false;
 };

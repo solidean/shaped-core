@@ -12,20 +12,16 @@ Public API:
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console
+from ..core import console, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset
 from ..core.process import emsdk_env, run_step
+from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
-
-# Artifact suffixes that are not directly runnable and must be launched via node.
-# Emscripten emits a `<name>.js` loader next to the `.wasm`.
-_WASM_LAUNCH_SUFFIXES = {".js", ".mjs", ".wasm"}
 
 # nexus prints this when a name filter matches no tests in a binary.
 # With a filter active that is "nothing to run here", not a failure.
@@ -52,6 +48,20 @@ def _lsan_suppression_env() -> dict[str, str]:
     existing = os.environ.get("LSAN_OPTIONS", "")
     value = f"suppressions={suppressions.as_posix()}"
     return {"LSAN_OPTIONS": f"{existing}:{value}" if existing else value}
+
+
+def _tsan_suppression_env() -> dict[str, str]:
+    """TSAN_OPTIONS pointing at the runtime suppression list.
+
+    Set unconditionally for the same reason as the LSan one: a build without ThreadSanitizer ignores the variable.
+    Appends to whatever the caller already set, so a developer chasing one race can add options without losing these.
+    """
+    suppressions = Path(__file__).resolve().parents[3] / "cmake" / "tsan-suppressions.txt"
+    if not suppressions.is_file():
+        return {}
+    existing = os.environ.get("TSAN_OPTIONS", "")
+    value = f"suppressions={suppressions.as_posix()}"
+    return {"TSAN_OPTIONS": f"{existing}:{value}" if existing else value}
 
 
 def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
@@ -101,6 +111,7 @@ def test(
     mirror: bool = False,
     verbose: bool = False,
     emsdk_path: str | None = None,
+    runtime: jsr.JsRuntimeRequest | None = None,
 ) -> list[dict]:
     """Run the named test binaries, optionally filtered by `test_name`.
 
@@ -124,6 +135,7 @@ def test(
         # Per-preset env additions that apply to every binary, such as the Windows ASan runtime dir on PATH.
         preset_env = _sanitizer_path_env(preset.build_dir)
         preset_env.update(_lsan_suppression_env())
+        preset_env.update(_tsan_suppression_env())
 
         # Emscripten test artifacts are .js/.wasm that run under node, which the emsdk environment puts on PATH.
         # Native presets keep the inherited environment.
@@ -131,97 +143,107 @@ def test(
         if preset.is_emscripten:
             wasm_env = emsdk_env(emsdk_path)
             if wasm_env is None:
-                print(
+                ui.write_line(
                     console.yellow(
                         f"WARNING: emsdk not found for preset {preset.name!r}; "
                         f"running with the inherited environment (node may be missing). "
                         f"Pass --emsdk-path or activate emsdk."
-                    ),
-                    file=sys.stderr,
+                    )
                 )
             else:
                 preset_base_env = wasm_env
 
+        # Resolved against the emsdk overlay above, since that is where node is expected to live.
+        launcher_for_preset = jsr.LazyLauncher(runtime, preset_base_env)
+
         records: list[dict] = []
-        for name in binary_names:
-            target = by_name.get(name)
-            if target is None or target.artifact is None:
-                continue
-            xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
+        with ui.phase(f"test {preset.name}", total=len(binary_names)) as binaries:
+            for name in binary_names:
+                binaries.advance(name)
+                target = by_name.get(name)
+                if target is None or target.artifact is None:
+                    continue
+                xml_path = target.artifact.parent / f"{target.artifact.name}.results.xml"
 
-            # Emscripten emits a non-executable .js/.wasm artifact; launch it via node.
-            launcher = (
-                ["node"]
-                if preset.is_emscripten or target.artifact.suffix.lower() in _WASM_LAUNCH_SUFFIXES
-                else []
-            )
-            cmd = [*launcher, str(target.artifact)]
-            if test_name:
-                cmd.append(test_name)
-            # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.
-            # A harmless positional for other runners.
-            if verbose:
-                cmd.append("-v")
-            # nexus writes a native per-test JUnit report here, and a non-nexus or crashed binary simply will not — synthesis below covers that.
-            # Clear any stale report first, so a crashed run cannot be read as fresh.
-            if write_xml:
-                xml_path.unlink(missing_ok=True)
-                cmd += ["--junit-xml", str(xml_path)]
-            cmd += extra_args
-
-            # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
-            run_env = preset_base_env
-            layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
-            if layered:
-                run_env = {**os.environ, **(preset_base_env or {}), **layered}
-
-            result = run_step(
-                cmd,
-                step_type="test",
-                name=name,
-                build_dir=preset.build_dir,
-                cwd=root,
-                env=run_env,
-                timeout=timeout,
-                mirror=mirror,
-                verbose=verbose,
-                summary_extra=(lambda r, xp=xml_path: _test_extra(xp)) if write_xml else None,
-            )
-
-            # With a name filter, "no matching tests in this binary" isn't a failure.
-            if test_name and not result.ok and _selected_no_tests(result.stderr_log):
+                # Emscripten emits a non-executable .js/.wasm artifact; hand it to the JS runtime instead.
+                # A missing runtime is a setup problem rather than a bug, so it is reported as one line rather than as a
+                # traceback out of the middle of a test run.
+                try:
+                    launcher = (launcher_for_preset.prefix()
+                                if jsr.needs_launcher(preset.is_emscripten, target.artifact) else [])
+                except jsr.NotFound as e:
+                    raise SystemExit(f"error: {e}") from None
+                cmd = [*launcher, str(target.artifact)]
+                if test_name:
+                    cmd.append(test_name)
+                # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.
+                # A harmless positional for other runners.
                 if verbose:
-                    print(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
-                continue
+                    cmd.append("-v")
+                # nexus writes a native per-test JUnit report here, and a non-nexus or crashed binary simply will not — synthesis below covers that.
+                # Clear any stale report first, so a crashed run cannot be read as fresh.
+                if write_xml:
+                    xml_path.unlink(missing_ok=True)
+                    cmd += ["--junit-xml", str(xml_path)]
+                cmd += extra_args
 
-            summary = None
-            if write_xml:
-                # Prefer the binary's own native report, one case per nexus test.
-                # Fall back to a synthesized single-case sidecar when it wrote nothing.
-                native = None
-                if xml_path.is_file() and xml_path.stat().st_size > 0:
-                    native = parse_junit(xml_path)
-                summary = native or write_step_junit(xml_path, name=name, result=result)
+                # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
+                run_env = preset_base_env
+                layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
+                if layered:
+                    run_env = {**os.environ, **(preset_base_env or {}), **layered}
 
-            record = {
-                "name": name,
-                "artifact": str(target.artifact),
-                "junit": (
-                    {
-                        "tests": summary.tests,
-                        "failures": summary.failures,
-                        "errors": summary.errors,
-                        "skipped": summary.skipped,
-                        "assertions": summary.assertions,
-                        "time_s": round(summary.time_s, 3),
-                    }
-                    if summary
-                    else None
-                ),
-                **step_fields(result, preset.build_dir),
-            }
-            records.append(record)
-            all_records.append(record)
+                result = run_step(
+                    cmd,
+                    step_type="test",
+                    name=name,
+                    build_dir=preset.build_dir,
+                    cwd=root,
+                    env=run_env,
+                    timeout=timeout,
+                    mirror=mirror,
+                    verbose=verbose,
+                    summary_extra=(lambda r, xp=xml_path: _test_extra(xp)) if write_xml else None,
+                )
+
+                # With a name filter, "no matching tests in this binary" isn't a failure.
+                if test_name and not result.ok and _selected_no_tests(result.stderr_log):
+                    if verbose:
+                        ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
+                    continue
+
+                summary = None
+                if write_xml:
+                    # Prefer the binary's own native report, one case per nexus test.
+                    # Fall back to a synthesized single-case sidecar when it wrote nothing.
+                    native = None
+                    if xml_path.is_file() and xml_path.stat().st_size > 0:
+                        native = parse_junit(xml_path)
+                    summary = native or write_step_junit(xml_path, name=name, result=result)
+
+                record = {
+                    "name": name,
+                    # Which preset ran it.
+                    # The sidecar is per build dir so it is implied there, but the records a caller gets back span every
+                    # preset in one list, and attributing a slow run needs it.
+                    "preset": preset.name,
+                    "artifact": str(target.artifact),
+                    "junit": (
+                        {
+                            "tests": summary.tests,
+                            "failures": summary.failures,
+                            "errors": summary.errors,
+                            "skipped": summary.skipped,
+                            "assertions": summary.assertions,
+                            "time_s": round(summary.time_s, 3),
+                        }
+                        if summary
+                        else None
+                    ),
+                    **step_fields(result, preset.build_dir),
+                }
+                records.append(record)
+                all_records.append(record)
 
         totals = {
             "binaries": len(records),

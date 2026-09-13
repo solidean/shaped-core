@@ -1,8 +1,14 @@
 #pragma once
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/material/material_library.hh>
@@ -69,6 +75,83 @@ inline env const& shared_env()
                    .has_compiler = lib.value()->can_compile(slib::shader_language::hlsl, sg::shader_format::dxil)};
     }();
     return e;
+}
+
+/// Give whatever the last frame started somewhere to run.
+///
+/// **Not just a yield.** A trace kicks its material compiles off with `cc::async_start`, which hands them to the
+/// ambient scheduler — and under `SC_THREADS=OFF` that scheduler has no threads of its own, so the only thread that
+/// can run them is this one.
+/// A loop that only yielded would spin until its deadline against work nobody will ever pick up, which is exactly
+/// how the single-threaded preset timed out.
+inline void drive_ambient_work()
+{
+    if (cc::ambient_async_scheduler().try_run_one())
+        return;
+    if (cc::thread_pump_all())
+        return;
+    cc::this_thread_yield();
+}
+
+/// Drives `ctx.routines.tick()` until `ready()` holds, or until `timeout_secs` elapses; true when it came up.
+///
+/// **A workaround, and marked as one.** A routine's shaders and pipelines build on the ambient async scheduler, off
+/// the calling thread, and a path-traced view additionally waits on one compile per material permutation.
+/// So a test that drives a fixed number of frames and then asserts is really asserting on compile latency, which is
+/// the machine's rather than the code's.
+///
+/// The real answer is an `ASYNC_TEST` that simply `co_await`s readiness.
+/// That needs main-thread affinity for `cc::async`, which clean-core does not have yet -- it is recorded in
+/// libs/graphics/shaped-graphics/docs/TODO.md under the ASYNC_TEST migration.
+/// Every sv test that needs a routine up goes through here until then, so the places to revisit are exactly this
+/// function's callers.
+template <class F>
+[[nodiscard]] bool tick_until(sg::context& ctx, F&& ready, double timeout_secs = 30.0)
+{
+    auto const start = cc::current_time_steady_secs();
+    while (true)
+    {
+        (void)ctx.routines.tick();
+        if (ready())
+            return true;
+        if (cc::current_time_steady_secs() - start >= timeout_secs)
+            return false;
+        drive_ambient_work();
+    }
+}
+
+/// Records and submits `body(cmd)` as a whole frame, over and over, until it reports `executed`.
+///
+/// **The same workaround as tick_until, one level up**, and the one most sv tests need.
+/// A path trace is not usable the moment its routine reports ready: it still needs one compile per material
+/// permutation (or the fallback), and then a DXR state object that is built asynchronously and polled across frames.
+/// So "record one frame and assert it traced" is asserting that all of that finished within one frame, which is a
+/// statement about the machine.
+///
+/// Each iteration ticks, records, submits, advances and drains — a real frame — so whatever the previous one started
+/// has somewhere to land.
+/// Replaced by an ASYNC_TEST that co_awaits readiness once cc::async has main-thread affinity; see
+/// libs/graphics/shaped-graphics/docs/TODO.md.
+template <class F>
+[[nodiscard]] bool frames_until_executed(sg::context& ctx, F&& body, double timeout_secs = 60.0)
+{
+    auto const start = cc::current_time_steady_secs();
+    while (true)
+    {
+        (void)ctx.routines.tick();
+
+        auto cmd = ctx.create_command_list();
+        auto const outcome = body(*cmd);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        ctx.block_until_idle();
+
+        if (outcome == sg::routine_outcome::executed)
+            return true;
+        if (cc::current_time_steady_secs() - start >= timeout_secs)
+            return false;
+        drive_ambient_work();
+    }
 }
 
 } // namespace sv_test

@@ -17,6 +17,7 @@ docs/guides/building-and-testing.md is the workflow, and docs/dev-py-driver.md t
 from __future__ import annotations
 
 import argparse
+import atexit
 import sys
 from pathlib import Path
 
@@ -124,6 +125,14 @@ DEFAULT_SANITIZE_PRESETS: dict[str, str] = {
     "Darwin": "sanitize-macos-arm-llvm",
 }
 
+# ThreadSanitizer preset per platform, run by the `test` check.
+# Linux only, and that is a cost decision rather than a capability one: the macOS preset exists and works, and a second
+# full sanitized build is the most expensive leg the check has.
+# One machine running it on every check is what keeps the preset from rotting between manual runs.
+DEFAULT_SANITIZE_THREAD_PRESETS: dict[str, str] = {
+    "Linux": "sanitize-thread-linux-clang",
+}
+
 # Default coverage preset per platform (RelWithDebInfo, SC_COVERAGE ON).
 # `coverage` uses these instead of DEFAULT_BUILD_PRESETS when no --preset is given.
 COVERAGE_BUILD_PRESETS: dict[str, str] = {
@@ -163,6 +172,7 @@ def build_policy() -> cmd.Policy:
         default_release=DEFAULT_RELEASE_PRESETS,
         default_singlethreaded=DEFAULT_SINGLETHREADED_PRESETS,
         default_sanitize=DEFAULT_SANITIZE_PRESETS,
+        default_sanitize_thread=DEFAULT_SANITIZE_THREAD_PRESETS,
         coverage_build=COVERAGE_BUILD_PRESETS,
         pgo_generate=PGO_GENERATE_PRESETS,
         pgo_use=PGO_USE_PRESETS,
@@ -215,6 +225,11 @@ def main() -> None:
     parser.add_argument("--profile-lanes", choices=("global", "per-type"), default="global",
                         help="Lane allocation: 'global' (default) packs every job into one pool, "
                              "'per-type' gives each job type its own pool and its own track.")
+    progress_group = parser.add_mutually_exclusive_group()
+    progress_group.add_argument("--progress", action="store_true",
+                                help="Force the live progress display (default: on when the console is a terminal)")
+    progress_group.add_argument("--no-progress", action="store_true",
+                                help="Force the terse capture-only output — what a pipe, a redirect or CI gets anyway")
     color_group = parser.add_mutually_exclusive_group()
     color_group.add_argument("--colored", action="store_true",
                              help="Force colored output (default: auto-detect by terminal)")
@@ -235,6 +250,10 @@ def main() -> None:
         parser.error("unrecognized arguments: %s" % " ".join(forwarded))
     args.runner_args = forwarded
     console.configure("colored" if args.colored else "plain" if args.plain else "auto")
+    # Deliberately independent of the color decision above: --plain and NO_COLOR say how to render, not whether to.
+    # A monochrome progress region is still worth having, and coupling the two axes only makes both harder to explain.
+    dev.ui.configure("off" if args.no_progress else "on" if args.progress else "auto",
+                     tail_lines=16 if args.verbose else 8)
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
     if args.profile:
         dev.profile.configure(
@@ -243,9 +262,6 @@ def main() -> None:
         )
 
     # atexit fires on SystemExit too, so these are written however the command exits — a failed build or test included.
-    if args.collect_logs or args.profile:
-        import atexit
-
     if args.collect_logs:
 
         def _emit_log_archive() -> None:
@@ -267,9 +283,16 @@ def main() -> None:
 
         atexit.register(_emit_profile)
 
+    # Registered last, so it runs first: atexit is LIFO, and the region has to be gone before the summaries below print.
+    atexit.register(dev.ui.shutdown)
+
     ctx = cmd.Context(root=ROOT, policy=build_policy())
-    with dev.profile.span(args.command, type="invocation", extra={"argv": sys.argv[1:]}):
-        commands[args.command].run(args, ctx)
+    try:
+        with dev.profile.span(args.command, type="invocation", extra={"argv": sys.argv[1:]}):
+            commands[args.command].run(args, ctx)
+    finally:
+        # Before atexit, so an escaping traceback is printed below the region rather than into it.
+        dev.ui.shutdown()
 
 
 if __name__ == "__main__":

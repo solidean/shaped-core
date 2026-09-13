@@ -1,0 +1,27 @@
+# ThreadSanitizer runtime suppressions, applied to every sanitized test run (see tools/dev/lib/pipeline/test.py).
+#
+# The counterpart of lsan-suppressions.txt beside it, and it exists for the same reason: a finding nobody can act on
+# trains the reader to scroll past the next one, which might be ours.
+#
+# Everything here is a shared library we link but do not build, whose internals we cannot change without forking it.
+# `called_from_lib` suppresses reports whose stack passes through that module, which is the only handle TSan offers on
+# a module it has no instrumentation for -- so each entry says what it covers and why nothing of ours is hiding behind
+# it.
+#
+# Our own code stays fully checked, including the arguments and buffers it hands these libraries: a report in our
+# frames is still a report.
+
+# Mesa's Vulkan driver, reached only through sg's vulkan backend.
+# Uninstrumented, so TSan sees its atomics as plain memory and reports its internal handoffs as races.
+called_from_lib:libvulkan_radeon.so
+
+# The prebuilt DXC we vendor (extern/dxc), reached through ssc::dxc.
+# It carries process-global state of its own -- a compile allocates in one thread and frees in another through its
+# WideCharToMultiByte shim -- so two compilers on two threads race inside it even though each instance is private.
+# That is a property of the binary we are given, not of how we call it.
+called_from_lib:libdxcompiler.so
+
+# SDL3's D-Bus integration, reached through sr::window_system.
+# It takes the same two D-Bus locks in both orders across a window system's creation and destruction, which TSan
+# reports as a potential deadlock -- correctly, and about code in libdbus and SDL rather than in ours.
+deadlock:libdbus-1.so

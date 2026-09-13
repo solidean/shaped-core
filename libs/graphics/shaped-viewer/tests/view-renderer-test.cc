@@ -54,17 +54,30 @@ TEST("sv - view renderer end to end (headless)")
                                                   .half_extent_v = tg::vec3f(0, 0, 0.75f),
                                                   .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch()); // the frame's job, not the renderer's
-    auto store = sv::view_store{};             // and so is what the view keeps across frames
+    auto store = sv::view_store{}; // what the view keeps across frames
+    auto traced = sg::texture_2d();
 
-    // The renderer only ever hands back a texture — it never sees an output target.
-    auto const traced = sv::view_renderer::execute(*cmd, v, resources, store);
+    // Driven until it actually dispatches — see sv_test::frames_until_executed.
+    // Not only so the checks below mean something: a declined trace STARTS the compiles it was missing, and a test
+    // that stops before they land leaves async work carrying a context it is about to destroy.
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch()); // the frame's job
+                                               // The renderer only ever hands back a texture — it never sees an output target.
+                                               traced = sv::view_renderer::execute(cmd, v, resources, store);
+                                               // The fallback's compile is STARTED by every trace whether or not it
+                                               // is needed, so it is waited for here too — otherwise it is still
+                                               // running when this test drops the context it was started against.
+                                               auto const fallback_settled
+                                                   = resources.shaders.acquire_fallback().shader->is_ready();
+                                               return store.accumulated_frames(v.id) > 0 && fallback_settled
+                                                        ? sg::routine_outcome::executed
+                                                        : sg::routine_outcome::declined;
+                                           }));
+
     CHECK(traced.width() == size[0]);
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
-
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
 }
 
 // The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
@@ -123,12 +136,19 @@ TEST("sv - view renderer renders indexed geometry (headless)")
                                                   .half_extent_v = tg::vec3f(0, 0, 0.75f),
                                                   .emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
 
-    auto cmd = ctx.create_command_list();
-    resources.advance_to(ctx.current_epoch());
+    // Driven rather than fired once, for the same reason as the test above: a declined trace starts the compiles it
+    // was missing, and those settle on the ambient scheduler.
+    // The context here is process-wide and shared between tests, so nothing tears it down at the end of this one —
+    // which means this test is the only thing that can wait for what it started.
     auto store = sv::view_store{};
-    (void)sv::view_renderer::execute(*cmd, v, resources, store);
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               (void)sv::view_renderer::execute(cmd, v, resources, store);
+                                               return store.accumulated_frames(v.id) > 0 ? sg::routine_outcome::executed
+                                                                                         : sg::routine_outcome::declined;
+                                           }));
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));

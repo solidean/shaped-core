@@ -5,6 +5,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
@@ -12,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 
 #include <atomic>
 
@@ -33,6 +35,11 @@ struct sg::backend::dx12::dx12_download_copy_job
     /// The reserving epoch's outstanding-copy counter, held until this job is drained or its list is dropped.
     /// The epoch's ring span frees once the counter reaches zero.
     std::shared_ptr<std::atomic<isize>> epoch_copies;
+
+    /// Counts this job as outstanding for as long as it exists, and only once it has been SUBMITTED.
+    /// A job still sitting in an unsubmitted command list is the caller's to submit, so it must not hold a drain
+    /// waiter — see wait_until_submitted_drained.
+    sg::impl::transfer_drain::token drain;
 };
 
 /// Inline READBACK path: copies GPU buffer bytes back to the host through a persistently-mapped READBACK-heap ring on the direct queue.
@@ -99,6 +106,12 @@ public:
     /// Shuts the actor down (draining pending copies), then unmaps + releases the ring buffer.
     void shutdown();
 
+    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
+    ///
+    /// What ctx.block_until_idle() waits on, and distinct from the private wait_until_idle: this counts a job only from
+    /// its submission, so a download recorded into a list the caller has not submitted yet cannot turn a wait into a hang.
+    void wait_until_submitted_drained() { _drain.wait_until_idle(); }
+
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // --- test-only escape hatches --------------------------------------------------------------------
     // Backend tests peel the abstraction to assert ring-cursor behavior, e.g. seam-splitting.
@@ -127,13 +140,35 @@ private:
         std::shared_ptr<std::atomic<isize>> epoch_copies;
     };
 
+    /// One readback the ring could not hold, staged in a dedicated buffer instead.
+    ///
+    /// A readback has a second liveness axis the epoch fence does not cover: the actor memcpys out of this memory on
+    /// its own thread, after the GPU copy the epoch gates.
+    /// So `keep_alive` is captured by every job built from it, and the buffer dies with the last of them.
+    struct outside_reservation
+    {
+        ID3D12Resource* resource = nullptr;
+        byte* mapped = nullptr;
+        std::shared_ptr<void> keep_alive;
+        std::shared_ptr<std::atomic<isize>> epoch_copies;
+    };
+
     /// Reserves `total` contiguous logical bytes in one shot and returns its start cursor plus the open epoch's counter.
     /// The span may wrap the physical seam; the caller walks it, handing a resumable readback to-seam windows (offset `cursor % capacity`, size to the seam).
     /// Does not itself count a copy — call account_pending_copy per window that yields a pushed copy job.
     /// A self-aligning texture readback can hit a seam tail that makes no progress, and that must not be counted.
     /// `total` must fit the capacity.
     /// Blocks on the reclaim watermark while space is held by earlier, still-in-flight epochs.
-    span_reservation reserve_span(isize total);
+    /// Nullopt where waiting cannot help: `total` exceeds the whole ring, or one epoch's readbacks do with nothing in
+    /// flight to reclaim.
+    /// The caller then stages through reserve_outside_ring instead.
+    [[nodiscard]] cc::optional<span_reservation> try_reserve_span(isize total);
+
+    /// A dedicated staging buffer for one readback the ring could not hold, contiguous by construction.
+    [[nodiscard]] outside_reservation reserve_outside_ring(isize total);
+
+    /// Says so once per epoch, naming what did not fit and what the budget is.
+    void warn_outside_ring(isize total);
 
     /// Counts one copy against the open epoch's tally (`epoch_copies`) and the global drain gate.
     /// Call exactly once per pushed dx12_download_copy_job; on_copy_done / discard_unsubmitted release it.
@@ -173,6 +208,11 @@ private:
     HANDLE _wait_event = nullptr;
 
     std::atomic<u64> _freed_pos = 0; // reclaim watermark; advanced by reclaim, waited on by reserve
+
+    sg::impl::transfer_drain _drain;
+
+    /// The last epoch the fallback warning fired in, so a frame that overruns repeatedly says so once.
+    cc::atomic<u64> _last_warned_epoch = 0;
 
     // Total readback copies reserved but not yet drained, across all epochs.
     // Bumped by account_pending_copy, dropped in on_copy_done / discard.

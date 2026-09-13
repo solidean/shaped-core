@@ -115,10 +115,26 @@ public:
     /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
-    /// Always true here, and it is a fact about the emulation rather than about the device.
-    /// DXGI needs a real presentation target, so a headless chain is `buffer_count` ordinary render-target textures
-    /// and a present that signals the fence and rotates the index — nothing in that asks the device for anything.
-    [[nodiscard]] bool supports_headless_present() const override { return true; }
+    /// D3D12 has every stage sg models, and headless present is always available here.
+    ///
+    /// Headless is a fact about the emulation rather than about the device: DXGI needs a real presentation target, so a
+    /// headless chain is `buffer_count` ordinary render-target textures and a present that signals the fence and
+    /// rotates the index — nothing in that asks the device for anything.
+    [[nodiscard]] bool supports(sg::feature f) const override
+    {
+        switch (f)
+        {
+        case sg::feature::raytracing:
+            return supports_raytracing();
+        case sg::feature::timestamp_query:
+            return _query_system.supports_timestamps();
+        case sg::feature::headless_present:
+        case sg::feature::geometry_shader:
+        case sg::feature::tessellation_shader:
+            return true;
+        }
+        return false;
+    }
 
     /// Routes this device's debug-layer messages to `callback` instead of stderr.
     /// Only ever called when the context was created with enable_debug_layer, and only for messages raised after creation returned.
@@ -466,9 +482,11 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
-    void advance_epoch(cc::optional<int> allowed_in_flight) override;
-    void advance_epoch_and_wait_for_idle() override { advance_epoch(0); }
-    void process_completed_epochs() override;
+    void advance_epoch() override;
+    [[nodiscard]] int in_flight_epoch_count() override;
+    void retire_completed_epochs() override;
+    void block_until_submissions_complete() override;
+    void block_until_transfers_drained() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;

@@ -6,6 +6,7 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/record/log.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_resource_upload.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_inline.hh>
@@ -27,10 +28,13 @@ cc::result<cc::unit> dx12_upload_inline_system::initialize(isize capacity)
     return cc::unit{};
 }
 
-u64 dx12_upload_inline_system::reserve_span(isize total)
+cc::optional<u64> dx12_upload_inline_system::try_reserve_span(isize total)
 {
     CC_ASSERT(total > 0, "reserve size must be positive");
-    CC_ASSERT(total <= _capacity, "a single inline upload exceeds the upload ring capacity");
+
+    // Larger than the whole ring: no budget makes this fit and no wait produces the space.
+    if (total > _capacity)
+        return {};
 
     for (;;)
     {
@@ -46,12 +50,48 @@ u64 dx12_upload_inline_system::reserve_span(isize total)
             });
 
         if (r.has_value())
-            return r.value();
+            return r;
 
+        // Waiting only helps if an epoch is still in flight to reclaim; otherwise this one epoch's uploads genuinely
+        // exceed the ring, and no amount of waiting changes that.
         bool const any_in_flight = _ctx._epoch_state.lock([](dx12_epoch_state& s) { return !s.in_flight.empty(); });
-        CC_ASSERT(any_in_flight, "inline uploads in one epoch exceed the upload ring capacity");
+        if (!any_in_flight)
+            return {};
         _ctx.wait_for_next_inflight_epoch();
     }
+}
+
+dx12_upload_allocation dx12_upload_inline_system::reserve_outside_ring(isize total)
+{
+    warn_outside_ring(total);
+
+    auto staging = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD,
+                                             D3D12_RESOURCE_STATE_GENERIC_READ, total);
+    CC_ASSERT(staging.has_value(), "could not allocate a one-off staging buffer for an oversized inline upload");
+
+    auto* const resource = staging.value().resource.Get();
+    auto* const mapped = static_cast<byte*>(staging.value().mapped);
+
+    // The same lifetime the ring span would have had: the copy reading these bytes is recorded into a list submitted
+    // in the open epoch, so the epoch fence is exactly what proves the GPU is done with them.
+    _ctx.schedule_deferred_deletion(dx12_expiring_resource{.resource = cc::move(staging.value().resource)});
+
+    // `size` is the whole request, so the caller's walk finishes in one pass: a dedicated buffer has no seam.
+    return dx12_upload_allocation{resource, mapped, 0, total};
+}
+
+void dx12_upload_inline_system::warn_outside_ring(isize total)
+{
+    // Once per epoch: a frame that overruns does it for every transfer in the frame, and one line per transfer would
+    // bury the one fact a caller needs.
+    auto const epoch = u64(_ctx.current_epoch());
+    auto seen = _last_warned_epoch.load(cc::memory_order_relaxed);
+    if (seen == epoch || !_last_warned_epoch.compare_exchange_strong(seen, epoch, cc::memory_order_relaxed))
+        return;
+
+    CC_LOG_WARNING("an inline upload of {} bytes did not fit the {}-byte upload ring, so it was staged in a one-off "
+                   "allocation — correct but slow. Raise ctx.upload.set_inline_budget past the peak an epoch uploads",
+                   total, _capacity);
 }
 
 void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
@@ -71,9 +111,21 @@ void dx12_upload_inline_system::upload_texture(dx12_command_list& cmd,
     // A per-chunk reserve could hand the job a sub-row tail and stall it, so the window must always fit progress.
     // Then walk the reserved span in to-seam windows; dx12_texture_upload owns the job's self-align contract.
     isize const total = upload.remaining_bytes() + fp.padded_pitch + texture_placement_alignment;
-    CC_ASSERT(total <= _capacity, "an inline texture upload (with staging slack) exceeds the upload ring capacity");
 
-    u64 cursor = reserve_span(total);
+    auto const span = try_reserve_span(total);
+    if (!span.has_value())
+    {
+        // One dedicated buffer, so the job runs to completion against a single contiguous window.
+        dx12_upload_allocation const alloc = reserve_outside_ring(total);
+        while (!upload.is_finished())
+        {
+            isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
+            CC_ASSERT(consumed > 0, "inline upload made no progress");
+        }
+        return;
+    }
+
+    u64 cursor = span.value();
     while (!upload.is_finished())
     {
         isize const offset = isize(cursor % u64(_capacity));
@@ -99,7 +151,19 @@ void dx12_upload_inline_system::upload_buffer(dx12_command_list& cmd,
 
     // Reserve the whole upload once (the span may wrap the seam), then walk it with to-seam windows.
     // A buffer consumes each window exactly, so it fits one window unless it straddles the seam.
-    u64 cursor = reserve_span(data.size());
+    auto const span = try_reserve_span(data.size());
+    if (!span.has_value())
+    {
+        dx12_upload_allocation const alloc = reserve_outside_ring(data.size());
+        while (!upload.is_finished())
+        {
+            isize const consumed = upload.execute_next_job(*cmd._list.Get(), alloc);
+            CC_ASSERT(consumed > 0, "inline upload made no progress");
+        }
+        return;
+    }
+
+    u64 cursor = span.value();
     while (!upload.is_finished())
     {
         isize const offset = isize(cursor % u64(_capacity));

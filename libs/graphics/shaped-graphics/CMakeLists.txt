@@ -72,6 +72,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/download.hh
     src/shaped-graphics/context/uncached.hh
     src/shaped-graphics/context/cached.hh
+    src/shaped-graphics/context/capabilities.hh
     src/shaped-graphics/transfer/stream.hh
     src/shaped-graphics/transfer/stream_handle.hh
     src/shaped-graphics/transfer/stream_sink.hh
@@ -79,6 +80,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/reload_generation.hh
     src/shaped-graphics/routine/render_routine.hh
     src/shaped-graphics/routine/render_routine_base.hh
+    src/shaped-graphics/routine/routine_params.hh
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
@@ -121,6 +123,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/context/gpu_metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
+    src/shaped-graphics/binding/shader_stage.hh
     src/shaped-graphics/compute/compute_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_pipeline.hh
     src/shaped-graphics/raytracing/raytracing_shader_table.hh
@@ -292,10 +295,15 @@ if(SC_BUILD_TESTS)
                 pattern_fill.hlsl:compute:main
         )
 
-        # Render-routine framework tests drive a dx12 WARP context directly (create_dx12_context) and
-        # dispatch the pattern_fill shader, so they need both DXC and the dx12 backend on Windows.
+        # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
+        # suite, so they need only the shader package this block already gated: the end-to-end test
+        # registers both DXC compilers and lets the asset pick whichever format the context accepts.
+        target_sources(shaped-graphics-test PRIVATE tests/routine/routine-test.cc)
+
+        # The two tests that compare TWO live contexts cannot be invocables -- the harness hands out one --
+        # so they create their own, and creating one means naming a backend.
         if(WIN32 AND TARGET shaped-graphics-dx12)
-            target_sources(shaped-graphics-test PRIVATE tests/routine/routine-test.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/routine/routine-contexts-test.cc)
         endif()
     endif()
 

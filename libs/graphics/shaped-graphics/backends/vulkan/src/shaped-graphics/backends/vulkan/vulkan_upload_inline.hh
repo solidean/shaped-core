@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
@@ -42,9 +43,21 @@ public:
     /// and of the texel block size, so a texture upload passes that constraint in rather than hoping for it.
     ///
     /// Blocks on an in-flight epoch when the ring is full, which is the back-pressure that bounds it.
-    /// Asserts when nothing is in flight and the request still does not fit: that means one epoch's inline uploads
-    /// exceed the whole ring, which is a budget error rather than something waiting can fix.
+    ///
+    /// Where waiting cannot help it falls back to a one-off staging buffer instead of failing:
+    /// a single upload larger than the whole ring, which no budget fixes, and one epoch's uploads exceeding the ring
+    /// with nothing in flight to reclaim.
+    /// The fallback is correct but slow — a dedicated allocation per transfer — so it warns once per epoch with the
+    /// size and the budget, which is what a caller needs to set the budget properly.
     [[nodiscard]] vulkan_upload_allocation reserve(isize size_in_bytes, isize alignment_in_bytes = 1);
+
+    /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
+    /// Deferred rather than immediate because the GPU may still be reading the ring this call would free.
+    void set_budget(isize capacity);
+
+    /// Applies a pending set_budget at an epoch boundary, and is a no-op when nothing is pending.
+    /// Drains every in-flight epoch first, so nothing is still reading the ring being replaced.
+    void apply_pending_budget();
 
     /// Records where the closing epoch ended, so its span can be freed when it retires.
     void on_epoch_advance(sg::epoch closed);
@@ -66,7 +79,26 @@ private:
         u64 next_pos = 0;                   ///< logical write cursor; only ever increases
         u64 freed_pos = 0;                  ///< everything below this has been reclaimed
         cc::vector<checkpoint> checkpoints; ///< FIFO, monotonic in both epoch and end_pos
+        isize pending_capacity = 0;         ///< a set_budget awaiting the next epoch boundary (0 = none)
     };
+
+    /// One host-visible mapped buffer, the shape both initialize and a resize build.
+    struct ring_storage
+    {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        byte* mapped = nullptr;
+    };
+
+    /// Builds a mapped TRANSFER_SRC buffer of `capacity` bytes, or nullopt if it could not be allocated.
+    [[nodiscard]] cc::optional<ring_storage> create_ring(isize capacity);
+
+    /// A dedicated staging buffer for one transfer the ring could not hold.
+    /// Freed with the epoch that recorded the copy, which is the same lifetime the ring span would have had.
+    [[nodiscard]] vulkan_upload_allocation reserve_outside_ring(isize size_in_bytes);
+
+    /// Says so once per epoch, naming what did not fit and what the budget is.
+    void warn_outside_ring(isize size_in_bytes);
 
     vulkan_context* _ctx = nullptr;
     VkBuffer _buffer = VK_NULL_HANDLE;
@@ -74,4 +106,7 @@ private:
     byte* _mapped = nullptr; ///< persistently mapped for the ring's whole life
     isize _capacity = 0;
     cc::mutex<ring_state> _state;
+
+    /// The last epoch the fallback warning fired in, so a frame that overruns repeatedly says so once.
+    cc::atomic<u64> _last_warned_epoch = 0;
 };

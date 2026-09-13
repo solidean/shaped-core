@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
@@ -39,7 +41,7 @@ bool pump_until(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 }
 } // namespace
 
-TEST("cnet - a literal address resolves to itself, with no lookup and no cache")
+CNET_IO_TEST("cnet - a literal address resolves to itself, with no lookup and no cache")
 {
     auto io = io_system::create({.unthreaded = true});
 
@@ -60,7 +62,7 @@ TEST("cnet - a literal address resolves to itself, with no lookup and no cache")
     CHECK(r->cached_host_count() == 0);
 }
 
-TEST("cnet - a resolved host is cached, and the second caller never reaches the worker")
+CNET_IO_TEST("cnet - a resolved host is cached, and the second caller never reaches the worker")
 {
     auto io = io_system::create({.unthreaded = true});
 
@@ -92,7 +94,7 @@ TEST("cnet - a resolved host is cached, and the second caller never reaches the 
     CHECK(calls == 2);
 }
 
-TEST("cnet - a cached answer expires on the injected clock")
+CNET_IO_TEST("cnet - a cached answer expires on the injected clock")
 {
     auto clk = manual_clock(0);
     auto io = io_system::create({.unthreaded = true, .time_source = &clk});
@@ -120,7 +122,7 @@ TEST("cnet - a cached answer expires on the injected clock")
     CHECK(calls == 2);
 }
 
-TEST("cnet - a family preference filters, and says so when nothing is left")
+CNET_IO_TEST("cnet - a family preference filters, and says so when nothing is left")
 {
     auto io = io_system::create({.unthreaded = true});
 
@@ -148,7 +150,7 @@ TEST("cnet - a family preference filters, and says so when nothing is left")
     CHECK(impossible->try_error() != nullptr);
 }
 
-TEST("cnet - a lookup that fails fails the resolve")
+CNET_IO_TEST("cnet - a lookup that fails fails the resolve")
 {
     auto io = io_system::create({.unthreaded = true});
 
@@ -168,7 +170,7 @@ TEST("cnet - a lookup that fails fails the resolve")
 }
 
 #if CC_HAS_THREADS
-TEST("cnet - a resolve can be cancelled while its worker is still blocked")
+CNET_IO_TEST("cnet - a resolve can be cancelled while its worker is still blocked")
 {
     auto io = io_system::create({.unthreaded = true});
 
@@ -198,7 +200,7 @@ TEST("cnet - a resolve can be cancelled while its worker is still blocked")
     CHECK(pump_until([&] { return true; }));
 }
 
-TEST("cnet - a resolve times out on the injected clock while its worker runs on")
+CNET_IO_TEST("cnet - a resolve times out on the injected clock while its worker runs on")
 {
     auto clk = manual_clock(0);
     auto io = io_system::create({.unthreaded = true, .time_source = &clk});
@@ -225,7 +227,7 @@ TEST("cnet - a resolve times out on the injected clock while its worker runs on"
 }
 #endif
 
-TEST("cnet - localhost resolves through the platform")
+CNET_IO_TEST("cnet - localhost resolves through the platform")
 {
     if (!resolver::is_supported())
         SKIP("this platform cannot resolve");

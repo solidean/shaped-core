@@ -15,7 +15,8 @@ See the [readme](readme.md#file-organization) for what each folder holds.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
 > **Error handling** (see [docs/error-handling.md](../../../docs/error-handling.md)): a resource create comes in two flavors.
-> A throwing default `create_*` returns the handle and raises a typed `sg::exception` on failure; a fallible `try_create_*` returns `cc::result`, for exception-free callers and local fallback.
+> `create_*` returns the handle and raises a typed `sg::exception` on failure — one spelling, because exhaustion is not something a call site can act on.
+> A `try_create_*` twin survives only where a caller demonstrably acts on the error: swapchains and windows (environment), and the pipeline surface sg's own cache builds on.
 > `create_command_list()` is infallible — it returns the list, and throws only on device loss.
 > Contract violations `CC_ASSERT`: a bad size, a missing usage, a null argument, a transient resource used past its epoch.
 > Those are bugs, not runtime failures.
@@ -56,7 +57,7 @@ f.completion()                      // -> cc::shared_async<cc::unit const> — d
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
 sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
-// to BLOCK until a download is delivered, use ctx.wait_for(future) (see epochs) — the future has no blocking wait
+// to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
 // sg REQUIRES an installed ambient async scheduler (cc::install_default_async_scheduler, or a nexus run's)
 ```
@@ -84,6 +85,12 @@ sg::present_mode          // vsync | immediate  (swapchain frame pacing — see 
 ctx.backend()                                      // sg::backend_kind (coarse tag, not identity)
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
+ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
+                                                   //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader
+                                                   //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
+                                                   //   ctx.supports_headless_present()) all forward here, so there is one answer per question
+ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
+                                                   //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
@@ -102,10 +109,9 @@ ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain
 // PREFER the typed factories below (create_buffer<T> / create_texture_2d) — raw_* is the byte-level escape hatch.
 // PREFER ctx.transient for anything sized by the current frame; ctx.persistent only for what outlives it.
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
-ctx.persistent.try_create_raw_buffer(size, usage, alloc={}) // -> cc::result<raw_buffer_handle>  (fallible core; every create_* has a try_ twin)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
-ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into; try_create_memory_heap for the result form)
+ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
@@ -115,13 +121,14 @@ ctx.upload.data_to_buffer(buf, cc::pinned_data<T const>, offset_in_elements=0)  
                                                    //   buf may be a raw_buffer_handle OR a buffer<T> — pass the typed buffer and T is deduced (no .raw())
 ctx.upload.bytes_to_texture(tex, cc::pinned_data<byte const>, subresource={}, region={})  // void — ASYNC upload tightly-packed pixels into one texture (sub)region (needs copy_dst); later lists reading tex auto-wait
 ctx.upload.set_async_window_size(bytes)            // void — resize the async staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
-ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; dx12 default 16 MiB
+ctx.upload.set_inline_budget(bytes)                // void — resize the inline (cmd.upload) ring; applied at the next advance_epoch; 16 MiB default
+//   Over-budget does NOT fail: a transfer the ring cannot hold is staged in a one-off buffer, warning once per epoch
 ctx.download.bytes_from_buffer(buf, offset_in_bytes, size)    // -> sg::bytes_future — ASYNC read buf back on the copy queue (needs copy_src); read auto-waits on the last writer, a later writer auto-waits on the read; drop the future to cancel; size 0 = ready empty future
 ctx.download.data_from_buffer<T>(buf, off_in_elements, count) // -> sg::data_future<T>; offset AND count in ELEMENTS of T. See bytes_from_buffer
 ctx.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_future<T> — T deduced from buffer<T>; no args past the buffer = whole buffer
 ctx.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — ASYNC read one texture (sub)region back (needs copy_src), tightly packed
 ctx.download.set_async_window_size(bytes)          // void — resize the async readback staging window (x3 buffered); copy actor adopts it between windows; dx12 default 16 MiB
-ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); dx12 default 16 MiB
+ctx.download.set_budget(bytes)                      // void — resize the inline (cmd.download) readback ring; applied at the next advance_epoch (drains the readback actor); 16 MiB default
 
 // ctx.stream — the WEAKER tier (see docs/concepts/streaming.md). No automatic sync: the streamed extent is YOURS
 // ALONE until the handle settles, and a list touching it must be SUBMITTED after you observed that.
@@ -182,7 +189,8 @@ sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_by
 sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()
 sg::binding_group_exception      // binding_group wiring error (unknown/missing binding, kind mismatch) or descriptor exhaustion
 sg::swapchain_creation_exception // create_swapchain failure (bad window / format / DXGI error)
-// only the throwing create_* and submit/advance raise these; the try_create_* surface never throws
+// create_*, submit and advance raise these; the remaining try_create_* (swapchain, window, pipelines) never throw
+// and ctx.take_pending_errors() carries what a backend could only report after the call (see epochs)
 ```
 
 ## epochs — frame-level GPU lifetime + CPU↔GPU sync  (see docs/concepts/epochs.md)
@@ -193,21 +201,31 @@ sg::epoch                 // enum class : u64 — invalid=0, first=10000; monoto
 sg::submission_token      // enum class : u64 — invalid=0, first=30000, not_submitted=~0; per-command-list token
 ctx.current_epoch()                     // sg::epoch — epoch new work records into
 ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
-ctx.advance_epoch(allowed_in_flight)    // void — close current epoch, open next; cc::optional<int>:
-                                        //   nullopt=never wait, 0=full drain, N=keep <=N epochs in flight
-ctx.advance_epoch_and_wait_for_idle()   // void — spelled-out advance_epoch(0); advance never hidden
+ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
-ctx.wait_for_epoch(e)                   // void — block until epoch e done, then retire (does NOT advance)
-ctx.wait_for_next_inflight_epoch()      // void — block on oldest in-flight epoch (back-pressure; no advance)
-ctx.wait_for(future)                    // -> cc::optional<cc::pinned_data<...>> (bytes/typed) — BLOCK until a download is
-                                        //   delivered, then return it; nullopt if invalid/unsubmitted/cancelled. The ONLY
-                                        //   guaranteed-complete call: advance_epoch* / wait_for_idle drain the GPU but NOT
-                                        //   the readback actor, so is_ready() can lag them. Waitable once its list is
-                                        //   submitted (no advance needed); touches no ctx state, safe from any thread.
+ctx.block_until_epochs_in_flight(N)     // void — the PER-FRAME back-pressure wait: park until <= N are in flight
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
+ctx.take_pending_errors()               // -> cc::vector<sg::device_error> — failures that arrived AFTER their call:
+                                        //   device_lost | creation_failed | validation. Drain once a frame; entries
+                                        //   accumulate until taken. Device loss lands here too, so draining this
+                                        //   means never polling is_device_lost().
+ctx.in_flight_epoch_count()             // int — epochs advanced past but not yet retired; the depth a throttle bounds
+ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
+
+// Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
+// and asking twice for the same target hands back the SAME node. They settle on a retire sweep.
+ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
+ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
+future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
+
+ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
+ctx.block_until_idle()                  // void — submissions done, every transfer actor drained, every epoch retired.
+                                        //   `block_until_` greps as the complete inventory of where a thread stops.
+                                        //   Asserts unless execution() == may_block. A bytes_future SUBMITTED before it
+                                        //   is delivered after it; one still in an unsubmitted list is yours to submit.
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
-// on multi_threaded backends: create/submit/drop, the wait_*/process_completed_epochs retire family, and
-//   wait_for(future) are all concurrency-safe (any thread); only advance_*/shutdown must be externally synchronized
+// on multi_threaded backends: create/submit/drop, process_completed_epochs and the completion queries are all
+//   concurrency-safe (any thread); only advance_epoch / block_until_* / shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
 cmd.context()                           // sg::context& — the context that created the list (outlives it); reach it without threading ctx separately
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
@@ -240,8 +258,9 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // cmd.upload/download = INLINE (recorded in this list); ctx.upload/download = ASYNC (copy queue, off the
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
-// no advance_epoch is needed for that — but advance_epoch* / wait_for_idle do not force it either;
-//   ctx.wait_for(future) is the only completion guarantee. See docs/concepts/download.inline.md.
+// no advance_epoch is needed for that, and advancing does not force it either: the readback actor is what delivers.
+//   future.completion() is the non-blocking answer, ctx.block_until_idle() the blocking one.
+//   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
 // both backends real.
@@ -283,8 +302,8 @@ t.is_valid()                    // bool — backed by a real query (false = defa
 t.is_ready()                    // bool — NON-BLOCKING poll; true once the tick landed (false before submit / forever if dropped)
 t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
 t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
-ctx.wait_for_ticks(t)           // -> cc::optional<cc::u64>  — BLOCK until delivered, returns the tick
-ctx.wait_for_seconds(t)         // -> cc::optional<double>   — same, returns seconds
+t.completion()                  // -> cc::shared_async<cc::unit const> — settles when the tick lands
+// to block: ctx.block_until_idle(), then t.try_get_ticks() / t.try_get_seconds()
 // normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
 
@@ -525,6 +544,11 @@ sg::binding_type            // uniform_buffer | read{only,write}_structured_buff
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
 sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
+                            //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
+                            //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
+                            //   cc::optional<pixel_format> storage_format   — readwrite_texture only; WGSL declares it, HLSL does not
+                            //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
+                            //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
                             //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
                             //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
                             //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot
@@ -533,15 +557,17 @@ sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they a
 sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
 sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
+sg::apply_stage_visibility(bindings, stage)  // void — stamp one stage into every binding's visibility; a compiler calls it once, reflection never knows the stage
 sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage
 sg::merge_bindings(into, from)          // void — same merge, accumulating into a cc::vector<binding> stage by stage
+                            //   first-seen wins on every field EXCEPT visibility, which is UNIONED — accumulating the declaring stages is the point
 sg::split_off_sampler_bindings(v)       // -> cc::vector<binding>  REMOVES the sampler bindings from v and returns them (both keep order)
                             //   split off the samplers you bind register-wise (pipeline_layout static_samplers); leaving one in the group claims its register twice
 
 #include <shaped-graphics/binding/compiled_shader.hh>
 sg::shader_stage            // vertex | tessellation_control(hull) | tessellation_evaluation(domain) | geometry | fragment | compute | raygen | closest_hit | any_hit | miss | intersection | callable
 sg::is_raytracing_stage(s)  // bool — one of the six RT stages;  sg::is_compute_stage(s) — the compute stage
-sg::shader_format           // dxil | spirv | metal_lib — which backend consumes the blob (ctx.accepts_shader_format(f))
+sg::shader_format           // dxil | spirv | metal_lib | wgsl — which backend consumes the blob (ctx.accepts_shader_format(f)); wgsl is SOURCE text, not bytecode
 // sg only CONSUMES compiled shaders. Producing one — packages, compilation, hot reload — is
 // shaped-shader-library's job; docs/shaders.md is the front door for the whole shader system.
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
@@ -565,7 +591,9 @@ sg::slotted_view            // { binding_slot slot; bound_view view }  — the s
                             //   `{}` is ambiguous under the two overloads: pass `cc::span<sg::named_view const>()` to mean "no views"
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
-sg::max_binding_groups      // int — hard cap on pipeline_layout group slots (== cmd.compute.bind_group's `group_index`)
+sg::max_binding_groups      // int (3) — group slots a CALLER gets (== cmd.compute.bind_group's `group_index`); same on every backend
+sg::reserved_binding_group  // int (3) — the slot above them, sg's own: inline-constant emulation where a backend has no
+                            //   push constants, later RT emulation and shader-side diagnostics. WebGPU guarantees 4, so 3 + 1 fits everywhere
 sg::pipeline_layout_description   // { small_vector<binding_group_layout_handle, max_binding_groups> groups; cc::vector<bound_sampler> static_samplers }  — groups ordered; index = bind slot
 sg::compute_pipeline_description  // { compiled_shader const& shader; pipeline_layout_handle layout; pinned_data<byte const> cached_pipeline={} }
 compute_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — backend's serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported / accelerator only, NOT in the cache key)
@@ -761,24 +789,57 @@ pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provi
 #include <shaped-graphics/routine/render_routine.hh>
 // A routine is a per-context singleton reached BY TYPE. Derive from the CRTP base:
 class my_routine : public sg::render_routine<my_routine> { ... };
-// protected virtuals (all default to no-ops) — three-phase init, split so async compiles start early:
-void init_once(sg::context& ctx)          // first init only, NEVER on reload — persistent, shader-independent work
-void init_declare(sg::context& ctx)       // first init + after every reload — acquire shaders/pipelines; NO GPU work/recording
-void init_materialize(sg::command_list&)  // first init + after every reload — record GPU init work
+// protected virtuals (both default to a no-op) — two phases, both COROUTINES so a phase awaits instead of blocking:
+cc::shared_async<cc::unit> init_once(sg::routine_init_scope)  // first init only, NEVER on reload; never cancelled
+cc::shared_async<cc::unit> init(sg::routine_init_scope)       // first init + at every reload generation
+//   The scope is taken BY VALUE: a coroutine's reference parameter dangles across its first suspend.
+scope.context() / scope.generation() / scope.is_cancelled()
+co_await scope.with_cmd([&](sg::command_list& cmd) { ... })  // record GPU init work into the TICK's shared list
+//   AWAITED, not just called: a phase may resume long after its tick returned, so this parks until a window is open.
+//   `f` is not a coroutine, which is what keeps a list from being held across an await.
+co_await scope.yield()                     // a budget boundary inside one phase, and a cancellation check
+co_await cc::async_settled(node)           // await WITHOUT short-circuiting — a bad shader is the routine's verdict
+fail_init()                                // void — "will not come good until a reload"; readiness reports `failed`
 // static entry points the CRTP adds (all reach the per-context instance by type — no handle, no registration):
-my_routine::acquire_exclusive(cmd)         // -> sg::routine_guard<my_routine> — lazily create + init, and HOLD the routine's lock; self-> is mutable
-my_routine::acquire(cmd)                   // -> my_routine const&  — same, but NO lock held: only const members are reachable
-my_routine::prewarm(ctx)                   // void     — create + init_once/init_declare only (before a command list; async compiles fan out on the pool)
-my_routine::evict(ctx)                     // void     — drop this routine's instance + its cached GPU state
-// Both memoize the instance per thread (weak, so it never keeps a routine alive past evict/clear/shutdown).
-// A routine is EXPECTED to hold state, so acquire_exclusive is the usual one — a routine needs NO mutex of its own.
-// Threading, three parts, all now the framework's:
+my_routine::try_acquire_exclusive(cmd[, params])  // -> sg::routine_guard<my_routine>  HOLDS the routine's lock; self-> is mutable
+my_routine::try_acquire(cmd[, params])           // -> sg::routine_scope<my_routine>  NO lock held; read-only
+//   NEITHER INITIALIZES. Asking registers the routine; ctx.routines.tick() is what brings it up.
+//   Both report three states — .is_ready() / .is_pending() / .is_failed(); no operator bool, so a site says which it means.
+//   `pending` = still building. `failed` = will not come good until a reload (a shader that was never good).
+my_routine::prewarm(ctx[, params])         // void — register it so the NEXT tick brings it up; it does not build anything itself
+my_routine::evict(ctx[, params])           // void — drop ONE parametrization; evict_all(ctx) drops every one
+// Instance memoized per thread on (context, params hash), weakly — never keeps a routine alive past evict/clear/shutdown.
+
+// Parametrized routines: the template names the parameter's TYPE, the value is runtime.
+class blit_routine : public sg::render_routine<blit_routine, sg::pixel_format> { ... params() ... };
+//   one instance per distinct value; a parameter must come from a SMALL, ENUMERABLE set (documented, not enforced)
+
+// Dependencies, declared in init and redeemed during execution:
+_token = depend_on<other_routine>(ctx[, params]);   // -> sg::routine_dependency<other_routine, P>; records the edge
+auto const& other = self.acquire(_token);           // CANNOT FAIL — the holder is not handed out until its subtree is ready
+auto other = self.acquire_exclusive(_token);        // the same, for a dependency this routine mutates
+//   ONE readiness check per entry into the routine system, not one per routine — that is what the token buys.
+//   A cycle asserts where the edge is declared: it would be a deadlock, not just a hang.
+
+// What a FALLIBLE routine's execute returns — one whose dependencies are not all static tokens:
+[[nodiscard]] sg::routine_outcome   // executed | declined; a routine with only static tokens returns void instead
+
+// Threading:
 //   registry guarded (acquiring from parallel recording is fine);
-//   ONE lock per routine covering both the init phases and everything the routine owns — acquire_exclusive hands it to you;
-//   acquire() takes no lock, so whatever it reaches must be immutable after init or self-guarded (sr::keyed_pipeline_cache is).
-//   State written in init_declare and only read later is exactly the case that needs acquire_exclusive: a reload rewrites it.
-// The lock is not recursive: never re-acquire the SAME routine under its guard. A DIFFERENT routine is fine, in a consistent order.
-// re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads.
+//   initialization runs ONLY inside a tick, so the phases are never concurrent and a reload cannot land mid-frame;
+//   _init guards the phase bookkeeping ONLY — a cc::mutex cannot be held across a co_await, so a routine's members
+//     are written by init without it and the pending -> ready transition is the publication barrier;
+//   the read-only scope takes no lock, so what it reaches must be immutable after init or self-guarded.
+// re-init is driven by sg::reload_generation() (process-global); init_once state survives reloads,
+//   and an `init` in flight when the generation moves is cancelled and restarted at the new one.
+
+ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initialized, pending, budget_exhausted, is_idle()}
+//   THE driver. A frame-boundary call: it opens and submits its own command list, so never inside one —
+//   after advance_epoch, before the frame's first acquire.
+//   Runs the phases on the AMBIENT async scheduler and asserts if none is installed; it participates while driving,
+//   so a cc::singlethreaded_scheduler works and the phases then run inline on the ticking thread.
+//   Budget is advisory PACING: it bounds how long the TICK drives, not how long an initialization takes.
+ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
 ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown

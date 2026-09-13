@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from . import console
+from . import console, ui
 from .models import Preset, StepResult
 from .profile import ProfileSummary, TypeStat
 
@@ -57,9 +57,9 @@ def print_build_failure(results: list[StepResult], presets: list[Preset], root: 
     """
     cfg_fail = next((r for r in results if not r.ok and r.step_type == "configure"), None)
     if cfg_fail is not None:
-        print(console.red(f"\nconfigure failed - see {rel(cfg_fail.stderr_log, root)}"), file=sys.stderr)
+        ui.write_line(console.red(f"\nconfigure failed - see {rel(cfg_fail.stderr_log, root)}"))
     else:
-        print(console.red(f"\nbuild failed - {build_diag_hint(presets, root)}"), file=sys.stderr)
+        ui.write_line(console.red(f"\nbuild failed - {build_diag_hint(presets, root)}"))
 
 
 def summarize_build(
@@ -67,13 +67,11 @@ def summarize_build(
 ) -> None:
     """Print the success summary for a build phase (callers handle failures)."""
     total_s = sum(r.duration_s for r in build_steps)
-    print(
+    ui.write_line(
         console.green(
             f"\nBuilt {built_files} file(s) across {len(build_steps)} target(s), "
             f"{len(presets)} preset(s) in {fmt_dur(total_s)}."
-        ),
-        file=sys.stderr,
-    )
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -99,19 +97,19 @@ def print_profile_summary(summary: ProfileSummary, path: str) -> None:
     if not summary.count:
         return
 
-    print(console.dim(f"\nProfile written to {path} ({summary.count} job(s))"), file=sys.stderr)
+    ui.write_line(console.dim(f"\nProfile written to {path} ({summary.count} job(s))"))
 
     total = summary.leaves[-1] if summary.leaves else None
-    print(console.dim(f"  {'leaf jobs':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"), file=sys.stderr)
+    ui.write_line(console.dim(f"  {'leaf jobs':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"))
     for s in summary.leaves:
         line = _profile_row(s, with_par=True)
-        print(line if s is total else console.dim(line), file=sys.stderr)
+        ui.write_line(line if s is total else console.dim(line))
 
     if summary.containers:
-        print(console.dim(f"\n  {'containers':<14}{'count':>7}{'sum':>11}{'span':>11}"
-                          "   (time already counted above)"), file=sys.stderr)
+        ui.write_line(console.dim(f"\n  {'containers':<14}{'count':>7}{'sum':>11}{'span':>11}"
+                          "   (time already counted above)"))
         for s in summary.containers:
-            print(console.dim(_profile_row(s, with_par=False)), file=sys.stderr)
+            ui.write_line(console.dim(_profile_row(s, with_par=False)))
 
 
 # ---------------------------------------------------------------------------
@@ -126,17 +124,71 @@ def summarize_tests(records: list[dict], presets: list[Preset], root: Path) -> b
     checks = sum(r["junit"]["assertions"] for r in records if r["junit"])
     stats = f"{tests} tests, {checks} checks"
     if failed:
-        print(
-            console.red(f"\n{failed} of {len(records)} test run(s) failed ({stats}) in {fmt_dur(total_s)}"),
-            file=sys.stderr,
-        )
-        print(console.red(f"tests failed - {test_diag_hint(presets, root)}"), file=sys.stderr)
+        ui.write_line(
+            console.red(f"\n{failed} of {len(records)} test run(s) failed ({stats}) in {fmt_dur(total_s)}"))
+        ui.write_line(console.red(f"tests failed - {test_diag_hint(presets, root)}"))
         return False
-    print(
-        console.green(f"\nAll {len(records)} test run(s) passed: {stats} in {fmt_dur(total_s)}."),
-        file=sys.stderr,
-    )
+    ui.write_line(
+        console.green(f"\nAll {len(records)} test run(s) passed: {stats} in {fmt_dur(total_s)}."))
     return True
+
+
+def summarize_check_timing(
+    presets: list[Preset],
+    build_results: list[StepResult],
+    test_records: list[dict],
+    *,
+    slow_test_s: float,
+) -> None:
+    """One line per preset: how long it spent building, and how long running tests.
+
+    `check` is the longest thing anyone runs here, and until now it reported only a total — so "it takes forever" could
+    not be turned into "which preset, and was it the build or the tests".
+    That is the whole point of this: it is a measurement, not a gate, and it never changes the verdict.
+
+    A preset whose tests exceed `slow_test_s` is called out, because a suite that slow is a bug report waiting to be
+    written rather than a fact about the machine.
+    """
+    if not presets:
+        return
+
+    # Builds are attributed by where their logs landed; test records carry the preset name outright.
+    def build_secs(preset: Preset) -> float:
+        return sum(
+            r.duration_s for r in build_results
+            if r.stdout_log is not None and _under(r.stdout_log, preset.build_dir)
+        )
+
+    rows = []
+    for preset in presets:
+        tests = [r for r in test_records if r.get("preset") == preset.name]
+        rows.append((preset.name, build_secs(preset), sum(r["duration_s"] for r in tests), len(tests)))
+
+    width = max(len(name) for name, _, _, _ in rows)
+    ui.write_line(console.dim("\ntiming, per preset:"))
+    for name, b, t, n in rows:
+        line = f"  {name:<{width}}  build {fmt_dur(b):>8}   test {fmt_dur(t):>8}  ({n} binaries)"
+        ui.write_line(console.yellow(line) if t > slow_test_s else console.dim(line))
+
+    slow = [(name, t) for name, _, t, _ in rows if t > slow_test_s]
+    if slow:
+        worst = ", ".join(f"{name} at {fmt_dur(t)}" for name, t in slow)
+        ui.write_line(
+            console.yellow(
+                f"  slow: {worst} — over the {fmt_dur(slow_test_s)} budget a test run is expected to stay inside"
+            )
+        )
+
+    total = sum(b for _, b, _, _ in rows) + sum(t for _, _, t, _ in rows)
+    ui.write_line(console.dim(f"  total {fmt_dur(total)} across {len(rows)} preset(s)"))
+
+
+def _under(path: Path, directory: Path) -> bool:
+    """Whether `path` sits inside `directory`, without raising on an unrelated drive."""
+    try:
+        return path.resolve().is_relative_to(directory.resolve())
+    except (OSError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -151,31 +203,27 @@ def summarize_coverage(results: list[dict], root: Path) -> bool:
             ok = False
             failed = next((s for s in r["steps"] if not s.ok), None)
             where = f" - see {rel(failed.stderr_log, root)}" if failed else ""
-            print(console.red(f"\ncoverage [{r['preset']}] FAILED{where}"), file=sys.stderr)
+            ui.write_line(console.red(f"\ncoverage [{r['preset']}] FAILED{where}"))
             continue
 
         t = r["totals"]
         def pct(metric: str) -> str:
             return f"{t.get(metric, {}).get('percent', 0.0):.1f}%"
         lines = t.get("lines", {})
-        print(
+        ui.write_line(
             console.green(
                 f"\nCoverage [{r['preset']}]: lines {pct('lines')} "
                 f"({lines.get('covered', 0)}/{lines.get('count', 0)}), "
                 f"functions {pct('functions')}, regions {pct('regions')}"
-            ),
-            file=sys.stderr,
-        )
+            ))
         for lib, m in r["libraries"].items():
             lm = m.get("lines", {})
-            print(
+            ui.write_line(
                 f"  {lib:<30} {lm.get('percent', 0.0):6.1f}%  "
-                f"({lm.get('covered', 0)}/{lm.get('count', 0)} lines)",
-                file=sys.stderr,
-            )
-        print(console.dim(f"  JSON: {rel(r['llvm_cov_json'], root)}"), file=sys.stderr)
+                f"({lm.get('covered', 0)}/{lm.get('count', 0)} lines)")
+        ui.write_line(console.dim(f"  JSON: {rel(r['llvm_cov_json'], root)}"))
         if r["html_dir"]:
-            print(console.dim(f"  HTML: {rel(Path(r['html_dir']) / 'index.html', root)}"), file=sys.stderr)
+            ui.write_line(console.dim(f"  HTML: {rel(Path(r['html_dir']) / 'index.html', root)}"))
     return ok
 
 
@@ -190,7 +238,7 @@ def summarize_perf(metrics: list[dict]) -> None:
     The signed % and the green/red coloring carry the direction instead.
     """
     if not metrics:
-        print(console.yellow("  no comparable metrics (did the PGO benchmarks record any?)"), file=sys.stderr)
+        ui.write_line(console.yellow("  no comparable metrics (did the PGO benchmarks record any?)"))
         return
 
     name_w = max((len(f"{m['test']} | {m['name']}") for m in metrics), default=10)
@@ -202,30 +250,26 @@ def summarize_perf(metrics: list[dict]) -> None:
             f"  {label:<{name_w}}  {m['baseline']:>10.2f} -> {m['pgo']:>10.2f} {m['unit']:<8} "
             f"{delta:+.1f}%"
         )
-        print(color(line), file=sys.stderr)
+        ui.write_line(color(line))
 
 
 def summarize_pgo(result: dict, root: Path) -> bool:
     """Print the PGO outcome (and, when present, the measure delta table). True if ok."""
     if not result.get("ok"):
         stage = result.get("stage", "?")
-        print(console.red(f"\nPGO FAILED at stage: {stage}"), file=sys.stderr)
+        ui.write_line(console.red(f"\nPGO FAILED at stage: {stage}"))
         return False
 
     train = result.get("train")
     if train:
-        print(
+        ui.write_line(
             console.green(f"\nPGO profile built from {train['profraw_count']} profraw file(s): "
-                          f"{rel(Path(train['profile']), root)}"),
-            file=sys.stderr,
-        )
+                          f"{rel(Path(train['profile']), root)}"))
 
     measure = result.get("measure")
     if measure is not None:
-        print(
-            console.bold(f"\nPGO speedup [{measure['baseline_preset']} -> {measure['pgo_preset']}]:"),
-            file=sys.stderr,
-        )
+        ui.write_line(
+            console.bold(f"\nPGO speedup [{measure['baseline_preset']} -> {measure['pgo_preset']}]:"))
         summarize_perf(measure["metrics"])
     return True
 
@@ -241,34 +285,31 @@ def summarize_format(result, root: Path) -> bool:
     """
     if result.nothing:
         what = result.scope.phrase("libs/ sources") if result.scope else "libs/ sources"
-        print(console.dim(f"No {what} to format."), file=sys.stderr)
+        ui.write_line(console.dim(f"No {what} to format."))
         return True
 
     if result.check:
         if result.ok:
-            print(console.green(f"\n{result.files} file(s) already formatted."), file=sys.stderr)
+            ui.write_line(console.green(f"\n{result.files} file(s) already formatted."))
             return True
-        for f in result.offenders:
-            print(rel(f, root))
-        sys.stdout.flush()
+        with ui.suspend():
+            for f in result.offenders:
+                print(rel(f, root))
+            sys.stdout.flush()
         hint = result.scope.rerun_flag() if result.scope else ""
-        print(
+        ui.write_line(
             console.red(
                 f"\n{len(result.offenders)} of {result.files} file(s) need formatting "
                 f"- run: uv run dev.py format{hint}"
-            ),
-            file=sys.stderr,
-        )
+            ))
         return False
 
     if not result.ok:
         where = rel(result.stderr_log, root) if result.stderr_log else "the format log"
-        print(console.red(f"\nformat failed - see {where}"), file=sys.stderr)
+        ui.write_line(console.red(f"\nformat failed - see {where}"))
         return False
-    print(
-        console.green(f"\nFormatted {result.files} file(s) in {fmt_dur(result.duration_s)}."),
-        file=sys.stderr,
-    )
+    ui.write_line(
+        console.green(f"\nFormatted {result.files} file(s) in {fmt_dur(result.duration_s)}."))
     return True
 
 
@@ -283,20 +324,17 @@ def summarize_crossrefs(result, root: Path) -> bool:
     """
     files = result.md_files + result.src_files
     if not result.ok:
-        for offender in result.offenders:
-            print(offender)
-        sys.stdout.flush()
-        print(
-            console.red(f"\n{len(result.offenders)} stale or broken cross-reference(s) across {files} file(s)"),
-            file=sys.stderr,
-        )
+        with ui.suspend():
+            for offender in result.offenders:
+                print(offender)
+            sys.stdout.flush()
+        ui.write_line(
+            console.red(f"\n{len(result.offenders)} stale or broken cross-reference(s) across {files} file(s)"))
         return False
     total = result.md_links + result.src_refs
-    print(
+    ui.write_line(
         console.green(
             f"\nOK: {total} cross-references valid across {files} files "
             f"({result.md_links} md links, {result.src_refs} source refs)"
-        ),
-        file=sys.stderr,
-    )
+        ))
     return True

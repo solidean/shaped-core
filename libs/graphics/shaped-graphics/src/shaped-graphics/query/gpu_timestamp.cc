@@ -8,6 +8,11 @@ bool gpu_timestamp::is_ready() const
     return _heap_future != nullptr && _heap_future->is_ready();
 }
 
+cc::shared_async<cc::unit const> gpu_timestamp::completion() const
+{
+    return _heap_future != nullptr ? _heap_future->completion() : cc::shared_async<cc::unit const>();
+}
+
 cc::optional<u64> gpu_timestamp::try_get_ticks() const
 {
     if (_heap_future == nullptr)

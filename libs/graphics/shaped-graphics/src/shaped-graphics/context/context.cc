@@ -73,7 +73,11 @@ void context::mark_device_lost(cc::string reason)
     if (_device_lost)
         return;
     _device_lost = true;
-    _device_loss_reason = cc::move(reason);
+    _device_loss_reason = reason;
+
+    // And onto the deferred channel, so a frame loop that drains errors sees it without polling is_device_lost().
+    // Once, because the flag above is sticky — a caller draining every frame would otherwise get it every frame.
+    report_device_error({.kind = device_error_kind::device_lost, .message = cc::move(reason)});
 }
 
 context::context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats)
@@ -84,6 +88,7 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     stream(*this),
     uncached(*this),
     cached(*this),
+    routines(*this),
     _backend(backend),
     _thread_model(threading),
     _pipeline_cache(std::make_unique<pipeline_cache>())
@@ -115,27 +120,131 @@ pipeline_cache& context::pipeline_cache_ref()
     return *_pipeline_cache;
 }
 
-cc::optional<u64> context::wait_for_ticks(gpu_timestamp const& timestamp)
+cc::vector<device_error> context::take_pending_errors()
 {
-    if (timestamp._heap_future == nullptr)
-        return {};
-    // Its heap is delivered by the readback actor like any other download, so this blocks on the actor exactly as wait_for(future) does.
-    // It needs the same pump to make progress without threads.
-    drive_transfers_until_ready(*timestamp._heap_future);
-    auto const data = timestamp._heap_future->wait_get_data();
-    if (!data.has_value())
-        return {};
-    CC_ASSERT(timestamp._index < data.value().size(), "timestamp index out of range for its heap download");
-    return data.value()[timestamp._index];
+    return _pending_errors.lock(
+        [](cc::vector<device_error>& pending)
+        {
+            auto out = cc::move(pending);
+            pending.clear();
+            return out;
+        });
 }
 
-cc::optional<double> context::wait_for_seconds(gpu_timestamp const& timestamp)
+void context::report_device_error(device_error error)
 {
-    auto const ticks = wait_for_ticks(timestamp);
-    if (!ticks.has_value())
-        return {};
-    return double(ticks.value()) * timestamp._tick_to_seconds;
+    _pending_errors.lock([&](cc::vector<device_error>& pending) { pending.push_back(cc::move(error)); });
 }
+
+void context::process_completed_epochs()
+{
+    retire_completed_epochs();
+    settle_due_completions();
+}
+
+bool context::try_advance_epoch(int allowed_in_flight)
+{
+    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
+
+    // Retire first, and only then decide: an epoch the GPU finished but nobody has reclaimed still counts as in flight,
+    // so a caller that skipped this would decline against depth that is no longer there.
+    process_completed_epochs();
+    if (in_flight_epoch_count() > allowed_in_flight)
+        return false;
+
+    advance_epoch();
+    return true;
+}
+
+cc::shared_async<cc::unit const> context::completion_for(u64 target, bool is_submission)
+{
+    return _pending_completions.lock(
+        [&](cc::vector<pending_completion>& pending) -> cc::shared_async<cc::unit const>
+        {
+            for (auto const& p : pending)
+                if (p.target == target && p.is_submission == is_submission)
+                    return p.node;
+
+            auto node = cc::make_async_manual<cc::unit>();
+            pending.push_back({.target = target, .is_submission = is_submission, .node = node});
+            return node;
+        });
+}
+
+void context::settle_due_completions()
+{
+    // Taken out under the lock and pushed outside it: pushing resumes whoever depended on the node, and a dependent
+    // that reaches back in here would deadlock on a mutex this thread still holds.
+    auto due = _pending_completions.lock(
+        [this](cc::vector<pending_completion>& pending)
+        {
+            auto out = cc::vector<cc::shared_async<cc::unit>>();
+            auto const completed = u64(completed_epoch());
+            for (auto i = pending.size(); i > 0; --i)
+            {
+                auto& p = pending[i - 1];
+                auto const reached
+                    = p.is_submission ? is_submission_complete(submission_token(p.target)) : p.target <= completed;
+                if (!reached)
+                    continue;
+                out.push_back(cc::move(p.node));
+                pending.remove_at_unordered(i - 1);
+            }
+            return out;
+        });
+
+    for (auto const& node : due)
+        node->push_value(cc::unit{});
+}
+
+cc::shared_async<cc::unit const> context::epoch_completion(epoch e)
+{
+    if (u64(e) <= u64(completed_epoch()))
+        return make_ready_completion();
+    return completion_for(u64(e), false);
+}
+
+cc::shared_async<cc::unit const> context::submission_completion(submission_token token)
+{
+    // not_submitted is the one target that never arrives, so it gets a node nothing will ever push — which is what the
+    // poll already reports, rather than a ready node claiming work that was never recorded had finished.
+    if (token != submission_token::not_submitted && is_submission_complete(token))
+        return make_ready_completion();
+    return completion_for(u64(token), true);
+}
+
+void context::block_until_epochs_in_flight(int allowed_in_flight)
+{
+    CC_ASSERT(execution() == execution_model::may_block,
+              "block_until_epochs_in_flight() waits, and this context cannot — bound the depth with "
+              "try_advance_epoch() instead");
+    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
+
+    // Retire before waiting: an epoch the GPU already finished still counts as in flight until someone reclaims it,
+    // so a caller that skipped this would park against depth that is no longer there.
+    process_completed_epochs();
+    while (in_flight_epoch_count() > allowed_in_flight)
+        wait_for_next_inflight_epoch(); // retires as it goes, so this terminates
+}
+
+void context::block_until_idle()
+{
+    CC_ASSERT(execution() == execution_model::may_block,
+              "block_until_idle() waits, and this context cannot — read completion off the *_completion() asyncs, or "
+              "poll across frames");
+
+    // Three things, in this order, and the order is the point.
+    // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first
+    // would let a copy land behind us.
+    block_until_submissions_complete();
+    block_until_transfers_drained();
+
+    // And the epoch fence last, which the submission timeline does NOT cover: an epoch signals after the work it
+    // gates, so everything submitted can be done while the epoch that owns it has not retired — and its command
+    // allocators, its staged deletions and its finalizers would still be outstanding.
+    block_until_epochs_in_flight(0);
+}
+
 
 namespace
 {

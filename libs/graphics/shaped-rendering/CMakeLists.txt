@@ -31,7 +31,6 @@ target_sources(shaped-rendering
     src/shaped-rendering/all.hh
     src/shaped-rendering/gpu_types.hh
     src/shaped-rendering/input.hh
-    src/shaped-rendering/keyed_pipeline_cache.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
@@ -176,7 +175,6 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/imgui-routine-test.cc
             tests/imgui-manual-test.cc
-            tests/keyed-pipeline-cache-test.cc
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
         )

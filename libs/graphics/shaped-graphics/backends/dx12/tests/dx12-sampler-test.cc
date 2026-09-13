@@ -131,13 +131,13 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
 
     // No samplers provided → the dynamic "Dyn" binding is unfilled.
     // The empty view list is spelled out because create_binding_group is overloaded on how it keys them.
-    auto group = c.persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(), {});
-    CHECK(!group.has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(), {}),
+                    sg::binding_group_exception);
 
     // A sampler named for a binding that does not exist is also rejected.
     sg::named_sampler const wrong[] = {{.name = "Ghost", .sampler = {}}};
-    auto group2 = c.persistent.try_create_binding_group(layout, cc::span<sg::named_view const>(), wrong);
-    CHECK(!group2.has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(), wrong),
+                    sg::binding_group_exception);
 }
 
 INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP",
@@ -196,14 +196,13 @@ INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved w
         {.slot = sg::binding_slot(2), .view = buf.as_readwrite_buffer()},
     };
 
-    auto group = c.persistent.try_create_binding_group(layout, views);
-    REQUIRE(group.has_value());
+    CHECK(c.persistent.create_binding_group(layout, views) != nullptr);
 
     // And the failure the type is meant to make loud: a slot naming the sampler is not a view.
     sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_readonly_view()}};
-    CHECK(!c.persistent.try_create_binding_group(layout, wrong).has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, wrong), sg::binding_group_exception);
 
     // A slot past the end of bindings() is refused rather than read.
     sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_readonly_view()}};
-    CHECK(!c.persistent.try_create_binding_group(layout, out_of_range).has_value());
+    CHECK_THROWS_AS(c.persistent.create_binding_group(layout, out_of_range), sg::binding_group_exception);
 }

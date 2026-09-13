@@ -16,7 +16,8 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
 - [shaders](shaders.md) — how a shader gets from a file you edit to something a context can build a pipeline from: declaring a package, `acquire(ctx)`, hot reload, and dev-vs-shipping.
   Most of that machinery lives *downstream* of sg (shaped-shader-library, shaped-shader-compiler-dxc) — sg owns only `compiled_shader` and what a context accepts — but this is where to start looking.
 - [render-routines](render-routines.md) — the render-routine framework.
-  `sg::render_routine<Derived>` is 3-phase and hot-reload-aware, reached by type via `acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`.
+  `sg::render_routine<Derived, Params>` has two coroutine init phases and is hot-reload-aware, reached by type via `try_acquire(cmd)` / `prewarm(ctx)` / `evict(ctx)`.
+  `ctx.routines.tick()` is what initializes; nothing else does.
   The per-context `ctx.routines` registry self-registers lazily and has `clear()`; `sg::reload_generation` is the counter that invalidates.
   Concrete routines live in shaped-rendering.
 - [structure](structure.md) — the module roadmap with `[done]`/`[in progress]`/`[planned]` status.

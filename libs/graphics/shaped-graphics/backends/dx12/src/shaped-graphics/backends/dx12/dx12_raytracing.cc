@@ -45,7 +45,7 @@ namespace
 
 bool dx12_command_list::raytracing_is_supported() const
 {
-    return _ctx.supports_raytracing();
+    return _ctx.supports(sg::feature::raytracing);
 }
 
 sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_GEOMETRY_DESC const> geometry_descs,

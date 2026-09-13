@@ -82,7 +82,12 @@ struct http_server_state
 /// One connection, and the request it is in the middle of.
 struct session
 {
-    http_server_state* server = nullptr;
+    /// A STRONG reference, because a session outlives the http_server that accepted it.
+    /// stop() cancels the token and returns; the reads it cancelled complete later, on the reactor, and their
+    /// callbacks still touch the server's counters and description.
+    /// Holding the state here is what makes that well-defined -- it was a raw pointer, and a server destroyed with a
+    /// read in flight left every such callback writing into freed memory.
+    cc::shared_ptr<http_server_state> server;
     cc::shared_ptr<stream_connection> connection;
 
     impl::http1_parser parser;
@@ -130,7 +135,7 @@ struct response_stream_state
 
 namespace
 {
-void accept_one(http_server_state* server);
+void accept_one(cc::shared_ptr<http_server_state> const& server);
 void read_request(cc::shared_ptr<session> const& s);
 void pump_stream(cc::shared_ptr<response_stream_state> const& body);
 
@@ -217,7 +222,7 @@ struct route_match
     auto const& head = s->parser.request();
     auto const path = path_of(head.target);
 
-    auto const found = find_route(s->server, head.method, path);
+    auto const found = find_route(s->server.get(), head.method, path);
     if (found.handler == nullptr)
         return http_server_response::empty(found.path_exists ? 405 : 404);
 
@@ -648,7 +653,7 @@ void read_request(cc::shared_ptr<session> const& s)
                      });
 }
 
-void accept_one(http_server_state* server)
+void accept_one(cc::shared_ptr<http_server_state> const& server)
 {
     if (server->stopped.load() || !server->listener.is_valid())
         return;
@@ -828,15 +833,16 @@ void accept_one(http_server_state* server)
     if (listener.has_error())
         return cc::error(cc::move(listener).error());
 
-    auto state = cc::make_unique<http_server_state>(cc::move(owned), t, desc);
+    auto state = cc::make_shared<http_server_state>(cc::move(owned), t, desc);
     state->listener = cc::move(listener).value();
     state->bound = state->listener->local();
 
     CC_LOG_INFO("http server listening on {}", state->bound);
 
-    auto* const raw = state.get();
-    auto server = cc::make_unique<http_server>(cc::move(state));
-    accept_one(raw);
+    // The accept holds its own reference, so the pending accept keeps the state alive past http_server's own lifetime
+    // -- which is exactly what a cancelled accept completing after stop() needs.
+    auto server = cc::make_unique<http_server>(state);
+    accept_one(cc::move(state));
     return server;
 }
 } // namespace
@@ -959,7 +965,7 @@ bool http_response_stream::is_open() const
 
 // ---- the server ----------------------------------------------------------------------------------------
 
-http_server::http_server(cc::unique_ptr<http_server_state> state) : _state(cc::move(state))
+http_server::http_server(cc::shared_ptr<http_server_state> state) : _state(cc::move(state))
 {
 }
 

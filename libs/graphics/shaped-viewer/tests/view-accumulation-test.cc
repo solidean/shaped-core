@@ -54,18 +54,35 @@ TEST("sv - a view accumulates across frames under its id")
     // The persistent half is the caller's here, exactly as it is a viewer's — no window in sight.
     auto store = sv::view_store{};
 
+    auto const accumulated = [&](sv::view_id id) { return store.accumulated_frames(id); };
+
     // One whole frame: both per-frame reclaims, then the trace.
+    //
+    // Driven until the accumulator actually moves, rather than run once.
+    // What this test is about is how many TRACED frames a view has folded in, and a frame that declined folded in
+    // nothing — so counting it would make the assertions below depend on whether a state object happened to finish,
+    // which under a parallel suite it sometimes does not.
+    // See sv_test::frames_until_executed, of which this is the view-scoped twin.
     auto const trace = [&](sv::view_data const& view)
     {
-        auto cmd = ctx.create_command_list();
-        resources.advance_to(ctx.current_epoch());
-        store.begin_frame(u64(ctx.current_epoch()));
-        auto const target = sv::view_renderer::execute(*cmd, view, resources, store);
-        ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        auto const before = accumulated(view.id);
+        auto target = sg::texture_2d();
+        auto const moved = sv_test::frames_until_executed(
+            ctx,
+            [&](sg::command_list& cmd)
+            {
+                resources.advance_to(ctx.current_epoch());
+                store.begin_frame(u64(ctx.current_epoch()));
+                target = sv::view_renderer::execute(cmd, view, resources, store);
+                // CHANGED rather than increased: a trace whose inputs moved restarts the estimate, so the counter
+                // drops back to 1 — which is still a frame that dispatched, and is exactly what the camera sections
+                // below are about.
+                // A declined frame is the only one that leaves it untouched.
+                return accumulated(view.id) != before ? sg::routine_outcome::executed : sg::routine_outcome::declined;
+            });
+        REQUIRE(moved);
         return target;
     };
-    auto const accumulated = [&](sv::view_id id) { return store.accumulated_frames(id); };
 
     SECTION("an unchanged view keeps counting into the one target")
     {
@@ -253,15 +270,30 @@ TEST("sv - a view accumulates across frames down the plan path", nx::config::mai
 
         // No history fed in: this asserts the store's own bookkeeping, not the refresh policy's.
         auto const plan = sv::build_render_plan(def, output_size, index, {});
-        sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                     output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        CHECK(sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                           output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)))
+              == sg::routine_outcome::executed);
 
-        // A dead shader traces nothing and would pass every check below; readiness is the last trace's, so it is
-        // only an answer once one has been recorded.
-        REQUIRE(sv::pathtrace_routine::is_ready(*cmd));
+        // A dead shader traces nothing and would pass every check below.
+        // The frame's own outcome is what says it did not, and it is checked above rather than read off the routine.
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
     };
+
+    // Warmed first, for the same reason as the test above: the counted frames must all be frames that dispatched.
+    // Frame index 0 is outside the 1..4 the loop below uses, so nothing here is counted twice.
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               store.begin_frame(u64(ctx.current_epoch()));
+                                               auto const plan = sv::build_render_plan(def, output_size, 0, {});
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
+    store = sv::view_store{}; // the warm-up's own counts are not what this test is about
 
     // The regression this exists for: `resolve` stamped the *declaration's* reset rule onto the slot, `trace` then
     // compared its own content hash against it, and the mismatch restarted the estimator on every frame.

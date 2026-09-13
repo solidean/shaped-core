@@ -109,6 +109,19 @@ What is left is the ordinary rule every callback API has: do not destroy an obje
 continuations captured.
 `stop()` is how a caller picks the moment that happens, rather than inheriting it from a destructor.
 
+**"Inline" covers what the reactor holds, and not an operation parked elsewhere.**
+A connect waiting on name resolution is sitting on the resolver's own worker thread, so `stop()` marks the system
+stopping and that operation settles when the worker next looks — which is after `stop()` has returned.
+So a caller who wants to observe the answer has to let that thread run: `cc::thread_pump_all()` in a loop, not a read
+straight after the call.
+It matters under load more than it looks, because the worker competes with everything else the machine is doing.
+
+Two tests assumed otherwise and were flaky for it (`connect-test.cc`).
+**Open question, not settled here:** whether stopping twice in a row can genuinely lose an answer, or whether every
+failure seen so far is only that worker being starved.
+Both tests drive to the answer now, one of them with a deliberately generous budget, which makes them pass without
+establishing which of the two it was.
+
 ## What clean-core is missing that this library wants
 
 **Path resolution and directory metadata.**

@@ -44,7 +44,8 @@ INVOCABLE_TEST("sg - upload then download the same buffer in one list", (sg::con
     auto future = cmd->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -73,7 +74,8 @@ INVOCABLE_TEST("sg - upload and download across separate lists", (sg::context_ha
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value().size() == 256);
     CHECK(bytes.value()[100] == pattern(100));
@@ -91,7 +93,8 @@ INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle con
     auto future = cmd->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -114,7 +117,8 @@ INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::contex
     auto future = cmd->download.data_from_buffer(buf); // whole buffer; T deduced, no <int>
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -130,7 +134,8 @@ INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::contex
     auto future2 = cmd2->download.data_from_buffer(buf, 1, 3);
     ctx->submit_command_list(cc::move(cmd2));
 
-    auto const data2 = ctx->wait_for(future2);
+    ctx->block_until_idle();
+    auto const data2 = future2.try_get_data();
     REQUIRE(data2.has_value());
     REQUIRE(data2.value().size() == 3);
     CHECK(data2.value()[0] == 22);  // element 1 <- braced list
@@ -158,7 +163,8 @@ INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::contex
     auto future = down->download.bytes_from_buffer(buf, 64, 128);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 128);
     bool matches = true;
@@ -188,7 +194,8 @@ INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg::conte
     auto future = cmd->download.bytes_from_buffer(buf, 0, 16);
     ctx->submit_command_list(cc::move(cmd));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
@@ -216,8 +223,9 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
 }
 
 // A submitted readback is deliverable without advancing the epoch.
-// ctx.wait_for blocks until the download actor has copied the bytes back, with no advance_epoch / wait_for_idle needed.
-// This replaces an earlier is_ready()-after-wait_for_idle assumption that flaked under transfer-fuzz seed 1.
+// ctx.block_until_idle() drains the download actor as well as the GPU, so the bytes are back with no advance needed.
+// This replaces an earlier is_ready()-after-idle assumption that flaked under transfer-fuzz seed 1: draining the GPU
+// alone never said anything about the actor.
 // Idle drains the GPU but not the actor, so is_ready() can lag it; wait_for is the actual completion guarantee.
 INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch advance", (sg::context_handle const& ctx))
 {
@@ -239,7 +247,8 @@ INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch adv
     ctx->submit_command_list(cc::move(down));
 
     // No advance_epoch: the future is waitable as soon as its list is submitted.
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     CHECK(future.is_ready()); // wait_for delivered -> the non-blocking poll now agrees
@@ -253,8 +262,8 @@ INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch adv
 INVOCABLE_TEST("sg - wait_for on an invalid future yields nullopt", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    CHECK(!ctx->wait_for(sg::bytes_future{}).has_value());
-    CHECK(!ctx->wait_for(sg::data_future<int>{}).has_value());
+    CHECK(!sg::bytes_future{}.try_get_bytes().has_value());
+    CHECK(!sg::data_future<int>{}.try_get_data().has_value());
 }
 
 INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle const& ctx))
@@ -269,11 +278,92 @@ INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_handle co
     auto future = cmd->download.data_from_buffer<int>(buf, 0, 8);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->advance_epoch_and_wait_for_idle(); // close the epoch and fully drain before reading back
+    ctx->advance_epoch();
+    ctx->block_until_idle(); // close the epoch and fully drain before reading back
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 8);
     CHECK(data.value()[0] == 10);
     CHECK(data.value()[7] == 80);
+}
+
+// The inline rings fall back instead of asserting, in both directions.
+//
+// Two conditions reach the fallback and only one of them is a budget error: a single transfer larger than the whole
+// ring is unreachable by any budget, which is why an assert was the wrong answer even in principle.
+// CC_ASSERT compiles out in release, so the old behaviour was "silently proceed" there and "die" here — the two
+// worst answers to the same question.
+INVOCABLE_TEST("sg - an inline upload larger than the ring is staged anyway", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // A small ring, applied at the next advance.
+    // vulkan implements this too now; it used to be a no-op there while its own ring-full assert told the caller to
+    // call it.
+    ctx->upload.set_inline_budget(64 * 1024);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    // Comfortably past the ring, so no wait could ever produce the space.
+    auto const count = isize(64 * 1024);
+    auto const src = ctx->persistent.create_buffer<u32>(count, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+
+    auto values = cc::vector<u32>();
+    values.resize_to_defaulted(count);
+    for (auto i = isize(0); i < count; ++i)
+        values[i] = u32(i);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
+    auto const back = cmd->download.data_from_buffer(src);
+    (void)ctx->submit_command_list(cc::move(cmd));
+
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    // Staged through a one-off allocation, and the bytes are the ones we wrote.
+    auto const data = back.try_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == count);
+    CHECK(data.value()[0] == 0);
+    CHECK(data.value()[count - 1] == u32(count - 1));
+}
+
+// The other condition: each transfer fits the ring, but one epoch's worth of them does not, with nothing in flight to
+// reclaim.
+// Waiting cannot help there either — the space is held by the epoch still being recorded.
+INVOCABLE_TEST("sg - one epoch's inline transfers may exceed the ring", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    ctx->upload.set_inline_budget(64 * 1024);
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    auto const chunk = isize(8 * 1024); // u32s: 32 KiB each, so three overrun a 64 KiB ring
+    auto values = cc::vector<u32>();
+    values.resize_to_defaulted(chunk);
+    for (auto i = isize(0); i < chunk; ++i)
+        values[i] = u32(i + 1);
+
+    auto cmd = ctx->create_command_list();
+    auto buffers = cc::vector<sg::buffer<u32>>();
+    for (auto i = 0; i < 4; ++i)
+    {
+        buffers.push_back(
+            ctx->persistent.create_buffer<u32>(chunk, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src));
+        cmd->upload.data_to_buffer(buffers.back(), cc::span<u32 const>(values));
+    }
+    auto const back = cmd->download.data_from_buffer(buffers.back());
+    (void)ctx->submit_command_list(cc::move(cmd));
+
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    auto const data = back.try_get_data();
+    REQUIRE(data.has_value());
+    CHECK(data.value()[0] == 1);
+    CHECK(data.value()[chunk - 1] == u32(chunk));
 }

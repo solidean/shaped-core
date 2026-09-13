@@ -10,6 +10,12 @@ namespace sg::backend::vulkan
 cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_context& ctx,
                                                                          sg::pipeline_layout_description const& desc)
 {
+    // The cap is sg's rather than vulkan's: a caller gets max_binding_groups slots on every backend, and the one
+    // above them is sg::reserved_binding_group.
+    // A small_vector still heap-grows past its inline size, so this is a real check rather than a restatement.
+    if (int(desc.groups.size()) > sg::max_binding_groups)
+        return cc::error("pipeline_layout: more group slots than max_binding_groups");
+
     auto const hash = sg::impl::pipeline_layout_hash(desc);
 
     // A group's position in the description is its bind slot, and the same index is the `firstSet` a bind command

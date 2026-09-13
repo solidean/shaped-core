@@ -114,13 +114,14 @@ INVOCABLE_TEST("sg - typed create_buffer<T> (transient)", (sg::context_handle co
     CHECK(buf.element_count() == 64);
 }
 
-INVOCABLE_TEST("sg - typed try_create_buffer<T> (persistent)", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - typed create_buffer<T> (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    auto r = ctx->persistent.try_create_buffer<particle>(8, sg::buffer_usage::readonly_buffer);
-    REQUIRE(r.has_value());
-    CHECK(r.value().element_count() == 8);
+    // One spelling, and it either returns a buffer or throws: there is no fallible twin to choose between, because
+    // running out of memory is not something a call site can do anything about.
+    auto const b = ctx->persistent.create_buffer<particle>(8, sg::buffer_usage::readonly_buffer);
+    CHECK(b.element_count() == 8);
 }
 
 INVOCABLE_TEST("sg - typed buffer<u16> as_index_buffer picks the index width", (sg::context_handle const& ctx))

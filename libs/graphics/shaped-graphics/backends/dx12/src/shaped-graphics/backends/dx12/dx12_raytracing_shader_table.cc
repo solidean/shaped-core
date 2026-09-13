@@ -75,16 +75,14 @@ cc::result<dx12_raytracing_shader_table_handle> dx12_raytracing_shader_table::cr
 
     // TODO: back this with a dedicated shader_binding_table usage once types.hh grows one; a plain
     // shader-readable + copy-dst buffer is a temporary stand-in.
-    auto buffer_result
-        = ctx.persistent.try_create_raw_buffer(total, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    auto buffer_result = ctx.create_dx12_buffer(total, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst,
+                                                sg::allocation_info{});
     CC_RETURN_IF_ERROR(buffer_result);
-    sg::raw_buffer_handle const raw = cc::move(buffer_result.value());
+    dx12_buffer_handle const dx_buffer = cc::move(buffer_result.value());
 
     // Stream the records in on the async copy queue; a later dispatch that reads the buffer waits on the copy.
-    ctx.upload.bytes_to_buffer(raw, cc::make_pinned_data(cc::span<byte const>(image)));
+    ctx.upload.bytes_to_buffer(dx_buffer, cc::make_pinned_data(cc::span<byte const>(image)));
 
-    auto const dx_buffer = std::dynamic_pointer_cast<dx12_buffer const>(raw);
-    CC_ASSERT(dx_buffer != nullptr, "shader table buffer is not a dx12 buffer");
     D3D12_GPU_VIRTUAL_ADDRESS const base = dx_buffer->gpu_virtual_address();
 
     // Build through a non-const pointer (the returned handle is shared_ptr<...const>).

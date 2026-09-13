@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_copy.hh>
@@ -75,15 +76,31 @@ public:
 private:
     /// Reserves `total` contiguous logical bytes in one shot and returns its start cursor.
     /// The span may wrap the physical seam; the caller walks it, handing a resumable job to-seam windows (offset `cursor % capacity`, size to the seam).
-    /// `total` must fit the capacity.
     /// Blocks, retiring in-flight epochs, while the space is still held by earlier ones.
-    u64 reserve_span(isize total);
+    ///
+    /// Nullopt where waiting cannot help: `total` exceeds the whole ring, or one epoch's uploads do with nothing in
+    /// flight to reclaim.
+    /// The caller then stages through reserve_outside_ring instead.
+    [[nodiscard]] cc::optional<u64> try_reserve_span(isize total);
+
+    /// A dedicated staging buffer for one upload the ring could not hold, contiguous by construction.
+    ///
+    /// Freed with the epoch that recorded the copy, which is the same lifetime the ring span would have had.
+    /// Its `size` is the whole request, so the caller's window walk completes in a single pass — a one-off buffer has
+    /// no seam to split at.
+    [[nodiscard]] dx12_upload_allocation reserve_outside_ring(isize total);
+
+    /// Says so once per epoch, naming what did not fit and what the budget is.
+    void warn_outside_ring(isize total);
 
     dx12_context& _ctx;
 
     ComPtr<ID3D12Resource> _buffer;
     byte* _mapped = nullptr;
     isize _capacity = 0;
+
+    /// The last epoch the fallback warning fired in, so a frame that overruns repeatedly says so once.
+    cc::atomic<u64> _last_warned_epoch = 0;
 
     /// A logical end-cursor snapshot for a closed epoch; its space frees once the epoch retires.
     struct epoch_checkpoint

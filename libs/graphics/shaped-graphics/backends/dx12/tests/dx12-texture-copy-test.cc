@@ -110,7 +110,8 @@ INVOCABLE_TEST("sg dx12 - texture upload/download round-trip pads + un-pads rows
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
@@ -146,7 +147,8 @@ INVOCABLE_TEST("sg dx12 - texture upload into a sub-region leaves the rest untou
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
@@ -180,7 +182,8 @@ INVOCABLE_TEST("sg dx12 - async texture upload/download round-trip on the copy q
     handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
     auto future = handle->download.bytes_from_texture(tex);
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
@@ -214,7 +217,8 @@ INVOCABLE_TEST("sg dx12 - an inline readback waits on a pending async texture up
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
@@ -300,7 +304,8 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
     for (int i = 0; i < N; ++i)
         src[i] = float(i) + 0.5f;
 
-    ctx->advance_epoch_and_wait_for_idle(); // drain, then park the ring cursor just before the seam
+    ctx->advance_epoch();
+    ctx->block_until_idle(); // drain, then park the ring cursor just before the seam
     c._upload_inline.debug_set_cursor(u64(park));
     auto const before = c._upload_inline.debug_cursor();
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
@@ -313,7 +318,8 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
     auto down = ctx->create_command_list();
     auto fut = down->download.bytes_from_texture(tex.value());
     ctx->submit_command_list(cc::move(down));
-    auto const bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
@@ -344,7 +350,8 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     up->upload.bytes_to_texture(tex.value(), cc::as_bytes(cc::span<float const>(src, N)));
     ctx->submit_command_list(cc::move(up));
 
-    ctx->advance_epoch_and_wait_for_idle(); // drain, then park the readback ring cursor just before the seam
+    ctx->advance_epoch();
+    ctx->block_until_idle(); // drain, then park the readback ring cursor just before the seam
     c._download_inline.debug_set_cursor(u64(park));
     auto const before = c._download_inline.debug_cursor();
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
@@ -353,7 +360,8 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     auto fut = down->download.bytes_from_texture(tex.value()); // the seam-straddling readback splits here
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
     bool ok = true;
@@ -382,7 +390,8 @@ TEST("sg dx12 - async texture copy splits across staging windows")
     ctx->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
     auto fut = ctx->download.bytes_from_texture(tex);
 
-    auto const bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(sizeof(src)));
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
@@ -419,11 +428,13 @@ INVOCABLE_TEST("sg dx12 - an empty texture region is a no-op", (dx12::dx12_conte
     auto full_fut = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    auto const empty_bytes = c.wait_for(empty_fut);
+    c.block_until_idle();
+    auto const empty_bytes = empty_fut.try_get_bytes();
     REQUIRE(empty_bytes.has_value());
     CHECK(empty_bytes.value().size() == 0);
 
-    auto const full = c.wait_for(full_fut);
+    c.block_until_idle();
+    auto const full = full_fut.try_get_bytes();
     REQUIRE(full.has_value());
     auto const* got = reinterpret_cast<float const*>(full.value().data());
     bool ok = true;
@@ -452,7 +463,8 @@ INVOCABLE_TEST("sg dx12 - block-compressed texture round-trips whole blocks", (d
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    auto const bytes = c.wait_for(future);
+    c.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 32);
     bool ok = true;

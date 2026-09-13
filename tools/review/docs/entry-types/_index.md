@@ -18,7 +18,7 @@ and no hunks — uses almost none of them.
 
 | goal | the types it uses |
 |---|---|
-| `pr-comment`, `land-changes` | orientation, glossary, api-surface, example-showcase, example-evidence, verdict, draft-artifact |
+| `pr-comment`, `land-changes` | orientation, feature-tour, glossary, api-surface, example-showcase, example-evidence, design-critique, verdict, draft-artifact |
 | `design` | [design-topic](design-topic.md), and glossary where the design coins names |
 
 A design review's `framing` entry stands in for both orientation and verdict, and its groups differ too — `framing`,
@@ -39,6 +39,12 @@ Take its structure and its examples, and drop anything the change does not have.
   The first entry in every review with a changeset, written by the reviewer after reading the branch.
   What it does, what it claims, the concepts a reader needs, and what the reviewer went looking for.
   *Applies: always, when there is a changeset.*
+
+- [feature-tour](feature-tour.md) — **the feature, taught: the smallest real example, what it produces, what it replaced.**
+  Made of annotated code rather than of description, and produced by running the branch rather than written out.
+  One per feature cluster, one or two being the common case.
+  *Applies: whenever the change adds a feature a reader could use.
+  Skip it for a change that is entirely internal.*
 
 - [glossary](glossary.md) — **every term the change and the review use, defined once.**
   A lookup, alphabetical and complete, so no other entry has to re-explain a noun.
@@ -64,6 +70,15 @@ Take its structure and its examples, and drop anything the change does not have.
   wrong.
   *Applies: a `design` review, which is every review with no changeset.*
 
+- [design-critique](design-critique.md) — **the alternatives, priced.**
+  Whether the change is the *right* solution rather than a correct one: what else could have been built, what each
+  would have cost, and where the chosen point is a bet.
+  **Placed immediately after the tour**, at `014`: the tour gives a feel for the feature, and the critique then
+  anchors the top-level understanding before any detail.
+  *Applies: whenever the change makes a design choice that outlives it — a new mechanism, a new API, a new
+  dependency.
+  Skip it for a change with no choice in it.*
+
 - [verdict](verdict.md) — **the big picture, at the end.**
   Is the shape right, does it fit the repository's philosophy, would we want this in a year.
   The judgement that detail-oriented entries lose.
@@ -82,6 +97,8 @@ A design review numbers the same way, with `010-framing.md` in place of orientat
 
 ```
 010-orientation.md     the reviewer's own framing        (authored)
+012-feature-tour.md    the feature, taught by example    (authored)
+014-design-critique.md the alternatives, priced          (authored)
 015-changes.md         the range, its commits, its shape (generated)
 018-glossary.md        the vocabulary                    (authored)
 02x-example-*.md       the examples, and their images    (authored)

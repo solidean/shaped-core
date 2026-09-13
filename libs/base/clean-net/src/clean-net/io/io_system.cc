@@ -19,6 +19,11 @@ struct submit_request
     io_operation* op = nullptr;
 };
 
+struct arm_request
+{
+    io_operation* op = nullptr;
+};
+
 struct cancel_request
 {
     io_operation* op = nullptr;
@@ -29,13 +34,13 @@ struct signal_request
     io_operation* op = nullptr;
 };
 
-using actor_handle = cc::threaded_actor<submit_request, cancel_request, signal_request>;
+using actor_handle = cc::threaded_actor<submit_request, arm_request, cancel_request, signal_request>;
 
 /// The reactor's semantic thread.
 ///
 /// Every reactor call happens here, which is what lets reactor.hh take no lock: the mailbox is the serializer, so
 /// `submit` from another thread is a message rather than a shared write.
-class io_actor_impl final : public cc::threaded_actor_impl<submit_request, cancel_request, signal_request>
+class io_actor_impl final : public cc::threaded_actor_impl<submit_request, arm_request, cancel_request, signal_request>
 {
 public:
     io_actor_impl(reactor& r, cc::atomic<isize>& pending, cc::atomic<bool>& stopping, i32 max_wait_ms, bool unthreaded)
@@ -51,6 +56,8 @@ protected:
         _reactor.submit(msg.op);
         _pending.store(_reactor.pending_count());
     }
+
+    void on_message(arm_request msg) override { _reactor.arm(msg.op); }
 
     void on_message(cancel_request msg) override
     {
@@ -155,11 +162,13 @@ public:
         // answer had to be decided BEFORE start(), because the thread start() spawns can reach on_process before any
         // store here would land.
         // So the duplicate is a claim rather than a second source of truth, and this is what checks it.
-        CC_ASSERT(_handle->is_unthreaded() == _unthreaded,
-                  "the io_system and its actor disagree about whether there is a reactor thread");
+        CC_ASSERT(_handle->is_unthreaded() == _unthreaded, "the io_system and its actor disagree about whether there "
+                                                           "is a reactor thread");
     }
 
-    void submit(io_operation* op)
+    /// False when the operation was answered here instead of reaching the reactor, in which case it is already gone
+    /// and nothing may touch it again -- the caller's submission guard included.
+    [[nodiscard]] bool submit(io_operation* op)
     {
         if (!_handle->enqueue_message(submit_request{.op = op}))
         {
@@ -169,9 +178,16 @@ public:
             op->on_complete(error{.code = error_code::cancelled,
                                   .native_code = 0,
                                   .message = cc::string("the io_system is shutting down")});
-            return;
+            return false;
         }
         _reactor->wake();
+        return true;
+    }
+
+    void arm(io_operation* op)
+    {
+        if (_handle->enqueue_message(arm_request{.op = op}))
+            _reactor->wake();
     }
 
     void cancel(io_operation* op)
@@ -263,9 +279,16 @@ clock& io_system::time_source() const
     return _actor->time_source();
 }
 
-void io_system::submit(impl::io_operation* op)
+impl::submission io_system::submit(impl::io_operation* op)
 {
-    _actor->submit(op);
+    if (!_actor->submit(op))
+        return {}; // already answered and gone; an empty guard arms nothing
+    return impl::submission(*this, op);
+}
+
+void io_system::arm(impl::io_operation* op)
+{
+    _actor->arm(op);
 }
 
 void io_system::cancel(impl::io_operation* op)

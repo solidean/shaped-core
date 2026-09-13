@@ -270,6 +270,17 @@
             }
         },
         {
+            "name": "x64-linux-clang-ninja-sanitize-thread",
+            "displayName": "Sanitize Thread Clang (Ninja, Linux)",
+            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for)",
+            "inherits": "x64-linux-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SANITIZE": "thread",
+                "SC_MIMALLOC": "OFF"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-coverage",
             "displayName": "Coverage Clang (Ninja, Windows)",
             "description": "RelWithDebInfo build with LLVM source-based coverage instrumentation",
@@ -462,6 +473,17 @@
             }
         },
         {
+            "name": "macos-arm-llvm-sanitize-thread",
+            "displayName": "Sanitize Thread Clang (macOS ARM)",
+            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for)",
+            "inherits": "macos-arm-llvm-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SANITIZE": "thread",
+                "SC_MIMALLOC": "OFF"
+            }
+        },
+        {
             "name": "macos-arm-llvm-base",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
@@ -641,6 +663,105 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
+        },
+        {
+            "name": "wasm-emscripten-threads-debug",
+            "displayName": "Debug Emscripten (WASM, threads)",
+            "description": "Debug WebAssembly build via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-release",
+            "displayName": "Release Emscripten (WASM, threads)",
+            "description": "Optimized WebAssembly build via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, threads)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; threads, no WebGPU",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "OFF"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-debug",
+            "displayName": "Debug Emscripten (WASM, WebGPU)",
+            "description": "Debug WebAssembly build via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-release",
+            "displayName": "Release Emscripten (WASM, WebGPU)",
+            "description": "Optimized WebAssembly build via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-webgpu-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, WebGPU)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; single-threaded, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "OFF",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-debug",
+            "displayName": "Debug Emscripten (WASM, threads + WebGPU)",
+            "description": "Debug WebAssembly build via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-release",
+            "displayName": "Release Emscripten (WASM, threads + WebGPU)",
+            "description": "Optimized WebAssembly build via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
+        },
+        {
+            "name": "wasm-emscripten-threads-webgpu-relwithdebinfo",
+            "displayName": "RelWithDebInfo Emscripten (WASM, threads + WebGPU)",
+            "description": "Optimized WebAssembly build with debug symbols via Emscripten; threads, WebGPU (emdawnwebgpu)",
+            "inherits": "wasm-emscripten-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_THREADS": "ON",
+                "SC_WASM_WEBGPU": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -789,6 +910,14 @@
             "configurePreset": "macos-arm-llvm-sanitize-address-undefined"
         },
         {
+            "name": "sanitize-thread-linux-clang",
+            "configurePreset": "x64-linux-clang-ninja-sanitize-thread"
+        },
+        {
+            "name": "sanitize-thread-macos-arm-llvm",
+            "configurePreset": "macos-arm-llvm-sanitize-thread"
+        },
+        {
             "name": "macos-arm-llvm-debug",
             "configurePreset": "macos-arm-llvm-debug"
         },
@@ -835,6 +964,42 @@
         {
             "name": "emscripten-relwithdebinfo",
             "configurePreset": "wasm-emscripten-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-threads-debug",
+            "configurePreset": "wasm-emscripten-threads-debug"
+        },
+        {
+            "name": "emscripten-threads-release",
+            "configurePreset": "wasm-emscripten-threads-release"
+        },
+        {
+            "name": "emscripten-threads-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-threads-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-webgpu-debug",
+            "configurePreset": "wasm-emscripten-webgpu-debug"
+        },
+        {
+            "name": "emscripten-webgpu-release",
+            "configurePreset": "wasm-emscripten-webgpu-release"
+        },
+        {
+            "name": "emscripten-webgpu-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-webgpu-relwithdebinfo"
+        },
+        {
+            "name": "emscripten-threads-webgpu-debug",
+            "configurePreset": "wasm-emscripten-threads-webgpu-debug"
+        },
+        {
+            "name": "emscripten-threads-webgpu-release",
+            "configurePreset": "wasm-emscripten-threads-webgpu-release"
+        },
+        {
+            "name": "emscripten-threads-webgpu-relwithdebinfo",
+            "configurePreset": "wasm-emscripten-threads-webgpu-relwithdebinfo"
         }
     ]
 }

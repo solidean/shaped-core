@@ -13,8 +13,8 @@ Reusable render routines and helpers built on shaped-graphics (`sg::`) — the c
 The composable base every routine builds on lives in **shaped-graphics**, not here — see [shaped-graphics/docs/render-routines.md](../../shaped-graphics/docs/render-routines.md):
 
 ```text
-sg::render_routine<D>   [done]  one unit of GPU work; 3-phase init (once/declare/materialize), re-inits on reload
-                                reached by type via static acquire(cmd) / prewarm(ctx) / evict(ctx) — no handle,
+sg::render_routine<D,P> [done]  one unit of GPU work; two coroutine init phases (once/init), re-inits on reload
+                                reached by type via static try_acquire(cmd) / prewarm(ctx) / evict(ctx) — no handle,
                                 no registration
 ctx.routines            [done]  per-context registry: lazy self-registration, clear()
 sg::reload_generation   [done]  process-global hot-reload counter (bumped by the shader library on reload)
@@ -68,7 +68,6 @@ Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas 
 
 ```text
 sr::blit_routine          [done]     fullscreen-triangle blit of a texture across an open raster scope
-sr::keyed_pipeline_cache  [done]     one pipeline per caller-chosen key, usually the target's pixel format
 mipmap generation         [planned]
 texture compression       [planned]
 tonemapping               [planned]

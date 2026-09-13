@@ -22,6 +22,22 @@ namespace
 {
 constexpr auto mip_usage
     = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture | sg::texture_usage::copy_dst;
+
+/// Brings every variant up before a command list opens.
+///
+/// **A workaround, and here to be found again.**
+/// A tick drives only routines that are already REGISTERED, and `execute` is what registers one — so a caller meeting
+/// a shape for the first time declines that frame and draws on the next.
+/// An app absorbs that; a test asserting on the first call cannot, so it names the variants up front — which couples
+/// this test to a choice the code under test makes.
+/// It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness; see
+/// libs/graphics/shaped-graphics/docs/TODO.md.
+void prewarm_every_variant(sg::context& ctx)
+{
+    for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)
+        sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant(v));
+    (void)ctx.routines.tick_until_idle();
+}
 } // namespace
 
 // Only one slib::shader_library may exist at a time — the generated package symbols are process-wide
@@ -72,18 +88,20 @@ TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-sha
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 5) == 0);
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 3) == 2);
 
+    prewarm_every_variant(ctx);
     auto cmd = ctx.create_command_list();
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_1d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_3d);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_cube);
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d_array);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_1d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_3d) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_cube) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d_array) == sg::routine_outcome::executed);
 
     // Regenerating only the tail is the streaming case: the first levels are already good.
-    sr::box_filter_mipmap_routine::execute(*cmd, tex_2d, 3);
+    CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d, 3) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 namespace
@@ -109,7 +127,8 @@ namespace
 /// reads are left in the layouts the generating dispatch put them in rather than in the common one that queue expects.
 [[nodiscard]] cc::vector<u8> read_back(sg::context& ctx, sg::bytes_future const& future)
 {
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_bytes();
     if (!data.has_value())
         return {};
     return red_channel(data.value().span());
@@ -158,6 +177,7 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
     constexpr u8 sentinel = 255;
     auto const face_value = [](int slice) { return u8(20 * (slice + 1)); };
 
+    prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     for (auto face = 0; face < 6; ++face)
     {
@@ -176,10 +196,11 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
         up->upload.bytes_to_texture(tex_1d_array.raw(), rgba8_constant(1, sentinel),
                                     {.mip_level = 2, .array_layer = slice});
     }
-    sr::box_filter_mipmap_routine::execute(*up, tex_cube);
-    sr::box_filter_mipmap_routine::execute(*up, tex_1d_array);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_cube) == sg::routine_outcome::executed);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_1d_array) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Every generated level of every slice, read back in one list.
     auto dl = ctx.create_command_list();
@@ -192,7 +213,8 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
             futures.push_back(
                 dl->download.bytes_from_texture(tex_1d_array.raw(), {.mip_level = level, .array_layer = slice}));
     ctx.submit_command_list(cc::move(dl));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Averaging equal texels reproduces them exactly, so every generated level of a face is that face's own value —
     // and a face the dispatch never covered still holds the sentinel.
@@ -233,17 +255,20 @@ TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive
         for (auto c = 0; c < 4; ++c)
             base.push_back(byte(u8(8 * x)));
 
+    prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
-    sr::box_filter_mipmap_routine::execute(*up, tex);
+    CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     auto dl = ctx.create_command_list();
     auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
     auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     ctx.submit_command_list(cc::move(dl));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Level 1 averages each pair of the base level; level 2 has one texel left over three, so its second tap
     // clamps to the level's last texel and the third is dropped.

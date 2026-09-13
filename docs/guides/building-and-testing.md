@@ -180,7 +180,20 @@ Reach for `--build-suffix` only when you want a name the auto-redirect would not
 
 ### WebAssembly (Emscripten)
 
-The `emscripten-{debug,relwithdebinfo,release}` presets cross-compile to WASM, single-threaded.
+The `emscripten-*` presets cross-compile to WASM.
+Two features are optional and independent of each other, so there are four cells, each in `debug` / `relwithdebinfo` / `release`:
+
+| Preset | Threads | WebGPU | What it is for |
+|--------|---------|--------|----------------|
+| `emscripten-<type>` | no | no | the lightweight build, and the only cell CI gates |
+| `emscripten-threads-<type>` | yes | no | high-performance compute that needs no graphics |
+| `emscripten-webgpu-<type>` | no | yes | graphics on a host that serves no special headers |
+| `emscripten-threads-webgpu-<type>` | yes | yes | the full browser-graphics tier |
+
+The two middle rows are deployment tiers rather than points on a performance gradient.
+Threads mean `SharedArrayBuffer`, which means the page must be cross-origin isolated and therefore served with COOP/COEP headers; WebGPU on its own requires neither.
+So a no-threads WebGPU build drops onto any static host, and a threaded one does not.
+
 They need the [emsdk](https://github.com/emscripten-core/emsdk); point dev.py at it with `--emsdk-path`, `SC_EMSDK_PATH`, or an activated `EMSDK`.
 dev.py applies the emsdk environment itself, so no permanent activation is required:
 
@@ -188,8 +201,31 @@ dev.py applies the emsdk environment itself, so no permanent activation is requi
 uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsdk
 ```
 
-The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node and parses the same JUnit report as native runs.
+The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node by default and parses the same JUnit report as native runs.
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
+
+#### Which runtime executes the artifact
+
+A preset says what to compile; `--runtime` says what runs the result.
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo                          # node, the default
+uv run dev.py test --preset emscripten-webgpu-relwithdebinfo --runtime deno
+```
+
+node and deno carry different WebGPU implementations: node's binding is Dawn, which Chrome ships, and deno's is wgpu, which Firefox ships.
+Running a graphics build under both is therefore how both browser engines get covered from the CLI, with no browser involved.
+
+node is the default because it is what CI runs and what the emsdk bundles, so a bare `dev.py test` means the same thing on every machine.
+deno is opt-in rather than picked up when present.
+A default that followed whatever happened to be installed would let two machines silently exercise two different WebGPU implementations, which is the divergence the pair exists to catch.
+
+On a wasm preset the default node is emsdk's own pinned build rather than whatever sits on `PATH`, which is what keeps a run reproducible across machines that happen to have different system nodes.
+A native preset has no emsdk environment and falls back to `PATH` as before.
+
+`--node-path` and `--deno-path` name a specific install, and selecting one of them selects that runtime.
+`SC_JS_RUNTIME`, `SC_NODE_PATH` and `SC_DENO_PATH` are the environment-variable equivalents.
+The same three flags are on `run`, `example` and `benchmark`.
 
 **Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.
@@ -214,8 +250,20 @@ Its template is [nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-pag
 
 ## Quiet by default, and how to diagnose
 
-dev.py does **not** stream child output.
-For each step it:
+dev.py never streams child output into your scrollback.
+What it does instead depends on where it is running, and the two modes read the same record.
+
+At a **real terminal** it draws a live region at the bottom, one row per running step.
+Each row carries a spinner, an elapsed clock, a progress bar where the step can report one, and the last few lines that step printed.
+A step that succeeds collapses to its one summary line and its rows are erased.
+A step that fails keeps that tail on screen as the evidence, above the usual diagnostic hint.
+So a long run stays one screen tall, and you can see at a glance whether the steps before the current one were fine.
+
+**Piped, redirected, or in CI** — which is every agent-driven run — the region never appears and the output is exactly the terse per-step trace it has always been.
+`--no-progress` selects it explicitly.
+The per-step capture below is common to both modes; the diagnostic hints and the `build_diag` / `test_diag` loop after it are written for this one.
+
+For each step, in both modes, it:
 
 - captures stdout/stderr to `build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt`,
 - writes a JSON sidecar in the build dir (`configure.json` / `build.json` / `test.json`),
@@ -236,6 +284,7 @@ These read the artifacts dev.py already emitted, which beats scrolling raw logs.
 Mirroring is additive to capture, so the logs read the same either way; to watch something live as well, reach for the mirror flags under [Useful flags](#useful-flags).
 **Don't pipe dev.py into `tail`/`head`/`grep`.**
 The output is already terse, and `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
+Piping now also changes the mode, so it is doubly not the way to read a run: you lose the live region and gain nothing.
 
 ## Formatting
 
@@ -271,21 +320,59 @@ It auto-applies every unambiguous fix it can (clang-tidy, shaped-linter, then cl
 uv run dev.py check            # run every check -> one verdict
 uv run dev.py check --fix      # apply fixable checks (clang-format -i), then report
 uv run dev.py check --no-test  # static checks only — skip the build+test tail (docs-only re-check)
-uv run dev.py check --all      # widen lint, shaped-lint and format from dirty-only to the whole tree
-uv run dev.py check --commit <rev>   # check a commit or range instead of the working tree
+uv run dev.py check --all      # widen lint, shaped-lint and format to the whole tree
+uv run dev.py check --dirty-only     # narrow them to uncommitted work alone
+uv run dev.py check --commit <rev>   # check a commit or range instead
+uv run dev.py check --since <rev>    # everything changed since <rev>, working tree included
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
 ```
+
+### The default scope is the branch, not the working tree
+
+`lint`, `shaped-lint` and `format` default to **everything this branch changed, including what is not committed yet**.
+That is the merge base with `origin/main`, diffed against the working tree.
+
+This is not the obvious choice, and the obvious one is wrong.
+A gate scoped to dirty files alone *empties as you work*: commit, and the working tree is clean, so the next `check` inspects nothing and reports green for a branch it never looked at.
+That is precisely the run that matters — the one before pushing — and it was the one saying least.
+
+The consequence to know is that `check` re-examines files you committed earlier on the branch, so a rule that changed since then surfaces now rather than never.
+That is the point, and it is also why the first `check` on an old branch can report more than you expect.
+
+`--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
+On `main` itself there is no branch to diff, so the default falls back to the working tree.
 
 Registered checks, **in the order they run**:
 
 | Check        | What it does                                                                   | `--fix`? |
 |--------------|--------------------------------------------------------------------------------|----------|
-| `lint`       | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
-| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Dirty-only by default; `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
-| `format`     | clang-format our C++ sources. Dirty-only by default; `--commit` or `--all` to rescope. | yes (rewrites in place) |
+| `lint`       | clang-tidy whitelist gates on `.cc` sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
+| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
+| `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
+
+### What it prints about its own cost
+
+`check` is the longest command here, so it reports where the time went rather than only a total.
+
+```raw
+static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (total 62.2 s)
+
+timing, per preset:
+  relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
+  debug-nopch-clang     build    3.0 s   test   95.1 s  (18 binaries)
+  release-clang         build   164 ms   test   80.5 s  (18 binaries)
+  singlethreaded-clang  build    1.9 s   test   77.5 s  (18 binaries)
+  total 332.5 s across 4 preset(s)
+```
+
+One line for the static gates, and one per preset for the build-and-test tail split into its two halves.
+Neither changes the verdict — they are a measurement of the run that just happened.
+
+A preset whose tests exceed the budget in `tools/dev/cmd/check.py` is called out by name.
+The budget is a ceiling a run must not cross rather than a target it should hit: tighten it as the suite gets faster, and never raise it to silence a warning.
 
 **That order is a correctness property, not a listing convention.**
 A lint fix is a byte-range edit — dropping a `cc::` qualifier shortens a line and strands the continuation lines aligned under where it used to end.
@@ -597,13 +684,15 @@ A `.install/` at the wrong pin is otherwise invisible, and is the thing that mak
 
 ## Sanitizers
 
-The `sanitize-*` presets are Debug builds with AddressSanitizer + UndefinedBehaviorSanitizer
-(`SANITIZE=address,undefined`, wired in the root [CMakeLists.txt](../../CMakeLists.txt)):
+Two families, and they cannot be combined: **`sanitize-*`** is AddressSanitizer + UndefinedBehaviorSanitizer, **`sanitize-thread-*`** is ThreadSanitizer.
+Both are wired through one `SANITIZE` cache variable in the root [CMakeLists.txt](../../CMakeLists.txt).
 
 ```bash
-uv run dev.py test --preset sanitize-linux-clang   # Linux
-uv run dev.py test --preset sanitize-macos-arm-llvm # macOS
-uv run dev.py test --preset sanitize-clang          # Windows (see caveat)
+uv run dev.py test --preset sanitize-linux-clang      # ASan + UBSan, Linux
+uv run dev.py test --preset sanitize-macos-arm-llvm   # ASan + UBSan, macOS
+uv run dev.py test --preset sanitize-clang            # ASan + UBSan, Windows (see caveat)
+uv run dev.py test --preset sanitize-thread-linux-clang    # TSan, Linux
+uv run dev.py test --preset sanitize-thread-macos-arm-llvm # TSan, macOS
 ```
 
 On **Linux and macOS** the clang driver links the sanitizer runtime itself, and these presets are part of the `check` test gate.
@@ -626,11 +715,43 @@ We cannot fix those without diverging from upstream, and a finding nobody will e
 Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
 The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.
 
+### ThreadSanitizer (`sanitize-thread-*`)
+
+`SANITIZE=thread`, and **RelWithDebInfo rather than Debug** — the one place this family's shape differs from the ASan one.
+TSan already costs 5-15x, an unoptimized build compounds it, and optimized-with-symbols is what the tool is tuned for.
+`CC_ASSERT` is therefore on here too.
+
+**Part of the `check` gate on Linux only**, and nowhere else.
+It is a separate full build of the repo at 5-15x test time, so one platform carrying it on every check is the trade.
+That is enough to stop the preset rotting between manual runs, without paying for it three times.
+The macOS preset works and is run by hand; there is no CI leg for either.
+
+Three things to know before reading a report.
+
+**TSan models no fence at all.**
+`cc::atomic_thread_fence` is a no-op to the tool.
+So a release fence paired with a relaxed store — correct by the memory model, and what the chase-lev deque used to do — reads as a missing edge and reports as a race.
+Publication therefore carries its ordering on the store, not on a separate fence, wherever TSan has to be able to check it.
+
+**Uninstrumented libraries report as races.**
+Their atomics look like plain memory, so their internal handoffs surface as findings nobody can act on.
+[tools/cmake/tsan-suppressions.txt](../../tools/cmake/tsan-suppressions.txt) is the runtime list, applied by dev.py on every test run, and each entry says which module and why.
+It is the counterpart of `lsan-suppressions.txt` beside it; the compile-time `sanitizer-ignorelist.txt` cannot help here, because a prebuilt `.so` was never compiled by us.
+
+**A stack walk is not the source's.**
+TSan starts threads through a trampoline the walker cannot get past, and rewrites every access, so `cc::capture_stack` reports frames that are correct but not the ones the code suggests.
+`CC_HAS_THREAD_SANITIZER` exists for exactly that, and for nothing else — it is not a way to skip a test that is merely slow under the tool.
+
 ## Useful flags
 
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
 - `--mirror-test-output` — global; stream only the test binaries live, staying quiet through configure and build.
   The usual choice when you want a binary's own output, such as a benchmark table, without the build wall.
+- `--progress` / `--no-progress` — global; force or disable the live progress region.
+  The default auto-detects: on when stdout and stderr are both a terminal, off when either is piped or redirected, when `TERM=dumb`, or when a CI environment variable is set.
+  `SC_DEV_UI=0` / `1` overrides the detection, and an explicit flag overrides that.
+  It is **independent of the color flags**: `--plain` and `NO_COLOR` say how to render, not whether to, so a monochrome region is still available.
+  Mirroring wins per step — a mirrored step owns the screen and opens no row, while the steps around it still get theirs.
 - `--colored` / `--plain` — global; force or disable colored output.
   The default auto-detects: colored when stdout and stderr are both a terminal, plain when either is piped, such as a run driven by an agent.
   In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.

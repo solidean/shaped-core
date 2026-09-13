@@ -180,8 +180,15 @@ cancel_state* cancel_state_create_child(cancel_state* parent)
     return child;
 }
 
-void cancel_registration::attach(cancel_token const& token, io_system& io, io_operation* op)
+void cancel_registration::attach(submission in_flight, cancel_token const& token)
 {
+    // Empty guard: the io_system was shutting down, `submit` completed the operation itself, and it is gone.
+    // Reading the token would be harmless and touching the operation would not, so this stops here.
+    auto* const op = in_flight.operation();
+    if (op == nullptr)
+        return;
+    auto& io = *in_flight.io();
+
     auto* const state = token.state();
     if (state == nullptr)
         return;

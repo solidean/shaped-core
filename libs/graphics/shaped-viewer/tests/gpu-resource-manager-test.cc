@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/linalg/pos_ops.hh> // tg::distance
@@ -65,11 +66,13 @@ TEST("sv - the resource manager's epoch tick is idempotent")
     m.advance_to(ctx.current_epoch());
     CHECK(m.current_epoch() == e);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     m.advance_to(ctx.current_epoch());
     CHECK(m.current_epoch() != e);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - the resource manager declares only its configured tables")
@@ -88,7 +91,8 @@ TEST("sv - the resource manager declares only its configured tables")
     CHECK(m.table_capacity(sv::bindless_table::textures_cube) == 0);
     CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_cube, make_texture(ctx).as_readonly_view()));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - the resource manager refuses acquires while frozen")
@@ -125,7 +129,8 @@ TEST("sv - the resource manager refuses acquires while frozen")
     }
     CHECK(!m.is_locked());
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - two freezes in one epoch keep the first's indices")
@@ -167,14 +172,16 @@ TEST("sv - two freezes in one epoch keep the first's indices")
     }
 
     // The epoch tick clears the declaration lists, so the next epoch declares what that epoch acquired.
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     m.advance_to(ctx.current_epoch());
     {
         auto const bound = m.freeze();
         CHECK(bound.elements(sv::bindless_table::textures_2d).empty());
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a pinned texture is declared and outlives its epoch")
@@ -206,13 +213,15 @@ TEST("sv - a pinned texture is declared and outlives its epoch")
     // Churn the transient working set through later epochs; the pinned index is unmoved.
     for (auto i = 0; i < 3; ++i)
     {
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
         m.advance_to(ctx.current_epoch());
         (void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view());
         CHECK(pin->index() == index);
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 namespace
@@ -277,7 +286,8 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
     CHECK(other_id != id);
     CHECK(element_of(m, other_id) != element_of(m, id));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - the same pixels at a different shape are a different texture")
@@ -299,7 +309,8 @@ TEST("sv - the same pixels at a different shape are a different texture")
     CHECK(wide != tall);
     CHECK(m.textures.count() == 2);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a texture given every mip is complete")
@@ -324,7 +335,8 @@ TEST("sv - a texture given every mip is complete")
     CHECK(record->state == sv::residency::complete);
     CHECK(record->uploaded_mips == record->total_mips);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one")
@@ -351,7 +363,8 @@ TEST("sv - a texture's element is declared for the epoch that acquired it, and o
 
     // The declaration is the epoch's, so the next one starts empty — and re-acquiring the same view lands on the same index,
     // which is what keeps an unchanged working set from churning descriptors.
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     m.advance_to(ctx.current_epoch());
     {
         auto const bound = m.freeze();
@@ -359,7 +372,8 @@ TEST("sv - a texture's element is declared for the epoch that acquired it, and o
     }
     CHECK(element_of(m, id) == index);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - mip generation is queued, not done inline")
@@ -393,6 +407,13 @@ TEST("sv - mip generation is queued, not done inline")
     m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 1);
 
+    // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
+    // declines until its variant is built, and a tick drives only what is already registered.
+    // So the shape is named here rather than discovered.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    (void)ctx.routines.tick_until_idle();
+
     auto cmd = ctx.create_command_list();
     auto const spent = m.record_pending_work(*cmd);
     ctx.submit_command_list(cc::move(cmd));
@@ -401,7 +422,8 @@ TEST("sv - mip generation is queued, not done inline")
     CHECK(m.pending_work_count() == 0);
     CHECK(m.textures.get_ptr(id)->state == sv::residency::complete);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - the work budget spreads mip generation across epochs")
@@ -429,12 +451,20 @@ TEST("sv - the work budget spreads mip generation across epochs")
     m.wait_for_pending_uploads();
     CHECK(m.pending_work_count() == 3);
 
+    // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
+    // declines until its variant is built, and a tick drives only what is already registered.
+    // So the shape is named here rather than discovered.
+    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    (void)ctx.routines.tick_until_idle();
+
     auto const drain = [&]
     {
         auto cmd = ctx.create_command_list();
         auto const spent = m.record_pending_work(*cmd);
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
         m.advance_to(ctx.current_epoch());
         return spent;
     };
@@ -447,7 +477,8 @@ TEST("sv - the work budget spreads mip generation across epochs")
     CHECK(m.pending_work_count() == 0);
     CHECK(drain() == 0);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a texture policy that wants no mips queues nothing")
@@ -469,7 +500,8 @@ TEST("sv - a texture policy that wants no mips queues nothing")
     // It stays at its base level, which is a resolvable state rather than a failure.
     CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 // --- the material chain's GPU half: attribute upload and the per-instance parameter block ---------------------
@@ -530,11 +562,13 @@ TEST("sv - an attribute is uploaded once and content-keyed")
     REQUIRE(record.data.raw() != nullptr);
     auto const index = u32(m.acquire_buffer(record.data.as_readonly_buffer()));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     m.advance_to(ctx.current_epoch());
     CHECK(u32(m.acquire_buffer(m.attributes.get(id).data.as_readonly_buffer())) == index);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a parameter block is filled at the offsets the generated shader reads")
@@ -616,7 +650,8 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     // Building it again mints nothing new: every index it writes is one this epoch already handed out.
     CHECK(cc::memcmp(m.build_instance_parameters(m.get_instance(instance)).data(), bytes.data(), bytes.size()) == 0);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - an instance record names its own geometry and parameters")
@@ -682,7 +717,8 @@ TEST("sv - an instance record names its own geometry and parameters")
     CHECK(m.describe_instance(*cmd, indexed, instance).vertices != record.vertices);
 
     ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - an imported asset uploads and resolves like any other mesh")
@@ -753,7 +789,8 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
             if (*node != nullptr)
                 (void)cc::try_async_blocking_get(*node);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
@@ -834,7 +871,8 @@ TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
         ctx.submit_command_list(cc::move(cmd));
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor")
@@ -927,7 +965,8 @@ TEST("sv - a texture still streaming samples a placeholder seeded from the mater
         = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
     CHECK(once_resident == element_of(m, texture));
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived")
@@ -981,7 +1020,8 @@ TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arriv
     CHECK(copy.is_ready());
     CHECK(m.create_mesh(copy).geometry == first.geometry);
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
 
 TEST("sv::mesh - an evicted payload is re-acquired rather than named dead")
@@ -1023,5 +1063,6 @@ TEST("sv::mesh - an evicted payload is re-acquired rather than named dead")
     CHECK(m.create_mesh(mesh).geometry == again.geometry);
     CHECK(mesh.is_ready());
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }

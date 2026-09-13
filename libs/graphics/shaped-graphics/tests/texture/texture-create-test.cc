@@ -180,14 +180,13 @@ INVOCABLE_TEST("sg - typed create_texture_2d (transient, no alloc)", (sg::contex
     CHECK(tex.width() == 128);
 }
 
-INVOCABLE_TEST("sg - typed try_create_texture_2d (persistent)", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    auto r = ctx->persistent.try_create_texture_2d(
+    auto const tex = ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba8_unorm, .width = 32, .height = 32, .usage = sg::texture_usage::readonly_texture});
 
-    REQUIRE(r.has_value());
-    CHECK(r.value().width() == 32);
-    CHECK(r.value().height() == 32);
+    CHECK(tex.width() == 32);
+    CHECK(tex.height() == 32);
 }

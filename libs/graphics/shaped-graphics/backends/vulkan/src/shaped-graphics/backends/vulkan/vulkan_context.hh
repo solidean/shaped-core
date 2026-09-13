@@ -189,7 +189,23 @@ public:
         return _headless_surface_supported && _swapchain_supported;
     }
 
-    [[nodiscard]] bool supports_headless_present() const override { return is_headless_present_supported(); }
+    /// Vulkan has every stage sg models, so the graphics-stage features are a flat yes; the other three are device facts.
+    [[nodiscard]] bool supports(sg::feature f) const override
+    {
+        switch (f)
+        {
+        case sg::feature::raytracing:
+            return is_raytracing_supported();
+        case sg::feature::timestamp_query:
+            return _query_system.supports_timestamps();
+        case sg::feature::headless_present:
+            return is_headless_present_supported();
+        case sg::feature::geometry_shader:
+        case sg::feature::tessellation_shader:
+            return true;
+        }
+        return false;
+    }
 
     /// Whether this instance can create a surface for `platform`.
     /// False for one whose extension the loader does not offer, and for one this build was compiled without — a
@@ -571,15 +587,25 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
-    void advance_epoch(cc::optional<int> allowed_in_flight) override;
-    void advance_epoch_and_wait_for_idle() override { advance_epoch(0); }
-    void process_completed_epochs() override;
+    void advance_epoch() override;
+    [[nodiscard]] int in_flight_epoch_count() override;
+    void retire_completed_epochs() override;
+    void block_until_submissions_complete() override;
+    void block_until_transfers_drained() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
 
+    // The inline ring budgets.
+    // Recorded here and applied at the next advance_epoch, never synchronously.
+    // Re-exposed for the debug messenger, which is a free callback rather than a member.
+    using sg::context::report_device_error;
+
+    void set_inline_upload_budget(isize bytes) override { _upload_inline.set_budget(bytes); }
+    void set_inline_download_budget(isize bytes) override { _download_inline.set_budget(bytes); }
+
     /// Whether any submitted epoch has yet to retire.
-    /// The inline rings ask before blocking: with nothing in flight, a full ring cannot be reclaimed by waiting, and
-    /// the request is a budget error rather than back-pressure.
+    /// The inline rings ask before blocking: with nothing in flight a full ring cannot be reclaimed by waiting, so the
+    /// request falls back to a one-off allocation rather than waiting for something that is not coming.
     [[nodiscard]] bool has_epochs_in_flight();
 
     /// Blocks until `token`'s command list has finished executing.

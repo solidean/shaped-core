@@ -47,8 +47,10 @@ TEST("sg vulkan - a timestamp pair measures real work")
     auto const t1 = cmd->query.record_gpu_timestamp();
     ctx.submit_command_list(cc::move(cmd));
 
-    auto const s0 = ctx.wait_for_seconds(t0);
-    auto const s1 = ctx.wait_for_seconds(t1);
+    ctx.block_until_idle();
+    auto const s0 = t0.try_get_seconds();
+    ctx.block_until_idle();
+    auto const s1 = t1.try_get_seconds();
     REQUIRE(s0.has_value());
     REQUIRE(s1.has_value());
 
@@ -90,5 +92,6 @@ TEST("sg vulkan - a timestamp records inside a rendering scope")
     ctx.submit_command_list(cc::move(cmd));
 
     CHECK(inside.is_valid());
-    CHECK(ctx.wait_for_ticks(inside).has_value());
+    ctx.block_until_idle();
+    CHECK(inside.try_get_ticks().has_value());
 }

@@ -602,8 +602,10 @@ sg::bytes_future vulkan_command_list::download_bytes_from_texture(sg::raw_textur
 
     vulkan_download_copy_job job;
     auto const size = layout.size_in_bytes;
-    job.deferred_cpu_copy
-        = [source = staging.mapped, dst_span, size] { cc::memcpy(dst_span.data(), source, size_t(size)); };
+    // `keep` owns the staging memory when the ring could not hold this readback, and is null otherwise — captured so
+    // the buffer outlives the actor's memcpy, which the epoch fence alone does not cover.
+    job.deferred_cpu_copy = [source = staging.mapped, dst_span, size, keep = staging.keep_alive]
+    { cc::memcpy(dst_span.data(), source, size_t(size)); };
     job.pin = std::weak_ptr<void const>(dst.pin());
     job.completion = completion;
     job.gate = gate;
@@ -692,7 +694,8 @@ sg::bytes_future vulkan_command_list::download_bytes_from_buffer(sg::raw_buffer_
     _ctx._download_inline.account_pending_copy(staging.epoch_copies);
 
     vulkan_download_copy_job job;
-    job.deferred_cpu_copy = [source = staging.mapped, dst_span, size_in_bytes]
+    // See the texture readback above for what `keep` is doing here.
+    job.deferred_cpu_copy = [source = staging.mapped, dst_span, size_in_bytes, keep = staging.keep_alive]
     { cc::memcpy(dst_span.data(), source, size_t(size_in_bytes)); };
     job.pin = std::weak_ptr<void const>(dst.pin());
     job.completion = completion;
@@ -755,6 +758,6 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
 // it reported false while the seams were stubs, and why it can stop doing so only now.
 bool vulkan_command_list::raytracing_is_supported() const
 {
-    return _ctx.is_raytracing_supported();
+    return _ctx.supports(sg::feature::raytracing);
 }
 } // namespace sg::backend::vulkan
