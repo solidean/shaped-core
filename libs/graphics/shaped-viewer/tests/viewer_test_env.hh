@@ -93,6 +93,18 @@ inline void drive_ambient_work()
     cc::this_thread_yield();
 }
 
+/// Runs async work that is ready on this thread until none is, so what a test started ends with the test.
+///
+/// The GPU tests share one context across the whole driver, so nothing tears it down between them.
+/// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, and a compile left
+/// unfinished is async work the next test inherits.
+inline void drain_ambient_work()
+{
+    while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
+    {
+    }
+}
+
 /// Drives `ctx.routines.tick()` until `ready()` holds, or until `timeout_secs` elapses; true when it came up.
 ///
 /// **A workaround, and marked as one.** A routine's shaders and pipelines build on the ambient async scheduler, off

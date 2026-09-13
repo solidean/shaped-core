@@ -79,6 +79,7 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
     }
 
     CHECK(frames_drawn >= 8);
+    sv_test::drain_ambient_work();
 
     // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
@@ -164,6 +165,8 @@ INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::
         // A deadline rather than a frame count — see the note at the top of this loop.
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
+
+    sv_test::drain_ambient_work();
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
     // non-empty, and that is the whole failure being guarded against.
@@ -309,6 +312,7 @@ INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
+    sv_test::drain_ambient_work();
     CHECK(traced_before_timeout);
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
