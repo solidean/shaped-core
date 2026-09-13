@@ -28,10 +28,11 @@ thread_local cc::impl::async_tls_block cc::impl::s_async_tls = {};
 
 namespace
 {
-// Process-wide default scheduler for compute nodes that cannot run on the current thread.
+// Process-wide compute and io schedulers: where unhomed work routes when it cannot run on the current thread.
 // Read-mostly, installed once at startup.
 // Atomic so installation is visible to worker threads without extra synchronization.
-cc::atomic<cc::async_scheduler*> s_default_scheduler = {nullptr};
+cc::atomic<cc::async_scheduler*> s_compute_scheduler = {nullptr};
+cc::atomic<cc::async_scheduler*> s_io_scheduler = {nullptr};
 
 // spilled dependency-list nodes come from the node slab allocator (wait-free free, cross-thread safe): a node
 // parked by one worker may be re-polled/torn down by another, which then frees these on a different thread.
@@ -99,14 +100,24 @@ cc::async_scheduler* cc::async_scheduler::current_or_null()
     return cc::impl::async_tls().scheduler;
 }
 
-void cc::async_scheduler::set_default(async_scheduler* sched)
+void cc::async_scheduler::set_compute(async_scheduler* sched)
 {
-    s_default_scheduler.store(sched, cc::memory_order_release);
+    s_compute_scheduler.store(sched, cc::memory_order_release);
 }
 
-cc::async_scheduler* cc::async_scheduler::default_or_null()
+cc::async_scheduler* cc::async_scheduler::compute_or_null()
 {
-    return s_default_scheduler.load(cc::memory_order_acquire);
+    return s_compute_scheduler.load(cc::memory_order_acquire);
+}
+
+void cc::async_scheduler::set_io(async_scheduler* sched)
+{
+    s_io_scheduler.store(sched, cc::memory_order_release);
+}
+
+cc::async_scheduler* cc::async_scheduler::io_or_null()
+{
+    return s_io_scheduler.load(cc::memory_order_acquire);
 }
 
 cc::async_worker_scope::async_worker_scope(cc::async_scheduler& scheduler) : _previous(cc::impl::async_tls().scheduler)
@@ -176,20 +187,50 @@ void cc::singlethreaded_scheduler::participate_until_ready(async_node_base& root
 // the ambient scheduler
 // ============================================================================
 
-void cc::install_default_async_scheduler(async_scheduler& scheduler)
+void cc::install_compute_async_scheduler(async_scheduler& scheduler)
 {
-    CC_ASSERT(async_scheduler::default_or_null() == nullptr,
-              "a default async scheduler is already installed; overriding a live default is almost never correct "
-              "(uninstall it first, or use scoped_default_async_scheduler)");
-    async_scheduler::set_default(&scheduler);
+    CC_ASSERT(async_scheduler::compute_or_null() == nullptr,
+              "a compute async scheduler is already installed; overriding a live one is almost never correct "
+              "(uninstall it first, or use scoped_compute_async_scheduler)");
+    async_scheduler::set_compute(&scheduler);
 }
 
-void cc::uninstall_default_async_scheduler(async_scheduler& scheduler)
+void cc::uninstall_compute_async_scheduler(async_scheduler& scheduler)
 {
-    CC_ASSERT(async_scheduler::default_or_null() == &scheduler, "uninstall_default_async_scheduler: this scheduler is "
-                                                                "not the currently installed default");
+    CC_ASSERT(async_scheduler::compute_or_null() == &scheduler, "uninstall_compute_async_scheduler: this scheduler is "
+                                                                "not the currently installed compute scheduler");
     CC_UNUSED(scheduler);
-    async_scheduler::set_default(nullptr);
+    async_scheduler::set_compute(nullptr);
+}
+
+void cc::install_io_async_scheduler(async_scheduler& scheduler)
+{
+    CC_ASSERT(async_scheduler::io_or_null() == nullptr, "an io async scheduler is already installed (uninstall it "
+                                                        "first, or use scoped_io_async_scheduler)");
+    async_scheduler::set_io(&scheduler);
+}
+
+void cc::uninstall_io_async_scheduler(async_scheduler& scheduler)
+{
+    CC_ASSERT(async_scheduler::io_or_null() == &scheduler, "uninstall_io_async_scheduler: this scheduler is not the "
+                                                           "currently installed io scheduler");
+    CC_UNUSED(scheduler);
+    async_scheduler::set_io(nullptr);
+}
+
+cc::async_scheduler& cc::compute_scheduler()
+{
+    auto* const installed = async_scheduler::compute_or_null();
+    CC_ASSERT(installed != nullptr, "no compute async scheduler installed: install one at startup with "
+                                    "cc::scoped_async_homes or cc::install_compute_async_scheduler");
+    return *installed;
+}
+
+cc::async_scheduler& cc::io_scheduler()
+{
+    if (auto* const io = async_scheduler::io_or_null())
+        return *io;
+    return compute_scheduler();
 }
 
 namespace
@@ -255,9 +296,9 @@ cc::async_scheduler& cc::ambient_async_scheduler()
     if (auto* const bound = async_scheduler::current_or_null())
         return *bound;
 
-    auto* const installed = async_scheduler::default_or_null();
+    auto* const installed = async_scheduler::compute_or_null();
     CC_ASSERT(installed != nullptr, "no ambient async scheduler: install one at startup with "
-                                    "cc::install_default_async_scheduler (an app), or let nexus install the run's "
+                                    "cc::install_compute_async_scheduler (an app), or let nexus install the run's "
                                     "own (a test declaring nx::no_scheduler has opted out of it)");
     return *installed;
 }
@@ -326,8 +367,8 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
 void cc::async_node_base::route_after_schedule()
 {
     // State is `scheduled` and nobody else will enqueue it, since schedule() is idempotent on `scheduled`.
-    // So we route exactly once: the current worker (hot) if a scope is active here, else the installed default pool.
-    // The default-pool fallback is thread-independent, which is what makes cross-thread wakeups correct.
+    // So we route exactly once: the current worker (hot) if a scope is active here, else the installed compute scheduler.
+    // The compute fallback is thread-independent, which is what makes cross-thread wakeups correct.
     auto self = async_node_ptr::from_alive(this); // strong > 0 throughout scheduling (our caller holds a handle)
     if (auto* sched = async_scheduler::current_or_null())
     {
@@ -335,13 +376,13 @@ void cc::async_node_base::route_after_schedule()
         return;
     }
 
-    if (auto* d = async_scheduler::default_or_null())
+    if (auto* d = async_scheduler::compute_or_null())
     {
         d->submit(cc::move(self));
         return;
     }
 
-    CC_ASSERT(false, "no scheduler to route a compute async: install a default async pool or drive it inside an "
+    CC_ASSERT(false, "no scheduler to route an async: install a compute async scheduler or drive it inside an "
                      "async_worker_scope");
 }
 

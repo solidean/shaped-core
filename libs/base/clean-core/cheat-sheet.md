@@ -842,7 +842,7 @@ cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::asy
 // cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
 // values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
 auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else default pool
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else compute
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
@@ -913,12 +913,16 @@ root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
+cc::scoped_async_homes const homes({.compute_workers = 7, .io_workers = 8}); // an app's startup: owns + installs both
+cc::async_scheduler& c = cc::compute_scheduler();        // the installed compute pool; asserts if none
+cc::async_scheduler& io = cc::io_scheduler();            // the io pool, or compute when no io pool is installed
 cc::async_thread_pool pool;                              // >=1 workers; default = hardware concurrency - 1 (below)
-cc::scoped_default_async_scheduler const ambient(pool);  // THE ambient scheduler: every async belongs to it
+cc::scoped_compute_async_scheduler const ambient(pool);  // or install one by hand (also scoped_io_async_scheduler)
 int v = cc::async_blocking_get(root);                    // caller PARTICIPATES (runs the graph, steals), then blocks
 // ^ hence the -1 default: the driving thread is a worker for the duration. A graph that never forks stays on it
 //   entirely — tens of ns, no cross-thread round trip (docs/systems/async.md "Driving").
-//   An app installs one at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
+//   An app installs compute at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
+//   Libraries never create their own compute/io pools — they use these, which is what avoids oversubscription.
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
 // WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.

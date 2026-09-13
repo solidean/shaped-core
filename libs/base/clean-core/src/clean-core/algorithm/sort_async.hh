@@ -198,7 +198,7 @@ template <class RangeT, class CompareF>
 /// The work runs on whichever scheduler drives the returned async:
 ///   * created inside a worker      -> starts on that worker's pool immediately;
 ///   * created on a foreign thread  -> stays cold until required by other async work, submitted through
-///     pool.blocking_get / root->schedule_on(pool), or scheduled onto an installed default pool.
+///     pool.blocking_get / root->schedule_on(pool), or scheduled onto the installed compute scheduler.
 /// NEVER SCHEDULED MEANS NEVER SORTED — nothing here blocks or drives itself, and there is deliberately no
 /// blocking convenience: pool.blocking_get asserts when called from a worker of that same pool, so a wrapper
 /// would be a trap that fires exactly in the composition case it exists to serve.

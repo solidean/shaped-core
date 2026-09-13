@@ -1544,21 +1544,21 @@ namespace
 /// A null `next` is the phase that wants none at all.
 struct scoped_ambient_override
 {
-    explicit scoped_ambient_override(cc::async_scheduler* next) : _previous(cc::async_scheduler::default_or_null())
+    explicit scoped_ambient_override(cc::async_scheduler* next) : _previous(cc::async_scheduler::compute_or_null())
     {
         if (_previous != nullptr)
-            cc::uninstall_default_async_scheduler(*_previous);
+            cc::uninstall_compute_async_scheduler(*_previous);
         if (next != nullptr)
-            cc::install_default_async_scheduler(*next);
+            cc::install_compute_async_scheduler(*next);
         _installed = next;
     }
 
     ~scoped_ambient_override()
     {
         if (_installed != nullptr)
-            cc::uninstall_default_async_scheduler(*_installed);
+            cc::uninstall_compute_async_scheduler(*_installed);
         if (_previous != nullptr)
-            cc::install_default_async_scheduler(*_previous);
+            cc::install_compute_async_scheduler(*_previous);
     }
 
     scoped_ambient_override(scoped_ambient_override const&) = delete;
@@ -1692,7 +1692,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     // It is never the scheduler driving the tests either, so a body that blocks on its own graph can never end up running another test's.
     cc::async_thread_pool run_ambient(config.jobs > 0 ? cc::max(config.jobs - 1, 1)
                                                       : cc::async_thread_pool::default_worker_count());
-    cc::scoped_default_async_scheduler const run_ambient_installed(run_ambient);
+    cc::scoped_compute_async_scheduler const run_ambient_installed(run_ambient);
 
     for (auto const& phase : phases)
     {

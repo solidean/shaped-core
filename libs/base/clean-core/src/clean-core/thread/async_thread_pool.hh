@@ -27,7 +27,7 @@
 // The measured scaling, and the four benchmarks behind it, are in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
 //
 //   cc::async_thread_pool pool;                           // hardware concurrency - 1; see the constructor
-//   cc::scoped_default_async_scheduler const ambient(pool); // every async now belongs to this pool
+//   cc::scoped_compute_async_scheduler const ambient(pool); // every async now belongs to this pool
 //   auto a = cc::make_async_lazy([] { return heavy(); });
 //   int v = cc::async_blocking_get(a);                    // drive on the ambient scheduler, block THIS thread
 //
@@ -39,7 +39,7 @@
 // itself, stealing like any worker, and parks only once there is genuinely nothing left for it.
 //
 // Lifetime: the pool must outlive every node routed to it, since a woken node reaches its pool through the
-// installed default by design.
+// installed compute scheduler by design.
 // The destructor stops the workers and joins them; it does not RUN outstanding work, so finish your graphs
 // before tearing a pool down.
 // Abandoning them deliberately is supported -- queued work is released rather than leaked (see the drain in the destructor).
@@ -65,7 +65,7 @@ struct cc::async_thread_pool final : async_scheduler
     [[nodiscard]] static int default_worker_count();
 
     /// Stops and joins all workers.
-    /// Asserts the pool is not still the installed default — uninstall it first, via uninstall_default_async_scheduler or scoped_default_async_scheduler.
+    /// Asserts the pool is not still the installed compute scheduler — uninstall it first, via uninstall_compute_async_scheduler or scoped_compute_async_scheduler.
     /// Does not drain queued work: outstanding graphs must have completed, or be intentionally abandoned.
     ~async_thread_pool() override;
 
@@ -193,4 +193,40 @@ private:
     int _thread_count = 0; // never anything else; kept so worker_count() reads the same either way
 
 #endif
+};
+
+/// Owns the process's compute and io pools and installs them for its lifetime — the startup an application writes once.
+///
+///   cc::scoped_async_homes const homes({.compute_workers = 7, .io_workers = 8});
+///
+/// Libraries never create pools of their own for either role; they reach these through cc::compute_scheduler() and
+/// cc::io_scheduler(), which is what keeps several libraries from oversubscribing one machine.
+/// With `io_workers == 0` no io pool is created, and cc::io_scheduler() falls back to compute.
+/// Must be constructed and destroyed on the same thread, like the install/uninstall pair it wraps.
+struct cc::scoped_async_homes
+{
+    struct config
+    {
+        /// Workers of the compute pool; defaults to cc::async_thread_pool::default_worker_count().
+        int compute_workers = -1;
+        /// Workers of the io pool; 0 creates none.
+        int io_workers = 0;
+    };
+
+    scoped_async_homes();
+    explicit scoped_async_homes(config cfg);
+    ~scoped_async_homes();
+
+    scoped_async_homes(scoped_async_homes const&) = delete;
+    scoped_async_homes(scoped_async_homes&&) = delete;
+    scoped_async_homes& operator=(scoped_async_homes const&) = delete;
+    scoped_async_homes& operator=(scoped_async_homes&&) = delete;
+
+    [[nodiscard]] async_thread_pool& compute() { return *_compute; }
+    /// Null when constructed with no io workers.
+    [[nodiscard]] async_thread_pool* io() { return _io.get(); }
+
+private:
+    cc::unique_ptr<async_thread_pool> _compute;
+    cc::unique_ptr<async_thread_pool> _io;
 };

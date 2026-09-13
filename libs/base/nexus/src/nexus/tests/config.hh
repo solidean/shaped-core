@@ -35,7 +35,7 @@ enum class nx::config::scheduler_mode
     none,     // bodies driven directly on the calling thread, in schedule order
 };
 
-// WHICH scheduler the async system uses inside a test — the one cc::install_default_async_scheduler installs.
+// WHICH scheduler the async system uses inside a test — the one cc::install_compute_async_scheduler installs.
 // Every async needs one, so a run provides it; a test only names this to get something other than the default.
 enum class nx::config::ambient_mode
 {

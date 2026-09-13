@@ -358,7 +358,9 @@ namespace impl
 {
 struct thread_pump_entry;
 }
-struct scoped_default_async_scheduler;
+struct scoped_compute_async_scheduler;
+struct scoped_io_async_scheduler;
+struct scoped_async_homes; // owns and installs the compute and io pools (thread/async_thread_pool.hh)
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
 struct async_ambient_scope;
 struct async_ambient_handle; // a captured chain head, re-installable on another thread

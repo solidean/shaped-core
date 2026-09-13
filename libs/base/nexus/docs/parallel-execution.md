@@ -50,8 +50,8 @@ Tests sharing a mode form one graph and run as one **phase**; phases run one aft
 
 A separate axis from the one above: **where the body runs** is one question, **which scheduler the body's own async work belongs to** is another.
 
-Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_default_async_scheduler`).
-A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the process-wide default.
+Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_compute_async_scheduler`).
+A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the installed compute scheduler.
 
 | Config item | The ambient scheduler |
 |---|---|

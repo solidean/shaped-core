@@ -89,10 +89,10 @@ TEST("async - many independent asyncs fan out across the pool", nx::config::no_s
 #if CC_HAS_THREADS
 TEST("async - external push from a foreign thread wakes a pool-parked dependent",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     cc::async_thread_pool pool(2);
-    cc::scoped_default_async_scheduler as_default(pool); // so the foreign push routes the woken dependent back here
+    cc::scoped_compute_async_scheduler as_default(pool); // so the foreign push routes the woken dependent back here
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -125,13 +125,56 @@ TEST("async - two pools coexist; each drives its own submitted root", nx::config
     CHECK(cc::async_blocking_get_on(pool_b, rb) == 9);
 }
 
-TEST("async - installing a second default pool asserts", nx::config::no_scheduler, exclusive("cc-default-async-pool"))
+TEST("async - installing a second compute scheduler asserts", nx::config::no_scheduler, exclusive("cc-compute-async-pool"))
 {
     cc::async_thread_pool pool_a(1);
     cc::async_thread_pool pool_b(1);
 
-    cc::scoped_default_async_scheduler as_default(pool_a);
-    CHECK_ASSERTS(cc::install_default_async_scheduler(pool_b)); // a default is already installed
+    cc::scoped_compute_async_scheduler as_default(pool_a);
+    CHECK_ASSERTS(cc::install_compute_async_scheduler(pool_b)); // a default is already installed
+}
+
+TEST("async - io_scheduler falls back to compute until an io scheduler is installed",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    cc::async_thread_pool compute(1);
+    cc::async_thread_pool io(1);
+
+    cc::scoped_compute_async_scheduler const as_compute(compute);
+    CHECK(&cc::compute_scheduler() == &compute);
+    CHECK(&cc::io_scheduler() == &compute);
+
+    {
+        cc::scoped_io_async_scheduler const as_io(io);
+        CHECK(&cc::io_scheduler() == &io);
+        CHECK_ASSERTS(cc::install_io_async_scheduler(compute)); // an io scheduler is already installed
+    }
+
+    CHECK(&cc::io_scheduler() == &compute);
+}
+
+TEST("async - scoped_async_homes installs both pools for its lifetime and nothing after",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    {
+        cc::scoped_async_homes homes({.compute_workers = 2, .io_workers = 1});
+        CHECK(&cc::compute_scheduler() == &homes.compute());
+        CHECK(homes.io() != nullptr);
+        CHECK(&cc::io_scheduler() == homes.io());
+
+        auto const root = cc::make_async_lazy([] { return 7; });
+        CHECK(cc::async_blocking_get(root) == 7);
+    }
+    CHECK(cc::async_scheduler::compute_or_null() == nullptr);
+    CHECK(cc::async_scheduler::io_or_null() == nullptr);
+
+    {
+        cc::scoped_async_homes homes({.compute_workers = 1});
+        CHECK(homes.io() == nullptr);
+        CHECK(&cc::io_scheduler() == &homes.compute()); // no io pool: io work shares compute
+    }
 }
 
 TEST("async - two pools coexist and drive independent graphs", nx::config::no_scheduler)
@@ -276,13 +319,13 @@ TEST("async - a pool with one worker still wakes for injected work", nx::config:
 
 TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked in a pool",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     // The graph is parked on an unpushed manual node inside the pool, so a singlethreaded_scheduler cannot advance it however hard it pumps.
     // That is a report, not an abort -- it is not this scheduler's graph to fail.
-    // The push then routes the woken dependent to the default pool, which finishes it.
+    // The push then routes the woken dependent to the compute scheduler, which finishes it.
     cc::async_thread_pool pool(1);
-    cc::scoped_default_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_default(pool);
 
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
@@ -299,7 +342,7 @@ TEST("async - a singlethreaded_scheduler reports no-progress on a graph parked i
 
 TEST("async - a subtree shared between a pool and a singlethreaded_scheduler stays correct",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     // The real shape of the hybrid case: an outer API alternating single- and multi-threaded work over asyncs shared with previous calls, so one subtree is reachable from both schedulers at once.
     // `shared` below is that subtree, driven on the pool; root_st is a dependent driven right here on a singlethreaded_scheduler.
@@ -312,7 +355,7 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
     // A wrong value or an abort is not legal.
     // Correctness only: st never publishes, so it may drag a subtree the pool could have parallelized into single-threaded execution.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_default(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -337,7 +380,7 @@ TEST("async - a subtree shared between a pool and a singlethreaded_scheduler sta
 
 TEST("async - a node migrated into a singlethreaded_scheduler is not stranded when it stops driving",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     // Regression for migration stranding, which is a HANG rather than a wrong answer.
     // TWO separate roots share a subtree: root_mt is submitted to the pool, root_st is driven on a singlethreaded_scheduler.
@@ -348,7 +391,7 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
     // try_blocking_get drains its queue before returning, with its worker scope still bound, settling root_mt into a completed or re-parked state.
     // This test must finish, not hang.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_default(pool);
 
     i64 const expected = i64(1) << 6;
     for (int iter = 0; iter < 50; ++iter)
@@ -370,12 +413,12 @@ TEST("async - a node migrated into a singlethreaded_scheduler is not stranded wh
 #if CC_HAS_THREADS
 TEST("async - a node woken across threads still runs under its own ambient context",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
     // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
     cc::async_thread_pool pool(4);
-    cc::scoped_default_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_default(pool);
 
     int scope_value = 7;
     auto gate = cc::make_async_manual<i64>();
@@ -420,7 +463,7 @@ TEST("async - a throwing frame on a worker does not take the process down", nx::
 
 TEST("async - a work item stolen by a parked participant runs under its own context, not the stealer's",
      nx::config::no_scheduler,
-     exclusive("cc-default-async-pool"))
+     exclusive("cc-compute-async-pool"))
 {
     // A blocking get parks INSIDE an ambient scope and steals while parked, so whatever it picks up would inherit that
     // scope if a dequeued item were treated like an inline-driven dependency.
@@ -430,7 +473,7 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
     // The pool's one worker is pinned inside `hog` for the whole test, so the parked participant is the only thread
     // left that can run `victim` — the steal is forced rather than raced.
     cc::async_thread_pool pool(1);
-    cc::scoped_default_async_scheduler as_default(
+    cc::scoped_compute_async_scheduler as_default(
         pool); // the pusher thread has nothing bound, and resolving `gate` routes a continuation
 
     cc::atomic<bool> hog_running = {false};
@@ -501,10 +544,10 @@ TEST("async - a pool releases a finished graph's value", nx::config::no_schedule
 
     // The pool OUTLIVES the graph, which is the whole point: checking after the pool dies proves nothing, since its
     // queue is released with it either way.
-    // It is the DEFAULT scheduler too, because that is what a scheduled async submits itself to at creation — the
+    // It is the COMPUTE scheduler too, because that is what a scheduled async submits itself to at creation — the
     // shape every `cached.acquire_*` in shaped-graphics has.
     cc::async_thread_pool pool(2);
-    cc::scoped_default_async_scheduler as_default(pool);
+    cc::scoped_compute_async_scheduler as_default(pool);
     {
         auto node = cc::make_async_scheduled<std::shared_ptr<int>>(
             [captured = owned](async_context<std::shared_ptr<int>>& actx) -> cc::async_step_status

@@ -128,7 +128,7 @@ Only what the signatures above cannot tell you.
   Bump `version` to replace a value.
 - **`acquire` singleflights the WHOLE pipeline**, lookup included — so a joiner never runs the compute, and never looks up either.
 - **A cold `acquire` runs only when something drives it.** It is scheduled here if a worker scope is active or a
-  default pool is installed, and left cold otherwise for the caller to drive — the same contract as every other `cc::async` surface.
+  compute scheduler is installed, and left cold otherwise for the caller to drive — the same contract as every other `cc::async` surface.
 - **The flight table holds operations WEAKLY.** Once the last caller lets go, the operation is forgotten, and a
   later `acquire` re-reads from storage.
   That extra lookup is the price of the cache not becoming a second, unbounded in-memory cache of every blob it ever handed out.

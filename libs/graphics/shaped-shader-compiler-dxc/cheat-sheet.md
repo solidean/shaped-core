@@ -71,7 +71,7 @@ compiler.version()               // -> cc::string_view "major.minor"; empty if D
 // drive: cc::async_blocking_get(sh) -> sg::compiled_shader; or poll sh->try_value() (-> compiled_shader_handle).
 
 // a compile failure surfaces as an async error (sh->has_error()); DXC diagnostics carried through.
-// runs on the ambient scheduler (cc::install_default_async_scheduler), which blocking on it drives.
+// runs on the ambient scheduler (cc::install_compute_async_scheduler), which blocking on it drives.
 // each worker uses its own thread-local compiler (compiler is one-per-thread). Cache preprocessed source.
 ```
 

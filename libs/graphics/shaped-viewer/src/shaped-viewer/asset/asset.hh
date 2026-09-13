@@ -20,7 +20,7 @@
 ///     }
 ///
 /// **What runs where.** Fetching, parsing and importing are work over bytes, and run on whatever scheduler `cc::async`
-/// was given — a `cc::scoped_default_async_scheduler`, or none, in which case nothing progresses until something
+/// was given — a `cc::scoped_compute_async_scheduler`, or none, in which case nothing progresses until something
 /// drives it and `wait` is that something.
 /// The one step that cannot move off the calling thread is minting the imported materials, since `material_library` is
 /// not thread-safe: `poll` is where that happens, which is why it is a call rather than a query.

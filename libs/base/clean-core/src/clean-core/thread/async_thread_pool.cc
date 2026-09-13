@@ -95,9 +95,9 @@ cc::async_thread_pool::~async_thread_pool()
     // Joins every worker, so a task that never returns hangs HERE rather than where it was submitted.
     CC_RECORD_SCOPE("cc.thread_pool.destroy");
 
-    CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
-              "scoped_default_async_scheduler)");
+    CC_ASSERT(async_scheduler::compute_or_null() != static_cast<async_scheduler*>(this),
+              "uninstall this pool as the default before destroying it (uninstall_compute_async_scheduler / "
+              "scoped_compute_async_scheduler)");
 
     _stop.store(true, cc::memory_order_release);
     {
@@ -597,9 +597,9 @@ cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(fal
 
 cc::async_thread_pool::~async_thread_pool()
 {
-    CC_ASSERT(async_scheduler::default_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_default_async_scheduler / "
-              "scoped_default_async_scheduler)");
+    CC_ASSERT(async_scheduler::compute_or_null() != static_cast<async_scheduler*>(this),
+              "uninstall this pool as the default before destroying it (uninstall_compute_async_scheduler / "
+              "scoped_compute_async_scheduler)");
 
     // No drain by hand, unlike the threaded destructor: _queue holds real handles, so abandoned work releases its own counts when the vector dies.
     // Same contract though — outstanding graphs are dropped, not run.
@@ -667,3 +667,33 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 }
 
 #endif // CC_HAS_THREADS
+
+// ============================================================================
+// scoped_async_homes
+// ============================================================================
+
+cc::scoped_async_homes::scoped_async_homes() : scoped_async_homes(config{})
+{
+}
+
+cc::scoped_async_homes::scoped_async_homes(config cfg)
+{
+    auto const compute_workers
+        = cfg.compute_workers < 0 ? async_thread_pool::default_worker_count() : cfg.compute_workers;
+    _compute = cc::make_unique<async_thread_pool>(compute_workers);
+    install_compute_async_scheduler(*_compute);
+
+    if (cfg.io_workers > 0)
+    {
+        _io = cc::make_unique<async_thread_pool>(cfg.io_workers);
+        install_io_async_scheduler(*_io);
+    }
+}
+
+cc::scoped_async_homes::~scoped_async_homes()
+{
+    // Uninstalled before either pool dies: a pool asserts it is no longer installed when it is destroyed.
+    if (_io != nullptr)
+        uninstall_io_async_scheduler(*_io);
+    uninstall_compute_async_scheduler(*_compute);
+}

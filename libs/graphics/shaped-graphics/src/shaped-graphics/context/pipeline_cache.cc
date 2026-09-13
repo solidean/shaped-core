@@ -172,7 +172,7 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
     // A build parks on the store, so it needs somewhere to resume.
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it —
     // a cache may never change what a caller gets, only how fast.
-    if (cc::async_scheduler::current_or_null() == nullptr && cc::async_scheduler::default_or_null() == nullptr)
+    if (!cc::impl::async_can_schedule_here())
         return nullptr;
 
     // Resolved lazily so that merely creating a context never opens a cache file.

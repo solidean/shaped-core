@@ -59,7 +59,7 @@ sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already se
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
 // to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
-// sg REQUIRES an installed ambient async scheduler (cc::install_default_async_scheduler, or a nexus run's)
+// sg REQUIRES an installed ambient async scheduler (cc::install_compute_async_scheduler, or a nexus run's)
 ```
 
 ## Enums

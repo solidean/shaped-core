@@ -153,7 +153,7 @@ bcache::blob_cache* shader_cache::resolve_blob_cache()
 {
     // A compile parks on the store, so it needs somewhere to resume.
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it.
-    if (cc::async_scheduler::current_or_null() == nullptr && cc::async_scheduler::default_or_null() == nullptr)
+    if (!cc::impl::async_can_schedule_here())
         return nullptr;
 
     if (!_blob_cache.has_value())

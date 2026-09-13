@@ -589,7 +589,7 @@ template <class U, class Ue>
 ///   auto const v = co_await a + co_await b;    // neither await starts anything
 ///
 /// Idempotent, and safe on a node that is already scheduled, running or ready.
-/// A no-op where nothing could be reached — no worker scope bound here and no default pool installed — which leaves the node cold rather than asserting.
+/// A no-op where nothing could be reached — no worker scope bound here and no compute scheduler installed — which leaves the node cold rather than asserting.
 template <class T, class E>
 shared_async<T, E> async_start(shared_async<T, E> h)
 {

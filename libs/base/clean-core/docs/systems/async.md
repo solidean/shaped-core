@@ -200,14 +200,18 @@ The handler is C++ EH only, which is what keeps a hardware fault from being swal
 The graph is **decoupled from any executor**: a worker binds a scheduler to its thread with `async_worker_scope`, and nodes reach it via `async_scheduler::current()`.
 
 **Touching the async system requires an ambient scheduler**, and it is an error to do so without one.
-The ambient scheduler is the one bound to this thread, or else the process-wide default:
+The ambient scheduler is the one bound to this thread, or else the installed compute scheduler:
 
 ```cpp
-cc::async_thread_pool pool;
-cc::scoped_default_async_scheduler const ambient(pool);   // an application does this once, early
+cc::scoped_async_homes const homes({.compute_workers = 7, .io_workers = 8}); // an application does this once, early
 ```
 
 An application installs one at startup, and a nexus run installs one per phase — a test or example opts out with `nx::no_scheduler`, and then owns the decision itself.
+
+**cc names the places work runs, and the application sizes them.**
+`cc::compute_scheduler()` is the installed compute pool; `cc::io_scheduler()` is the installed io pool, or compute when there is none.
+A library never creates a compute or io pool of its own: several libraries each sizing a pool to the machine oversubscribe it, and a shared vocabulary is what prevents that.
+`cc::scoped_async_homes` owns and installs both; `scoped_compute_async_scheduler` and `scoped_io_async_scheduler` install a pool the caller already owns.
 `cc::ambient_async_scheduler()` is the lookup, and it asserts rather than falling back, so "nobody installed one" is reported where it happens instead of surfacing as a graph that never runs.
 
 There are two schedulers, and they present the same surface:
@@ -238,7 +242,7 @@ That is an ordinary state — a foreign thread has never had one — and the sco
 It is what a host driving foreign code inside its own graph needs.
 Left bound, a node that code schedules lands in the *host's* queue and is run later, outside the lifetime of everything its frame captured.
 Nexus unbinds around every test body for exactly that reason ([parallel-execution](../../../nexus/docs/parallel-execution.md)).
-A node created inside the scope still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
+A node created inside the scope still routes to the installed compute scheduler, exactly as it would on a thread that never had a scheduler.
 
 ### Blocking on a graph
 
@@ -427,7 +431,7 @@ It happens at the initial suspend, which is over before the caller ever sees the
 It cannot move into `get_return_object` either: the coroutine is not suspended there yet, so a peer could resume a frame still inside its own ramp.
 
 `cc::async_start(h)` is the explicit "and go" for a handle you already hold.
-It is idempotent, and a no-op where nothing could be reached — no worker scope bound and no default pool — which leaves the node cold rather than asserting.
+It is idempotent, and a no-op where nothing could be reached — no worker scope bound and no compute scheduler — which leaves the node cold rather than asserting.
 
 **`co_await` never starts work.**
 `require()` is a wakeup edge, and one await parks on one dependency, so **awaiting two cold asyncs in sequence runs them in sequence**.
@@ -499,7 +503,7 @@ It is deliberately not lock-free: only genuinely foreign submits reach it — a 
 
 ```cpp
 cc::async_thread_pool pool(cc::recommended_worker_count());
-cc::scoped_default_async_scheduler const ambient(pool);  // every async now belongs to this pool
+cc::scoped_compute_async_scheduler const ambient(pool);  // every async now belongs to this pool
 auto root = build_graph();
 int v = cc::async_blocking_get(root);                    // participate in the pool, block THIS thread
 ```
@@ -575,9 +579,9 @@ The spawn tree is the pure-overhead metric — its leaves do nothing, so its ns/
 
 ### Routing to a specific pool
 There is no task-class or affinity system: every worker in every pool serves all compute work, and steals are always eligible.
-A node with no active worker scope and no explicit target routes to the installed **default** pool.
+A node with no active worker scope and no explicit target routes to the installed **compute** scheduler.
 To drive a graph on a *specific* pool, submit its root there — `pool.blocking_get(root)`, or the lower-level `root->schedule_on(pool)` — rather than pinning the node.
-Build and coexist as many pools as you like; only one may be the process-wide default at a time.
+Build and coexist as many pools as you like; only one may be the installed compute scheduler at a time.
 
 ### Node layout (size & locking)
 

@@ -170,46 +170,84 @@ public:
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
 
-    /// The process-wide default scheduler that compute nodes route to when they cannot run on the current thread.
-    /// Null unless one is installed (see install_default_async_scheduler).
+    /// The process-wide compute scheduler: where unhomed work routes when it cannot run on the current thread.
+    /// Null unless one is installed (see install_compute_async_scheduler).
     /// Read-mostly — install once at startup, before the graphs that depend on it run.
-    static void set_default(async_scheduler* sched);
-    [[nodiscard]] static async_scheduler* default_or_null();
+    static void set_compute(async_scheduler* sched);
+    [[nodiscard]] static async_scheduler* compute_or_null();
+
+    /// The process-wide io scheduler, or null when none is installed — cc::io_scheduler() is the lookup that falls back to compute.
+    static void set_io(async_scheduler* sched);
+    [[nodiscard]] static async_scheduler* io_or_null();
 };
 
 namespace cc
 {
-/// Install `scheduler` as the process-wide default: everything the async system does needs one, and this is where it comes from.
+/// Install `scheduler` as the process-wide compute scheduler: everything the async system does needs one, and this is where it comes from.
 ///
 /// **An application installs one early, before any async work**, and a nexus run installs one per phase — see nx::no_scheduler for the test that wants none.
-/// cc::async_thread_pool is the multi-threaded one to reach for; cc::singlethreaded_scheduler makes every graph run inline on whoever drives it.
+/// cc::scoped_async_homes installs compute and io together; cc::singlethreaded_scheduler makes every graph run inline on whoever drives it.
 ///
-/// Asserts if a default is already installed: overriding a live one is almost never correct, since asyncs created under the old default may outlive the new one.
-/// Pair with uninstall_default_async_scheduler, or use scoped_default_async_scheduler.
-void install_default_async_scheduler(async_scheduler& scheduler);
+/// Asserts if one is already installed: overriding a live one is almost never correct, since asyncs created under the old one may outlive the new one.
+/// Pair with uninstall_compute_async_scheduler, or use scoped_compute_async_scheduler.
+void install_compute_async_scheduler(async_scheduler& scheduler);
 
-/// Remove `scheduler` as the process-wide default.
+/// Remove `scheduler` as the process-wide compute scheduler.
 /// Asserts it is the currently installed one, and must run before it is destroyed.
-void uninstall_default_async_scheduler(async_scheduler& scheduler);
+void uninstall_compute_async_scheduler(async_scheduler& scheduler);
 
-/// The scheduler this thread's async work belongs to: the bound worker scope if there is one, else the installed default.
+/// Install `scheduler` as the process-wide io scheduler, for work that blocks — reads, network, anything sized for waiting rather than for cores.
+/// Optional: with none installed, cc::io_scheduler() hands back compute instead.
+/// Asserts if one is already installed.
+void install_io_async_scheduler(async_scheduler& scheduler);
+
+/// Remove `scheduler` as the process-wide io scheduler; asserts it is the installed one.
+void uninstall_io_async_scheduler(async_scheduler& scheduler);
+
+/// The installed compute scheduler.
+/// Asserts if none is installed.
+[[nodiscard]] async_scheduler& compute_scheduler();
+
+/// The installed io scheduler, or the compute scheduler when no io scheduler is installed.
+/// The fallback keeps a library that hops to io working in a binary that never set one up, at the cost of that work sharing compute's cores.
+[[nodiscard]] async_scheduler& io_scheduler();
+
+/// The scheduler this thread's async work belongs to: the bound worker scope if there is one, else the installed compute scheduler.
 /// Asserts if there is neither — interacting with the async system without an ambient scheduler is an error, not a fallback.
 [[nodiscard]] async_scheduler& ambient_async_scheduler();
 } // namespace cc
 
-/// RAII: installs `scheduler` as the process-wide default for the scope.
-struct cc::scoped_default_async_scheduler
+/// RAII: installs `scheduler` as the process-wide compute scheduler for the scope.
+struct cc::scoped_compute_async_scheduler
 {
-    explicit scoped_default_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
+    explicit scoped_compute_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
     {
-        install_default_async_scheduler(scheduler);
+        install_compute_async_scheduler(scheduler);
     }
-    ~scoped_default_async_scheduler() { uninstall_default_async_scheduler(_scheduler); }
+    ~scoped_compute_async_scheduler() { uninstall_compute_async_scheduler(_scheduler); }
 
-    scoped_default_async_scheduler(scoped_default_async_scheduler const&) = delete;
-    scoped_default_async_scheduler(scoped_default_async_scheduler&&) = delete;
-    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler const&) = delete;
-    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler&&) = delete;
+    scoped_compute_async_scheduler(scoped_compute_async_scheduler const&) = delete;
+    scoped_compute_async_scheduler(scoped_compute_async_scheduler&&) = delete;
+    scoped_compute_async_scheduler& operator=(scoped_compute_async_scheduler const&) = delete;
+    scoped_compute_async_scheduler& operator=(scoped_compute_async_scheduler&&) = delete;
+
+private:
+    async_scheduler& _scheduler;
+};
+
+/// RAII: installs `scheduler` as the process-wide io scheduler for the scope.
+struct cc::scoped_io_async_scheduler
+{
+    explicit scoped_io_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
+    {
+        install_io_async_scheduler(scheduler);
+    }
+    ~scoped_io_async_scheduler() { uninstall_io_async_scheduler(_scheduler); }
+
+    scoped_io_async_scheduler(scoped_io_async_scheduler const&) = delete;
+    scoped_io_async_scheduler(scoped_io_async_scheduler&&) = delete;
+    scoped_io_async_scheduler& operator=(scoped_io_async_scheduler const&) = delete;
+    scoped_io_async_scheduler& operator=(scoped_io_async_scheduler&&) = delete;
 
 private:
     async_scheduler& _scheduler;
@@ -236,7 +274,7 @@ private:
 ///
 /// The state it restores is an ordinary one — a foreign thread has never had a scheduler bound — so this only makes it reachable from inside a worker.
 /// It is what a host driving foreign code inside its own graph needs: work that code schedules must not land in the host's queue, to be run later, out of its owner's lifetime.
-/// A node created here still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
+/// A node created here still routes to the installed compute scheduler, exactly as it would on a thread that never had a scheduler.
 struct cc::async_no_worker_scope
 {
     async_no_worker_scope();
@@ -688,7 +726,7 @@ public:
     // scheduling / driving
 public:
     /// Idempotent hint: make this node runnable.
-    /// Routes to the current worker (hot) if a worker scope is active here, else to the installed default pool.
+    /// Routes to the current worker (hot) if a worker scope is active here, else to the installed compute scheduler.
     /// Never implies ownership of execution, and is safe to call twice, or from a completed dependency waking many dependents.
     /// A running node records a re-poll request instead of enqueuing.
     /// The node must be shared-owned, created via make_shared.

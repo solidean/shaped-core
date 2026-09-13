@@ -277,11 +277,11 @@ template <class E>
 namespace impl
 {
 /// Whether scheduling a node from here would reach a scheduler at all.
-/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed default pool, so every "start it now" path tests this first.
+/// async_node_base::schedule() asserts with neither a bound worker scope nor an installed compute scheduler, so every "start it now" path tests this first.
 /// A node left cold is not a lost computation — it runs when something requires it, or when a driver schedules it.
 [[nodiscard]] inline bool async_can_schedule_here()
 {
-    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr;
+    return cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::compute_or_null() != nullptr;
 }
 
 /// Tag selecting async's manual/promise constructor, born external_pending in a single store.
@@ -838,7 +838,7 @@ template <class T, class E = async_error, class F, class... Args>
     return node;
 }
 
-/// Like make_async_lazy, but eager: it schedules the node immediately, on the worker scope active here or else the installed default pool.
+/// Like make_async_lazy, but eager: it schedules the node immediately, on the worker scope active here or else the installed compute scheduler.
 /// With neither, it stays cold and is scheduled when first required or driven.
 /// Same forms as make_async_lazy.
 template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
@@ -955,7 +955,7 @@ void async_drive_until_ready(async_node_base& root);
 /// Drive `root` to completion on the ambient scheduler and return its outcome.
 /// Ready on return, always: value or error, never still pending.
 ///
-/// Requires an ambient scheduler (cc::install_default_async_scheduler, or a nexus run's).
+/// Requires an ambient scheduler (cc::install_compute_async_scheduler, or a nexus run's).
 /// Never returns while the graph is unfinished, so a node awaiting a push that never comes hangs here — that is the
 /// honest failure, and try_async_blocking_get_for is the way out for a caller that cannot afford it.
 ///
