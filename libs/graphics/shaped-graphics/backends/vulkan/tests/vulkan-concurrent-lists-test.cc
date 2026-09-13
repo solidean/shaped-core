@@ -48,7 +48,7 @@ bool matches(cc::span<byte const> bytes, isize count, int salt)
 }
 } // namespace
 
-TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next")
+TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next", exclusive("vulkan-device"))
 {
     auto const ctx = sg::backend::vulkan::test::make_context();
     if (ctx == nullptr)
@@ -81,7 +81,7 @@ TEST("sg vulkan - a buffer written by one concurrently recorded list and read by
     ctx->block_until_idle();
 }
 
-TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next")
+TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next", exclusive("vulkan-device"))
 {
     auto const ctx = sg::backend::vulkan::test::make_context();
     if (ctx == nullptr)

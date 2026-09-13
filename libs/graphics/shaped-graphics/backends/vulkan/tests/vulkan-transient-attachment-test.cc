@@ -30,7 +30,7 @@ constexpr int k_frames = 120;
 constexpr int k_epochs_in_flight = 2;
 } // namespace
 
-TEST("sg vulkan - a transient attachment recreated every pipelined epoch")
+TEST("sg vulkan - a transient attachment recreated every pipelined epoch", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)

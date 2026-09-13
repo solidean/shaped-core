@@ -64,7 +64,7 @@ void exercise_context(vulkan::vulkan_context& ctx)
 }
 } // namespace
 
-TEST("sg vulkan - context")
+TEST("sg vulkan - context", exclusive("vulkan-device"))
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
@@ -74,7 +74,7 @@ TEST("sg vulkan - context")
     exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
 }
 
-TEST("sg vulkan - software-preferred context")
+TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
 {
     // prefer_software picks a CPU device (e.g. lavapipe) when one is present, and falls back to hardware otherwise.
     // Either way the same paths are exercised.
@@ -91,7 +91,7 @@ namespace
 using vulkan::test::make_context; // see vulkan-test-common.hh
 } // namespace
 
-TEST("sg vulkan - epoch advance and retire")
+TEST("sg vulkan - epoch advance and retire", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -108,7 +108,7 @@ TEST("sg vulkan - epoch advance and retire")
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }
 
-TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires")
+TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -130,7 +130,7 @@ TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch 
     CHECK(finalized);
 }
 
-TEST("sg vulkan - command pools are recycled across epochs")
+TEST("sg vulkan - command pools are recycled across epochs", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -159,7 +159,7 @@ TEST("sg vulkan - command pools are recycled across epochs")
     CHECK(free_count() == 1);
 }
 
-TEST("sg vulkan - submission token reports completion")
+TEST("sg vulkan - submission token reports completion", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -176,7 +176,7 @@ TEST("sg vulkan - submission token reports completion")
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-TEST("sg vulkan - throttle bounds epochs in flight")
+TEST("sg vulkan - throttle bounds epochs in flight", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -192,7 +192,7 @@ TEST("sg vulkan - throttle bounds epochs in flight")
     CHECK(in_flight <= 1);
 }
 
-TEST("sg vulkan - the command list reports the device's ray-tracing answer")
+TEST("sg vulkan - the command list reports the device's ray-tracing answer", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -211,7 +211,7 @@ TEST("sg vulkan - the command list reports the device's ray-tracing answer")
     c.drop_vulkan_command_list(cc::move(cmd.value()));
 }
 
-TEST("sg vulkan - an installed message callback receives validation messages")
+TEST("sg vulkan - an installed message callback receives validation messages", exclusive("vulkan-device"))
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
@@ -241,7 +241,7 @@ TEST("sg vulkan - an installed message callback receives validation messages")
     CHECK(seen == 1);
 }
 
-TEST("sg vulkan - the debug messenger reaches the installed callback")
+TEST("sg vulkan - the debug messenger reaches the installed callback", exclusive("vulkan-device"))
 {
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
@@ -274,7 +274,7 @@ TEST("sg vulkan - the debug messenger reaches the installed callback")
     c.set_message_callback({});
 }
 
-TEST("sg vulkan - an inline upload records, submits and reclaims its staging")
+TEST("sg vulkan - an inline upload records, submits and reclaims its staging", exclusive("vulkan-device"))
 {
     auto handle = make_context(); // installs the fail-on-validation listener
     if (handle == nullptr)
@@ -301,7 +301,7 @@ TEST("sg vulkan - an inline upload records, submits and reclaims its staging")
     CHECK(!c.is_device_lost());
 }
 
-TEST("sg vulkan - staging survives more uploads than the ring holds at once")
+TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
 {
     // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
     // in-flight epoch and reuse the space it frees.
@@ -329,7 +329,7 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once")
     CHECK(!c.is_device_lost());
 }
 
-TEST("sg vulkan - a texture round-trips through the staging rings")
+TEST("sg vulkan - a texture round-trips through the staging rings", exclusive("vulkan-device"))
 {
     auto handle = make_context(); // installs the fail-on-validation listener
     if (handle == nullptr)
@@ -371,7 +371,7 @@ TEST("sg vulkan - a texture round-trips through the staging rings")
     CHECK(matched);
 }
 
-TEST("sg vulkan - a block-compressed texture stages at its block size")
+TEST("sg vulkan - a block-compressed texture stages at its block size", exclusive("vulkan-device"))
 {
     // BC formats store whole 4x4 blocks, so an 8x8 BC1 subresource is 4 blocks of 8 bytes rather than 8x8 texels.
     // Getting the staging size or its offset alignment wrong here is a validation error rather than a wrong image,
@@ -405,7 +405,7 @@ TEST("sg vulkan - a block-compressed texture stages at its block size")
     CHECK(read.value().size() == 32);
 }
 
-TEST("sg vulkan - the device reports descriptor buffer properties")
+TEST("sg vulkan - the device reports descriptor buffer properties", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -427,7 +427,7 @@ TEST("sg vulkan - the device reports descriptor buffer properties")
     CHECK((props.descriptorBufferOffsetAlignment & (props.descriptorBufferOffsetAlignment - 1)) == 0);
 }
 
-TEST("sg vulkan - the descriptor heap allocates, frees and coalesces")
+TEST("sg vulkan - the descriptor heap allocates, frees and coalesces", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)
@@ -462,7 +462,7 @@ TEST("sg vulkan - the descriptor heap allocates, frees and coalesces")
     CHECK(heap.device_address() != 0);
 }
 
-TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch")
+TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch", exclusive("vulkan-device"))
 {
     auto handle = make_context();
     if (handle == nullptr)

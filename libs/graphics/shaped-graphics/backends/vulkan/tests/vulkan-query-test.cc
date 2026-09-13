@@ -19,7 +19,7 @@ namespace
 namespace vulkan = sg::backend::vulkan;
 } // namespace
 
-TEST("sg vulkan - a timestamp pair measures real work")
+TEST("sg vulkan - a timestamp pair measures real work", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
@@ -61,7 +61,7 @@ TEST("sg vulkan - a timestamp pair measures real work")
     CHECK(elapsed < 1.0);
 }
 
-TEST("sg vulkan - a timestamp records inside a rendering scope")
+TEST("sg vulkan - a timestamp records inside a rendering scope", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)

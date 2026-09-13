@@ -14,6 +14,10 @@ namespace sg::backend::vulkan::test
 {
 /// A fresh context with the fail-on-validation listener installed, or nullptr on a host with no Vulkan device.
 ///
+/// A test that creates a context takes `exclusive("vulkan-device")`.
+/// Device creation and teardown are serialized process-wide (vulkan_driver_lock.hh), and a teardown slows with every
+/// other device still alive, so thirty tests creating contexts at once run twice as long as the same thirty in turn.
+///
 /// Any validation message of warning severity or worse fails the running test, which is what makes the layer a gate
 /// rather than log noise.
 /// A test whose subject IS the bad input clears the callback for its duration.

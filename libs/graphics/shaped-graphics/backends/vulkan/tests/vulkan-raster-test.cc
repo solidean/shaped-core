@@ -57,7 +57,7 @@ sg::vertex_input_layout make_vertex_layout()
 }
 } // namespace
 
-TEST("sg vulkan - a rendering scope clears, draws and stores")
+TEST("sg vulkan - a rendering scope clears, draws and stores", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
@@ -157,7 +157,7 @@ TEST("sg vulkan - a rendering scope clears, draws and stores")
 // and reopen it with LOAD ops.
 // Without that the validation layer reports VUID-vkCmdPipelineBarrier2-None-09553, and with a broken reopen the clear
 // would come back instead of the drawn pixels.
-TEST("sg vulkan - a draw depending on a dispatch in the same list")
+TEST("sg vulkan - a draw depending on a dispatch in the same list", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
@@ -282,7 +282,7 @@ TEST("sg vulkan - a draw depending on a dispatch in the same list")
 // its own — a pool worker holding the build node past release_cached_pipelines — rather than because anyone wrote
 // the code below.
 // Declaring the handle before the context is the deterministic form of the same thing.
-TEST("sg vulkan - a pipeline handle may outlive its context")
+TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-device"))
 {
     sg::raster_pipeline_handle pipeline; // declared first, so it is destroyed LAST — after the context
     {

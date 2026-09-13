@@ -37,7 +37,7 @@ sg::raw_buffer_handle make_triangle_vertices(sg::context& ctx)
 }
 } // namespace
 
-TEST("sg vulkan - builds a triangle blas and a tlas over it")
+TEST("sg vulkan - builds a triangle blas and a tlas over it", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
@@ -86,7 +86,7 @@ TEST("sg vulkan - builds a triangle blas and a tlas over it")
     CHECK(!tlas->is_expired());
 }
 
-TEST("sg vulkan - builds a procedural (aabb) blas")
+TEST("sg vulkan - builds a procedural (aabb) blas", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
@@ -125,7 +125,7 @@ TEST("sg vulkan - builds a procedural (aabb) blas")
 //
 // The alternating rays are what make the readback meaningful: a backend that wrote a constant, traced against an
 // empty scene, or mixed up the miss and hit groups would all produce a uniform buffer.
-TEST("sg vulkan - traces rays against a tlas")
+TEST("sg vulkan - traces rays against a tlas", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context();
     if (handle == nullptr)
