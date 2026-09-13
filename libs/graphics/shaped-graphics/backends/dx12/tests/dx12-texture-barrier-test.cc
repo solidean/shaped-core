@@ -330,7 +330,8 @@ INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers on WARP", (dx12::dx
     emit(c.acquire_pre_list(*cmd.value()), dtex->finalize_slot(cmd.value()->slot()));
 
     c.submit_dx12_command_list(cc::move(cmd.value()));
-    c.advance_epoch_and_wait_for_idle();
+    c.advance_epoch();
+    c.block_until_idle();
 
     // Getting here without a device-removed means the debug layer accepted the texture barriers.
     CHECK(!c.is_shut_down());

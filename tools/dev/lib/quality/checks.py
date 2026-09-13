@@ -6,10 +6,12 @@ This module only knows how to *run* a selected set: static checks first, then th
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..core import console, profile, ui
+from ..core.report import fmt_dur
 from .changes import ChangeScope
 
 
@@ -51,6 +53,7 @@ def run_checks(
     `scope` is handed to every check identically; a check that is always repo-wide ignores it.
     """
     failed: list[str] = []
+    timings: list[tuple[str, float]] = []
 
     # The gate list is known upfront, so the region can say which gate of how many is running.
     with ui.phase("check", total=len(selected)) as gates:
@@ -58,8 +61,10 @@ def run_checks(
         def run_one(c: Check) -> None:
             ui.write_line(console.dim(f"\n--- running {c.name} ---"))
             gates.advance(c.name)
+            started = time.monotonic()
             with profile.span(c.name, type="check-gate"):
                 ok = c.run(fix=fix, scope=scope, mirror=mirror, verbose=verbose)
+            timings.append((c.name, time.monotonic() - started))
             if not ok:
                 failed.append(c.name)
 
@@ -77,6 +82,14 @@ def run_checks(
                 gates.advance(c.name)
             else:
                 run_one(c)
+
+    # One line for the static gates, so a linter or a formatter quietly becoming a time sink is visible rather than
+    # buried in the total.
+    # The test gate prints its own per-preset breakdown and is left out of this.
+    static = [(name, secs) for name, secs in timings if name != "test"]
+    if static:
+        parts = ", ".join(f"{name} {fmt_dur(secs)}" for name, secs in static)
+        ui.write_line(console.dim(f"\nstatic gates: {parts}  (total {fmt_dur(sum(s for _, s in static))})"))
 
     if failed:
         ui.write_line(console.red("\ncheck: FAIL"))

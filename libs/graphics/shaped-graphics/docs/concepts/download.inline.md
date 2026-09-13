@@ -21,14 +21,14 @@ In a build without threads the actor owns no thread and runs on whoever pumps it
 
 The completion-guaranteeing call is **`ctx.wait_for(future)`**.
 The future itself carries only the non-blocking `is_ready()` / `try_get_bytes()` polls, since a blocking wait is a context-level effect and is kept off the future.
-`wait_for` refuses to block until the list is *submitted* — blocking earlier would stall the very thread that must submit — and returns `nullopt` for an unsubmitted or cancelled download.
-A future is waitable as soon as its list is submitted, **before** its epoch ends, with no `advance_epoch` required.
+A download becomes observable as soon as its list is submitted, **before** its epoch ends, with no `advance_epoch` required.
+One recorded into a list nobody has submitted cannot progress at all, which is why nothing waits for it: that work is the caller's to submit.
 
-**What epoch waits do not guarantee.**
-`advance_epoch(...)` and `advance_epoch_and_wait_for_idle()` wait on the **GPU epoch fence** only.
-Reaching idle means every readback copy has finished on the GPU and the ring bytes are valid, but the actor thread may not yet have been scheduled to run the CPU memcpy.
-So `future.is_ready()` can be transiently **false** right after idle returns — a scheduling race, not a bug.
-Only `ctx.wait_for(future)`, which blocks on the future's own completion node, guarantees the bytes have landed in the caller's destination.
+**What an epoch fence does not guarantee.**
+`advance_epoch` and the epoch fence say only that the GPU is done: every readback copy has finished and the ring bytes are valid.
+The actor thread may not yet have been scheduled to run the CPU memcpy, so `future.is_ready()` can be transiently **false** right after — a scheduling race, not a bug.
+`future.completion()` is how a caller learns the bytes landed without waiting, and `ctx.block_until_idle()` is how it waits.
+That one drains the transfer actors as well as the GPU, counting outstanding jobs rather than watching an inbox.
 
 ## Why reclaim is epoch-granular (the load-bearing decision)
 
@@ -62,7 +62,12 @@ One counter subsumes both hazards, which is why the download system needs **no**
 Only *space reclaim* is coarsened to epoch granularity, not the copies themselves.
 The actor still copies in submission order rather than serializing globally, so interleaved lists pipeline.
 
-As with upload, a single epoch whose inline downloads exceed the ring is a hard budget error — there is no earlier epoch left to wait on.
+As with upload, a single epoch whose inline downloads exceed the ring has nothing left to wait on, so it falls back to a one-off dedicated staging buffer.
+So does a single readback larger than the whole ring.
+See [why that is not an assert](upload.inline.md#the-fallback-and-why-it-is-not-an-assert).
+
+A readback's fallback buffer has a **second liveness axis** the upload's does not: the actor memcpys out of it on its own thread, after the GPU copy the epoch fence gates.
+So it is owned by the copy jobs built from it rather than by the epoch, and it dies with the last of them.
 
 ## Dropping a list cancels its downloads
 
@@ -121,7 +126,6 @@ The freshly-opened epoch has no downloads yet, so that outstanding count reaches
 A read larger than the ring, or one straddling the seam, splits into several contiguous windows.
 A texture region's chunks are each un-padded into the tightly-packed destination.
 
-**Deferred:** a fallback path when a single epoch's downloads exceed the ring.
 Also the finer split GPU/CPU watermarks noted in [epochs](epochs.md), should profiling show the single-counter coarsening costs pipelining.
 
 ## See also

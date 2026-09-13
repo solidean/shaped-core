@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/time.hh> // cc::current_time_steady_secs
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -18,16 +19,23 @@ using namespace cnet;
 
 namespace
 {
-bool pump_until(cc::function_ref<bool()> done, i32 rounds = 1000)
+/// Bounded by the WALL CLOCK rather than by a round count, even though the link's latency is on the injected clock.
+/// A fixed number of spins is a budget that shrinks as the machine gets busier: the same 1000 rounds that were seconds
+/// on an idle host are milliseconds when the rest of the suite is running, which made this a flake rather than a test.
+/// The deadline is a timeout, never the thing under test -- what is being measured still advances only when the
+/// injected clock does.
+bool pump_until(cc::function_ref<bool()> done, double max_ms = 5000)
 {
-    for (i32 i = 0; i < rounds; ++i)
+    auto const started = cc::current_time_steady_secs();
+    while (true)
     {
         if (done())
             return true;
         if (!cc::thread_pump_all())
             cc::this_thread_yield();
+        if ((cc::current_time_steady_secs() - started) * 1000.0 >= max_ms)
+            return done();
     }
-    return done();
 }
 
 [[nodiscard]] cc::span<byte const> bytes_of(cc::string_view s)

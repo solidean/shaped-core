@@ -1,34 +1,63 @@
 #pragma once
 
+#include <clean-core/common/utility.hh> // cc::unit
 #include <clean-core/error/optional.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/fwd.hh> // sg::context, sg::command_list
+#include <shaped-graphics/routine/routine_init_scope.hh>
 
 /// Base class for a reusable, self-contained unit of GPU work — a post-process pass, a LUT bake, a mipmap generate, a texture copy.
-/// It owns its own lazy, hot-reload-aware initialization, so a call site only has to ask for it and use it.
-/// Concrete routines derive from the CRTP sg::render_routine (render_routine.hh), which adds the by-type acquire(cmd) entry point;
+/// Concrete routines derive from the CRTP sg::render_routine (render_routine.hh), which adds the acquire entry points;
 /// this base carries the phase engine they share.
 ///
-/// Initialization is three phases, kept apart so async pipeline compilation can start long before a command list exists:
+/// Initialization is two phases, both coroutines returning `cc::shared_async<cc::unit>`:
 ///
-///   init_once        persistent one-time work, independent of shader content.
-///                    Never re-runs, not even on hot reload — a CPU-computed noise buffer uploaded once, say.
-///   init_declare     acquire shaders, acquire async pipelines (kicking off background compiles), kick off uploads.
-///                    Records no GPU work and opens no command list.
-///                    Re-runs after a reload.
-///   init_materialize record GPU init work: dispatches, clears, LUT bakes.
-///                    Re-runs after a reload.
+///   init_once  persistent one-time work, independent of shader content.
+///              Never re-runs, not even on hot reload — a CPU-computed noise buffer uploaded once, say.
+///   init       everything that depends on shader content: shaders, pipelines, dependency tokens, GPU init work.
+///              Re-runs at each reload generation, and an in-flight one is cancelled when the generation moves.
 ///
-/// Most routines need only init_declare; the other two default to no-ops.
-/// Re-init is driven by sg's process-global reload generation (sg::reload_generation):
-/// when it moves, the next ensure_* re-runs declare + materialize, while init_once state is preserved.
-/// A routine reads that counter directly — it needs no library reference.
-/// Instances live per-context in ctx.routines, so their cached GPU state dies with the context that built it — no stale handles across contexts.
+/// Both default to a no-op, so a routine overrides only what it needs.
+/// Re-init is driven by sg's process-global reload generation (sg::reload_generation), which the tick reads once per
+/// tick — so a reload is observed at a frame boundary and never lands mid-frame.
+/// Instances live per-context in ctx.routines, so their cached GPU state dies with the context that built it.
 ///
-/// Threading: one lock per routine, held across the phase callbacks, so concurrent acquires are safe and each phase runs exactly once —
-/// the losers of the race block until the winner is done, then see it initialized.
-/// It is the same lock acquire_exclusive hands out, so it guards the derived routine's own state too; see sg::render_routine.
-/// A phase callback therefore must not call back into acquire/acquire_exclusive/prewarm for the same routine.
+/// **Nothing here runs on the frame path.** `ctx.routines.tick()` is the only thing that drives a phase, and a caller
+/// that asks for a routine either gets one that is already up or is told to come back.
+///
+/// Threading: `_init` guards the phase bookkeeping ONLY.
+/// A coroutine cannot hold a cc::mutex across a suspend, so a routine's own members are written by `init` without the
+/// lock, and the pending -> ready transition the tick publishes is the barrier a reader synchronizes with.
+
+/// Where a routine stands, as three states rather than two.
+///
+/// "Still compiling" and "will never compile" produce the same answer to a caller that only draws, and collapsing them
+/// is how a broken shader becomes a black rectangle that reports nothing.
+/// The common branch is the same either way -- a caller that only draws tests is_ready() -- so the third state costs
+/// nothing at the sites that ignore it and is the difference between a failure a test can assert on and one a person
+/// has to notice.
+enum class sg::routine_readiness
+{
+    pending, ///< initialization has not finished; try again after another tick
+    ready,   ///< every phase ran at the current reload generation
+    failed,  ///< initialization failed and will not succeed until something changes (a reload, an eviction)
+};
+
+/// What a FALLIBLE routine's execute reports back.
+///
+/// Most routines are not fallible: one whose dependency set is entirely static tokens is handed out only when its
+/// whole subtree is ready, so when it reports ready, execute goes through and returns void.
+/// A routine that acquires something dynamically during execution can still decline, and it has to SAY so — a caller
+/// that cannot tell "declined" from "nothing to draw" is how a headless capture writes a blank image and reports
+/// success.
+enum class sg::routine_outcome
+{
+    executed, ///< the work was recorded
+    declined, ///< something it needed was not ready; nothing was recorded
+};
+
 class sg::render_routine_base
 {
 public:
@@ -40,44 +69,132 @@ public:
 protected:
     render_routine_base() = default;
 
-    virtual void init_once(context& ctx) { (void)ctx; }
-    virtual void init_declare(context& ctx) { (void)ctx; }
-    virtual void init_materialize(command_list& cmd) { (void)cmd; }
+    /// Declare from inside a phase that initialization cannot succeed at this reload generation.
+    ///
+    /// Building a shader is what fails today; an asset a routine cannot load is the same shape and will want it too.
+    /// Either way the routine is not "still working on it": it stays failed until something changes, and collapsing
+    /// that into pending is how a routine nobody can use becomes one nobody hears about.
+    ///
+    /// **A failed shader RELOAD does not reach here.** slib promotes a recompile only when it produced a value, so a
+    /// bad edit leaves the last good shader in place and does not even bump the reload generation, so routines keep
+    /// running on what they already built.
+    /// What reaches here is a shader that was never good: the first compile failing, a missing package, or a context
+    /// accepting no format any registered compiler produces.
+    ///
+    /// Cleared when the phases re-run at a new generation, so a genuine reload is a fresh verdict.
+    /// The spelling changes once init is a coroutine — a failed await will resolve the init async on its error
+    /// channel — but the state it reports does not.
+    void fail_init();
+
+    /// Persistent one-time work, independent of shader content.
+    /// NEVER re-runs, not even on reload, and is never cancelled by one.
+    virtual cc::shared_async<cc::unit> init_once(routine_init_scope scope);
+
+    /// Everything that depends on shader content: acquire shaders, build pipelines, declare dependencies, record GPU
+    /// init work through `scope.with_cmd`.
+    ///
+    /// Re-runs at each reload generation, and an in-flight one is cancelled when the generation moves — so it must be
+    /// safe to abandon between `with_cmd` bodies.
+    virtual cc::shared_async<cc::unit> init(routine_init_scope scope);
+
+    /// Wait out async work this routine STARTED outside its own phases, before the context goes away.
+    ///
+    /// A routine whose execute discovers work — a compile it needs and does not have — may kick that off on the frame
+    /// path rather than decline forever.
+    /// Such a node belongs to no phase, so the tick cannot collect it and readiness never covers it, and it is holding
+    /// a context that `clear()` is about to let go of.
+    /// Override this to wait for whatever was started; `routine_registry::clear()` calls it on every instance first.
+    ///
+    /// Default is a no-op, which is right for the routines that start nothing outside init — nearly all of them.
+    virtual void drain_detached_work() {}
 
 private:
     // The phase engine is driven by the CRTP's static entry points (acquire / prewarm), not by user code.
-    template <class>
+    template <class, class>
     friend class render_routine;
     // It hands the same lock on to its caller, so it needs to name what _init guards.
     template <class>
     friend class routine_guard;
+    // The tick drives initialization, so it needs to ask whether a routine still wants driving and to run its phases.
+    // clear() also calls drain_detached_work on every instance before dropping it.
+    friend class routine_registry;
 
     /// Which phases have run, and at which reload generation.
     /// It shares _init with the derived routine's own state, so a phase runs only once even under a concurrent acquire.
     struct init_state
     {
+        /// init_once has completed.
+        /// It never runs again, whatever the generation does.
         bool once_done = false;
-        cc::optional<u64> declared_generation;
-        cc::optional<u64> materialized_generation;
+
+        /// The generation `init` last COMPLETED at.
+        /// Readiness is this equalling the current one.
+        cc::optional<u64> ready_generation;
+
+        /// The phase currently running, if any.
+        /// Phases are sequential, so there is at most one.
+        cc::shared_async<cc::unit> in_flight;
+
+        /// Whether `in_flight` is init_once rather than init.
+        bool in_flight_is_once = false;
+
+        /// The run the in-flight phase holds, so a reload can cancel it.
+        std::shared_ptr<impl::routine_run> run;
     };
 
-    /// Runs init_once (first time only), then init_declare (first time + after each reload).
-    /// The prewarm entry point: call it before opening a command list so async compiles start as early as possible.
-    void ensure_initialized_no_materialize(context& ctx);
+    /// Whether every phase has run at the CURRENT reload generation, so a tick has nothing left to do here.
+    /// Read under the routine's lock, so it is a snapshot rather than a promise: a reload can land right after it.
+    [[nodiscard]] bool is_initialized();
 
-    /// The above, then init_materialize.
-    /// The context is reached through cmd.context().
-    /// Safe to call every frame — a no-op once initialized at the current generation.
-    void ensure_initialized(command_list& cmd);
+    /// The same, given a lock already held — cc::mutex is not recursive, so the exclusive path cannot re-take it.
+    [[nodiscard]] routine_readiness own_readiness_locked(init_state const& s);
 
-    // The bodies of the two above, minus the locking — so they may call each other, which the entry points cannot: cc::mutex is not recursive.
-    // Only ever called with `_init` already held, which is also how acquire_exclusive runs the phases under the guard it hands out.
+    /// Where this routine stands, ignoring anything it depends on.
+    ///
+    /// `failed` is unreachable while the phases are synchronous and cannot report an error; it exists because the
+    /// state a caller branches on should not change shape when the mechanism behind it does.
+    [[nodiscard]] routine_readiness own_readiness();
 
-    void ensure_initialized_no_materialize_impl(init_state& s, context& ctx);
-    void ensure_initialized_impl(init_state& s, command_list& cmd);
+    /// One step of this routine's initialization, driven by the tick and never by anything else.
+    ///
+    /// Starts the next phase, collects one that has settled, or does nothing while one is running.
+    /// Returns true when it brought the routine up, which is what the tick counts.
+    bool advance_init(routine_registry& registry, context& ctx, u64 generation);
+
+    /// Abandon an in-flight `init` because the generation moved.
+    /// init_once is never cancelled.
+    void cancel_init_for_reload(init_state& s);
+
+    /// The tick's entry into the above: cancel an in-flight `init` that belongs to an older generation.
+    /// Called once per tick, before anything is advanced, so one reload retires every stale run together.
+    void cancel_init_for_reload_if_stale(u64 generation);
+
+    /// Whether the tick still has something to do here at `generation`: a phase is running, or one has yet to start.
+    ///
+    /// Asked against the tick's OWN generation rather than the global one, which is what keeps a reload landing
+    /// mid-tick from leaving the tick chasing a generation it is not driving.
+    [[nodiscard]] bool needs_init(u64 generation);
 
     /// The process-global reload generation to compare against (sg::reload_generation).
     [[nodiscard]] static u64 current_generation();
+
+    /// The first tick at which this routine was observed pending, and whether the stuck-pending warning has fired.
+    /// Bookkeeping for routine_registry::warn_if_pending_too_long, kept here because it is per routine.
+    [[nodiscard]] u64 first_pending_tick() const { return _first_pending_tick.load(cc::memory_order_relaxed); }
+    void note_pending_at(u64 tick);
+    void clear_pending_mark();
+
+    /// True if the warning has already fired for this routine, and marks it fired if not.
+    [[nodiscard]] bool mark_warned_pending() { return _warned_pending.exchange(true); }
+
+    cc::atomic<u64> _first_pending_tick = 0;
+    cc::atomic<bool> _warned_pending = false;
+
+    /// Set by fail_init from inside a phase, cleared when the phases re-run at a new generation.
+    ///
+    /// Atomic and beside _init rather than inside it: a phase runs on whichever worker the scheduler gave it, so this
+    /// is written off the lock while a reader may be asking for readiness.
+    cc::atomic<bool> _failed = false;
 
     cc::mutex<init_state> _init;
 };

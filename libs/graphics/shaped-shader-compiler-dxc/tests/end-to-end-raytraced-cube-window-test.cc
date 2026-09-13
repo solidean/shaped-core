@@ -360,7 +360,8 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         auto build = ctx.create_command_list();
         blas = build->raytracing.build_blas({{.vertices = vbuf.raw(), .vertex_count = cube.size()}});
         ctx.submit_command_list(cc::move(build));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
     }
     REQUIRE(blas != nullptr);
 
@@ -417,10 +418,12 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
             cmd->raster.draw({.vertex_range = {.offset = 0, .size = 3}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx.advance_epoch(sc->buffer_count());
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(sc->buffer_count());
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     if (!s_window_closed)
         DestroyWindow(hwnd);
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly

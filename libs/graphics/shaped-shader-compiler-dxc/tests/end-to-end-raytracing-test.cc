@@ -119,7 +119,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     auto const tlas = build->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
     REQUIRE(tlas != nullptr);
     ctx.submit_command_list(cc::move(build));
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 
     // Compile the three ray-tracing shaders (each its own single-entry DXIL library).
     auto raygen = compile_rt(comp.value(), sg::shader_stage::raygen, "RayGen", raygen_hlsl);
@@ -182,7 +183,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     cc::vector<u32> result;
     for (auto const v : data.value())

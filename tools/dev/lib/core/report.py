@@ -133,6 +133,64 @@ def summarize_tests(records: list[dict], presets: list[Preset], root: Path) -> b
     return True
 
 
+def summarize_check_timing(
+    presets: list[Preset],
+    build_results: list[StepResult],
+    test_records: list[dict],
+    *,
+    slow_test_s: float,
+) -> None:
+    """One line per preset: how long it spent building, and how long running tests.
+
+    `check` is the longest thing anyone runs here, and until now it reported only a total — so "it takes forever" could
+    not be turned into "which preset, and was it the build or the tests".
+    That is the whole point of this: it is a measurement, not a gate, and it never changes the verdict.
+
+    A preset whose tests exceed `slow_test_s` is called out, because a suite that slow is a bug report waiting to be
+    written rather than a fact about the machine.
+    """
+    if not presets:
+        return
+
+    # Builds are attributed by where their logs landed; test records carry the preset name outright.
+    def build_secs(preset: Preset) -> float:
+        return sum(
+            r.duration_s for r in build_results
+            if r.stdout_log is not None and _under(r.stdout_log, preset.build_dir)
+        )
+
+    rows = []
+    for preset in presets:
+        tests = [r for r in test_records if r.get("preset") == preset.name]
+        rows.append((preset.name, build_secs(preset), sum(r["duration_s"] for r in tests), len(tests)))
+
+    width = max(len(name) for name, _, _, _ in rows)
+    ui.write_line(console.dim("\ntiming, per preset:"))
+    for name, b, t, n in rows:
+        line = f"  {name:<{width}}  build {fmt_dur(b):>8}   test {fmt_dur(t):>8}  ({n} binaries)"
+        ui.write_line(console.yellow(line) if t > slow_test_s else console.dim(line))
+
+    slow = [(name, t) for name, _, t, _ in rows if t > slow_test_s]
+    if slow:
+        worst = ", ".join(f"{name} at {fmt_dur(t)}" for name, t in slow)
+        ui.write_line(
+            console.yellow(
+                f"  slow: {worst} — over the {fmt_dur(slow_test_s)} budget a test run is expected to stay inside"
+            )
+        )
+
+    total = sum(b for _, b, _, _ in rows) + sum(t for _, _, t, _ in rows)
+    ui.write_line(console.dim(f"  total {fmt_dur(total)} across {len(rows)} preset(s)"))
+
+
+def _under(path: Path, directory: Path) -> bool:
+    """Whether `path` sits inside `directory`, without raising on an unrelated drive."""
+    try:
+        return path.resolve().is_relative_to(directory.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------

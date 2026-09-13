@@ -80,7 +80,8 @@ TEST("sg vulkan - builds a triangle blas and a tlas over it")
 
     // Persistent: the handles outlive the epoch that built them, and the validation listener is what says the builds
     // themselves were well-formed.
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(!blas->is_expired());
     CHECK(!tlas->is_expired());
 }
@@ -114,7 +115,8 @@ TEST("sg vulkan - builds a procedural (aabb) blas")
 
     CHECK(blas->size_in_bytes() > 0);
     CHECK(blas->geometry_count() == 1);
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(!blas->is_expired());
 }
 
@@ -206,7 +208,8 @@ TEST("sg vulkan - traces rays against a tlas")
     auto future = down->download.data_from_buffer<u32>(output, 0, k_rays);
     ctx.submit_command_list(cc::move(down));
 
-    auto const data = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(k_rays));
 

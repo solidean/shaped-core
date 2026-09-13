@@ -46,6 +46,16 @@ struct pending_settle
     std::shared_ptr<sg::impl::stream_control> control;
 };
 
+/// One upload counted as outstanding until the GPU has passed its completion value.
+///
+/// The job object is gone by then — it leaves `_active` when its last chunk is packed — so the drain token has to
+/// outlive it, and this is what carries it.
+struct pending_drain
+{
+    dx12_group_value completion;
+    sg::impl::transfer_drain::token drain;
+};
+
 /// The highest completion value the open window finished on one timeline.
 /// A window may finish transfers to several destinations, and each has to be signaled on its own fence — one
 /// Signal per entry after the window executes.
@@ -280,8 +290,24 @@ private:
     // This actor stages every other transfer in the system, so sitting on a fence here would stall all of them
     // behind one stream's copy — and the stream has nothing to gain from being told a cycle earlier.
     // What a settle does need is a wake once its value lands, which arm_settle_wake provides.
+    // Release the drain tokens whose copies the GPU has now run.
+    // Same shape and same cycle as the stream settles below, because it is the same question asked for a different
+    // reason: one settles a caller's node, the other lets block_until_idle() return.
+    void release_reached_drains()
+    {
+        if (_pending_drains.empty())
+            return;
+
+        cc::vector<pending_drain> still_pending;
+        for (auto& p : _pending_drains)
+            if (!p.completion.has_reached())
+                still_pending.push_back(cc::move(p));
+        _pending_drains = cc::move(still_pending);
+    }
+
     void drain_ready_settles()
     {
+        release_reached_drains();
         if (_pending_settles.empty())
             return;
 
@@ -304,7 +330,17 @@ private:
     // Re-armed every cycle rather than tracked, since an already-passed value is settled above and never reaches here.
     void arm_settle_wake()
     {
-        if (_pending_settles.empty() || _sys._settle_event == nullptr)
+        if ((_pending_settles.empty() && _pending_drains.empty()) || _sys._settle_event == nullptr)
+            return;
+
+        // Drains are armed exactly like settles: without this the actor sleeps with tokens outstanding and nothing
+        // ever wakes it to release them, so a caller blocked in block_until_idle() waits forever.
+        for (auto const& p : _pending_drains)
+        {
+            HRESULT const hr = p.completion.group->fence->SetEventOnCompletion(p.completion.value, _sys._settle_event);
+            CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion (upload drain) failed");
+        }
+        if (_pending_settles.empty())
             return;
 
         // One registration per timeline still owed: any of them signaling wakes the actor, which re-drains and
@@ -321,10 +357,13 @@ private:
     // Blocking is right here and only here — this path already waits the copy queue out anyway.
     void drain_settles_blocking()
     {
-        if (_pending_settles.empty())
+        if (_pending_settles.empty() && _pending_drains.empty())
             return;
 
         for (auto const& p : _pending_settles)
+            wait_for_group_value(p.completion);
+        // The drains too, for the same reason: with no actor thread there is no later cycle to release them in.
+        for (auto const& p : _pending_drains)
             wait_for_group_value(p.completion);
         drain_ready_settles();
     }
@@ -352,7 +391,7 @@ private:
             if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
                 continue;
             cancel_stream(a.job);
-            _active.remove_from_to(i, i + 1);
+            _active.remove_at(i);
         }
     }
 
@@ -543,7 +582,14 @@ private:
             queue_stream_settle(a.job);
         else
             fold_completion_value(a.job);
-        _active.remove_from_to(index, index + 1); // releases the pins + keepalive, on the actor thread
+
+        // The job is done PACKING, not done copying, so its drain token moves to a record keyed on the value the
+        // copy will signal.
+        // Without this the count would reach zero while the window was still in flight.
+        if (a.job.drain != nullptr && a.job.completion.is_pending())
+            _pending_drains.push_back({.completion = a.job.completion, .drain = a.job.drain});
+
+        _active.remove_at(index); // releases the pins + keepalive, on the actor thread
     }
 
     // Fails a job whose source gave up.
@@ -552,7 +598,7 @@ private:
     {
         auto& a = _active[index];
         cancel_stream(a.job);
-        _active.remove_from_to(index, index + 1);
+        _active.remove_at(index);
     }
 
     // Writes one chunk of `a` into the open window and records its copy.
@@ -727,7 +773,10 @@ private:
     cc::vector<active_upload> _active;                    // resolved and mid-pack, until the last chunk is recorded
     cc::vector<sg::impl::transfer_candidate> _candidates; // rebuilt per pick; a member only to reuse its storage
     u64 _next_sequence = 0;
-    cc::vector<pending_settle> _pending_settles; // finished streams, waiting on the copy fence
+    cc::vector<pending_settle> _pending_settles;
+
+    /// Drain tokens waiting on a completion value, so an upload counts as outstanding until its copy has run.
+    cc::vector<pending_drain> _pending_drains; // finished streams, waiting on the copy fence
 
     u64 _current_window = 0; // next window index to submit; slot = index % num_staging_windows
 
@@ -831,6 +880,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -872,6 +922,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     job.completion = dx12_group_value{dst->_upload_group, value};
     // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -950,6 +1001,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
     job.source = cc::move(source);
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));
@@ -994,6 +1046,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.stream = control;
     job.source = cc::move(source);
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));

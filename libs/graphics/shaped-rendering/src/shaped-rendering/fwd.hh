@@ -23,14 +23,12 @@ struct gpu_boolean;
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
+enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
 struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 
-/// A pipeline cache keyed by whatever a routine varies on (see keyed_pipeline_cache.hh).
-template <class Key, class Pipeline>
-class keyed_pipeline_cache;
 
 // OS windows (see window.hh).
 // Always declared; SR_HAS_WINDOW says whether a backend was built in, and without one creation fails.
@@ -60,7 +58,8 @@ class imgui_routine;
 namespace impl
 {
 class imgui_texture_registry;
-}
+class imgui_texture_routine; // the routine owning that registry, shared by every imgui_routine parametrization
+} // namespace impl
 
 /// The domain every recording site in shaped-rendering is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

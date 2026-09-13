@@ -67,17 +67,17 @@ public:
 
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
-    static void trace(sg::command_list& cmd,
-                      viewer_definition const& def,
-                      render_plan const& plan,
-                      u32 trace_index,
-                      plan_resources const& res,
-                      gpu_resource_manager& resources,
-                      view_store& store);
+    [[nodiscard]] static sg::routine_outcome trace(sg::command_list& cmd,
+                                                   viewer_definition const& def,
+                                                   render_plan const& plan,
+                                                   u32 trace_index,
+                                                   plan_resources const& res,
+                                                   gpu_resource_manager& resources,
+                                                   view_store& store);
 
 protected:
     /// No shaders of its own; it warms the path tracer so its compiles start early.
-    void init_declare(sg::context& ctx) override;
+    cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
     /// Bumped every time the routine initializes, which is once per shader reload.
@@ -86,5 +86,9 @@ private:
     /// shaders produced.
     /// Back when the accumulation lived on this routine, `evict` gave that for free; a store the caller owns outlives
     /// the instance, so the invalidation has to be said out loud.
+    /// The routine every trace goes through.
+    /// Declared rather than prewarmed, so this renderer reports pending until the pathtracer is ready.
+    sg::routine_dependency<pathtrace_routine, sg::routine_no_params> _pathtrace;
+
     u64 _shader_generation = 0;
 };

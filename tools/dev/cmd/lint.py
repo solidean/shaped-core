@@ -78,7 +78,17 @@ def run_clang_tidy(
 
     runner = ctx.root / "tools" / "lint" / "clang-tidy.py"
     argv = ["uv", "run", str(runner), "--build-dir", str(preset.build_dir)]
-    if scope is not None:
+    if scope is not None and scope.since is not None:
+        # The runner has no flag for "since this, working tree included", and it does not need one: it takes an
+        # explicit file list, and that is exactly what this scope already computes.
+        # Passing the flag it does have would silently drop half the scope — --commit misses the uncommitted work and
+        # --dirty-only misses everything already committed on the branch.
+        sources = [f for f in dev.changed_files(ctx.root, scope) if f.suffix == ".cc"]
+        if not sources:
+            print(dev.console.green("clang-tidy: nothing to lint (no .cc sources in scope)"), file=sys.stderr)
+            return True
+        argv += [str(f) for f in sources]
+    elif scope is not None:
         argv += ["--commit", scope.revision] if scope.revision else ["--dirty-only"]
     if fix:
         argv.append("--fix")
@@ -139,9 +149,15 @@ def run_shaped_linter(
             changed_lines_spec.write_text(spec, encoding="utf-8")
 
     # Batch to stay well under the OS command-line length limit on a whole-tree run.
+    #
+    # Each batch gets its own step NAME, and therefore its own log.
+    # Sharing one meant every batch overwrote the previous one's output, so a finding in any but the last was
+    # reported as a failure with an empty log — which is unreadable exactly when a run is big enough to batch.
     ok = True
+    batch_count = (len(files) + 199) // 200
     for start in range(0, len(files), 200):
         batch = files[start:start + 200]
+        batch_name = "shaped-linter" if batch_count == 1 else f"shaped-linter-{start // 200 + 1}of{batch_count}"
         # The linter's own `auto` sees a pipe (run_step captures it), so it would drop color even while we mirror to a terminal.
         # Hand it dev.py's already-resolved decision instead.
         argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
@@ -151,7 +167,7 @@ def run_shaped_linter(
             argv += ["--changed-lines", str(changed_lines_spec)]
         argv += [str(f) for f in batch]
         result = dev.run_step(
-            argv, step_type="lint", name="shaped-linter",
+            argv, step_type="lint", name=batch_name,
             build_dir=preset.build_dir, cwd=ctx.root, mirror=True, verbose=verbose,
         )
         ok = ok and result.ok
@@ -305,11 +321,16 @@ def run_bless_includes(
 def _scope(args: argparse.Namespace, ctx: Context) -> dev.ChangeScope | None:
     """The requested scope, with a bad revision reported before anything is built."""
     scope = a.scope_from_args(args)
-    if scope is not None and not scope.is_working_tree:
-        try:
+    if scope is None:
+        return None
+    try:
+        if scope.revision is not None:
             dev.resolve_range(ctx.root, scope.revision)
-        except dev.ChangeScopeError as e:
-            ctx.die(str(e))
+        elif scope.since is not None:
+            # The since-kind resolves its base inside changed_files, and a gate is a bad place to discover a typo.
+            dev.changed_files(ctx.root, scope)
+    except dev.ChangeScopeError as e:
+        ctx.die(str(e))
     return scope
 
 

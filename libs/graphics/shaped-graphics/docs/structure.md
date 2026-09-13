@@ -124,8 +124,10 @@ src/shaped-graphics/
     impl/                                       internal (sg::impl), outside the public header set
 
   routine/
-    render_routine_base.hh        [in progress] abstract base of a registered routine (init/evict hooks)
-    render_routine.hh/.cc         [in progress] render_routine<Derived> CRTP: 3-phase, hot-reload-aware acquire / prewarm / evict
+    render_routine_base.hh        [in progress] abstract base of a registered routine: the two coroutine init phases
+    routine_init_scope.hh         [in progress] what a phase is given — context, generation, with_cmd, yield
+    routine_params.hh             [done]        routine_no_params + how a parameter is hashed
+    render_routine.hh/.cc         [in progress] render_routine<Derived, Params> CRTP: try_acquire / prewarm / evict, dependency tokens
     routine_registry.hh/.cc       [in progress] the per-context ctx.routines type-keyed registry
     reload_generation.hh/.cc      [done]        process-global monotonic counter driving hot-reload invalidation
 

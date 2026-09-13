@@ -12,7 +12,9 @@
 /// Persistent resources live until their handles are released, unlike ctx.transient's, which the backend recycles per epoch.
 /// See lifetime_scope.
 ///
-/// Every create comes in a `try_create_*` fallible core and a throwing `create_*` default — the pattern in docs/error-handling.md.
+/// One spelling per create, and it throws: running out of memory is not something a call site can act on, so there is
+/// no fallible twin to choose between — see docs/error-handling.md.
+/// Best-effort rather than a contract: a backend whose creation is asynchronous reports on ctx.take_pending_errors().
 /// The throwing flavor raises sg::allocation_exception or sg::binding_group_exception, and sg::device_lost_exception if the device was lost.
 /// Contract violations assert in either flavor — they are bugs, not runtime failures.
 class sg::context_persistent_scope
@@ -26,10 +28,6 @@ public:
                                                       buffer_usages usage,
                                                       allocation_info const& alloc = {});
 
-    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
-                                                                      buffer_usages usage,
-                                                                      allocation_info const& alloc = {});
-
     // Typed buffer factory — allocates `element_count` elements of `T`, so element_count * sizeof(T) bytes.
     // Returns the wrapped `buffer<T>`, whose view factories are typed by `T`.
     // `element_count` must be >= 0, and 0 is a valid empty buffer.
@@ -41,17 +39,6 @@ public:
         return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage, alloc));
     }
 
-    template <class T>
-    [[nodiscard]] cc::result<buffer<T>> try_create_buffer(isize element_count,
-                                                          buffer_usages usage,
-                                                          allocation_info const& alloc = {})
-    {
-        auto r = try_create_raw_buffer(element_count * isize(sizeof(T)), usage, alloc);
-        if (r.has_value())
-            return buffer<T>::from_raw(cc::move(r).value());
-        return cc::error(cc::move(r).error());
-    }
-
     // textures
 public:
     /// Allocates a GPU-resident texture from a description; `alloc` selects the backing memory, dedicated by default.
@@ -59,9 +46,6 @@ public:
     /// Throws sg::allocation_exception on allocation failure.
     [[nodiscard]] raw_texture_handle create_raw_texture(texture_description const& desc,
                                                         allocation_info const& alloc = {});
-
-    [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
-                                                                        allocation_info const& alloc = {});
 
     // Typed texture factories — take a shape-specific description (see texture_descriptions.hh), expand it to a full texture_description, and return the wrapped `texture<Traits>`.
     // `create_texture` / `try_create_texture` are the generic core, deducing the shape from the description.
@@ -75,54 +59,24 @@ public:
         return Desc::texture_type::from_raw(create_raw_texture(desc.to_texture_description(), alloc));
     }
 
-    template <class Desc>
-    [[nodiscard]] cc::result<typename Desc::texture_type> try_create_texture(Desc const& desc,
-                                                                             allocation_info const& alloc = {})
-    {
-        auto r = try_create_raw_texture(desc.to_texture_description(), alloc);
-        if (r.has_value())
-            return Desc::texture_type::from_raw(cc::move(r).value());
-        return cc::error(cc::move(r).error());
-    }
-
     [[nodiscard]] texture_1d create_texture_1d(texture_1d_description const& d, allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
-    }
-    [[nodiscard]] cc::result<texture_1d> try_create_texture_1d(texture_1d_description const& d,
-                                                               allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
     }
 
     [[nodiscard]] texture_2d create_texture_2d(texture_2d_description const& d, allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_2d> try_create_texture_2d(texture_2d_description const& d,
-                                                               allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_3d create_texture_3d(texture_3d_description const& d, allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_3d> try_create_texture_3d(texture_3d_description const& d,
-                                                               allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_cube create_texture_cube(texture_cube_description const& d, allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
-    }
-    [[nodiscard]] cc::result<texture_cube> try_create_texture_cube(texture_cube_description const& d,
-                                                                   allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
     }
 
     [[nodiscard]] texture_1d_array create_texture_1d_array(texture_1d_array_description const& d,
@@ -130,21 +84,11 @@ public:
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_1d_array> try_create_texture_1d_array(texture_1d_array_description const& d,
-                                                                           allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_2d_array create_texture_2d_array(texture_2d_array_description const& d,
                                                            allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
-    }
-    [[nodiscard]] cc::result<texture_2d_array> try_create_texture_2d_array(texture_2d_array_description const& d,
-                                                                           allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
     }
 
     [[nodiscard]] texture_cube_array create_texture_cube_array(texture_cube_array_description const& d,
@@ -152,21 +96,11 @@ public:
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_cube_array> try_create_texture_cube_array(texture_cube_array_description const& d,
-                                                                               allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_2d_ms create_texture_2d_ms(texture_2d_ms_description const& d,
                                                      allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
-    }
-    [[nodiscard]] cc::result<texture_2d_ms> try_create_texture_2d_ms(texture_2d_ms_description const& d,
-                                                                     allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
     }
 
     [[nodiscard]] texture_2d_array_ms create_texture_2d_array_ms(texture_2d_array_ms_description const& d,
@@ -174,33 +108,17 @@ public:
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_2d_array_ms> try_create_texture_2d_array_ms(texture_2d_array_ms_description const& d,
-                                                                                 allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_cube_ms create_texture_cube_ms(texture_cube_ms_description const& d,
                                                          allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
     }
-    [[nodiscard]] cc::result<texture_cube_ms> try_create_texture_cube_ms(texture_cube_ms_description const& d,
-                                                                         allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
-    }
 
     [[nodiscard]] texture_cube_array_ms create_texture_cube_array_ms(texture_cube_array_ms_description const& d,
                                                                      allocation_info const& alloc = {})
     {
         return create_texture(d, alloc);
-    }
-    [[nodiscard]] cc::result<texture_cube_array_ms> try_create_texture_cube_array_ms(
-        texture_cube_array_ms_description const& d,
-        allocation_info const& alloc = {})
-    {
-        return try_create_texture(d, alloc);
     }
 
     // memory heaps
@@ -209,8 +127,6 @@ public:
     /// Query a resource's requirements from the heap, pick an offset, then create_* with that placement.
     /// Size must be >= 0, and 0 is a valid empty heap; throws sg::allocation_exception on allocation failure.
     [[nodiscard]] memory_heap_handle create_memory_heap(isize size_in_bytes);
-
-    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes);
 
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
@@ -222,17 +138,10 @@ public:
                                                             cc::span<named_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
-    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
-                                                                            cc::span<named_view const> views,
-                                                                            cc::span<named_sampler const> samplers = {});
-
     /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
     /// It starts fully vacant, so every scalar view binding must be set before the first snapshot.
     /// Throws sg::binding_group_exception if the staging descriptors cannot be allocated.
     [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout);
-
-    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
-        binding_group_layout_handle layout);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;
@@ -241,6 +150,27 @@ public:
     context_persistent_scope& operator=(context_persistent_scope&&) = delete;
 
 private:
+    // The fallible cores the throwing creates above are built on.
+    //
+    // Not public: an exhaustion failure is not something a caller can act on, and offering the choice
+    // implied that it was — see docs/error-handling.md.
+
+    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
+                                                                      buffer_usages usage,
+                                                                      allocation_info const& alloc = {});
+
+    [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
+                                                                        allocation_info const& alloc = {});
+
+    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes);
+
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<named_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
+
+    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
+        binding_group_layout_handle layout);
+
     // Only a context constructs its own scope; the scope in turn reaches the context's protected backend virtuals (mutual friendship).
     friend class context;
     explicit context_persistent_scope(context& ctx) : _ctx(ctx) {}

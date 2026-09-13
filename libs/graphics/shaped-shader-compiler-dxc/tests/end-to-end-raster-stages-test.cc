@@ -200,7 +200,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    auto const bytes = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
     auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
@@ -298,7 +299,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch t
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    auto const bytes = ctx.wait_for(future);
+    ctx.block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
     auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());

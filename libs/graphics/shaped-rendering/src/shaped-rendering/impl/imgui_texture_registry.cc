@@ -57,6 +57,12 @@ void imgui_texture_registry::create_texture(sg::context& ctx, ImTextureData* tex
                                                      "sr::imgui_context");
     CC_ASSERT(tex->Width > 0 && tex->Height > 0, "imgui requested a degenerate texture");
 
+    // The atlas is written by an async transfer before anything samples it, so it wants to START in
+    // async_ready_layout rather than be transitioned into it by a command list submitted for that alone — which is
+    // what the "found a texture in a layout its transfer queue cannot use" warning on every imgui consumer's first
+    // frame is reporting.
+    // `initial_layout` is the field for exactly that and it is left unset here on purpose: dx12 ignores it today
+    // (see texture_description::initial_layout), so setting it would silence nothing and claim that it had.
     auto texture
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = tex->Width,

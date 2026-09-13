@@ -36,7 +36,8 @@ INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg:
     }
 
     // The open-list count is back to zero, so this must not assert "open lists before advancing".
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 
     // ...and the context is still fully usable afterwards.
     auto next = ctx->create_command_list();
@@ -55,7 +56,8 @@ INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::cont
     // not_submitted is the always-pending sentinel and is never complete.
     CHECK(!ctx->is_submission_complete(sg::submission_token::not_submitted));
 
-    ctx->advance_epoch_and_wait_for_idle(); // fully drain: the token's work is now finished
+    ctx->advance_epoch();
+    ctx->block_until_idle(); // fully drain: the token's work is now finished
     CHECK(ctx->is_submission_complete(token));
 }
 
@@ -74,7 +76,8 @@ INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_han
     // Distinct submissions get distinct, monotonically increasing tokens.
     CHECK(u64(second) > u64(first));
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     CHECK(ctx->is_submission_complete(first));
     CHECK(ctx->is_submission_complete(second));
 }

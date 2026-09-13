@@ -320,21 +320,59 @@ It auto-applies every unambiguous fix it can (clang-tidy, shaped-linter, then cl
 uv run dev.py check            # run every check -> one verdict
 uv run dev.py check --fix      # apply fixable checks (clang-format -i), then report
 uv run dev.py check --no-test  # static checks only — skip the build+test tail (docs-only re-check)
-uv run dev.py check --all      # widen lint, shaped-lint and format from dirty-only to the whole tree
-uv run dev.py check --commit <rev>   # check a commit or range instead of the working tree
+uv run dev.py check --all      # widen lint, shaped-lint and format to the whole tree
+uv run dev.py check --dirty-only     # narrow them to uncommitted work alone
+uv run dev.py check --commit <rev>   # check a commit or range instead
+uv run dev.py check --since <rev>    # everything changed since <rev>, working tree included
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
 ```
+
+### The default scope is the branch, not the working tree
+
+`lint`, `shaped-lint` and `format` default to **everything this branch changed, including what is not committed yet**.
+That is the merge base with `origin/main`, diffed against the working tree.
+
+This is not the obvious choice, and the obvious one is wrong.
+A gate scoped to dirty files alone *empties as you work*: commit, and the working tree is clean, so the next `check` inspects nothing and reports green for a branch it never looked at.
+That is precisely the run that matters — the one before pushing — and it was the one saying least.
+
+The consequence to know is that `check` re-examines files you committed earlier on the branch, so a rule that changed since then surfaces now rather than never.
+That is the point, and it is also why the first `check` on an old branch can report more than you expect.
+
+`--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
+On `main` itself there is no branch to diff, so the default falls back to the working tree.
 
 Registered checks, **in the order they run**:
 
 | Check        | What it does                                                                   | `--fix`? |
 |--------------|--------------------------------------------------------------------------------|----------|
-| `lint`       | clang-tidy whitelist gates on `.cc` sources. Dirty-only by default; `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
-| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Dirty-only by default; `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
-| `format`     | clang-format our C++ sources. Dirty-only by default; `--commit` or `--all` to rescope. | yes (rewrites in place) |
+| `lint`       | clang-tidy whitelist gates on `.cc` sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope.  | yes (applies clang-tidy fixes) |
+| `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
+| `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
+
+### What it prints about its own cost
+
+`check` is the longest command here, so it reports where the time went rather than only a total.
+
+```raw
+static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (total 62.2 s)
+
+timing, per preset:
+  relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
+  debug-nopch-clang     build    3.0 s   test   95.1 s  (18 binaries)
+  release-clang         build   164 ms   test   80.5 s  (18 binaries)
+  singlethreaded-clang  build    1.9 s   test   77.5 s  (18 binaries)
+  total 332.5 s across 4 preset(s)
+```
+
+One line for the static gates, and one per preset for the build-and-test tail split into its two halves.
+Neither changes the verdict — they are a measurement of the run that just happened.
+
+A preset whose tests exceed the budget in `tools/dev/cmd/check.py` is called out by name.
+The budget is a ceiling a run must not cross rather than a target it should hit: tighten it as the suite gets faster, and never raise it to silence a warning.
 
 **That order is a correctness property, not a listing convention.**
 A lint fix is a byte-range edit — dropping a `cc::` qualifier shortens a line and strands the continuation lines aligned under where it used to end.

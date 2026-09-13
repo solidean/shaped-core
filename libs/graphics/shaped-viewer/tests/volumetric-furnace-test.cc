@@ -1,6 +1,7 @@
 #include "viewer_test_env.hh"
 
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
+#include <clean-core/common/time.hh>
 #include <clean-core/container/array.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
@@ -133,8 +134,15 @@ image_stats trace_furnace(sg::context& ctx,
                                                                  | sg::texture_usage::readwrite_texture
                                                                  | sg::texture_usage::copy_src});
 
-    for (auto f = 0; f < frames; ++f)
+    // A declined frame integrated nothing, so it must not count as one of the `frames` being accumulated: a trace
+    // declines until its DXR state object lands, which is built asynchronously.
+    // Same workaround as sv_test::frames_until_executed, spelled inline because this loop owns its frame index.
+    auto const loop_start = cc::current_time_steady_secs();
+    for (auto f = 0; f < frames;)
     {
+        // What brings the routine up; nothing else does, and this loop is the frame loop.
+        (void)ctx.routines.tick();
+
         auto fc = sv::pt_frame_constants_gpu{};
         fc.camera = sv::camera_gpu::from(cam);
 
@@ -173,13 +181,13 @@ image_stats trace_furnace(sg::context& ctx,
 
         auto const bindless = resources.freeze();
 
-        sv::pathtrace_routine::execute(*cmd, {.frame = frame,
-                                              .background = background,
-                                              .instances = instances,
-                                              .output = target,
-                                              .instance_table = instance_table,
-                                              .hit_groups = hit_groups,
-                                              .bindless = &bindless});
+        auto const traced = sv::pathtrace_routine::execute(*cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
 
         // The routine degrades to a no-op when its shaders do not build, and every number below would then be read off a
         // target nothing ever wrote.
@@ -188,24 +196,34 @@ image_stats trace_furnace(sg::context& ctx,
         // unwinding past a recorded-but-unsubmitted command list asserts inside its destructor.
         // A second assertion while the first is unwinding is an immediate `abort`, which loses the message that would have
         // said what went wrong — see the viewer TODO's entry on exactly this.
-        auto const ready = sv::pathtrace_routine::is_ready(*cmd);
+        auto const ready = traced == sg::routine_outcome::executed;
 
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
         // intermediate ones say nothing the final one does not.
         auto readback = sg::data_future<tg::vec4f>();
-        if (f == frames - 1)
+        if (ready && f == frames - 1)
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(target.raw()));
 
         ctx.submit_command_list(cc::move(cmd));
-        ctx.advance_epoch_and_wait_for_idle();
+        ctx.advance_epoch();
+        ctx.block_until_idle();
 
-        REQUIRE(ready);
+        if (!ready)
+        {
+            // Not a failure yet — the state object has not landed.
+            // The deadline is what turns a hang into a message.
+            REQUIRE(cc::current_time_steady_secs() - loop_start < 45.0);
+            sv_test::drive_ambient_work(); // under SC_THREADS=OFF this thread is the only one that can build it
+            continue;
+        }
+        ++f;
 
         if (!readback.is_valid())
             continue;
 
         // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
-        auto const delivered = ctx.wait_for(readback);
+        ctx.block_until_idle();
+        auto const delivered = readback.try_get_data();
         REQUIRE(delivered.has_value());
 
         auto const pixels = delivered.value();
@@ -236,7 +254,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment", nx::co
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
-    // The binary dies through `__fastfail` inside `ctx.advance_epoch_and_wait_for_idle()`, after a trivial dispatch whose
+    // The binary dies through `__fastfail` inside `ctx.block_until_idle()`, after a trivial dispatch whose
     // command list also recorded an inline readback.
     // Not an assertion and not a lost device: both were instrumented and neither fires, and a fastfail bypasses the SEH
     // filter and the SIGABRT handler nexus installs — which is why it arrived as an exit code with no output at all.

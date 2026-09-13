@@ -15,6 +15,8 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
+#include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-graphics/transfer/stream_sink.hh>
 
@@ -43,6 +45,11 @@ struct sg::backend::vulkan::vulkan_async_download_job
     /// signals the completion value so a later writer never hangs.
     cc::span<byte> destination;
     std::weak_ptr<void const> pin;
+
+    /// Counts this job as outstanding for as long as it exists.
+    /// Destroyed with the job on every exit path — delivered, cancelled, or abandoned at shutdown — which is what
+    /// makes ctx.block_until_idle() a delivery guarantee rather than a GPU one.
+    sg::impl::transfer_drain::token drain;
     cc::shared_async<cc::unit> completion;
 
     /// This readback's value on the source's own download timeline.
@@ -50,6 +57,21 @@ struct sg::backend::vulkan::vulkan_async_download_job
 
     /// Defer the read until this graphics-queue token completes, so it reads what the last writer left.
     sg::submission_token wait_token = sg::submission_token::not_submitted;
+
+    /// How many bytes of this readback have already been copied out.
+    ///
+    /// The cursor lives on the job because a readback no longer runs to completion in one go: the scheduler hands
+    /// windows out one at a time and another job may take the next one, so this is where it picks up again.
+    isize done = 0;
+
+    /// Actor-assigned submission order, and the source resource this reads from.
+    ///
+    /// `family` is the ordering constraint the scheduler enforces: two readbacks of one source must run in `sequence`
+    /// order, because their completion values were reserved in that order and a timeline only moves forwards.
+    /// Across families the order is free, which is the whole point — a large readback no longer holds up a small one
+    /// behind it.
+    u64 family = 0;
+    u64 sequence = 0;
 
     /// Set only for a STREAMING readback; null marks the async tier.
     std::shared_ptr<sg::impl::stream_control> stream;
@@ -66,7 +88,12 @@ struct sg::backend::vulkan::vulkan_async_download_job
     vulkan_group_value upload_wait;
 };
 
-/// Drains readbacks in enqueue order, which is what preserves per-source ordering.
+/// Drives readbacks through the shared transfer scheduler, one window at a time.
+///
+/// A message is ADMITTED rather than run: `on_process` then picks which pending readback fills the next window, so
+/// several interleave instead of each running to completion before the next is looked at.
+/// Ordering within one source is preserved by the scheduler's family rule, which is what the completion timelines
+/// require; across sources there is no order to preserve and none is imposed.
 class sg::backend::vulkan::vulkan_download_async_actor final : public cc::threaded_actor_impl<vulkan_async_download_job>
 {
 public:
@@ -76,6 +103,9 @@ protected:
     [[nodiscard]] cc::string_view actor_name() const noexcept override { return "sg-vulkan-download-async"; }
     void on_thread_init() override;
     void on_message(vulkan_async_download_job job) override;
+
+    /// One window's worth of work; true while there may be more.
+    bool on_process() override;
 
 private:
     vulkan_download_async_system& _system;
@@ -123,8 +153,25 @@ public:
 
     void shutdown();
 
-    /// Runs one job on the actor thread: submits the copy, waits for it, then delivers.
-    void process(vulkan_async_download_job& job);
+    /// Blocks until every job handed to the actor has been delivered, cancelled or dropped.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
+    /// Takes one job onto the pending list, giving it its ordering keys.
+    void admit(vulkan_async_download_job job);
+
+    /// Fills one window from whichever pending readback the scheduler picks; true if it did anything.
+    ///
+    /// One chunk per call rather than one job: that is what lets a second readback take the next window while a large
+    /// one is still going, and it is the same shape vulkan_upload_async_system::run_one_window has.
+    bool run_one_window();
+
+    /// Whether anything is still pending — what the actor's process loop reports back.
+    [[nodiscard]] bool has_pending() const { return !_pending.empty(); }
+
+    /// Settles one finished or abandoned readback and drops it from the pending list.
+    /// `delivered` false is a cancellation; `signal_here` signals the completion value on the queue, for a readback
+    /// that never queued a copy to carry it.
+    void settle_and_drop(isize index, bool delivered, bool signal_here);
 
     /// The driver's per-thread initialization, under a leak annotation — see the upload system's twin.
     void warm_up_driver_thread();
@@ -147,6 +194,18 @@ private:
     VkCommandPool _window_pools[k_window_count] = {};
     VkCommandBuffer _window_buffers[k_window_count] = {};
     int _next_window = 0;
+
+    sg::impl::transfer_drain _drain;
+
+    /// Readbacks admitted and not yet finished, in no particular order — the scheduler decides which runs next.
+    cc::vector<vulkan_async_download_job> _pending;
+
+    /// Window sharing and job selection, identical to the upload side's.
+    /// Its `family` rule is what keeps two readbacks of one source in sequence order.
+    sg::impl::transfer_scheduler _scheduler;
+
+    /// Monotonic, actor-local, so the scheduler can order within a family.
+    u64 _next_sequence = 0;
 
     cc::unique_ptr<cc::threaded_actor<vulkan_async_download_job>> _actor;
 };

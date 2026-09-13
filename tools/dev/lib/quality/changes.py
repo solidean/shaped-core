@@ -31,26 +31,44 @@ class ChangeScopeError(Exception):
 class ChangeScope:
     """Which change set a lint or format run is restricted to.
 
-    `revision` None means the working tree — dirty and untracked files.
-    Otherwise it is a git revision or an `A..B` range, and the change set is that diff instead.
-    A scope of `None` — no ChangeScope at all — means the whole tree, which is a third state and deliberately not expressible here.
+    Three kinds, and the third is what a pre-commit gate on a feature branch actually wants:
+
+    - `revision` None, `since` None — the **working tree**: dirty and untracked files.
+    - `revision` set — a git revision or an `A..B` range, and the change set is that diff.
+    - `since` set — everything that changed **since `since`, including the working tree**.
+      That is the branch's whole contribution: its commits AND whatever is not committed yet.
+
+    The third exists because the first one empties as you work.
+    A gate scoped to the working tree inspects nothing the moment you commit, and reports green for a branch it never
+    looked at — which is exactly when a pre-commit gate is being trusted most.
+
+    A scope of `None` — no ChangeScope at all — means the whole tree, which is a fourth state and deliberately not expressible here.
     """
 
     revision: str | None = None
 
+    #: Base for the "since this, working tree included" kind.
+    #: Mutually exclusive with `revision`.
+    since: str | None = None
+
     @property
     def is_working_tree(self) -> bool:
-        return self.revision is None
+        return self.revision is None and self.since is None
 
     def phrase(self, noun: str) -> str:
         """`noun` narrowed to this scope, as a summary line would say it.
 
-        The two scopes want the qualifier on opposite sides — "dirty libs/ sources" but "libs/ sources in abc123" — so the caller hands over the noun rather than a prefix.
+        The kinds want the qualifier in different places — "dirty libs/ sources", "libs/ sources in abc123",
+        "libs/ sources since origin/main" — so the caller hands over the noun rather than a prefix.
         """
+        if self.since is not None:
+            return f"{noun} since {self.since}"
         return f"dirty {noun}" if self.revision is None else f"{noun} in {self.revision}"
 
     def rerun_flag(self) -> str:
         """The flag that reproduces this scope, for a hint in a failure message."""
+        if self.since is not None:
+            return f" --since {self.since}"
         return " --dirty-only" if self.revision is None else f" --commit {self.revision}"
 
 
@@ -197,8 +215,30 @@ def _warn_on_drift(root: Path, head: str, selected: set[Path]) -> None:
     )
 
 
+def _since_files(root: Path, base: str) -> list[Path]:
+    """Files that differ from `base` on disk — the branch's commits and its uncommitted edits together.
+
+    `git diff <base>` with no second revision compares against the WORKING TREE, which is the whole point: one listing
+    covers both halves, so nothing falls between "already committed" and "not committed yet".
+    Untracked files are added separately, since a diff cannot see them.
+    """
+    if _rev_parse(root, base) is None:
+        raise ChangeScopeError(f"{base!r} does not name a commit")
+
+    stdout = _git_or_raise(root, ["diff", "--name-only", "--diff-filter=d", "-z", base])
+    paths = {(root / name).resolve() for name in _split_z(stdout)}
+
+    untracked = _git(root, ["ls-files", "--others", "--exclude-standard", "-z"], timeout=30)
+    if untracked is not None and untracked.returncode == 0:
+        paths |= {(root / name).resolve() for name in _split_z(untracked.stdout)}
+
+    return sorted(p for p in paths if p.is_file())
+
+
 def changed_files(root: Path, scope: ChangeScope) -> list[Path]:
     """The absolute paths the scope covers, before any linter's own roots and suffixes narrow them."""
+    if scope.since is not None:
+        return _since_files(root, scope.since)
     if scope.is_working_tree:
         return _dirty_files(root)
 
@@ -250,6 +290,20 @@ def changed_line_ranges(root: Path, scope: ChangeScope) -> dict[Path, list[tuple
     For a revision the ranges are numbered against its head commit, which is why `changed_files` warns when the tree has moved on.
     """
     ranges: dict[Path, list[tuple[int, int]]] = {}
+
+    if scope.since is not None:
+        # Against the working tree, so the ranges are numbered against what is on disk and there is no drift to warn
+        # about — which is the other reason this kind is the right default for a gate that runs before a commit.
+        _parse_diff_ranges(root, _git_or_raise(root, ["diff", "--unified=0", "--no-color", scope.since]), ranges)
+        untracked = _git(root, ["ls-files", "--others", "--exclude-standard"], timeout=30)
+        if untracked is not None and untracked.returncode == 0:
+            for name in untracked.stdout.splitlines():
+                if not name.strip():
+                    continue
+                p = (root / name.strip()).resolve()
+                if p.is_file():
+                    ranges.setdefault(p, []).append((1, _ALL_LINES))
+        return ranges
 
     if not scope.is_working_tree:
         base, head = resolve_range(root, scope.revision)

@@ -34,6 +34,13 @@ void add_binding(cc::byte_stream_builder& b, binding const& bnd)
     b.add_pod(bnd.type);
     b.add_optional(bnd.block_size);
     b.add_optional(bnd.texture_dimension);
+    // What a WebGPU bind group layout entry needs beyond the above, and what dx12 and vulkan ignore.
+    // They are part of the identity anyway: two layouts that differ only here are different layouts on some backend,
+    // and this hash is what a persistent pipeline cache keys on across processes.
+    b.add_pod(bnd.visibility.bits);
+    b.add_optional(bnd.storage_format);
+    b.add_optional(bnd.sample_type);
+    b.add_optional(bnd.sampler_type);
 }
 } // namespace
 

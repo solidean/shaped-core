@@ -16,6 +16,10 @@ struct sg::texture_1d_description
     int mip_levels = 1;
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_1d;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -24,7 +28,8 @@ struct sg::texture_1d_description
                 .dimension = texture_dimension::d1,
                 .width = width,
                 .mip_levels = mip_levels,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -36,6 +41,10 @@ struct sg::texture_2d_description
     int mip_levels = 1;
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_2d;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -45,7 +54,8 @@ struct sg::texture_2d_description
                 .width = width,
                 .height = height,
                 .mip_levels = mip_levels,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -58,6 +68,10 @@ struct sg::texture_3d_description
     int mip_levels = 1;
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_3d;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -68,7 +82,8 @@ struct sg::texture_3d_description
                 .height = height,
                 .depth = depth,
                 .mip_levels = mip_levels,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -78,6 +93,10 @@ struct sg::texture_cube_description
     int size = 1; ///< edge length; cube faces are square (width == height == size)
     int mip_levels = 1;
     texture_usages usage = {};
+
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
 
     using texture_type = texture_cube;
 
@@ -89,7 +108,8 @@ struct sg::texture_cube_description
                 .height = size,
                 .mip_levels = mip_levels,
                 .is_cube = true,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -101,6 +121,10 @@ struct sg::texture_1d_array_description
     int array_layers = 1;
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_1d_array;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -110,7 +134,8 @@ struct sg::texture_1d_array_description
                 .width = width,
                 .mip_levels = mip_levels,
                 .array_layers = array_layers,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -123,6 +148,10 @@ struct sg::texture_2d_array_description
     int array_layers = 1;
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_2d_array;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -133,7 +162,8 @@ struct sg::texture_2d_array_description
                 .height = height,
                 .mip_levels = mip_levels,
                 .array_layers = array_layers,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -144,6 +174,10 @@ struct sg::texture_cube_array_description
     int mip_levels = 1;
     int cube_count = 1; ///< number of cubes (the backend expands to 6 * cube_count faces)
     texture_usages usage = {};
+
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
 
     using texture_type = texture_cube_array;
 
@@ -156,7 +190,8 @@ struct sg::texture_cube_array_description
                 .mip_levels = mip_levels,
                 .array_layers = cube_count,
                 .is_cube = true,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -168,6 +203,10 @@ struct sg::texture_2d_ms_description
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_2d_ms;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -177,7 +216,8 @@ struct sg::texture_2d_ms_description
                 .width = width,
                 .height = height,
                 .sample_count = sample_count,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -190,6 +230,10 @@ struct sg::texture_2d_array_ms_description
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
     texture_usages usage = {};
 
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
+
     using texture_type = texture_2d_array_ms;
 
     [[nodiscard]] texture_description to_texture_description() const
@@ -200,7 +244,8 @@ struct sg::texture_2d_array_ms_description
                 .height = height,
                 .array_layers = array_layers,
                 .sample_count = sample_count,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -210,6 +255,10 @@ struct sg::texture_cube_ms_description
     int size = 1;         ///< edge length; cube faces are square (width == height == size)
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
     texture_usages usage = {};
+
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
 
     using texture_type = texture_cube_ms;
 
@@ -221,7 +270,8 @@ struct sg::texture_cube_ms_description
                 .height = size,
                 .sample_count = sample_count,
                 .is_cube = true,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };
 
@@ -232,6 +282,10 @@ struct sg::texture_cube_array_ms_description
     int cube_count = 1;   ///< number of cubes (the backend expands to 6 * cube_count faces)
     int sample_count = 1; ///< must be > 1 (multisampled); a single mip level
     texture_usages usage = {};
+
+    /// The resting layout the texture starts in; see texture_description::initial_layout.
+    /// Free for every shape, which is why it is on every one of these rather than only on the general description.
+    cc::optional<texture_layout> initial_layout = {};
 
     using texture_type = texture_cube_array_ms;
 
@@ -244,6 +298,7 @@ struct sg::texture_cube_array_ms_description
                 .array_layers = cube_count,
                 .sample_count = sample_count,
                 .is_cube = true,
-                .usage = usage};
+                .usage = usage,
+                .initial_layout = initial_layout};
     }
 };

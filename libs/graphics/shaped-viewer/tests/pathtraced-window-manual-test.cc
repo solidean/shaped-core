@@ -301,13 +301,13 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
 
             auto const bindless = resources.freeze();
 
-            sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
-                                                        .background = background,
-                                                        .instances = instances,
-                                                        .output = color,
-                                                        .instance_table = instance_table,
-                                                        .hit_groups = hit_groups,
-                                                        .bindless = &bindless});
+            auto const traced = sv::pathtrace_routine::execute(*trace_cmd, {.frame = frame,
+                                                                            .background = background,
+                                                                            .instances = instances,
+                                                                            .output = color,
+                                                                            .instance_table = instance_table,
+                                                                            .hit_groups = hit_groups,
+                                                                            .bindless = &bindless});
             ctx.submit_command_list(cc::move(trace_cmd));
         }
 
@@ -316,14 +316,17 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         auto cmd = ctx.create_command_list();
         {
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.0f, 0.0f, 0.0f, 1.0f))}});
-            sr::blit_routine::execute(pass, color);
+            // Declines while the blit shaders are still compiling, which on the first frames is ordinary.
+            (void)sr::blit_routine::execute(pass, color);
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
-        ctx.advance_epoch(sc->buffer_count());
+        ctx.advance_epoch();
+        ctx.block_until_epochs_in_flight(sc->buffer_count());
 
         ++accum; // uncapped: a full-float mean goes on converging for as long as the view is left alone
     }
 
-    ctx.advance_epoch_and_wait_for_idle();
+    ctx.advance_epoch();
+    ctx.block_until_idle();
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly
 }

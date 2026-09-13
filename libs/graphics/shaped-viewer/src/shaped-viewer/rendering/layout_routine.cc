@@ -1,5 +1,6 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <sv_shaders.hh>
@@ -53,35 +54,36 @@ constexpr sg::blend_state over_blend
 }
 } // namespace
 
-void layout_routine::init_declare(sg::context& ctx)
+cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 {
-    auto vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
-    auto border_ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
-    auto view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
-    auto wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
+    auto& ctx = scope.context();
 
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(border_ps);
-    (void)cc::try_async_blocking_get(view_ps);
-    (void)cc::try_async_blocking_get(wipe_ps);
+    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
+    auto const border_ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
+    auto const view_ps = sv::shaders::layout.fragment.view_ps->acquire(ctx);
+    auto const wipe_ps = sv::shaders::layout.fragment.wipe_ps->acquire(ctx);
+
+    // All four are in flight from their acquire, so settling them one after another costs no concurrency.
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(border_ps);
+    co_await cc::async_settled(view_ps);
+    co_await cc::async_settled(wipe_ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_border = border_ps->try_value();
     auto const* const compiled_view = view_ps->try_value();
     auto const* const compiled_wipe = wipe_ps->try_value();
 
-    // A broken edit: (re)bind a callback that fails, so init still clears every pipeline built against the old layout
-    // and execute no-ops until the next reload compiles.
+    // Cleared first, so a shader that was never good leaves nothing behind to draw with.
+    _group_layout = nullptr;
+    for (auto& by_kind : _pipelines)
+        for (auto& p : by_kind)
+            p = nullptr;
+
     if (compiled_vs == nullptr || compiled_border == nullptr || compiled_view == nullptr || compiled_wipe == nullptr)
     {
-        _group_layout = nullptr;
-        _pipelines.init(ctx,
-                        [](sg::context&, impl::layout_pipeline_key) -> sg::async_raster_pipeline
-                        {
-                            return cc::make_async_from_error<sg::raster_pipeline_handle>(
-                                cc::async_error::make_error(cc::any_error("layout shaders did not compile")));
-                        });
-        return;
+        fail_init();
+        co_return;
     }
 
     // Group 0 comes from the *wipe* fragment stage, which is the only one binding both sources — so one layout serves
@@ -97,51 +99,82 @@ void layout_routine::init_declare(sg::context& ctx)
                 return &b;
         return nullptr;
     }();
-    // A vertex stage that reflects no constants block cannot be driven, but this is a shader edit like any other:
-    // fail the build callback so execute no-ops, rather than taking the process down on the default preset.
+    // A vertex stage that reflects no constants block cannot be driven, but this is a shader problem like any other:
+    // report it as a failed init rather than taking the process down on the default preset.
     if (constants_binding == nullptr)
     {
         _group_layout = nullptr;
-        _pipelines.init(ctx,
-                        [](sg::context&, impl::layout_pipeline_key) -> sg::async_raster_pipeline
-                        {
-                            return cc::make_async_from_error<sg::raster_pipeline_handle>(cc::async_error::make_error(
-                                cc::any_error("layout.hlsl declares no layout_constants cbuffer")));
-                        });
-        return;
+        fail_init();
+        co_return;
     }
 
     auto const pipeline_layout
         = ctx.cached.acquire_pipeline_layout({.groups = {_group_layout}, .inline_constants = *constants_binding});
 
-    _pipelines.init(
-        ctx,
-        [layout = pipeline_layout, vertex_shader = *compiled_vs, border = *compiled_border, view = *compiled_view,
-         wipe = *compiled_wipe](sg::context& c, impl::layout_pipeline_key key) -> sg::async_raster_pipeline
+    // Every pipeline this format needs, built here rather than on demand: a draw happens inside the caller's open
+    // rendering scope, and that is where nothing may wait.
+    //
+    // Six of the eight (kind, blended) slots are reachable.
+    // A flat fill is always blended -- is_blended returns true for one unconditionally -- so background and border
+    // have no unblended form, and those two slots stay null.
+    auto pending = cc::vector<sg::async_raster_pipeline>();
+    for (auto kind_index = 0; kind_index < k_draw_kinds; ++kind_index)
+    {
+        auto const kind = draw_kind(kind_index);
+        for (auto blended = 0; blended < 2; ++blended)
         {
-            // The border stage is the flat-color one, so a background renders through it too.
-            auto const& fragment_shader = is_flat_fill(key.kind) ? border : key.kind == draw_kind::wipe ? wipe : view;
+            if (is_flat_fill(kind) && blended == 0)
+                continue; // unreachable: a flat fill always blends
 
-            auto target = sg::color_target_state{.format = key.format};
-            if (key.blended)
+            // The border stage is the flat-color one, so a background renders through it too.
+            auto const& fragment_shader = is_flat_fill(kind)      ? *compiled_border
+                                        : kind == draw_kind::wipe ? *compiled_wipe
+                                                                  : *compiled_view;
+
+            auto target = sg::color_target_state{.format = params()};
+            if (blended != 0)
                 target.blend = over_blend;
 
-            auto const desc = sg::raster_pipeline_description{
-                .layout = layout,
-                .vertex_shader = vertex_shader,
+            auto node = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+                .layout = pipeline_layout,
+                .vertex_shader = *compiled_vs,
                 .fragment_shader = fragment_shader,
                 .topology = sg::primitive_topology::triangle_list, // no vertex input — SV_VertexID
                 .rasterization = {.cull = sg::cull_mode::none},
                 .color_targets = {target},
-            };
-            return c.cached.acquire_raster_pipeline(desc);
-        });
+            });
+            pending.push_back(node);
+        }
+    }
+
+    // Started together, then collected: the builds overlap rather than running one after another.
+    auto at = isize(0);
+    for (auto kind_index = 0; kind_index < k_draw_kinds; ++kind_index)
+    {
+        auto const kind = draw_kind(kind_index);
+        for (auto blended = 0; blended < 2; ++blended)
+        {
+            if (is_flat_fill(kind) && blended == 0)
+                continue;
+
+            auto const& node = pending[at++];
+            co_await cc::async_settled(node);
+            auto const* const built = node->try_value();
+            if (built == nullptr)
+            {
+                fail_init(); // one pipeline missing makes the whole routine unusable, so say so once
+                co_return;
+            }
+            _pipelines[kind_index][blended] = *built;
+        }
+    }
+    co_return;
 }
 
-void layout_routine::execute(sg::rendering_scope& scope,
-                             window_id window,
-                             cc::span<layout_draw const> draws,
-                             plan_textures const& textures)
+sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
+                                            window_id window,
+                                            cc::span<layout_draw const> draws,
+                                            plan_textures const& textures)
 {
     (void)window; // keyed on today, and the seam a per-window color space plugs into
 
@@ -149,7 +182,10 @@ void layout_routine::execute(sg::rendering_scope& scope,
     CC_ASSERT(!scope.color_formats().empty(), "a layout must be drawn into a scope with a color target");
     auto const format = scope.color_formats()[0];
 
-    auto const& self = acquire(cmd);
+    // The target's format picks the instance, and is only knowable once the caller's scope is open.
+    auto const self = try_acquire(cmd, format);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
 
     for (auto const& d : draws)
@@ -159,11 +195,10 @@ void layout_routine::execute(sg::rendering_scope& scope,
         if (w <= 0 || h <= 0)
             continue; // a collapsed cell draws nothing rather than a degenerate viewport
 
-        // Fallible rather than throwing: this runs inside the caller's rendering scope, and an exception unwinding out
-        // of there would leave their command list unsubmitted.
-        auto const pipeline = self._pipelines.try_acquire({.format = format, .kind = d.kind, .blended = is_blended(d)});
-        if (pipeline.has_error() || pipeline.value() == nullptr)
-            return;
+        // An index rather than a lookup: every pipeline this format needs was built during init, so there is nothing
+        // here that could still be building.
+        auto const& pipeline = self->_pipelines[int(d.kind)][is_blended(d) ? 1 : 0];
+        CC_ASSERT(pipeline != nullptr, "a layout draw reached a (kind, blend) combination init did not build");
 
         auto constants = layout_constants_gpu{};
         constants.tint = tg::vec4f(d.opacity, d.opacity, d.opacity, d.opacity); // premultiplied, so the color scales too
@@ -178,7 +213,7 @@ void layout_routine::execute(sg::rendering_scope& scope,
             if (textures.targets.empty())
                 continue;
             group = ctx.transient.create_binding_group(
-                self._group_layout,
+                self->_group_layout,
                 {{.name = "source_0", .view = textures.targets[0].as_readonly_view()},
                  {.name = "source_1", .view = textures.targets[0].as_readonly_view()}},
                 {{.name = "source_sampler", .sampler = {}}});
@@ -202,7 +237,7 @@ void layout_routine::execute(sg::rendering_scope& scope,
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group
-                = ctx.transient.create_binding_group(self._group_layout,
+                = ctx.transient.create_binding_group(self->_group_layout,
                                                      {{.name = "source_0", .view = primary->as_readonly_view()},
                                                       {.name = "source_1", .view = secondary->as_readonly_view()}},
                                                      {{.name = "source_sampler",
@@ -216,10 +251,11 @@ void layout_routine::execute(sg::rendering_scope& scope,
         scope.set_viewport(
             {.offset = tg::pos2f(f32(d.dst_rect.min[0]), f32(d.dst_rect.min[1])), .size = tg::vec2f(f32(w), f32(h))});
         scope.set_scissor(d.dst_rect);
-        scope.bind_pipeline(*pipeline.value());
+        scope.bind_pipeline(*pipeline);
         scope.bind_group(0, *group);
         scope.set_inline_constants(cc::span<layout_constants_gpu const>(&constants, 1).as_bytes(), {});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
+    return sg::routine_outcome::executed;
 }
 } // namespace sv

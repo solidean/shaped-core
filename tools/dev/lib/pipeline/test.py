@@ -223,6 +223,10 @@ def test(
 
                 record = {
                     "name": name,
+                    # Which preset ran it.
+                    # The sidecar is per build dir so it is implied there, but the records a caller gets back span every
+                    # preset in one list, and attributing a slow run needs it.
+                    "preset": preset.name,
                     "artifact": str(target.artifact),
                     "junit": (
                         {

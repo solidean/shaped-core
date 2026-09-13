@@ -136,6 +136,32 @@ This gives clean ergonomics by default — no `.value()` on every create — whi
 A caller that never wants to catch simply stays on the `try_*` surface.
 Requiring some care to go exception-free is acceptable; making it the default is not.
 
+### Offer both only where both are real
+
+The pattern earns its keep when **some** callers genuinely handle the failure.
+Where none can, publishing the fallible core is worse than not: it implies a choice that does not exist, and every call site then carries a branch that only ever goes one way.
+
+sg's resource creation is the worked example.
+A buffer, texture, heap or binding group that cannot be created has failed for want of memory, and a caller has no fallback.
+So those expose **one** spelling, `create_*`, and the fallible core stays private.
+It still throws where a backend knows synchronously, and that is **best-effort rather than a contract**.
+A backend whose creation is asynchronous (WebGPU) cannot know, and reports on the deferred channel below instead.
+
+Pipelines are the counter-example in the same file, and the difference is evidence rather than taste.
+sg's own pipeline cache *does* act on a build failure, turning it into a failed async so a render routine reports `failed` instead of throwing on a worker.
+A caller that demonstrably acts on the error keeps the fallible form.
+
+## Deferred errors: failures that arrive after the call
+
+Everything above assumes the answer is available when the call returns.
+Some backends cannot promise that — WebGPU reports a bad buffer or a failed pipeline through a promise that settles long after the call, and a validation layer speaks up whenever it notices.
+
+`ctx.take_pending_errors()` is that channel: a list of `sg::device_error`, drained once a frame, in the order the backend saw them.
+Entries accumulate until taken, so a caller that never asks grows a list rather than losing anything.
+The kinds are deliberately coarse — `device_lost`, `creation_failed`, `validation` — because a caller branching on a fine-grained cause is a caller behaving differently per backend.
+
+Device loss is reported here too, so a frame loop that drains this channel never also has to poll `is_device_lost()`.
+
 Keep the two channels distinct.
 A `try_*` returning "absent" or an error must mean a **recoverable** failure the caller can retry or route around — out of budget, doesn't fit.
 A **sticky, global** condition like a lost device is *not* that.

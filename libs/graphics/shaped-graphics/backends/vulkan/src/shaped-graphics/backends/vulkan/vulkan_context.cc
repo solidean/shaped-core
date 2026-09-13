@@ -177,11 +177,14 @@ void vulkan_context::shutdown()
         _download_async.shutdown();
     }
 
-    // Advance-and-wait-for-idle drains the GPU, then closes and retires the final epoch — freeing every
-    // resource (in-flight and staged) and running finalizers — before the device is released.
+    // Close the final epoch and drain: this frees every resource (in-flight and staged) and runs finalizers
+    // before the device is released.
     // Externally synchronized: no create/submit/drop may run concurrently with shutdown.
     if (_device != VK_NULL_HANDLE && _epoch_timeline != VK_NULL_HANDLE)
-        advance_epoch_and_wait_for_idle();
+    {
+        advance_epoch();
+        block_until_idle();
+    }
 
     if (_device != VK_NULL_HANDLE)
     {

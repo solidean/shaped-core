@@ -38,7 +38,14 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_messenger_callback(VkDebugUtilsMessageSever
     // The messenger created alongside the instance carries no context yet, so its create-time messages go to the log.
     // The standalone one created after the context carries it, which is what lets a test fail on a validation message.
     if (auto* const ctx = static_cast<vulkan_context*>(user_data); ctx != nullptr)
+    {
+        // Errors also go on the deferred channel, so an application draining ctx.take_pending_errors() once a frame
+        // sees them without installing a callback of its own.
+        // Errors only: a warning is not a failure, and a channel that carries both stops being worth draining.
+        if (mapped == vulkan_message_severity::error)
+            ctx->report_device_error({.kind = sg::device_error_kind::validation, .message = cc::string(data->pMessage)});
         ctx->dispatch_validation_message(mapped, cc::string_view(data->pMessage));
+    }
     else if (mapped == vulkan_message_severity::error)
         CC_LOG_ERROR("validation: {}", data->pMessage);
     else if (mapped == vulkan_message_severity::warning)

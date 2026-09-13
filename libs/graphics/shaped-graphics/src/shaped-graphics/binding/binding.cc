@@ -4,20 +4,33 @@
 
 namespace sg
 {
+void apply_stage_visibility(cc::span<binding> bindings, shader_stage stage)
+{
+    for (auto& b : bindings)
+        b.visibility.set(stage);
+}
+
 void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from)
 {
     for (auto const& b : from)
     {
-        auto seen = false;
-        for (auto const& e : into)
+        auto* existing = static_cast<binding*>(nullptr);
+        for (auto& e : into)
             if (e.name == b.name)
             {
-                seen = true;
+                existing = &e;
                 break;
             }
 
-        if (!seen)
+        if (existing == nullptr)
+        {
             into.push_back(b);
+            continue;
+        }
+
+        // First-seen wins for every field except visibility, which is the one thing the merge exists to accumulate:
+        // one compiled_shader is one stage, so a binding declared by two stages arrives here twice, once per bit.
+        existing->visibility |= b.visibility;
     }
 }
 

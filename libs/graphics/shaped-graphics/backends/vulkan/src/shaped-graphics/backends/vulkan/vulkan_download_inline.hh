@@ -3,12 +3,14 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/transfer_drain.hh>
 
 #include <atomic>
 
@@ -40,6 +42,11 @@ struct sg::backend::vulkan::vulkan_download_copy_job
 
     /// The reserving epoch's outstanding-copy count, released when this job is done or discarded.
     std::shared_ptr<std::atomic<isize>> epoch_copies;
+
+    /// Counts this job as outstanding for as long as it exists, and only once it has been SUBMITTED.
+    /// A job still sitting in an unsubmitted command list is the caller's to submit, so it must not hold a drain
+    /// waiter — see vulkan_download_inline_system::wait_until_idle.
+    sg::impl::transfer_drain::token drain;
 };
 
 /// Drains readbacks in enqueue order, which is also ring-allocation order.
@@ -74,12 +81,22 @@ public:
         isize offset = 0;
         byte const* mapped = nullptr;
         std::shared_ptr<std::atomic<isize>> epoch_copies;
+
+        /// Non-null only for a reservation the ring could not hold, and then it OWNS the one-off staging buffer.
+        ///
+        /// A readback has a second liveness axis the epoch fence does not cover: the actor memcpys out of this memory
+        /// on its own thread, after the GPU copy the epoch gates.
+        /// So the recording site captures this in the job's deferred copy, and the buffer dies with the job.
+        std::shared_ptr<void> keep_alive;
     };
 
     /// Reserves contiguous ring space for the current epoch at a multiple of `alignment_in_bytes`, blocking on an
     /// in-flight epoch when full.
     /// Image copies need the alignment; buffer copies do not.
     /// See the upload ring's reserve for why.
+    ///
+    /// Where waiting cannot help — a single readback larger than the ring, or one epoch's readbacks exceeding it with
+    /// nothing in flight — it falls back to a one-off staging buffer carried on `reservation::keep_alive`.
     [[nodiscard]] reservation reserve(isize size_in_bytes, isize alignment_in_bytes = 1);
 
     /// Counts one job against its epoch, paired one-to-one with a job actually enqueued or discarded.
@@ -103,6 +120,22 @@ public:
     /// Blocks until `token`'s list has finished.
     void wait_for_submission(sg::submission_token token);
 
+    /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
+    ///
+    /// This is what makes ctx.block_until_idle() a delivery guarantee and not just a GPU one: the copy the GPU
+    /// finished still has to be memcpy'd into the caller's destination, and only the actor does that.
+    /// Submitted-only on purpose — a download recorded into a list the caller has not submitted yet can never
+    /// progress, so counting it would turn this into a hang rather than a wait.
+    void wait_until_idle() { _drain.wait_until_idle(); }
+
+    /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
+    void set_budget(isize capacity);
+
+    /// Applies a pending set_budget at an epoch boundary, and is a no-op when nothing is pending.
+    /// Drains every in-flight epoch AND waits the actor out: the memcpy reads this ring on its own thread, so the
+    /// epoch fence alone would not prove it is safe to free.
+    void apply_pending_budget();
+
     void on_epoch_advance(sg::epoch closed);
     void on_epochs_completed(sg::epoch completed);
 
@@ -120,10 +153,28 @@ private:
         u64 freed_pos = 0;
         std::shared_ptr<std::atomic<isize>> current_epoch_copies = std::make_shared<std::atomic<isize>>(0);
         cc::vector<checkpoint> checkpoints;
+        isize pending_capacity = 0; ///< a set_budget awaiting the next epoch boundary (0 = none)
     };
+
+    /// One host-visible mapped buffer, the shape both initialize and a resize build.
+    struct ring_storage
+    {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        byte const* mapped = nullptr;
+    };
+
+    /// Builds a mapped TRANSFER_DST buffer of `capacity` bytes, or nullopt if it could not be allocated.
+    [[nodiscard]] cc::optional<ring_storage> create_ring(isize capacity);
 
     /// Frees the leading run of checkpoints that are both retired and fully drained.
     void reclaim(ring_state& s, sg::epoch completed);
+
+    /// A dedicated staging buffer for one readback the ring could not hold, owned by the returned keep_alive.
+    [[nodiscard]] reservation reserve_outside_ring(isize size_in_bytes);
+
+    /// Says so once per epoch, naming what did not fit and what the budget is.
+    void warn_outside_ring(isize size_in_bytes);
 
     vulkan_context* _ctx = nullptr;
     VkBuffer _buffer = VK_NULL_HANDLE;
@@ -132,5 +183,9 @@ private:
     isize _capacity = 0;
     sg::epoch _last_completed = sg::epoch::first;
     cc::mutex<ring_state> _state;
+    sg::impl::transfer_drain _drain;
+
+    /// The last epoch the fallback warning fired in, so a frame that overruns repeatedly says so once.
+    cc::atomic<u64> _last_warned_epoch = 0;
     cc::unique_ptr<cc::threaded_actor<vulkan_download_copy_job>> _actor;
 };

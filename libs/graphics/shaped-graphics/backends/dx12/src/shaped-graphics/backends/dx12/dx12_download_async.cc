@@ -38,6 +38,13 @@ struct download_mem_job
     cc::shared_async<cc::unit> completion;        // set only on a job's last chunk; settles the future
     std::shared_ptr<void const> source_keepalive; // holds the source (buffer or texture) alive across the read
     std::shared_ptr<dx12_download_sink> sink;     // set for a sink-driven read; its `failed` decides how this settles
+
+    /// The originating job's drain token, one copy per chunk.
+    ///
+    /// It has to live HERE and not only on the active_download, because this actor is two-stage: a read leaves _active
+    /// the moment its last chunk is PACKED, while its bytes are delivered later, when the window it landed in drains.
+    /// A token that died with the active_download would let block_until_idle() return before any memcpy had run.
+    sg::impl::transfer_drain::token drain;
 };
 
 // A submitted-but-not-yet-drained window.
@@ -208,7 +215,7 @@ private:
             if (a.job.stream == nullptr || !a.job.stream->cancelled.load(std::memory_order_relaxed))
                 continue;
             fold_cancelled_completion(a.job); // settles the shared node, so the future fails rather than hanging
-            _active.remove_from_to(i, i + 1);
+            _active.remove_at(i);
         }
     }
 
@@ -286,7 +293,7 @@ private:
             }
 
             if (_active[index].packer->is_finished())
-                _active.remove_from_to(index, index + 1);
+                _active.remove_at(index);
 
             // Independent of whether that finished the read: one ending exactly on the window boundary still leaves
             // a full window, and the next pick would be handed a zero-byte allocation.
@@ -335,7 +342,7 @@ private:
         // Only the last chunk settles the future: windows drain in order, so every earlier chunk is copied by then.
         _open_mem_jobs.push_back(download_mem_job{cc::move(chunk.deferred_cpu_copy), a.job.pin,
                                                   last ? a.job.completion : cc::shared_async<cc::unit>(), a.keepalive,
-                                                  a.job.sink});
+                                                  a.job.sink, a.job.drain});
         return true;
     }
 
@@ -660,6 +667,7 @@ sg::bytes_future dx12_download_async_system::download_buffer(sg::raw_buffer_hand
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     // A null upload group means the source can never have been an upload target, so nothing to observe.
     job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(completion));
@@ -714,6 +722,7 @@ sg::bytes_future dx12_download_async_system::download_texture(sg::raw_texture_ha
     job.completion_value = dx12_group_value{src->_download_group, value};
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value = dx12_group_value{src->_upload_group, upload_wait};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::bytes_future(cc::move(dst), cc::move(completion));
@@ -793,6 +802,7 @@ sg::stream_download_handle dx12_download_async_system::stream_buffer(sg::raw_buf
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value
         = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
@@ -840,6 +850,7 @@ sg::stream_download_handle dx12_download_async_system::stream_texture(sg::raw_te
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value
         = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future(cc::move(dst), control->completion));
@@ -877,6 +888,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_buffer(sg::ra
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value
         = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     // No bytes_future: the sink IS the delivery channel, and handing back an empty future beside it would only
@@ -925,6 +937,7 @@ sg::stream_download_handle dx12_download_async_system::stream_sink_texture(sg::r
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(std::memory_order_acquire));
     job.upload_wait_value
         = dx12_group_value{src->_upload_group, src->_pending_async_upload_value.load(std::memory_order_acquire)};
+    job.drain = _drain.start();
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_download_handle(cc::move(control), sg::bytes_future());

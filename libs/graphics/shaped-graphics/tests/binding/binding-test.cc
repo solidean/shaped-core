@@ -206,3 +206,49 @@ TEST("sg bindings - named_view pairs a name with bound views")
     CHECK(!scalar.is_array());
     CHECK(b.texture_dimension == sg::texture_view_dimension::cube);
 }
+
+// Visibility is the one field merge_bindings accumulates rather than deduplicating.
+// A binding declared by two stages arrives twice — once per compiled_shader, each carrying its own stage — and the
+// layout built from the merge has to be visible to both or one stage reads nothing.
+TEST("sg::binding - visibility unions across stages")
+{
+    auto vs = cc::vector<sg::binding>();
+    vs.push_back({.name = "camera", .index = 0, .type = sg::binding_type::uniform_buffer});
+    sg::apply_stage_visibility(vs, sg::shader_stage::vertex);
+
+    auto ps = cc::vector<sg::binding>();
+    ps.push_back({.name = "camera", .index = 0, .type = sg::binding_type::uniform_buffer});
+    ps.push_back({.name = "albedo", .index = 1, .type = sg::binding_type::readonly_texture});
+    sg::apply_stage_visibility(ps, sg::shader_stage::fragment);
+
+    CHECK(vs[0].visibility.has(sg::shader_stage::vertex));
+    CHECK(!vs[0].visibility.has(sg::shader_stage::fragment));
+
+    auto merged = cc::vector<sg::binding>();
+    sg::merge_bindings(merged, vs);
+    sg::merge_bindings(merged, ps);
+
+    REQUIRE(merged.size() == 2);
+
+    // Shared between the stages, so both bits survive the merge.
+    CHECK(merged[0].name == "camera");
+    CHECK(merged[0].visibility.has(sg::shader_stage::vertex));
+    CHECK(merged[0].visibility.has(sg::shader_stage::fragment));
+
+    // Declared by one stage only, so it stays narrow — which is the whole point: WebGPU rejects a storage binding
+    // marked visible to a stage that never declared it.
+    CHECK(merged[1].name == "albedo");
+    CHECK(!merged[1].visibility.has(sg::shader_stage::vertex));
+    CHECK(merged[1].visibility.has(sg::shader_stage::fragment));
+}
+
+// Empty means "never said", and stays that way: a hand-written binding is visible everywhere by a backend's choice,
+// not by this vocabulary pretending to know.
+TEST("sg::binding - visibility defaults to empty")
+{
+    auto const b = sg::binding{.name = "hand_written", .index = 0, .type = sg::binding_type::uniform_buffer};
+    CHECK(b.visibility.is_empty());
+    CHECK(!b.storage_format.has_value());
+    CHECK(!b.sample_type.has_value());
+    CHECK(!b.sampler_type.has_value());
+}

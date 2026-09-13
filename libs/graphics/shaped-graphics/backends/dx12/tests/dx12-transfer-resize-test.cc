@@ -37,7 +37,8 @@ bool inline_round_trip(sg::context_handle const& ctx, isize n, int seed)
     auto fut = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
 
-    auto bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto bytes = fut.try_get_bytes();
     if (!bytes.has_value() || bytes.value().size() != n)
         return false;
     for (isize i = 0; i < n; ++i)
@@ -63,7 +64,8 @@ bool async_round_trip(sg::context_handle const& ctx, isize n, int seed)
     auto fut = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
 
-    auto bytes = ctx->wait_for(fut);
+    ctx->block_until_idle();
+    auto bytes = fut.try_get_bytes();
     if (!bytes.has_value() || bytes.value().size() != n)
         return false;
     for (isize i = 0; i < n; ++i)
@@ -97,7 +99,7 @@ TEST("sg dx12 - inline upload ring grows to fit a larger upload")
     CHECK(inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 
     ctx.value()->upload.set_inline_budget(isize(128) * 1024); // grow the ring
-    ctx.value()->advance_epoch(cc::nullopt);                  // applies the pending budget
+    ctx.value()->advance_epoch();                             // applies the pending budget
 
     CHECK(inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
 }
@@ -111,7 +113,7 @@ TEST("sg dx12 - inline download ring grows to fit a larger readback")
     CHECK(inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 
     ctx.value()->download.set_budget(isize(128) * 1024); // grow the readback ring
-    ctx.value()->advance_epoch(cc::nullopt);             // applies the pending budget (drains the actor)
+    ctx.value()->advance_epoch();                        // applies the pending budget (drains the actor)
 
     CHECK(inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
 }

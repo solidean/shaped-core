@@ -157,9 +157,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   The model to reach is: a routine's init phases exclude every `execute`, while `execute` calls that only *read* run in parallel with each other.
   A read-only routine like `sr::blit_routine` — one that can be acquired without exclusivity — has no reason to serialize against another thread's `execute`.
   Both halves are approximated today, because clean-core has no shared/exclusive mutex:
-  `acquire()` takes **no** lock where it wants a shared one (so a reload's `init_declare` can run while it reads), and `acquire_exclusive()` serializes `execute` calls that would be free to overlap.
+  `try_acquire()` takes **no** lock where it wants a shared one, and `try_acquire_exclusive()` serializes `execute` calls that would be free to overlap.
   The clean-core extension it needs is a `cc::shared_mutex<T>` next to `cc::mutex<T>` — `lock_shared(f)` / `lock_shared_scoped()` alongside `lock(f)` / `lock_scoped()`.
-  Then `acquire()` holds a shared guard for the caller's read, `acquire_exclusive()` keeps the exclusive one, and the init phases run under the exclusive side of the same lock.
+  Then `try_acquire()` holds a shared guard for the caller's read and `try_acquire_exclusive()` keeps the exclusive one.
+  The phases are a separate question: they are coroutines and can hold no lock at all across a suspend.
+  What excludes them from an `execute` today is that they run only inside a tick, which is a frame-boundary call.
   See [render_routine.hh](../src/shaped-graphics/routine/render_routine.hh) and [render-routines.md](render-routines.md#threading).
 - **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
@@ -202,4 +204,15 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
+- **Migrate the suites to `ASYNC_TEST`.**
+  nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
+  What blocks it is that `cc::async` cannot resume on the main thread, and `ASYNC_TEST` asserts against nexus's `main_thread` flag — which the window and present suites need.
+  Closing that in clean-core is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
+
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
+  The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
+  What is left is smaller and more specific than "migrate the frame loops": **no frame loop in the tree uses `try_advance_epoch` yet.**
+  Every one of them — `sv::viewer`, both examples, every window test — throttles with `block_until_epochs_in_flight`.
+  That is allowed under the amortization rule, and it still asserts on a `never_block` context.
+  So the per-frame back-pressure call is the one thing a WebGPU target will hit on its first frame, and `try_advance_epoch` is the spelling that already exists for it.
+  What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).

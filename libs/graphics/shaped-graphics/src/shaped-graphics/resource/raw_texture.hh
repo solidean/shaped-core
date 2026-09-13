@@ -53,9 +53,13 @@ struct sg::texture_description
     /// `undefined` and `present` are rejected: the first is the state this exists to leave, and the second belongs to
     /// a swapchain image rather than to anything create_texture makes.
     ///
-    /// dx12 ignores it today.
-    /// A D3D12 resource is created in COMMON, which is `general`, so it already has a real resting layout and needs no
-    /// initial transition — see libs/graphics/shaped-graphics/docs/concepts/barriers.md.
+    /// **dx12 ignores it, and cannot honour it without emitting a transition it has no list to emit from.**
+    /// A D3D12 resource is created in COMMON, which is `general`, so that IS its resting layout — seeding the layout
+    /// tracker from this instead makes the tracker name a layout the resource is not in, and the very next barrier
+    /// says so: `Barrier layout(D3D12_BARRIER_LAYOUT_COPY_DEST)` against a resource still in COMMON.
+    /// Honouring it there means creating the texture and then transitioning it, which is the submit this field exists
+    /// to avoid.
+    /// See libs/graphics/shaped-graphics/docs/concepts/barriers.md.
     cc::optional<texture_layout> initial_layout = {};
 
     /// `initial_layout`, or the layout derived from `usage` when it is unset.

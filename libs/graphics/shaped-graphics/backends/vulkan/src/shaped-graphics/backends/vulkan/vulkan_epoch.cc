@@ -1,6 +1,7 @@
 // vulkan epoch system: advance/retire, waits, and deferred-deletion staging.
 // The per-epoch bookkeeping types live in vulkan_epoch.hh, device-level teardown in vulkan_context.cc.
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -19,7 +20,7 @@ sg::epoch vulkan_context::completed_epoch() const
     return sg::epoch(value < u64(sg::epoch::first) ? first_minus_one : value);
 }
 
-void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
+void vulkan_context::advance_epoch()
 {
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists.load(std::memory_order_relaxed) == 0, "all command lists opened this epoch must be "
@@ -101,22 +102,15 @@ void vulkan_context::advance_epoch(cc::optional<int> allowed_in_flight)
             s.in_flight.push_back(cc::move(data));
         });
 
-    // Throttle pipelining depth: keep at most `allowed_in_flight` epochs in flight.
-    if (allowed_in_flight.has_value())
-    {
-        int const a = allowed_in_flight.value();
-        CC_ASSERT(a >= 0, "allowed_in_flight must be non-negative");
-        u64 const allowed = u64(a);
-        u64 const last_u = u64(last);
-        if (last_u >= u64(sg::epoch::first) + allowed)
-            wait_for_epoch(sg::epoch(last_u - allowed)); // this also retires
-        else
-            process_completed_epochs(); // too few epochs yet to wait on; still reclaim finished ones
-    }
-
     // Apply a pending ctx.transient.set_budget() now that the new epoch is open: it drains all in-flight epochs and resizes the transient heap.
     // Rare — only after a set_budget — so the stall is acceptable.
     apply_pending_transient_budget();
+
+    // Same for the inline upload/download ring budgets (ctx.upload.set_inline_budget / ctx.download.set_budget).
+    // Each drains in-flight epochs — the download ring also waits its actor out — then reallocates.
+    // A no-op unless a budget change is pending.
+    _upload_inline.apply_pending_budget();
+    _download_inline.apply_pending_budget();
 }
 
 bool vulkan_context::has_epochs_in_flight()
@@ -124,7 +118,64 @@ bool vulkan_context::has_epochs_in_flight()
     return _epoch_state.lock([](vulkan_epoch_state& s) { return !s.in_flight.empty(); });
 }
 
-void vulkan_context::process_completed_epochs()
+int vulkan_context::in_flight_epoch_count()
+{
+    return _epoch_state.lock([](vulkan_epoch_state& s) { return int(s.in_flight.size()); });
+}
+
+void vulkan_context::block_until_submissions_complete()
+{
+    CC_RECORD_SCOPE("sg.epoch.block_until_submissions_complete");
+
+    if (_submission_timeline == VK_NULL_HANDLE)
+        return;
+
+    // The last token handed out, so this covers everything submitted so far and nothing that has not been.
+    u64 const issued = _next_submission.lock([](sg::submission_token& next) { return u64(next); });
+    if (issued <= u64(sg::submission_token::first))
+        return; // nothing has ever been submitted
+    u64 const target = issued - 1;
+
+    u64 current = 0;
+    vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+
+    // Yield before blocking, for the same reason wait_for_epoch does: submitted work may be waiting on an async
+    // transfer's completion value, and without a thread of its own the copy actor runs on whoever sweeps the pump.
+    while (current < target && cc::thread_pump_all())
+        vkGetSemaphoreCounterValue(_device, _submission_timeline, &current);
+
+    if (current < target)
+    {
+        auto const wait = VkSemaphoreWaitInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+            .semaphoreCount = 1,
+            .pSemaphores = &_submission_timeline,
+            .pValues = &target,
+        };
+        VkResult const wr = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+        if (note_device_lost_if_lost(wr, "submission semaphore wait"))
+            throw sg::device_lost_exception(device_loss_reason());
+    }
+}
+
+void vulkan_context::block_until_transfers_drained()
+{
+    CC_RECORD_SCOPE("sg.epoch.block_until_transfers_drained");
+
+    // Everything an actor could still be holding, in the order the work flows: the pump releases whatever runs on the
+    // calling thread, and the ring's own accounting is what an actor with a thread of its own is observed through.
+    while (cc::thread_pump_all())
+    {
+    }
+    _download_inline.wait_until_idle();
+    _download_async.wait_until_idle();
+
+    // Uploads too — see the dx12 twin.
+    // An upload is drained when its copy has run, not when it was staged.
+    _upload_async.wait_until_idle();
+}
+
+void vulkan_context::retire_completed_epochs()
 {
     if (_epoch_timeline == VK_NULL_HANDLE)
         return;

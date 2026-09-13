@@ -33,10 +33,11 @@ namespace cube_editor
 class app
 {
 public:
-    /// Null when there is no window backend, no D3D12 device at all, no shader compiler, or a broken shader.
+    /// Null when there is no window backend, no D3D12 device at all, or no shader compiler.
     /// Reports why on stderr, since an example that silently does nothing is worse than one that says what is missing.
     ///
-    /// Heap-held for the renderer's sake: a pipeline cache guards its map with a mutex, so nothing around it can move either.
+    /// A broken shader is NOT reported here any more: the cube pass is a render routine, so its shaders are compiled
+    /// by the routine tick rather than at bring-up, and a failure surfaces as a routine that reports failed.
     [[nodiscard]] static cc::unique_ptr<app> create(cc::string_view title);
 
     ~app();
@@ -44,7 +45,6 @@ public:
     [[nodiscard]] sr::window_system& windows() const { return *_wsys; }
     [[nodiscard]] sr::window& window() const { return *_win; }
     [[nodiscard]] sr::imgui_context& imgui() { return _imgui; }
-    [[nodiscard]] renderer& scene_renderer() { return *_renderer; }
 
     /// True while the window is open. Pumps the OS queue and feeds imgui, so it must be the loop condition.
     /// Skips a minimized frame internally by reporting a zero viewport, which `render` then declines to draw.
@@ -85,7 +85,6 @@ private:
     slib::shader_library _lib;
     sg::swapchain_handle _swapchain;
     sr::imgui_context _imgui;
-    cc::unique_ptr<renderer> _renderer;
 
     /// What the environment asked for, or an inactive request on an ordinary interactive run.
     sr::capture_request _capture;

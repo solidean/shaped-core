@@ -39,6 +39,10 @@ public:
     /// False before the recording list is submitted, and forever if that list was dropped.
     [[nodiscard]] bool is_ready() const;
 
+    /// The node settling when this timestamp's tick lands — see bytes_future::completion.
+    /// Depend on it to chain work off a measurement without blocking anything; an invalid timestamp hands back null.
+    [[nodiscard]] cc::shared_async<cc::unit const> completion() const;
+
     /// The raw GPU tick if ready (polls), else nullopt.
     /// Only differences are meaningful.
     [[nodiscard]] cc::optional<u64> try_get_ticks() const;

@@ -54,7 +54,8 @@ INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handl
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
     bool matches = true;
@@ -82,7 +83,8 @@ INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle const&
     auto future = down->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(down));
 
-    auto const data = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 5);
@@ -123,7 +125,8 @@ INVOCABLE_TEST("sg - async upload composes after a list that wrote the buffer", 
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool async_won = true;
     for (int i = 0; i < 256; ++i)
@@ -146,7 +149,8 @@ INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::context_h
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool second_won = true;
     for (int i = 0; i < 256; ++i)
@@ -185,14 +189,16 @@ INVOCABLE_TEST("sg - async upload interleaved with inline writes does not deadlo
     }
 
     // The pin: pre-fix the copy queue is deadlocked and this never returns.
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 
     // Bonus correctness: GPU order is A_0,B_0,…,A_255,B_255, so the last inline write wins the whole region.
     auto down = ctx->create_command_list();
     REQUIRE(down != nullptr);
     auto future = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool last_inline_won = true;
     for (int i = 0; i < n; ++i)
@@ -220,7 +226,8 @@ INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::context_han
     auto future = down->download.bytes_from_buffer(dst, 0, 128);
     ctx->submit_command_list(cc::move(down));
 
-    auto const bytes = ctx->wait_for(future);
+    ctx->block_until_idle();
+    auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool matches = true;
     for (int i = 0; i < 128; ++i)
@@ -255,12 +262,15 @@ INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::c
     REQUIRE(down != nullptr);
     auto future = down->download.bytes_from_buffer(keep, 0, 256);
     ctx->submit_command_list(cc::move(down));
-    REQUIRE(ctx->wait_for(future).has_value());
+    ctx->block_until_idle();
+    REQUIRE(future.try_get_bytes().has_value());
 
     // Retire the epoch the dropped buffer died in; with V signaled the deferred-deletion gate now releases its storage and runs the finalizer.
     // Two advances, so the death epoch is fully retired and swept.
-    ctx->advance_epoch_and_wait_for_idle();
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
     ctx->process_completed_epochs();
 
     CHECK(released->load(std::memory_order_acquire));

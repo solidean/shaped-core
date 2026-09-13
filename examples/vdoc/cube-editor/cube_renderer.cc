@@ -1,8 +1,10 @@
 #include "cube_renderer.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <cube_shaders.hh>
 
 using namespace cc::primitive_defines;
@@ -123,31 +125,37 @@ cc::vector<cube_instance> collect_instances(vdoc::document const& doc, vdoc::ent
     return out;
 }
 
-cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::shader_library& lib)
+cc::shared_async<cc::unit> cube_routine::init(sg::routine_init_scope scope)
 {
-    (void)lib; // the package was mounted at startup; the handles below reach it through the library
+    auto& ctx = scope.context();
 
     auto vs = shaders::cube.vertex.main_vs->acquire(ctx);
     auto ps = shaders::cube.fragment.main_ps->acquire(ctx);
 
-    // Driven on the ambient scheduler, which is the one the compiles were submitted to.
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(ps);
+    // Settled rather than awaited for the value: a shader that did not compile is this routine's verdict to report,
+    // not an error to propagate.
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
+
+    _pipeline = {};
     if (compiled_vs == nullptr || compiled_ps == nullptr)
     {
-        // The compiler's diagnostics ride on the async's failure channel, so reporting only "it did not compile" throws away the one thing worth reading.
+        // The compiler's diagnostics ride on the async's failure channel, so reporting only "it did not compile"
+        // throws away the one thing worth reading.
         auto message = cc::string("cube.hlsl did not compile");
         if (compiled_vs == nullptr)
             message += cc::format("\n  vertex main_vs: {}", acquire_failure(vs));
         if (compiled_ps == nullptr)
             message += cc::format("\n  fragment main_ps: {}", acquire_failure(ps));
-        return cc::error(cc::any_error(cc::move(message)));
+        CC_LOG_ERROR("{}", message);
+        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+        co_return;
     }
 
-    // The only binding is the vertex stage's 64-byte view-projection block, and it rides as inline constants —
+    // The only binding is the vertex stage's 64-byte view-projection block, and it rides as inline constants --
     // so there are no binding groups at all, which is why nothing here builds one.
     auto const* const constants = [&]() -> sg::binding const*
     {
@@ -157,44 +165,56 @@ cc::result<cc::unique_ptr<renderer>> renderer::create(sg::context& ctx, slib::sh
         return nullptr;
     }();
     if (constants == nullptr)
-        return cc::error(cc::any_error("cube.hlsl must declare the cube_constants cbuffer"));
+    {
+        CC_LOG_ERROR("cube.hlsl must declare the cube_constants cbuffer");
+        fail_init();
+        co_return;
+    }
 
     auto const layout = ctx.cached.acquire_pipeline_layout({.inline_constants = *constants});
 
-    auto out = cc::make_unique<renderer>();
-    out->_pipelines.init(ctx,
-                        [layout, vertex_shader = *compiled_vs, fragment_shader = *compiled_ps](
-                                  sg::context& c, sg::pixel_format format) -> sg::async_raster_pipeline
-                        {
-                            auto const desc = sg::raster_pipeline_description{
-                                 .layout = layout,
-                                 .vertex_shader = vertex_shader,
-                                 .fragment_shader = fragment_shader,
-                                 .vertex_input = sg::vertex_input_layout::create<cube_vertex, cube_instance>(),
-                                 .rasterization = {.cull = sg::cull_mode::back},
-                                 // Both default to OFF, and solid geometry needs both — a cube drawn without them
-                                 // shows whichever face happened to be recorded last.
-                                 .depth_stencil = {.depth_test = true, .depth_write = true},
-                                 .color_targets = {{.format = format}},
-                                 .depth_stencil_format = sg::pixel_format::depth32_float};
-                            return c.cached.acquire_raster_pipeline(desc);
-                        });
-    return out;
+    // One instance means one pipeline to build, rather than a map filled lazily on the frame path.
+    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = layout,
+        .vertex_shader = *compiled_vs,
+        .fragment_shader = *compiled_ps,
+        .vertex_input = sg::vertex_input_layout::create<cube_vertex, cube_instance>(),
+        .rasterization = {.cull = sg::cull_mode::back},
+        // Both default to OFF, and solid geometry needs both -- a cube drawn without them shows whichever face
+        // happened to be recorded last.
+        .depth_stencil = {.depth_test = true, .depth_write = true},
+        .color_targets = {{.format = params()}},
+        .depth_stencil_format = sg::pixel_format::depth32_float});
+
+    // Awaited HERE rather than polled in execute, so `ready` means ready.
+    co_await cc::async_settled(_pipeline);
+    co_return;
 }
 
-void renderer::draw(sg::rendering_scope& scope, vdoc::document const& doc, tg::mat4f const& view_projection, vdoc::entity_id selected)
+sg::routine_outcome cube_routine::execute(sg::rendering_scope& scope,
+                                          vdoc::document const& doc,
+                                          tg::mat4f const& view_projection,
+                                          vdoc::entity_id selected)
 {
     auto& cmd = scope.command_list();
     auto& ctx = cmd.context();
+    CC_ASSERT(!scope.color_formats().empty(), "the cube pass must be drawn into a scope with a color target");
 
-    // try_acquire, never acquire: an exception unwinding out of an open scope would leave the list unsubmitted.
-    auto const pipeline = _pipelines.try_acquire(scope.color_formats()[0]);
-    if (pipeline.has_error() || pipeline.value() == nullptr)
-        return;
+    // The format picks the instance, and it is only knowable here -- which is what makes this routine fallible.
+    // Exclusive because the instance buffer below is the routine's own state.
+    auto self = try_acquire_exclusive(cmd, scope.color_formats()[0]);
+    if (!self.is_ready())
+        return sg::routine_outcome::declined;
 
-    _instances = collect_instances(doc, selected);
-    if (_instances.empty())
-        return;
+    // Polled rather than waited on: execute runs inside the caller's rendering scope, so a wait would stall a frame
+    // that has a pass open, and a throw would leave their command list unsubmitted.
+    auto const* const pipeline = self->_pipeline != nullptr ? self->_pipeline->try_value() : nullptr;
+    if (pipeline == nullptr || *pipeline == nullptr)
+        return sg::routine_outcome::declined;
+
+    self->_instances = collect_instances(doc, selected);
+    if (self->_instances.empty())
+        return sg::routine_outcome::executed; // an empty document has nothing to draw and nothing to report
 
     // Transient: allocated from the per-epoch bump heap and recycled at advance_epoch, which is the right lifetime
     // for anything rebuilt every frame. A real renderer would keep the static mesh persistent; at 24 vertices the
@@ -206,17 +226,18 @@ void renderer::draw(sg::rendering_scope& scope, vdoc::document const& doc, tg::m
     auto const index_buffer = ctx.transient.create_buffer<u16>(
         cube_index_count, sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
     auto const instances = ctx.transient.create_buffer<cube_instance>(
-        _instances.size(), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+        self->_instances.size(), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
 
     cmd.upload.data_to_buffer(vertices, cc::span<cube_vertex const>(mesh));
     cmd.upload.data_to_buffer(index_buffer, cc::span<u16 const>(indices));
-    cmd.upload.data_to_buffer(instances, cc::span<cube_instance const>(_instances));
+    cmd.upload.data_to_buffer(instances, cc::span<cube_instance const>(self->_instances));
 
-    scope.bind_pipeline(*pipeline.value());
+    scope.bind_pipeline(**pipeline);
     scope.bind_vertex_buffers({vertices.as_vertex_buffer(), instances.as_vertex_buffer()});
     scope.bind_index_buffer(index_buffer.as_index_buffer());
     scope.set_inline_constants(view_projection);
     scope.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count},
-                        .instance_range = {.offset = 0, .size = _instances.size()}});
+                        .instance_range = {.offset = 0, .size = self->_instances.size()}});
+    return sg::routine_outcome::executed;
 }
 } // namespace cube_editor

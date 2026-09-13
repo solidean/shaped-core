@@ -1,6 +1,7 @@
 #include "viewer_test_env.hh"
 
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -52,6 +53,13 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
     auto accumulated = u32(0);
     auto pending_at_end = isize(-1);
 
+    // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its material permutations have
+    // compiled, and those compile on the ambient scheduler rather than on this thread.
+    // So a loop guard expressed as a frame count is really a bound on compile latency, and these are expressed as a
+    // deadline instead.
+    // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
+    auto const loop_start = cc::current_time_steady_secs();
+
     for (auto f : viewer.frames())
     {
         CHECK(f.viewport_size() == size);
@@ -70,11 +78,14 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
         pending_at_end = f.pending_resource_work();
 
         // A headless loop is ended by the body alone: nothing polls, so there is no close button and no quit.
-        if (++frames_drawn >= 8)
+        // Eight frames that TRACED, rather than eight frames: see the note above the deadline.
+        ++frames_drawn;
+        if (accumulated > 0 && frames_drawn >= 8)
             viewer.request_close();
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
-    CHECK(frames_drawn == 8);
+    CHECK(frames_drawn >= 8);
 
     // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
@@ -128,6 +139,13 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     auto front_first_frames = 0;
     auto side_applied = 0;
 
+    // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its material permutations have
+    // compiled, and those compile on the ambient scheduler rather than on this thread.
+    // So a loop guard expressed as a frame count is really a bound on compile latency, and these are expressed as a
+    // deadline instead.
+    // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
+    auto const loop_start = cc::current_time_steady_secs();
+
     for (auto f : sv::interactive(ctx, "sv-test/capture"))
     {
         auto view = f.window().view();
@@ -152,7 +170,9 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
                          .emission = tg::vec3f(12, 12, 12)});
 
         ++frames;
-        REQUIRE(frames < 400); // the capture ends the loop itself; this only stops a hang from becoming a timeout
+        // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
+        // A deadline rather than a frame count — see the note at the top of this loop.
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
@@ -274,6 +294,13 @@ TEST("sv - a capture that times out writes beside the requested path, not to it"
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
 
     auto frames = 0;
+
+    // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its material permutations have
+    // compiled, and those compile on the ambient scheduler rather than on this thread.
+    // So a loop guard expressed as a frame count is really a bound on compile latency, and these are expressed as a
+    // deadline instead.
+    // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
+    auto const loop_start = cc::current_time_steady_secs();
     for (auto f : sv::interactive(ctx, "sv-test/capture-timeout"))
     {
         auto view = f.window().view();
@@ -281,7 +308,9 @@ TEST("sv - a capture that times out writes beside the requested path, not to it"
         view.add_scene().add_mesh(mesh);
 
         ++frames;
-        REQUIRE(frames < 4000); // the timeout ends the loop; this only stops a hang from becoming a test timeout
+        // The capture's own 2 s timeout ends this loop; this only stops a hang from becoming a test timeout.
+        // A deadline rather than a frame count — see the note above.
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.

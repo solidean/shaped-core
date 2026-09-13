@@ -59,7 +59,8 @@ INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles", (sg:
 
     // Only NOW may a list that reads the streamed extent be submitted.
     auto const back = c.download.bytes_from_buffer(buf, 0, 4096);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
     CHECK(bytes.value()[1234] == src[1234]);
@@ -177,7 +178,8 @@ INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it witho
     auto back = cmd->download.bytes_from_buffer(buf, 0, 8192);
     c.submit_command_list(cc::move(cmd));
 
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
     CHECK(bytes.value()[8191] == src[8191]);
@@ -202,7 +204,8 @@ INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the tran
     stream.promote_to_async();
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 8192);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
     CHECK(bytes.value()[8191] == src[8191]);
@@ -235,7 +238,8 @@ INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates 
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_buffer(target, 0, 64 * 1024);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[65535] == payload[65535]);
 }
@@ -329,7 +333,8 @@ INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (
     CHECK(stream.progress().bytes_done == 9000);
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 9000);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
     CHECK(bytes.value()[699] == src[699]);   // end of the first chunk
@@ -365,7 +370,8 @@ INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (s
     CHECK(blocked.is_complete());
 
     auto const back = c.download.bytes_from_buffer(gated_buf, 0, 2048);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[2047] == gated_bytes[2047]);
 }
@@ -407,7 +413,8 @@ INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only de
 
     // The family order is what makes the outcome well-defined: the later upload wins.
     auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == overwrite[0]);
     CHECK(bytes.value()[2047] == overwrite[2047]);
@@ -456,7 +463,8 @@ INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::conte
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_texture(tex);
-    auto const bytes = c.wait_for(back);
+    c.block_until_idle();
+    auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == src.size());
     CHECK(bytes.value()[0] == src[0]);

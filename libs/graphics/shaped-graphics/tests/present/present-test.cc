@@ -62,13 +62,15 @@ INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_han
         auto future = cmd->download.bytes_from_texture(rt.texture());
         ctx->submit_command_list_and_present(*swapchain, cc::move(cmd));
 
-        auto const pixels = ctx->wait_for(future);
+        ctx->block_until_idle();
+        auto const pixels = future.try_get_bytes();
         REQUIRE(pixels.has_value());
         auto const* const p = reinterpret_cast<u8 const*>(pixels.value().data());
         if (p[0] != shades[frame] || p[3] != 255)
             all_correct = false;
 
-        ctx->advance_epoch(2);
+        ctx->advance_epoch();
+        ctx->block_until_epochs_in_flight(2);
     }
     CHECK(all_correct);
 
@@ -84,5 +86,6 @@ INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_han
     }
     CHECK(distinct.size() == k_buffers).context("the chain must rotate through every back buffer");
 
-    ctx->advance_epoch_and_wait_for_idle();
+    ctx->advance_epoch();
+    ctx->block_until_idle();
 }

@@ -26,7 +26,9 @@ So the ring region cannot be overwritten until the GPU is done reading it.
 
 A reservation fits when the requested window lies within `capacity` bytes of the free watermark.
 When it does not, the recording thread retires the oldest in-flight epoch to advance the watermark, then retries.
-If **nothing** is in flight and it still does not fit, this one epoch's uploads exceed the ring — a hard budget error, asserted.
+If **nothing** is in flight and it still does not fit, waiting cannot help — this one epoch's uploads exceed the ring.
+The upload is then staged in a **one-off dedicated buffer** instead, freed with the epoch that recorded the copy.
+Same for a single upload larger than the whole ring, which goes straight there: no budget makes it fit.
 
 ## Load-bearing invariants
 
@@ -36,6 +38,17 @@ Preserve these; the rest is tuning:
    in the same list, with no extra submission.
 2. **Space is reclaimed per epoch, gated on the epoch fence** — never freed while the GPU may still be
    reading the staged bytes.
+
+## The fallback, and why it is not an assert
+
+The ring is a budget, and a budget is a data-driven quantity — so overrunning it is a performance fact, not a programming error.
+An assert was the wrong shape twice over:
+it compiles out in release, so the same overrun died on one preset and silently proceeded on the other, and one of the two conditions that reach it is not a budget error at all.
+A single transfer larger than the whole ring is unreachable by any budget a caller could set.
+
+So both conditions fall back to a dedicated staging buffer.
+It is correct but slow — an allocation per transfer — so it warns **once per epoch**, naming the byte count and the current budget, which is what a caller needs to set the budget properly.
+Once per epoch rather than per transfer: a frame that overruns overruns for everything in it, and a line per transfer would bury the one fact worth reading.
 
 ## Runtime resize
 
@@ -48,8 +61,6 @@ It runs only after a `set_budget`, so the stall is acceptable.
 
 Not invariants — v1 shortcuts, each with a known better route:
 
-- **A single epoch's inline uploads must fit the ring** — over-budget asserts today.
-  The intended fix is a fallback route that always works, such as a one-off dedicated staging buffer for the overflow, trading peak throughput for correctness rather than failing.
 
 ## Contrast with inline download
 

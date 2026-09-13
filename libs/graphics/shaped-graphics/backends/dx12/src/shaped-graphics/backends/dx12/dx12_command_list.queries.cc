@@ -10,7 +10,7 @@ namespace sg::backend::dx12
 {
 bool dx12_command_list::query_timestamps_supported() const
 {
-    return _ctx._query_system.supports_timestamps();
+    return _ctx.supports(sg::feature::timestamp_query);
 }
 
 sg::gpu_timestamp dx12_command_list::query_record_gpu_timestamp()

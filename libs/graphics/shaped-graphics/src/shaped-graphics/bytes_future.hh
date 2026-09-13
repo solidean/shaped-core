@@ -33,14 +33,14 @@ private:
 /// Copyable and movable, and it outlives the command list that recorded it.
 /// It holds the destination span, a pin keeping that destination alive until the transfer finishes, and the
 /// completion node the backend pushes once those bytes are valid.
-/// Read the bytes with try_get_bytes() once ready, or block on ctx.wait_for(future).
+/// Read the bytes with try_get_bytes() once ready, or depend on completion() to chain off it without blocking.
 ///
 /// Completion rides on `cc::async`, so `completion()` composes a transfer into an async graph without blocking.
 /// Cancellation — a dropped recording list, a dropped destination — arrives as `cc::async_error::make_cancelled()`
 /// on that node rather than as a future that never completes.
 class sg::bytes_future
 {
-    // ctx.wait_for(future) reaches the blocking wait — kept off the future's own public API.
+    // The blocking read is kept off the future's own public API — ctx.block_until_idle() is the one place that waits.
     friend class context;
     // the typed wrapper forwards its blocking wait to the underlying bytes_future.
     template <class>
@@ -70,7 +70,7 @@ public:
 
     /// Non-blocking poll: whether the transfer has settled, with bytes or with an error.
     /// A download settles only once its readback actor copy has run, and neither this nor an epoch advance forces
-    /// that — ctx.wait_for(future) does.
+    /// that — ctx.block_until_idle() does.
     [[nodiscard]] bool is_ready() const { return _completion != nullptr && _completion->is_ready(); }
 
     /// The node completing when this transfer settles: `cc::unit` on success, an `async_error` when cancelled or failed.
@@ -79,7 +79,7 @@ public:
 
     /// The result bytes if delivered (polls), else nullopt — including when the transfer settled on its error channel.
     /// The returned pinned_data keeps the bytes alive on its own, so it stays valid even past this future's lifetime.
-    /// To block until delivered, use ctx.wait_for(future).
+    /// To block until delivered, use ctx.block_until_idle() and then poll.
     [[nodiscard]] cc::optional<cc::pinned_data<byte const>> try_get_bytes() const;
 
     // members
@@ -112,7 +112,7 @@ class sg::data_future
 {
     static_assert(std::is_trivially_copyable_v<T>, "data_future element type must be trivially copyable");
 
-    // ctx.wait_for(future) reaches the blocking wait — kept off the future's own public API.
+    // The blocking read is kept off the future's own public API — ctx.block_until_idle() is the one place that waits.
     friend class context;
 
 public:
@@ -127,7 +127,7 @@ public:
 
     /// The typed result if delivered (polls).
     /// Yields nullopt when the byte count is not a multiple of sizeof(T).
-    /// To block until delivered, use ctx.wait_for(future).
+    /// To block until delivered, use ctx.block_until_idle() and then poll.
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> try_get_data() const
     {
         auto const bytes = _bytes.try_get_bytes();

@@ -228,15 +228,14 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     auto offscreen = sg::texture_2d();
     if (config.headless)
     {
-        auto tex_r = ctx.persistent.try_create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
-                                                           .width = config.width,
-                                                           .height = config.height,
-                                                           .usage = sg::texture_usage::render_target
-                                                                  | sg::texture_usage::readonly_texture
-                                                                  | sg::texture_usage::copy_src});
-        if (tex_r.has_error())
-            return cc::error("shaped-viewer: could not create the offscreen target for a headless viewer");
-        offscreen = cc::move(tex_r.value());
+        // Throws on exhaustion rather than returning an error: there is nothing a headless viewer could do about it
+        // that the caller could not do better with the exception.
+        offscreen = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                      .width = config.width,
+                                                      .height = config.height,
+                                                      .usage = sg::texture_usage::render_target
+                                                             | sg::texture_usage::readonly_texture
+                                                             | sg::texture_usage::copy_src});
     }
     else
     {
@@ -296,7 +295,8 @@ viewer::~viewer()
         // handed back before anything drains — so it presents, exactly as if end_frame had been reached.
         end_frame();
 
-        _impl->ctx->advance_epoch_and_wait_for_idle();
+        _impl->ctx->advance_epoch();
+        _impl->ctx->block_until_idle();
     }
     catch (sg::device_lost_exception const&)
     {
@@ -530,6 +530,12 @@ frame viewer::acquire_frame()
     auto& im = *_impl;
     if (!im.config.headless)
         im.window_system->poll_events();
+
+    // Nothing else brings a render routine up, so a viewer that never ticked renders nothing at all and says nothing
+    // about it: every execute declines, every frame is a clear, and a capture writes a blank image.
+    // A frame boundary is where it belongs — after the previous frame's advance_epoch, before this frame's first
+    // acquire, and outside any open command list, which is exactly here.
+    (void)im.ctx->routines.tick();
 
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
@@ -832,21 +838,28 @@ void viewer::finish_frame(frame& f)
         // The output is a back buffer or the offscreen texture, and viewer_renderer cannot tell: same format, same
         // render_target_view, so the whole pass below this is identical either way.
         auto const output = im.config.headless ? im.offscreen.as_render_target_view() : im.current_backbuffer;
-        viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
+        // Presented either way: a cleared output is the honest "not ready yet" while the chain builds, and skipping
+        // the present would freeze the window instead of showing it catching up.
+        auto const recorded
+            = viewer_renderer::execute(*im.current_cmd, def, plan, im.resources, im.views, output.cleared(clear_color));
 
-        // Asked while the list is still ours: `is_ready` reports the last trace recorded onto it, and submitting moves it away.
-        // A frame with no trace has nothing to report, and nothing to be wrong about.
-        traces_ran = plan.traces.empty() || pathtrace_routine::is_ready(*im.current_cmd);
+        // The frame's own answer, rather than a flag the pathtracer left behind for someone to read.
+        // It is WIDER than the old question -- it covers the layout passes too, not just the traces -- and that is
+        // what a capture actually needs: a frame where any pass declined is one that would be saved incomplete.
+        // A frame with no trace and nothing declined has nothing to be wrong about.
+        traces_ran = recorded == sg::routine_outcome::executed;
 
         if (im.config.headless)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
-            im.ctx->advance_epoch(im.config.buffer_count);
+            im.ctx->advance_epoch();
+            im.ctx->block_until_epochs_in_flight(im.config.buffer_count);
         }
         else
         {
             im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
-            im.ctx->advance_epoch(im.swapchain->buffer_count());
+            im.ctx->advance_epoch();
+            im.ctx->block_until_epochs_in_flight(im.swapchain->buffer_count());
         }
     }
     catch (sg::device_lost_exception const& e)

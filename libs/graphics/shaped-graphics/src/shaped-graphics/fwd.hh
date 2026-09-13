@@ -39,13 +39,18 @@ struct stream_poll;                   // value type — a source poll's status a
 class stream_source;                  // the lazy chunk sequence feeding a streaming upload
 
 class context;
-struct adapter_info;       // which GPU a context runs on (see context/adapter_info.hh)
-struct gpu_memory_usage;   // GPU memory as this process sees it (context/gpu_metrics.hh)
-struct gpu_load;           // how busy the GPU was over a sampling interval
-struct gpu_engine_counter; // monotone busy time on one engine class
-struct gpu_counters;       // those counters, per engine class
-struct gpu_engine_load;    // one engine's share of a sampled load
-class gpu_load_sampler;    // GPU load, differenced against its own previous reading
+struct adapter_info;          // which GPU a context runs on (see context/adapter_info.hh)
+enum class feature;           // a capability a context has or has not (see context/capabilities.hh)
+enum class execution_model;   // whether a caller may block on this context at all (see context/capabilities.hh)
+enum class device_error_kind; // what kind of deferred error a backend reported (see context/device_error.hh)
+struct device_error;          // one entry on the deferred error channel (see context/device_error.hh)
+struct device_limits;         // the portable floors a caller sizes against (see context/capabilities.hh)
+struct gpu_memory_usage;      // GPU memory as this process sees it (context/gpu_metrics.hh)
+struct gpu_load;              // how busy the GPU was over a sampling interval
+struct gpu_engine_counter;    // monotone busy time on one engine class
+struct gpu_counters;          // those counters, per engine class
+struct gpu_engine_load;       // one engine's share of a sampled load
+class gpu_load_sampler;       // GPU load, differenced against its own previous reading
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;
@@ -53,11 +58,21 @@ class context_download_scope;
 class context_uncached_scope;
 class context_cached_scope;
 class routine_registry;
+struct routine_tick_options; // what one routine-init tick may do (see routine/routine_registry.hh)
+struct routine_tick_result;  // what it did
 class render_routine_base;
+enum class routine_readiness; // pending / ready / failed (see routine/render_routine_base.hh)
+enum class routine_outcome;   // what a fallible routine's execute reports (see routine/render_routine_base.hh)
+class routine_init_scope;     // what an initializing routine is given (see routine/routine_init_scope.hh)
 template <class Derived>
+class routine_scope;
+struct routine_no_params; // the parameter of an UNPARAMETRIZED routine (see routine/routine_params.hh)
+template <class Derived, class Params = routine_no_params>
 class render_routine;
 template <class Derived>
 class routine_guard;
+template <class Other, class Params>
+class routine_dependency; // one routine's declared need for another (see routine/render_routine.hh)
 class pipeline_cache;
 class command_list;
 class command_list_upload_scope;
@@ -201,9 +216,12 @@ enum class compare_op;
 struct sampler;
 
 // Compiled shaders + reflected bindings (see binding/compiled_shader.hh / binding/binding.hh) — value types.
+// shader_stage and its set (shader_stages) live in binding/shader_stage.hh, below binding.hh.
 enum class binding_type;
 enum class shader_stage;
 enum class shader_format;
+enum class texture_sample_type;
+enum class sampler_binding_type;
 struct binding;
 struct compiler_info;
 struct compute_dimensions;
@@ -244,6 +262,7 @@ namespace impl
 template <class Key>
 class slot_table;           // a bindless_array's key -> element-index map (binding/impl/slot_table.hh)
 class bindless_array_state; // what a bindless_array owns, shared so an element may outlive it
+class transfer_drain; // outstanding-job count a transfer system is drained against (transfer/impl/transfer_drain.hh)
 } // namespace impl
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the
@@ -298,9 +317,20 @@ enum class miss_index : u32;
 enum class hit_index : u32;
 enum class callable_index : u32;
 
-/// Hard cap on the number of group slots a pipeline_layout can hold (dx12 root-parameter / vulkan set
-/// budget). Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `group_index`.
-inline constexpr int max_binding_groups = 4;
+/// Hard cap on the number of group slots a pipeline_layout may hand a caller.
+/// Indexes into pipeline_layout_description::groups and cmd.compute.bind_group's `group_index`.
+///
+/// WebGPU's guaranteed floor is four groups, and sg keeps the last one for itself — see
+/// reserved_binding_group — so a caller gets three, on every backend.
+/// The cap is uniform rather than per-backend because a cap that varies is one somebody exceeds on the
+/// backend they develop against, and only finds on another.
+inline constexpr int max_binding_groups = 3;
+
+/// The group slot sg reserves for its own bindings, above everything a caller may bind.
+/// It is where a backend puts what it has to emulate: inline constants where there are no push constants,
+/// and later ray-tracing emulation and shader-side diagnostics.
+/// Reserved on every backend, whether or not that backend needs it, so one pipeline layout fits them all.
+inline constexpr int reserved_binding_group = max_binding_groups;
 
 // The next two caps are real GPU pipeline limits rather than arbitrary array sizes — an output-merger
 // has a fixed handful of color slots, an input assembler a fixed handful of vertex-buffer slots.

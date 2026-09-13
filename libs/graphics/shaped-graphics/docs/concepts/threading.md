@@ -25,10 +25,9 @@ A backend picks this when its underlying API or its own bookkeeping is not safe 
 
 - **Concurrency-safe**, callable from several threads at once:
   - resource and command-list operations — `create_command_list`, `create_raw_buffer`, `submit_command_list`, `drop_command_list`, and a resource's refcount reaching zero;
-  - the epoch waits and retire — `wait_for_epoch`, `wait_for_next_inflight_epoch`, `process_completed_epochs`;
-    these are internally synchronized because they double as ring back-pressure invoked from within concurrent recording;
-  - `wait_for(future)`, which touches only the future's own waiter and no context state.
-- **Externally synchronized:** advancing (`advance_epoch`, `advance_epoch_and_wait_for_idle`) and **`shutdown`**.
+  - retire — `process_completed_epochs`, internally synchronized because the backends' own ring back-pressure invokes it from within concurrent recording;
+  - the completion queries — `epoch_completion`, `submission_completion`, `is_submission_complete` — which read a fence and a guarded list.
+- **Externally synchronized:** advancing (`advance_epoch`, `try_advance_epoch`), the two `block_until_*` waits, and **`shutdown`**.
   The caller must guarantee none of these overlaps any other context operation.
   Advancing closes an epoch and rewrites the shared in-flight state, including the current-epoch counter every other op reads, so fencing it off is the caller's job.
   That is also why advancing is a deliberate, rationed operation (see [epochs](epochs.md)).
