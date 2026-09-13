@@ -510,7 +510,7 @@ rng.clone();                              // independent generator at the same s
 
 ## Timing
 
-The seam that replaces `<chrono>` — which only `time.cc` may include, being the most expensive header MSVC ships.
+The seam that replaces `<chrono>` — which only `time.cc` and `thread.cc` may include, being the most expensive header MSVC ships.
 Seconds as a `double` is the vocabulary; there are no `time_point` / `duration` types.
 
 ```cpp
@@ -530,6 +530,9 @@ cc::current_cycles();                      // -> u64; TSC on x86, CNTVCT_EL0 on 
 // current_cycles_and_core's core id is x86-only; ARM64 always says core 0, which is not "the same core".
                                            //    constant-rate, so it tracks wall time rather than work done, and nothing
                                            //    here converts it to seconds (the rate needs calibration you do yourself)
+
+#include <clean-core/thread/thread.hh>
+cc::this_thread_sleep_secs(secs);          // at least `secs`, typically a scheduler tick longer (~15.6 ms on Windows by default)
 ```
 
 ## Flags

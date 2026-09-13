@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
@@ -26,8 +27,13 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     for (i32 i = 0; i < rounds; ++i)
     {
         if (done())
@@ -44,6 +50,8 @@ bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
 /// does, and counting rounds there measures how fast this machine spins rather than how long it was given.
 bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_for");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 

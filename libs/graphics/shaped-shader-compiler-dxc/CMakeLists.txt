@@ -79,7 +79,7 @@ if(SC_BUILD_TESTS)
     sc_target_pch(shaped-shader-compiler-dxc-test SG NEXUS) # 0.59
 
     # The dx12 backend is added before this lib (root CMakeLists order), so its target exists here and can be
-    # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch on WARP -> read back.
+    # linked for a whole-chain integration test: compile HLSL -> reflect -> bind -> dispatch -> read back.
     if(TARGET shaped-graphics-dx12)
         target_sources(shaped-shader-compiler-dxc-test PRIVATE
             tests/dx12-entry.cc

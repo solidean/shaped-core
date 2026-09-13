@@ -84,11 +84,13 @@ def candidates_for_commit(
 
 def commit_atoms(
     git: Git, sha: str, *, base: str, head: str, net: LineSpace, paths: list[str] | None = None,
+    skip: set[str] | frozenset[str] = frozenset(),
 ) -> LineSpace:
     """Every atom this commit contributed that still stands at head, without reading a single hunk body.
 
     The same carrying as `candidates_for_commit`, but over the commit's whole diff at once.
     This is what lets a mechanical commit be accepted wholesale: the claim is exact, and no diff reaches anyone's context.
+    A file in `skip` contributes nothing, whichever side of a rename names it.
     """
     parent = _parent_of(git, sha)
     forward = linemap.build(git, sha, head)
@@ -98,6 +100,8 @@ def commit_atoms(
     for file in parse(git.diff(parent, sha, context=0, paths=paths)):
         commit_new_path = file.new_path or file.path
         commit_old_path = file.old_path or file.path
+        if commit_new_path in skip or commit_old_path in skip:
+            continue
 
         added: list[int] = []
         removed: list[int] = []
@@ -126,14 +130,23 @@ def commit_atoms(
 def bulk_candidate_for_commits(
     git: Git, shas: list[str], *, base: str, head: str, net: LineSpace,
     reason: str, label: str, matches=None, paths: list[str] | None = None,
+    hand_resolved: dict[str, set[str]] | None = None,
 ) -> Candidate | None:
     """One change covering everything these commits contributed, with no hunk bodies on disk.
 
     `matches` narrows it further by path, so "the formatting sweep, but only under libs/" is one claim rather than two.
+
+    A merge claims what it brought in and never what its author resolved by hand.
+    Every file the merge changed beyond git's own merge of its parents is left out whole, for an ordinary ingest to pick up.
+    Bulking `main` merged into a branch otherwise hides exactly the conflict resolutions, which are the branch author's work.
+    `hand_resolved` receives those paths per merge, so the caller can say what was left out.
     """
     claimed = LineSpace.empty()
     for sha in shas:
-        claimed = claimed.union(commit_atoms(git, sha, base=base, head=head, net=net, paths=paths))
+        resolved = git.hand_resolved_paths(sha)
+        if resolved and hand_resolved is not None:
+            hand_resolved[sha] = resolved
+        claimed = claimed.union(commit_atoms(git, sha, base=base, head=head, net=net, paths=paths, skip=resolved))
 
     if matches is not None:
         narrowed = LineSpace.empty()

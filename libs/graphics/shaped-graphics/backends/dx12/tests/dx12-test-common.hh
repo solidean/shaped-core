@@ -13,7 +13,7 @@
 // Driving still goes through the abstract API — see libs/graphics/shaped-graphics/docs/testing.md.
 //
 // Most tests are INVOCABLE_TESTs taking the context the entry driver (dx12-entry.cc) built — one per adapter, for the whole run.
-// The helpers here are for the few that need a context of their own: pristine epoch/pool state, or a backend knob the test is about.
+// The helpers here are for the few that need a context of their own: pristine epoch/pool state, a backend knob the test is about, or more than one context.
 
 namespace sg::backend::dx12
 {
@@ -79,34 +79,22 @@ inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_ha
     return typed;
 }
 
-/// A context for a test to own: WARP, debug layer on, validation messages failing the test.
-/// `config` supplies the backend knobs the test is about — the two fields above are set here regardless.
-/// Errors on the rare host without WARP, so a caller can SKIP.
+/// A context for a test to own: the hardware adapter or WARP where there is none, debug layer on, validation messages failing the test.
+/// `config` supplies the backend knobs the test is about — the adapter and the debug layer are set here regardless.
+/// Only for a test whose subject is the context itself: pristine epoch/pool state, a knob, creation or teardown.
+/// Errors on the rare host with no adapter at all, so a caller can SKIP.
 inline cc::result<dx12_context_handle> make_test_context(dx12_config config = {})
 {
-    config.use_warp = true;
+    config.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp;
     config.enable_debug_layer = true;
     return as_test_context(sg::create_dx12_context(config));
 }
 
-/// make_test_context as a bare handle, for the tests that assert pristine state — the epoch counter, allocator/list pool counts — and need no knobs.
+/// make_test_context as a bare handle, for a test that needs a fresh context and no knobs.
 /// nullptr when it could not be created; as_test_context has already said why.
-inline dx12_context_handle make_warp_context()
+inline dx12_context_handle make_fresh_context()
 {
     auto ctx = make_test_context();
-    return ctx.has_value() ? ctx.value() : nullptr;
-}
-
-/// A context on the REAL adapter rather than WARP, for the behaviour only a vendor driver can show.
-/// nullptr where the host has no D3D12 hardware adapter, which a caller turns into a SKIP.
-///
-/// Reach for this over make_warp_context only where the driver itself is the subject — serialized PSO blobs are the
-/// case that matters, since WARP's are the runtime's and say nothing about what a driver does with one.
-inline dx12_context_handle make_hardware_context(dx12_config config = {})
-{
-    config.use_warp = false;
-    config.enable_debug_layer = true;
-    auto ctx = as_test_context(sg::create_dx12_context(config));
     return ctx.has_value() ? ctx.value() : nullptr;
 }
 } // namespace sg::backend::dx12

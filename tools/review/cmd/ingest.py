@@ -128,13 +128,23 @@ def _bulk_commit_candidate(ctx: Context, cfg: review.ReviewConfig, net: review.L
     selectors = _split(args.paths)
     label = args.bulk_commits + (f" ∩ {args.bulk}" if args.bulk else "")
 
-    return review.bulk_candidate_for_commits(
+    hand_resolved: dict[str, set[str]] = {}
+    candidate = review.bulk_candidate_for_commits(
         ctx.git, [c.sha for c in commits],
         base=cfg.base, head=cfg.head, net=net,
         reason=args.reason, label=label,
         matches=matcher(args.bulk) if args.bulk else None,
         paths=selectors or None,
+        hand_resolved=hand_resolved,
     )
+    for sha, resolved in hand_resolved.items():
+        print(review.console.yellow(
+            f"{sha[:8]} is a merge whose author resolved {len(resolved)} file(s) by hand; "
+            "they stay out of the bulk and are read like any other change:"
+        ))
+        for path in sorted(resolved):
+            print(f"  {path}")
+    return candidate
 
 
 def _print_stats(cfg: review.ReviewConfig, net: review.LineSpace, candidates: list) -> None:
@@ -180,7 +190,24 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             context=cfg.context, gap=cfg.coalesce_gap, net=net, paths=selectors or None,
         )
 
+    # A bulk claim is a decision not to read those hunks, and a later plain sweep — typically run to re-point after a
+    # head move — must not quietly reverse it by handing each of them an id of its own.
+    inside_bulk = 0
+    if not bulking and not args.commits and not args.rest:
+        bulked = review.LineSpace.empty()
+        for change in ledger.live():
+            if change.is_bulk:
+                bulked = bulked.union(change.claim)
+        if not bulked.is_empty:
+            known = ledger.by_digest()
+            kept = [c for c in candidates if c.digest in known or not c.claim.subtract(bulked).is_empty]
+            inside_bulk = len(candidates) - len(kept)
+            candidates = kept
+
     if args.stats:
+        if args.rest:
+            covered = ledger.covered()
+            candidates = [c for c in candidates if not c.claim.subtract(covered).is_empty]
         _print_stats(cfg, net, candidates)
         return
 
@@ -207,6 +234,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     )
 
     print(f"{len(result.created)} changes created, {len(result.reused)} already known")
+    if inside_bulk:
+        print(f"{inside_bulk} skipped as lying wholly inside a bulk claim")
     if result.repointed:
         # A head move leaves a claim in the old coordinates; saying so is what keeps a changed count explicable.
         print(f"{len(result.repointed)} claim(s) re-pointed at their new line numbers")

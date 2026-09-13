@@ -9,10 +9,11 @@
 // Each creates a dx12 context and invokes every sg::context_handle API test against it.
 // Compiled only where the dx12 backend builds, so Windows.
 // They carry the slib-shader-library tag because the invocables they dispatch stand up a slib::shader_library, which is a process-wide singleton.
-// They carry sg-reload-generation because those invocables count routine inits, and sg::signal_reload() elsewhere would re-run them; a tag on an invoked child is ignored.
+// They carry sg-reload-generation because routine invocables count init runs, and a top-level test's sg::signal_reload would re-run them mid-test.
+// A child's own exclusion tags schedule nothing, since it runs inside its driver's body, so the driver has to hold them.
 // Two adapters are covered, both with the debug layer on:
-//   - WARP (software): present on any Windows host, so it also runs headless on CI.
-//   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI).
+//   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI), and FAILs when one is and creation still fails.
+//   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 
 namespace
 {
@@ -42,7 +43,11 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 
 TEST("sg dx12 warp backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
+    if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
+        SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
+
+    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
@@ -54,8 +59,12 @@ TEST("sg dx12 warp backend", exclusive("slib-shader-library"), exclusive("sg-rel
 
 TEST("sg dx12 hardware backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = false});
-    if (ctx.has_error())
+    auto ctx
+        = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
     {

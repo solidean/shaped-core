@@ -21,7 +21,7 @@ struct nx::bench::run_config
     /// The floor on measurement effort: sampling never stops before this much time has gone into it.
     f64 min_time_secs = 0.5;
 
-    /// The ceiling.
+    /// The ceiling, in wall-clock seconds — paused spans count against it, unlike against the floor.
     /// A run that has not converged by here stops anyway and says so.
     f64 max_time_secs = 5.0;
 
@@ -41,6 +41,7 @@ struct nx::bench::run_config
 
     /// Iterations run, and thrown away, before anything is measured.
     /// Caches, branch predictors and the allocator all settle here rather than inside the first sample.
+    /// A wall-clock budget, paused spans included: a body that pauses for most of an iteration still costs all of it.
     f64 warmup_time_secs = 0.1;
 
     /// A fixed warmup count instead of a time budget; 0 derives it from warmup_time_secs.

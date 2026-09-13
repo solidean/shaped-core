@@ -106,6 +106,11 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   findings will not be, and a wrong guess hides exactly the hunks that mattered.
   A 300-change range with no vendored drops in it is one you ingest plainly and account for entry by entry.
 
+- **Bulking a merge claims what it brought in, never what its author resolved.**
+  Every file the merge changed beyond git's own merge of its parents — per `git show --remerge-diff` — stays out of the bulk, and the command lists them.
+  That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
+- **A plain `ingest` never re-creates what a bulk claim covers.**
+  It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
 - **A review is scratch, so nothing outside it may cite an entry.**
   Entry numbers, ask names and round numbers are addresses within one folder under `.tmp/` that is deleted, renumbered
   and re-ingested freely.

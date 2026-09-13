@@ -52,7 +52,7 @@ What is left is the interaction on top of it, in dependency order:
   Init is a coroutine now and awaits those compiles instead of driving them, which removes that failure mode outright.
   What remains is the coverage gap it exposed: every tracing test but `pathtraced-view-test` asserts only CPU-side
   facts, so none of them would notice tracing nothing at all.
-  Until then, a tracing test that means anything needs `nx::config::main_thread` *and* an `is_ready` assertion.
+  Until then, a tracing test that means anything needs an `is_ready` assertion.
   That assertion now reports the last trace rather than the routine, so it belongs AFTER the execute rather than before it.
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
@@ -230,8 +230,8 @@ importance-samples the continuation — so what is left is coverage of the model
   the walk itself, the same walk at optical depth about 36, and an absorbing one that must come back darker.
   An 8% loss injected per scattering event moves the scattering case by 26% and leaves the clear one exact, which is what
   says the assertion has teeth.
-  It runs in about 7 seconds on WARP, second only to the closure probe, which is the reason its resolution and frame count are
-  as low as they are.
+  Its cost is the reason its resolution and frame count are as low as they are.
+  The dense scattering case dominates it, which is why that one traces 16x16 outside a thorough run: about 5 seconds for the test, down from 11.
 - **A scattering walk ends by Russian roulette now**, after 16 events, on the throughput's largest channel.
   Because `q` is the throughput itself the walk is self-normalizing: a survivor returns to about 1 and the per-event
   survival probability settles at the medium's albedo, so the expected length is `1 / (1 - albedo)`.

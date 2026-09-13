@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
@@ -62,6 +63,10 @@ struct sg::routine_tick_options
     /// and blame the wrong thing.
     /// Absent means "do everything pending", which is what a test or a loading screen wants.
     cc::optional<f64> budget_secs;
+
+    /// The clock the budget is spent against.
+    /// A test swaps in one it advances, so a budget running out is something it arranges rather than waits for.
+    f64 (*clock_seconds)() = cc::current_time_steady_secs;
 };
 
 /// What a tick did.

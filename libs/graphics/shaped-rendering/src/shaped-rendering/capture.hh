@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/time.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -71,8 +72,14 @@ struct sr::capture_request
     /// Frames to be satisfied for before capturing; see `capture_accumulate_env_var`.
     u32 accumulate_frames = 60;
 
-    /// The wall clock a capture may spend before it gives up and writes what it has.
+    /// The time a capture may spend before it gives up and writes what it has, measured on `clock_seconds`.
     double timeout_seconds = 60.0;
+
+    /// The clock `timeout_seconds` is spent against, in seconds; only a difference of two readings means anything.
+    ///
+    /// The environment cannot name one, so `from_environment` leaves the steady clock.
+    /// A test substitutes a clock it advances itself, which is how a timeout is reached without being waited out.
+    double (*clock_seconds)() = cc::current_time_steady_secs;
 
     /// Reads every variable above, applying the defaults for the ones that are unset.
     [[nodiscard]] static capture_request from_environment();

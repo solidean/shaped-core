@@ -102,7 +102,8 @@ struct socket_holder
 /// way: on a non-blocking socket "in progress" is the normal answer, and the reactor learns the outcome from
 /// writability plus SO_ERROR rather than from this call.
 /// Only an outright refusal by the local stack is reported here.
-[[nodiscard]] cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where);
+/// `fail_fast_on_refused` is `tcp_options::fail_fast_on_refused`, and carries its trade-off.
+[[nodiscard]] cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where, bool fail_fast_on_refused);
 
 /// Take one pending connection off a listening socket; the result is non-blocking.
 ///

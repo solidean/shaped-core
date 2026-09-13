@@ -17,7 +17,7 @@ using context_provider = cc::unique_function<cc::result<sg::context_handle>()>;
 
 /// Sets the hook that decides which context viewers run on.
 ///
-///     sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); });
+///     sv::set_acquire_context([] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp}); });
 ///
 /// Unset by default, and then `impl::acquire_default_context` answers instead — so a caller who never touches this
 /// gets a working viewer, and one who does is in full control.

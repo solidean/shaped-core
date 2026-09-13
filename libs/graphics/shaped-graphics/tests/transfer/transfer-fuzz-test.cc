@@ -18,10 +18,8 @@ using namespace cc::primitive_defines;
 // "Fuzzing over external, shared state": the `trace` below drops its open command list in its destructor
 // and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
 //
-// TODO: investigate fuzz runtime.
-// Per-op execution counts are capped below to keep it reasonable, and each download + epoch-wait genuinely stalls on the GPU.
-// It still feels slower than the op mix should cost.
-// Profile where the time actually goes (GPU round-trips vs. per-op host overhead vs. the fuzz engine itself) before raising the caps back up.
+// The full search is a thorough-run cost: on vulkan nearly all of it is synchronization validation, which is the point of running it there.
+// A default run narrows the seed count instead of dropping the layer, so every backend still sees random op sequences under its own checks.
 
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
@@ -252,6 +250,9 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                          CHECK(ref[i] == dl_data[i]);
                  })
         ->execute_at_least(10);
+
+    if (!nx::is_thorough())
+        test->cap_seed_count(24);
 
     SECTION("fuzz")
     {

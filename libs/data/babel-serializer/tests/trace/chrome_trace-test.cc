@@ -65,6 +65,23 @@ cc::rec::recording capture_all(cc::function_ref<void()> body)
     return rl.take();
 }
 
+/// Runs `round` until the running sampler has taken `samples` more samples.
+/// The cap is reached only by a sampler that is not sampling; the caller then proceeds and its assertions fail.
+void run_until_sampled(u64 samples, cc::function_ref<void()> round)
+{
+    auto const target = cc::rec::sampling_statistics().taken + samples;
+    auto const start = cc::current_time_steady_secs();
+    while (cc::rec::sampling_statistics().taken < target && cc::current_time_steady_secs() - start < 5.0)
+        round();
+}
+
+CC_DONT_INLINE void busy_round()
+{
+    u64 volatile sink = 0;
+    for (int i = 0; i < 4096; ++i)
+        sink = sink + u64(i);
+}
+
 cc::string encode_to_string(cc::rec::recording const& r, babel::chrome_trace::write_options opts = {})
 {
     auto encoded = babel::chrome_trace::encode(r, opts);
@@ -346,14 +363,12 @@ TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that we
 
             CC_RECORD_MARK("work-begins"); // joins this thread to the set the sampler knows
 
-            auto const start = cc::current_time_steady_secs();
-            u64 volatile sink = 0;
-            while (cc::current_time_steady_secs() - start < 0.2)
-            {
-                CC_RECORD_SCOPE("sampled-region");
-                for (int i = 0; i < 4096; ++i)
-                    sink = sink + u64(i);
-            }
+            run_until_sampled(20,
+                              []
+                              {
+                                  CC_RECORD_SCOPE("sampled-region");
+                                  busy_round();
+                              });
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
@@ -373,6 +388,7 @@ TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that we
     // worth asserting rather than eyeballing.
     cc::map<f64, int> depth_by_tid;
     auto sampled_spans = 0;
+    auto unopened_ends = 0; // an E with nothing open means the nesting is wrong
     auto const events = doc.value().root()["traceEvents"];
     for (isize i = 0; i < events.size(); ++i)
     {
@@ -391,8 +407,11 @@ TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that we
         else
             --depth;
 
-        CHECK(depth >= 0); // an E with nothing open means the nesting is wrong
+        if (depth < 0)
+            ++unopened_ends;
     }
+
+    CHECK(unopened_ends == 0);
 
     for (auto const& [tid, depth] : depth_by_tid)
         CHECK(depth == 0);
@@ -412,12 +431,8 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-
-            auto const start = cc::current_time_steady_secs();
-            u64 volatile sink = 0;
-            while (cc::current_time_steady_secs() - start < 0.2)
-                for (int i = 0; i < 4096; ++i)
-                    sink = sink + u64(i);
+            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; see clean-core's docs/TODO.md.
+            run_until_sampled(20, [] { busy_round(); });
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
@@ -553,12 +568,8 @@ TRACE_TEST("chrome_trace - a recording read back from bytes still resolves its o
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-
-            auto const start = cc::current_time_steady_secs();
-            u64 volatile sink = 0;
-            while (cc::current_time_steady_secs() - start < 0.2)
-                for (int i = 0; i < 4096; ++i)
-                    sink = sink + u64(i);
+            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; see clean-core's docs/TODO.md.
+            run_until_sampled(20, [] { busy_round(); });
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);

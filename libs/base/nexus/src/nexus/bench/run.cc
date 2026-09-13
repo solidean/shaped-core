@@ -155,6 +155,10 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
     r.name = cc::string(name);
     r.config = cfg;
 
+    // The last batch's wall clock, paused span included — what a time BUDGET has to be charged against, since a body
+    // that pauses for most of an iteration still costs the run all of it.
+    auto last_batch_wall_secs = f64(0);
+
     // Seconds for one batch of `count`, with any paused span already taken out.
     auto const time_batch = [&](isize count)
     {
@@ -171,6 +175,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
             state.items += declared;
 
         auto const gross = t1 - t0;
+        last_batch_wall_secs = f64(gross) * cal.seconds_per_tick;
         auto const net = gross > state.paused_ticks ? gross - state.paused_ticks : u64(0);
         return f64(net) * cal.seconds_per_tick;
     };
@@ -220,7 +225,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         while (elapsed < cfg.warmup_time_secs && r.warmup_iterations < max_batch_size)
         {
             auto const secs = time_batch(count);
-            elapsed += secs;
+            elapsed += last_batch_wall_secs;
             r.warmup_iterations += count;
 
             auto const per_iteration = secs / f64(count);
@@ -276,6 +281,7 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
     state.quantities.clear();
 
     auto elapsed = f64(0);
+    auto wall_elapsed = f64(0);
     auto total_paused = f64(0);
 
     // Per sample rather than only as a total, because the fraction below is a ratio and a ratio of sums is decided by
@@ -293,10 +299,12 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.samples.push_back(secs / f64(r.batch_size));
         r.measured_iterations += r.batch_size;
         elapsed += secs;
+        wall_elapsed += last_batch_wall_secs;
 
         auto const samples = isize(r.samples.size());
 
-        auto const capped = samples >= cfg.max_samples || elapsed >= cfg.max_time_secs;
+        // The effort floor is MEASURED time, since precision is what it buys; the cap is wall time, since the run's cost is.
+        auto const capped = samples >= cfg.max_samples || wall_elapsed >= cfg.max_time_secs;
         auto const effort_met = samples >= cfg.min_samples && elapsed >= cfg.min_time_secs;
 
         // Only ever evaluated where the loop could actually stop, since a full sort per sample would otherwise be the
@@ -428,9 +436,10 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.warnings.push_back({
             .kind = warning_kind::did_not_converge,
             .severity = warning_severity::warning,
-            .detail = cc::format(
-                "stopped at {} samples over {:.2f} s with a relative error of {:.1f}%, short of the {:.1f}% asked for",
-                r.samples.size(), elapsed, r.time.relative_error() * 100, cfg.target_relative_error * 100),
+            .detail = cc::format("stopped at {} samples over {:.2f} s ({:.2f} s measured) with a relative error of "
+                                 "{:.1f}%, short of the {:.1f}% asked for",
+                                 r.samples.size(), wall_elapsed, elapsed, r.time.relative_error() * 100,
+                                 cfg.target_relative_error * 100),
         });
     }
 

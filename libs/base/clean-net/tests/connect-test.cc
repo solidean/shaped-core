@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
@@ -19,6 +20,9 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Pump until `done` holds, or until the budget elapses.
 ///
 /// The budget is wall-clock rather than a count of rounds.
@@ -34,6 +38,8 @@ constexpr double k_settle_budget_ms = 30000;
 
 bool pump_until(cc::function_ref<bool()> done, double max_ms = 5000)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     auto const started = cc::current_time_steady_secs();
     while (true)
     {

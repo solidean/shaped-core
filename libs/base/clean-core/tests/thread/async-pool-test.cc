@@ -6,11 +6,11 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
 
 #if CC_HAS_THREADS
-#include <chrono>
 #include <thread>
 #endif
 
@@ -100,7 +100,7 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
     std::thread pusher(
         [&]
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2)); // bias toward p parking first
+            cc::this_thread_sleep_secs(0.002); // bias toward p parking first
             ext->push_value(41);
         });
 
@@ -272,7 +272,7 @@ TEST("async - destroying a pool releases work abandoned in its deques", nx::conf
         auto root = spawn_counted_tree(16); // 131k nodes: too many to be finished inside the window below
         root->schedule_on(pool);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        cc::this_thread_sleep_secs(0.002);
         // pool and root both die here.
         // The destructor cannot interrupt a running frame -- and the eager depth-first drive means "a running frame" is most of the tree -- so it blocks until that unwinds.
         // The workers then exit with whatever is still queued.
@@ -567,7 +567,7 @@ TEST("async - a pool releases a finished graph's value", nx::config::no_schedule
     for (int i = 0; i < 200 && owned.use_count() != 1; ++i)
     {
 #if CC_HAS_THREADS
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        cc::this_thread_sleep_secs(0.005);
 #endif
     }
     CHECK(owned.use_count() == 1);

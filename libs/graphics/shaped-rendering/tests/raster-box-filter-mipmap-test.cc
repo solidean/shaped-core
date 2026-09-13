@@ -1,6 +1,5 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -54,14 +53,9 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
 }
 } // namespace
 
-// Only one slib::shader_library may exist at a time — the generated package symbols are process-wide
-// globals — so this cannot run beside another test that builds one.
-TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
+    REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
     auto compiler = slib::create_dxc_compiler();
@@ -134,12 +128,9 @@ TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclus
 
 // A chain deeper than one level, and one generated from partway down.
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
-TEST("sr - raster box filter mipmap fills a tail of the chain", exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
+    REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
     auto compiler = slib::create_dxc_compiler();

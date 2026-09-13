@@ -15,6 +15,11 @@ from .context import Context
 
 NAME = "test"
 
+DEFAULT_TIMEOUT_S = 60.0
+
+# A thorough run is the full-strength version of every test, sized to what is worth waiting for, so the guard grows with it.
+THOROUGH_TIMEOUT_FACTOR = 10
+
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run tests")
@@ -27,9 +32,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Test binary target(s): comma-list, repeatable, wildcards")
     p.add_argument("--no-build", action="store_true", help="Skip the automatic build step")
     p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
-    p.add_argument("--timeout", type=float, default=60.0, metavar="SECS",
-                   help="Per-binary timeout in seconds (default: 60; 0 disables). The binary is "
-                        "killed and reported as failed if it exceeds it.")
+    p.add_argument("--timeout", type=float, default=None, metavar="SECS",
+                   help=f"Per-binary timeout in seconds (default: {DEFAULT_TIMEOUT_S:g}, or "
+                        f"{DEFAULT_TIMEOUT_S * THOROUGH_TIMEOUT_FACTOR:g} under --thorough; 0 disables). "
+                        "The binary is killed and reported as failed if it exceeds it.")
     p.add_argument("--jobs", "-j", type=int, metavar="N",
                    help="Upper bound on how many tests run at once, forwarded to the runner (nexus understands it); "
                         "0 means hardware concurrency. dev.py has to own the flag rather than let it fall through to "
@@ -41,6 +47,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "nx::test_args(). Forwarded to the runner as one string and tokenized there, "
                         "which is why it survives dev.py's own '--' handling. It replaces whatever the test "
                         "declared with nx::config::args, and applies to every test the run selects.")
+    p.add_argument("--thorough", action="store_true",
+                   help="Run every test at full strength rather than narrowed to what a default run affords: "
+                        "tests read it through nx::is_thorough() and raise their seeds, caps and input sizes. "
+                        "Forwarded to the runner as --thorough. "
+                        f"Raises the per-binary timeout to {DEFAULT_TIMEOUT_S * THOROUGH_TIMEOUT_FACTOR:g} s "
+                        "unless --timeout is given.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",
                    help="Run the selection up to N times, stopping at the first failing iteration "
                         "(default: 1). For chasing a flake: the build and discovery happen once, and "
@@ -69,6 +81,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     runner_args = list(args.runner_args or [])
     if runner_args and runner_args[0] == "--":
         runner_args = runner_args[1:]
+
+    if args.thorough:
+        runner_args = ["--thorough", *runner_args]
+
+    # An explicit --timeout always wins, 0 included; only the default scales with --thorough.
+    timeout = args.timeout
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT_S * (THOROUGH_TIMEOUT_FACTOR if args.thorough else 1)
 
     # Prepended, so an explicit `-- --jobs 4` after it still wins by being parsed later.
     if args.jobs is not None:
@@ -141,7 +161,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             root=ctx.root,
             test_name=test_name,
             extra_args=runner_args,
-            timeout=args.timeout if args.timeout else None,
+            timeout=timeout if timeout else None,
             write_xml=not args.no_xml_reports,
             mirror=args.mirror_output,
             verbose=args.verbose,

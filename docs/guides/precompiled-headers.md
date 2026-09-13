@@ -26,7 +26,7 @@ Applying several tiers composes them left to right, which is how an orthogonal t
 
 | tier | declared in | adds |
 |---|---|---|
-| `STD` | the module | `<chrono> <memory> <mutex> <string> <string_view> <system_error> <ranges> <atomic> <type_traits> <utility>` |
+| `STD` | the module | `<memory> <mutex> <string> <string_view> <system_error> <ranges> <atomic> <type_traits> <utility>` |
 | `CC` | clean-core | the clean-core surface a typical TU reaches for — containers, strings, `optional`/`result`, the function and memory wrappers |
 | `CC_ALL` | clean-core | `CC` + the heavy tail: threading, streams, node allocation |
 | `CC_STD` | clean-core | `CC_ALL` + `STD` |

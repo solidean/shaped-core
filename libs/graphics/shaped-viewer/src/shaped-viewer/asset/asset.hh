@@ -22,8 +22,8 @@
 /// **What runs where.** Fetching, parsing and importing are work over bytes, and run on whatever scheduler `cc::async`
 /// was given — a `cc::scoped_compute_async_scheduler`, or none, in which case nothing progresses until something
 /// drives it and `wait` is that something.
-/// The one step that cannot move off the calling thread is minting the imported materials, since `material_library` is
-/// not thread-safe: `poll` is where that happens, which is why it is a call rather than a query.
+/// The one step kept on the calling thread is minting the imported materials, in `poll` — which is why it is a call rather than a query.
+/// Minting runs the config's `material_override`, which is caller code, and running it there lets it touch caller state without a lock.
 ///
 /// **`is_ready` is whole-asset, not structure-first.**
 /// The design in libs/graphics/shaped-viewer/docs/asset-loading.md wants the mesh list and its bounds to arrive ahead

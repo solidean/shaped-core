@@ -47,6 +47,10 @@ o.value_or(fallback);                     // value or fallback
 - **Real API only.** Don't document stubs or not-yet-implemented types as if they work.
   Omit them, or note them in one line under Gotchas.
 - **Keep it current.** A cheat sheet *is* public API surface, so the repo's docs rule applies — when a change touches the public API, update the sheet in the same change.
+- **Then check the lint rules that point past it.**
+  A capability that replaces something — a `std::` header, a platform call, an older helper — usually has a shaped-linter entry saying there is no replacement yet.
+  Search the `.shaped-lint.yml` files for the header or call it replaces, and update the entry's `reason`, or move it to the deny block once the call sites have moved.
+  A stale allow reason is worse than none: it tells the next author, human or agent, to keep using what you just replaced.
 
 ## Related
 

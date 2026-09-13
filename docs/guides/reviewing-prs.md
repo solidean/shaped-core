@@ -133,6 +133,11 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
 - **Does the abstraction pay for itself?** A "manager" that fixes a layout and hides what its consumer needs is the anti-pattern.
   A small helper over one thing the caller still owns is the pattern.
 - **Which library does this belong in?** Dependency direction is a hard rule; "could live lower" is the more common finding.
+- **Does a new accessor name an internal of a library still in flux?** Then it pins the internal, and the public shape should say only the outcome.
+  pr-170's fix for a test drain needed to wait on sv's fallback shader compile, and first added `sv::frame::fallback_shader_compile()`.
+  The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
+  What landed was `frame::background_work() -> cc::shared_async<cc::unit>`, which covers the fallback today and grows with the internals while its signature stays put.
+  The same holds for a fix a review lands: an accessor added to reach one internal is a finding against the fix.
 
 Report API shape **in symbols**: signatures, the actual type names, and a few lines of call-site code.
 Prose about an API is much harder to judge than the API.
@@ -195,6 +200,24 @@ The lighter the process, the more the rule is carrying: a chat review that skips
 The worked example is a review of #154 that went well and then posted itself.
 The maintainer had opened with "this is a small one, so maybe in-chat is sufficient" and "goal is pr comment", read nothing, and found the comment already on the PR.
 A review the maintainer has not seen is a draft whatever its quality, and publishing one spends their credibility on findings they never agreed to.
+
+### Price work in what it improves and how long an agent takes, never in human hours
+
+**The author hands a comment to an agent, so the work in it is effectively free.**
+An option phrased "not worth an afternoon" prices the wrong thing, and it tilts the maintainer toward cutting work that would have cost nothing.
+
+What is actually being weighed is two things.
+Whether the change makes the codebase better, and whether it does so at a reasonable latency.
+Agents are fast at the work and still slow at wall-clock time, so a sprawling item is not free even when its effort is.
+
+pr-164's follow-up review is the worked case.
+A docs pass over eleven files was offered with the option "only the cheat sheets and shaders.md; the rest is not worth an afternoon", and the answer was:
+
+```raw
+julius will get your comment but delegates to an agent. the tradeoff is not "an afternoon" (the work is effectively free). we always want to consider if it makes the codebase better with reasonable amount of work latency
+```
+
+So when an ask offers a smaller scope, say what the smaller scope *loses*, not what the larger one costs in hours.
 
 ### Docs are for users first, implementors second
 
@@ -517,6 +540,14 @@ The maintainer had already approved the fix before the error was found.
 
 The check is cheap and specific: grep the constructor of the value, not the type that looks like it owns it.
 
+**A recommendation is a mechanism claim too.**
+pr-170 found that `exclusive(...)` on an `INVOCABLE_TEST` is silently ignored, and recommended that nexus union each child's tags onto the drivers that dispatch it.
+That fix assumes a static link from driver to child.
+There is none: a driver calls `nx::invoke_tests` at runtime, and which invocables it reaches is discovered then, so nothing before the schedule is built knows the edge.
+The maintainer's answer was a runtime assert at dispatch instead — a child's flags must be held by whichever test invokes it.
+The finding was right and the fix was unbuildable, and the review had even written "I have not checked how a driver's dispatched parameter type is known to the scheduler" beside it.
+A sentence like that is the check, left undone; do it before recommending, not after.
+
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
@@ -656,6 +687,34 @@ The declaration's own doc comment, a family list in `scalar/traits.hh`, a prose 
 Every one of them was a plain text match on the name.
 
 An instruction the author has to complete themselves is not an instruction.
+
+**The same holds for any change to a symbol, not just a rename.**
+An instruction that removes a table row, changes a constructor or replaces an overload owes the list of what references it: tests, test fakes, corpus cases, generated doc comments, other docs.
+pr-164's follow-up comment was right about every line it named and missed the references in four items.
+Removing the `Buffer` row would have broken the corpus's every-type case, which declares `Buffer<float4>` and numbers the bindings after it.
+Giving `sg::binding_group_layout` a new constructor argument also reaches both backends' subclasses and `fake_group_layout` in `layout_hash-test.cc`.
+Replacing `create_binding_group(G const&)` left five docs still spelling the old call.
+Renaming a CMake custom target missed the `add_dependencies` naming it and the property that records it.
+
+### An instruction to "both halves" is checked against each half separately
+
+Where a design implements one thing twice — a runtime parser and a build-time generator, two backends — an instruction written once for both assumes the halves have the same machinery.
+They rarely do, and the difference is exactly what the author discovers halfway through.
+
+pr-164's follow-up is the worked case, twice.
+"Pin vertex-input member offsets in both halves" assumed the C++ parser computes them.
+It computes only source offsets for the `[[vk::location]]` edit, so the instruction was new layout code rather than a corpus change.
+"Refuse two push-constant struct bodies of one name in both halves" assumed both read the same text.
+The Python generator reads the raw file and the C++ pass the flattened one, so an `#ifdef __spirv__` fork is two bodies to one and one body to the other.
+
+So for each "both halves" item, open each half and find the code the instruction would extend.
+
+### Items in one comment are checked against each other
+
+A long comment is written item by item, and an instruction's target wording in one section can undo another.
+pr-164's follow-up told the author to let non-address `[[vk::…]]` attributes through in a dialect file.
+Four items later it told them to document that a hand-written `[[vk::…]]` is valid only in a file with no attribute.
+Read the draft once for exactly that before handing it over.
 
 ### A bound is checked against every path the code dispatches to
 

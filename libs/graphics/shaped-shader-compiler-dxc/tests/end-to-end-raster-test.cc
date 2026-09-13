@@ -8,12 +8,12 @@
 
 using namespace cc::primitive_defines;
 
-// Raster pipeline + draw end to end on WARP.
+// Raster pipeline + draw end to end.
 // It compiles a vertex + pixel shader, builds an sg::raster_pipeline, uploads a triangle's vertices, then render_to a cleared rgba8 target and draws.
 // The read-back target shows the triangle's color over the center and the clear color in the corner.
 // That proves pipeline creation, vertex-buffer bind + input layout, the rendering scope, and the draw all execute.
 //
-// Driven through the backend-agnostic sg::context API; the dx12 WARP device is only how the context exists.
+// Driven through the backend-agnostic sg::context API; the dx12 device is only how the context exists.
 
 namespace
 {

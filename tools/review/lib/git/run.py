@@ -153,6 +153,22 @@ class Git:
         out = self.run(["rev-list", "--merges", "--first-parent", f"{base}..{head}"])
         return [line.strip() for line in out.splitlines() if line.strip()]
 
+    def parents(self, sha: str) -> list[str]:
+        out = self.run(["rev-list", "--parents", "-n", "1", sha], timeout=30)
+        return out.split()[1:]
+
+    def hand_resolved_paths(self, sha: str) -> set[str]:
+        """The paths a merge commit changed beyond what git's own merge of its parents produced.
+
+        That is its conflict resolutions plus any edit smuggled into the merge, which is the author's work rather than
+        the merged branch's — so a claim over "what the merge brought in" must not reach them.
+        Empty for a commit that is not a merge.
+        """
+        if len(self.parents(sha)) < 2:
+            return set()
+        out = self.run(["show", "--remerge-diff", "--format=", "--name-only", *_DIFF_FLAGS, sha])
+        return {line.strip() for line in out.splitlines() if line.strip()}
+
     def diff(self, base: str, head: str, *, context: int, paths: list[str] | None = None) -> str:
         """A two-dot diff between two commits, with the pinned flag set."""
         args = ["diff", *_DIFF_FLAGS, f"--unified={context}", base, head]

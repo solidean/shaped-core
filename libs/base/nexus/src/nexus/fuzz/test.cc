@@ -1,5 +1,6 @@
 #include "test.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/string/print.hh>
@@ -50,6 +51,20 @@ void test::build_machine()
         raw.push_back(op.get());
     _machine = cc::make_unique<fuzz_machine>(cc::span<fuzz_operation* const>(raw));
     _setup_ok = _machine->assert_is_properly_set_up(_setup_error);
+}
+
+void test::cap_max_executions(int times)
+{
+    CC_ASSERT(times >= 0, "an execution cap must be >= 0");
+    for (auto const& op : _operations)
+        if (op->execute_at_most_times() > times)
+            op->execute_at_most(times);
+}
+
+void test::cap_seed_count(int count)
+{
+    CC_ASSERT(count >= 1, "a fuzz needs at least one seed");
+    _seed_count = cc::min(_seed_count, count);
 }
 
 test::fuzz_result test::execute_fuzzer(int seed)
@@ -129,8 +144,7 @@ bool test::execute_fuzz_test(cc::string_view test_var)
         return false;
     }
 
-    constexpr int num_seeds = 256;
-    for (int seed = 1; seed <= num_seeds; ++seed)
+    for (int seed = 1; seed <= _seed_count; ++seed)
     {
         auto res = execute_fuzzer(seed);
         if (res.is_ok || !res.failing_run.has_value())

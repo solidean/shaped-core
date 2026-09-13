@@ -1,13 +1,12 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_tls.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
-
-#include <chrono> // the poll interval a driver waiting on an external push sleeps for
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -251,17 +250,17 @@ namespace
 ///
 /// Only an async awaiting an EXTERNAL push ever gets here — everything a scheduler owns is driven, not polled.
 /// So this trades latency on a path that is already crossing a thread boundary for a driver that costs nothing while it waits.
-constexpr int async_external_poll_ms = 1;
+constexpr f64 async_external_poll_secs = 0.001;
 
 void async_wait_a_moment()
 {
     // A thread with a home waits on that home instead: a push to it ends the wait at once, rather than after the interval.
     if (auto* const home = cc::impl::async_tls().home)
     {
-        home->wait_for_work(double(async_external_poll_ms));
+        home->wait_for_work(async_external_poll_secs * 1000.0);
         return;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(async_external_poll_ms));
+    cc::this_thread_sleep_secs(async_external_poll_secs);
 }
 } // namespace
 
@@ -291,7 +290,7 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
     // Deliberately NOT participate_until_ready: a pool parks in a slot until the root is ready, which is exactly the wait this overload exists to bound.
     // Stepping instead keeps the deadline honest, and a bound scheduler still runs its own work while we hold the thread.
     auto& scheduler = cc::ambient_async_scheduler();
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    auto const deadline = cc::current_time_steady_secs() + timeout_ms / 1000.0;
 
     while (!root.is_ready())
     {
@@ -302,7 +301,7 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
         if (cc::thread_pump_all())
             continue;
 
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (cc::current_time_steady_secs() >= deadline)
             return root.is_ready();
 
         async_wait_a_moment();

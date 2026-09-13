@@ -146,6 +146,29 @@ An invocable with no alias and no invocation is still an orphan, which is the wi
 shaped-graphics' vulkan backend was the worked case, through the whole of its build-out.
 [`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc) records what the toggle bought and when it came off.
 
+## Scheduling asks belong to the driver
+
+A dispatched child creates no node in the schedule: it runs inside the body of the test that dispatched it, on that test's thread, beside whatever that test runs beside.
+So a scheduling ask on an `INVOCABLE_TEST` can only be honoured by the scheduled test it is reached from — the driver, or an alias expanding to it.
+Which driver dispatches which child is discovered at runtime, so the asks cannot be propagated ahead of time either.
+
+`nx::invoke_tests` therefore asserts when the scheduled test does not hold what the child declares, naming the child, the ask and that test:
+
+- **`exclusive(tag)`** — the driver holds the same tag, or runs alone under `exclusive()`.
+  A child with several tags needs every one of them.
+- **`exclusive()`** — the driver runs alone too.
+- **`main_thread`** — the driver carries it.
+- **`singlethreaded`, `no_scheduler`, `own_pool(n)`** — the driver declares exactly the same mode.
+
+A child asking for none of these runs under any driver.
+Through a nested dispatch the check is against the scheduled test at the root, not the child in between, since that root is whose slot the whole chain runs in.
+
+The ask stays on the child, which is where a reader looks for it: it documents what the child needs, and the assert keeps every driver honest about it.
+shaped-graphics' routine tests are the worked case: those counting init runs hold `sg-reload-generation`, and so does every backend driver dispatching them.
+
+`thorough_only` is the exception, because it needs no slot: a child carrying it is skipped in a default run whatever its driver holds.
+[test-runtime](test-runtime.md#tests-with-no-narrow-version-thorough_only) has that config.
+
 ## Patterns
 
 - **Backend matrix** — one driver per backend, each invoking on the backend handle, as above.
@@ -162,6 +185,13 @@ The **planned** shape registers one concrete value-parametrized declaration per 
 Declaration and instantiation stay separable there, so long type lists can live apart from the body.
 Value parametrization, this document, is the part that composes across the registry **today**.
 
+## Not yet
+
+- **Async invocables honouring their own asks.**
+  Today a child runs on its driver's thread, which is why its scheduling asks are the driver's to hold.
+  Once async tests can migrate between threads, an async invocable could be scheduled apart from its parent and honour `exclusive`, `main_thread` and the scheduler modes itself.
+  The dispatch assert would then apply to synchronous children only.
+
 ## Gotchas
 
 - **Inert by default** — an `INVOCABLE_TEST` never runs on its own, and needs a driver.
@@ -169,5 +199,6 @@ Value parametrization, this document, is the part that composes across the regis
 - **Coarse matching** — use a unique key type; a bare `int` / `bool` key co-invokes.
 - **By value or `const&` only** — mutable lvalue-ref parameters are a compile error.
 - **Setup-once requires no sibling `SECTION`s** around a top-level `invoke_tests`.
+- **A child's `exclusive` / `main_thread` / scheduler mode is the driver's to hold** — dispatch asserts otherwise.
 - A driver that only invokes tests needs no `CHECK` of its own, being exempt from the no-assertion rule.
   But a call that matches **nothing** leaves the driver with neither checks nor children, and it is flagged.

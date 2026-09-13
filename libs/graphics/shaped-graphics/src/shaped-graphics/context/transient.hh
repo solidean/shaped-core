@@ -109,8 +109,11 @@ public:
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
     /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
     /// The change takes effect at the next advance_epoch, which drains in-flight work and resizes the transient heap; until then the current budget stays in force.
-    /// Default: 128 MiB.
+    /// Starts at default_budget_bytes.
     void set_budget(isize size_in_bytes);
+
+    /// The transient budget a context starts with.
+    static constexpr isize default_budget_bytes = isize(128) * 1024 * 1024;
 
     // Pinned to its owning context: neither copyable nor movable.
     context_transient_scope(context_transient_scope const&) = delete;
@@ -156,7 +159,7 @@ private:
     struct bump_state
     {
         memory_heap_handle heap = nullptr;
-        isize budget = isize(128) * 1024 * 1024;
+        isize budget = default_budget_bytes;
         isize head = 0;
         u64 last_epoch = 0;       // sg::epoch value the head was last reset for (0 = never)
         isize pending_budget = 0; // a set_budget() awaiting the next epoch boundary (0 = none pending)

@@ -183,10 +183,14 @@ def parse_junit(path: Path) -> TestSummary | None:
         return None
     totals = dict(tests=0, failures=0, errors=0, skipped=0, assertions=0)
     time_s = 0.0
+    resources: dict[str, str] = {}
     for suite in tree.getroot().iter("testsuite"):
         for attr in totals:
             totals[attr] += int(suite.get(attr, "0"))
         time_s += float(suite.get("time", "0"))
+        for attr in ("cpu_load", "cores_used", "peak_resident_bytes"):
+            if suite.get(attr) is not None:
+                resources[attr] = suite.get(attr)
     return TestSummary(
         binary=path.name,
         tests=totals["tests"],
@@ -195,6 +199,9 @@ def parse_junit(path: Path) -> TestSummary | None:
         skipped=totals["skipped"],
         time_s=time_s,
         assertions=totals["assertions"],
+        cpu_load=float(resources["cpu_load"]) if "cpu_load" in resources else None,
+        cores_used=float(resources["cores_used"]) if "cores_used" in resources else None,
+        peak_resident_bytes=int(resources["peak_resident_bytes"]) if "peak_resident_bytes" in resources else None,
     )
 
 

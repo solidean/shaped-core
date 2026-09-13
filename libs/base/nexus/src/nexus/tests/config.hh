@@ -55,6 +55,7 @@ struct nx::config::cfg
 {
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
+    bool thorough_only = false; // skipped unless the run is --thorough; orthogonal to `bucket` and `enabled`
     int seed = 0;
 
     scheduler_mode scheduler = scheduler_mode::shared;
@@ -137,6 +138,15 @@ constexpr struct
 {
     void apply(cfg& result) const { result.owns_recorder = true; }
 } owns_recorder;
+
+// This test runs only under --thorough, and a default run skips it rather than leaving it out.
+// For a test whose whole point is ground a default run cannot afford, so there is no narrower version of it worth running.
+// A test that CAN be narrowed stays a normal test and branches on nx::is_thorough() instead.
+// Honoured wherever the body runs, a child dispatched through nx::invoke_tests included.
+constexpr struct
+{
+    void apply(cfg& result) const { result.thorough_only = true; }
+} thorough_only;
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.

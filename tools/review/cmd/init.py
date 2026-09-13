@@ -39,7 +39,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--context", type=int, default=8, help="diff context for the hunks a reader sees (default 8)")
     p.add_argument("--gap", type=int, default=20,
                    help="merge hunks closer than this many lines into one change (default 20; below 2*context it does nothing)")
-    p.add_argument("--force", action="store_true", help="re-initialize an existing review folder")
+    p.add_argument("--force", action="store_true", help="rewrite an existing review's review.toml; its ledger, entries and answers are kept, "
+                        "so delete the folder to start over")
     return p
 
 

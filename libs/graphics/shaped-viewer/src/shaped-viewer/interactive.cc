@@ -1,3 +1,4 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/memory/unique_ptr.hh>
@@ -13,9 +14,18 @@ namespace
 ///
 /// This is the whole reason capture costs an example nothing: the request decides headless and the resolution before
 /// the viewer exists, so a body written for the interactive case is also the body that produces a reference image.
+void apply_capture_config(viewer_config& config, sr::capture_request const& req)
+{
+    config.headless = true;
+    config.width = req.size[0];
+    config.height = req.size[1];
+}
+
+/// The request the environment asks for, folded into `config` when it is active.
+///
 /// An active request with nowhere to write is a caller error rather than a silent no-op — a tool that forgot the path
 /// would otherwise get a run that looked like it worked.
-[[nodiscard]] sr::capture_request apply_capture_config(viewer_config& config)
+[[nodiscard]] sr::capture_request apply_environment_capture(viewer_config& config)
 {
     auto req = sr::capture_request::from_environment();
     if (!req.active)
@@ -28,9 +38,7 @@ namespace
         return sr::capture_request{};
     }
 
-    config.headless = true;
-    config.width = req.size[0];
-    config.height = req.size[1];
+    apply_capture_config(config, req);
     return req;
 }
 
@@ -38,7 +46,7 @@ namespace
 
 frame_range interactive(cc::string_view id, viewer_config config)
 {
-    auto req = apply_capture_config(config);
+    auto req = apply_environment_capture(config);
 
     // The range owns the viewer, so the loop is the viewer's whole lifetime and a caller keeps no handle on it.
     auto* const v = new viewer(viewer::create(id, cc::move(config)));
@@ -50,11 +58,33 @@ frame_range interactive(cc::string_view id, viewer_config config)
 
 frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config)
 {
-    auto req = apply_capture_config(config);
+    auto req = apply_environment_capture(config);
 
     auto* const v = new viewer(viewer::create(ctx, id, cc::move(config)));
     if (req.active)
         v->install_capture(cc::move(req));
+    v->begin_frames();
+    return frame_range::owning(v);
+}
+
+frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture)
+{
+    CC_ASSERT(capture.active && !capture.output_path.empty(), "an explicit capture must be active and name its output");
+    apply_capture_config(config, capture);
+
+    auto* const v = new viewer(viewer::create(id, cc::move(config)));
+    v->install_capture(cc::move(capture));
+    v->begin_frames();
+    return frame_range::owning(v);
+}
+
+frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config, sr::capture_request capture)
+{
+    CC_ASSERT(capture.active && !capture.output_path.empty(), "an explicit capture must be active and name its output");
+    apply_capture_config(config, capture);
+
+    auto* const v = new viewer(viewer::create(ctx, id, cc::move(config)));
+    v->install_capture(cc::move(capture));
     v->begin_frames();
     return frame_range::owning(v);
 }

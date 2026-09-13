@@ -546,13 +546,14 @@ It is cached on `(toolset, arch)` now and shows up as a single capture, so a run
 ### What becomes a job
 
 A **job** is one thing with a wall-clock start and an end.
-Five sources feed the profile, and none of them needs the build reconfigured:
+Six sources feed the profile, and none of them needs the build reconfigured:
 
 | type | one job per | where it comes from |
 |------|-------------|---------------------|
 | `configure` / `build` / `test` / `lint` / `format` / `run` | captured subprocess | `run_step`, the single choke point every child goes through |
 | `compile` / `link` | translation unit, and linked binary | the `<output>.diag.json` sidecars `diag-launcher` already writes next to every artifact |
 | `clang-tidy` | linted `.cc` | the gate runner's own thread pool, reported back through a fragment file |
+| `testcase` / `testcase-driver` | nexus test, dispatched children included | the `<binary>.timings.json` sidecar `dev.py test` asks each binary for with `--timings-json`, only under `--profile` |
 | `check-gate` | pre-commit gate | the `check` registry |
 | `env` / `git` / `discover` / `fingerprint` / `probe` / `prereq` / `crossrefs` | in-process phase | spans around the work that spends real time without spawning a step |
 
@@ -571,7 +572,7 @@ A trace has **two processes**, because the two halves of a run are shaped differ
 * **`dev.py`** — everything the driver timed on its own call stack, drawn as a proper nested flame chart with one row per depth.
   This nesting is exact rather than reconstructed: dev.py is single-threaded, so a span really does contain what ran inside it.
   The top row is the invocation, with the gates, steps and phases nested underneath.
-* **`jobs`** — everything that fanned out under a step: compile edges, link steps, the per-file lint.
+* **`jobs`** — everything that fanned out under a step: compile edges, link steps, the per-file lint, the testcases.
   These have no thread to attribute them to and overlap arbitrarily, so their rows are **reconstructed**: jobs are sorted by start and greedily packed into the fewest lanes their overlap requires.
 
 The two are always allocated independently, so a compile edge is never pushed down a row by the step that spawned it, and either block can be collapsed in the viewer to look at the other.
@@ -586,6 +587,19 @@ Only the rendered slice is adjusted, never a recorded job, so the summary's numb
 
 `--profile-lanes global` (the default) packs the fan-out into one pool.
 `--profile-lanes per-type` gives each fanned-out job type its own pool and its own track — worth it once one kind of work is what you are chasing.
+
+A slow test run is the case it was made for:
+
+```bash
+uv run dev.py test --profile .tmp/dev-profile/test.json --profile-type chrome-tracing --profile-lanes per-type
+```
+
+Every test becomes a `testcase` slice under its binary's `test` step, so the question "which test is this binary waiting on" reads straight off the timeline.
+A test that dispatched children through `nx::invoke_tests` is a `testcase-driver` instead, and each child is a `testcase` of its own.
+The driver's slice encloses its children's, so it is filed as a container: the summary lists it under `containers` and the trace still draws both.
+Overlap between fanned-out jobs never makes one a container, so this is the sidecar saying so — nexus writes `children` on such an entry.
+Lanes are packed by overlap, not by thread; the thread a test ran on is in its args, and thread 1 is the main thread.
+That one matters, because nexus runs `main_thread` and `exclusive()` tests one at a time and never beside the pool.
 The `dev.py` process is unaffected either way, since depth is not a thing to allocate.
 
 ### Formats, and composing runs
@@ -622,6 +636,15 @@ dev.py discovers them via the CMake File API, runs each with the optional name f
 So a binary that **crashes before printing anything** is still recorded as a failure, on its non-zero exit; `--mirror-test-output` shows whatever it printed before dying.
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and result recording stay consistent.
+
+A run ends with one row per binary, longest first: its wall time, its test count, and what it cost the machine.
+That cost is average CPU load, cores kept busy, and peak resident memory, as nexus measured them around its tests.
+A binary with a long wall time and a low load is spending that time serialized, which is usually the thing to fix.
+`check` prints its per-preset timing lines instead.
+
+`uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
+A test marked `thorough_only` runs only then, and the per-binary timeout grows tenfold to 600 s unless `--timeout` is given.
+[nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
 
 ## Examples (`example`)
 
@@ -759,7 +782,7 @@ TSan starts threads through a trampoline the walker cannot get past, and rewrite
 - `--keep-going` / `-k` (on `build`) — ninja `-k 0`: keep going after a failure, so one run surfaces every independent error instead of stopping at the first.
 - `--diag-archive FILE` (on `build`) — zip the build's diagnostic sidecars, **even when the build failed**.
   `build_diag` reads the archive directly, so this pairs with `--keep-going` to turn one red build into one artifact — which is what CI does.
-- `--timeout SECS` (on `test`) — per-binary timeout, default 60; `0` disables.
+- `--timeout SECS` (on `test`) — per-binary timeout, default 60, or 600 under `--thorough`; `0` disables.
   A binary that exceeds it is killed and reported as failed — but not before it is asked where it was.
   dev.py provokes clean-core's crash handler first and gives it two seconds to write, so the step's **stderr log** holds the running test, plus a stack for every thread in the process.
   In a hang the stack you want is under `other threads`; the faulting one is dev.py's doing and says nothing.

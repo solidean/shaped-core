@@ -3,13 +3,13 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-#include <chrono>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -79,7 +79,7 @@ protected:
     // exercises the single-initialization rule rather than passing because the first thread happened to finish first.
     cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        cc::this_thread_sleep_secs(0.002);
         ++inits;
         co_return;
     }
@@ -138,19 +138,21 @@ protected:
     }
 };
 
-// Slow enough that a tick with a small budget stops after one of them.
-// Two distinct types rather than two parametrizations, so the budget test does not depend on iteration order within
-// one type being stable.
+// Its init finishes only once `gate` is pushed, or at once while there is no gate.
+// That is how a test holds an initialization in flight for as long as it needs, without waiting for anything to take time.
+// Distinct tags rather than parametrizations, so a test does not depend on iteration order within one type being stable.
 template <int Tag>
-class slow_routine : public sg::render_routine<slow_routine<Tag>>
+class gated_routine : public sg::render_routine<gated_routine<Tag>>
 {
 public:
+    static inline cc::shared_async<cc::unit> gate;
     bool ran = false;
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope) override
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        if (gate != nullptr)
+            co_await gate;
         ran = true;
         co_return;
     }
@@ -365,8 +367,9 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
 {
     REQUIRE(ctx != nullptr);
 
-    // The exclusion tag is what makes `inits == 1` meaningful: sg::reload_generation() is process-global, and a
-    // concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
+    // The exclusion tag is what makes `inits == 1` meaningful.
+    // sg::reload_generation() is process-global, and a concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
+    // The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
     //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
     // backend in the same process would otherwise carry in.
@@ -452,7 +455,12 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 // A parametrized routine is one instance per distinct parameter value, and each instance knows which value it is for.
 // Serving one instance for two values would mean a pipeline built for the wrong format -- wrong output rather than
 // slow output, which is why the parameter is part of the registry key rather than something execute() re-checks.
-INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value", (sg::context_handle const& ctx))
+// Holds sg-reload-generation for the same reason as the concurrent-acquire test.
+// `inits == 1` is only meaningful while no other test signals a process-wide reload.
+// The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
+INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
@@ -505,7 +513,7 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
 {
     REQUIRE(ctx != nullptr);
 
-    using prewarmed = slow_routine<0>;
+    using prewarmed = gated_routine<0>;
     prewarmed::evict(*ctx);
 
     prewarmed::prewarm(*ctx);
@@ -528,37 +536,51 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
 }
 
 // The budget bounds how long the TICK spends driving, not how long an initialization takes.
-// A phase runs on a worker, so a budget below what the phases cost returns with them still in flight -- and a later
-// tick collects them.
-// Pacing rather than a deadline, which is why this asserts on what was left rather than on elapsed time.
+// A tick whose budget runs out returns with its phases still in flight, and a later tick collects them.
+// Both halves are arranged rather than timed: the injected clock spends the budget within one pass, and the gate keeps
+// the phases in flight until the test opens it.
 INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
 
-    using first_slow = slow_routine<1>;
-    using second_slow = slow_routine<2>;
+    using first_slow = gated_routine<1>;
+    using second_slow = gated_routine<2>;
 
     // Bring everything else up, so the only pending routines are the two below.
     (void)ctx->routines.tick_until_idle();
 
     first_slow::evict(*ctx);
     second_slow::evict(*ctx);
+    auto const gate = cc::make_async_manual<cc::unit>();
+    first_slow::gate = gate;
+    second_slow::gate = gate;
     first_slow::prewarm(*ctx);
     second_slow::prewarm(*ctx);
 
-    // A budget far below what the two routines cost, so the tick returns before either has settled.
-    auto const bounded = ctx->routines.tick({.budget_secs = 0.001});
+    // Each reading advances half the budget, so the tick gets one pass before the budget is spent.
+    auto const bounded = ctx->routines.tick({
+        .budget_secs = 1.0,
+        .clock_seconds =
+            []
+        {
+            static auto now = 0.0;
+            return now += 0.5;
+        },
+    });
     CHECK(bounded.budget_exhausted);
     CHECK(!bounded.is_idle());
 
-    // The work the bounded tick started is still running; this is what collects it.
+    // The work the bounded tick started is still in flight; opening the gate and ticking again is what collects it.
+    gate->push_value(cc::unit{});
     auto const rest = ctx->routines.tick_until_idle();
     CHECK(rest.is_idle());
     CHECK(first_slow::try_acquire(*ctx)->ran);
     CHECK(second_slow::try_acquire(*ctx)->ran);
 
+    first_slow::gate = {};
+    second_slow::gate = {};
     first_slow::evict(*ctx);
     second_slow::evict(*ctx);
 }
@@ -572,7 +594,7 @@ INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
 {
     REQUIRE(ctx != nullptr);
 
-    using reported = slow_routine<3>;
+    using reported = gated_routine<3>;
     reported::evict(*ctx);
 
     // Asking is enough to register it, so the next tick brings it up -- but asking did not bring it up.

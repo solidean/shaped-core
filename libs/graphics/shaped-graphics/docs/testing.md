@@ -19,6 +19,27 @@ uv run dev.py test                                                        # the 
 
 ---
 
+## Devices and adapters
+
+These rules bind every GPU test in the repo — sg's two tiers, and the libraries above sg (sr, sv, the shader compiler) alike.
+
+- **A test binary shares its devices.** One context per adapter, brought up by an entry driver that `nx::invoke_tests`es every test against it, which is the tier-1 shape below.
+  A device is expensive to create and to tear down, and several alive at once contend in the driver.
+  A test builds a context of its own only when the context itself is its subject — creation, teardown, a config knob, pristine epoch or pool state.
+- **The hardware adapter is the default.** It is what the code ships on, and it is fast.
+  WARP runs where there is no hardware adapter, which is what a headless CI host is, and under `--thorough` as a second pass on a machine that has one.
+  The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
+  A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
+  `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
+- **A test passes on any adapter.**
+  Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
+  Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.
+- **Never assert bytes that depend on the adapter.**
+  A serialized PSO, a floating-point readback compared exactly, or anything else one driver produces differently from another is not a stable expectation.
+  Compare within a tolerance, or assert the property instead.
+
+---
+
 ## Tier 1 — backend-agnostic API tests (`tests/`)
 
 This is the primary suite and **the default home for a new test.** It validates the public `sg` contract
@@ -37,8 +58,10 @@ INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::contex
 
 It becomes runnable against each backend by two pieces working together:
 
-- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+  The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
+  A driver holds every exclusion tag its children need (`slib-shader-library`, `sg-reload-generation`), because a child runs inside its driver's body and its own tags schedule nothing.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.
@@ -80,7 +103,7 @@ and each topic file is added to the `if(_sg_test_drivers)` block in the library
 
 ## Tier 2 — per-backend suites (`backends/<backend>/tests/`)
 
-Each backend has its **own `*-test` binary**, built only where that backend builds, and running on a software adapter where possible (dx12 → WARP) so it also runs on headless CI.
+Each backend has its **own `*-test` binary**, built only where that backend builds, and runs on the adapters [Devices and adapters](#devices-and-adapters) prescribes.
 Two kinds of test belong here:
 
 1. **Feature smoke tests** — one straightforward end-to-end exercise per feature, confirming the backend's own path works against a live device.
@@ -92,13 +115,21 @@ Two kinds of test belong here:
 
 ### A tier-2 test is an invocable too, unless it needs its own context
 
-The dx12 suite has the same driver shape as tier 1.
-[`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one WARP and one hardware context, and invokes every `INVOCABLE_TEST` in the binary against each.
-So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`, which also gets it exercised on the real GPU for free.
+Both backend suites have the same driver shape as tier 1.
+[`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one hardware and one WARP context, and invokes every `INVOCABLE_TEST` in the binary against each.
+The WARP one runs only where the adapter rules call for it.
+[`vulkan-entry.cc`](../backends/vulkan/tests/vulkan-entry.cc) brings up one context, with validation and synchronization validation on, and SKIPs where there is no Vulkan device.
+So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`, or `vulkan::vulkan_context_handle` for vulkan.
 The parameter is the **backend-typed** handle, unlike tier 1's `sg::context_handle`: a suite committed to one backend should not have to downcast to read its guts.
 
-Write an ordinary `TEST` only when the test needs a context of its own: pristine epoch / pool state, or a `dx12_config` knob it is about.
-`dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and such a test carries `exclusive("gpu")`.
+The invocables under one driver run in turn on one context, so each leaves it as it found it.
+Every list is submitted or dropped, and a test that swaps the validation callback reinstalls the failing one before it returns.
+An assertion on a counter the context has already advanced — the epoch, a pool's free count — is written against a snapshot taken at the start of the test rather than against zero.
+
+Write an ordinary `TEST` only when the context itself is the subject: pristine epoch / pool state a snapshot cannot stand in for, a backend config knob, or more than one context.
+`dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and `make_fresh_context()` is the same with no knobs.
+Both take `dx12_adapter::hardware_or_warp`, so such a test follows the adapter rules too.
+The vulkan one is `vulkan::test::make_context({…})` in [`vulkan-test-common.hh`](../backends/vulkan/tests/vulkan-test-common.hh), and its test carries `exclusive("vulkan-device")`.
 
 ### Drive through the abstract API even though the handle is backend-typed
 
