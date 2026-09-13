@@ -18,11 +18,10 @@ namespace sv::impl
 {
 /// One material an import built, before any library has seen it.
 ///
-/// The split exists for one reason: `material_library` is not thread-safe, and the expensive half of an import —
-/// decoding images, reading vertex buffers, building tangent frames — is exactly what wants to run off the main
-/// thread.
-/// So an importer produces these, and `acquire_asset_materials` is the small main-thread step that turns them into
-/// ids and points the meshes at them.
+/// The split exists because minting runs the loader's `material_override`, which is caller code.
+/// The expensive half of an import — decoding images, reading vertex buffers, building tangent frames — wants to run off the calling thread, and the hook does not.
+/// So an importer produces these, and `acquire_asset_materials` is the small step in `sv::asset::poll` that turns them into ids and points the meshes at them.
+/// Running there, on the calling thread, is what lets the hook touch caller state without a lock.
 struct asset_material_definition
 {
     cc::string name; ///< the file's own, matching `asset_material::name` at the same index
@@ -39,10 +38,9 @@ struct imported_asset
 
 /// The definitions an import produced, minted into `lib` and written back onto `out`.
 ///
-/// Must run where the library is owned; everything before it is thread-safe.
+/// Runs on the thread calling `sv::asset::poll`, because the loader's `material_override` hook runs here and is caller code.
 /// `out.materials` is parallel to `definitions`, and each slot's own `meshes` is what gets pointed at the new id — so
 /// two of a file's materials that hash alike still move independently.
-/// The loader's `material_override` hook runs here too, since what it returns is a library id.
 void acquire_asset_materials(asset_data& out,
                              cc::span<asset_material_definition const> definitions,
                              asset_loader_config const& cfg,

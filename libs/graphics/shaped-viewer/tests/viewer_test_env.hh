@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
@@ -7,6 +8,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/shaders.hh>
@@ -93,15 +95,33 @@ inline void drive_ambient_work()
     cc::this_thread_yield();
 }
 
-/// Runs async work that is ready on this thread until none is, so what a test started ends with the test.
+/// Runs async work on this thread until none is queued and `started` has settled, so what a test started ends with the test.
+/// False when `timeout_secs` ran out first, which only a broken build reaches.
 ///
 /// The GPU tests share one context across the whole driver, so nothing tears it down between them.
 /// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, and a compile left
 /// unfinished is async work the next test inherits.
-inline void drain_ambient_work()
+///
+/// **Queued work alone is not enough.** With threads, a trace starts the fallback's compile on a pool worker, where no queue shows it.
+/// So a test that traced passes what it started as `started`: `frame::background_work()` for a viewer loop, copied while the viewer lives,
+/// or `material_shader_cache::acquire_fallback().shader` for a test holding its own resource manager.
+/// A node nobody started is not waited for, since nothing would ever finish it.
+template <class T>
+[[nodiscard]] inline bool drain_ambient_work(cc::shared_async<T> const& started, double timeout_secs = 60.0)
 {
-    while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
+    CC_RECORD_SCOPE("sv_test.drain_ambient_work");
+
+    auto const start = cc::current_time_steady_secs();
+    while (true)
     {
+        while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
+        {
+        }
+        if (started == nullptr || started->is_cold() || started->is_ready())
+            return true;
+        if (cc::current_time_steady_secs() - start >= timeout_secs)
+            return false;
+        cc::this_thread_yield();
     }
 }
 
@@ -120,6 +140,8 @@ inline void drain_ambient_work()
 template <class F>
 [[nodiscard]] bool tick_until(sg::context& ctx, F&& ready, double timeout_secs = 30.0)
 {
+    CC_RECORD_SCOPE("sv_test.tick_until");
+
     auto const start = cc::current_time_steady_secs();
     while (true)
     {
@@ -147,6 +169,8 @@ template <class F>
 template <class F>
 [[nodiscard]] bool frames_until_executed(sg::context& ctx, F&& body, double timeout_secs = 60.0)
 {
+    CC_RECORD_SCOPE("sv_test.frames_until_executed");
+
     auto const start = cc::current_time_steady_secs();
     while (true)
     {

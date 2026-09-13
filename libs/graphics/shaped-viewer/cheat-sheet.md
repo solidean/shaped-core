@@ -719,6 +719,7 @@ frame.push_id(i) / frame.pop_id()                              // the same, expl
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+frame.background_work() -> cc::shared_async<cc::unit>          // settles once the pool work the viewer started is done; what it covers is internal
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_frames cannot see it
 view.accumulated_frames() -> u32                                // the SLOWEST traced layer's count; 0 for a view with none

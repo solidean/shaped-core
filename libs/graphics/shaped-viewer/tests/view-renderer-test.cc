@@ -61,15 +61,12 @@ INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle c
                                                resources.advance_to(ctx.current_epoch()); // the frame's job
                                                // The renderer only ever hands back a texture — it never sees an output target.
                                                traced = sv::view_renderer::execute(cmd, v, resources, store);
-                                               // The fallback's compile is STARTED by every trace whether or not it
-                                               // is needed, so it is waited for here too — otherwise it is still
-                                               // running when the next test takes the context over.
-                                               auto const fallback_settled
-                                                   = resources.shaders.acquire_fallback().shader->is_ready();
-                                               return store.accumulated_frames(v.id) > 0 && fallback_settled
-                                                        ? sg::routine_outcome::executed
-                                                        : sg::routine_outcome::declined;
+                                               return store.accumulated_frames(v.id) > 0 ? sg::routine_outcome::executed
+                                                                                         : sg::routine_outcome::declined;
                                            }));
+
+    // Every trace starts the fallback's compile whether or not it is needed, and it must not outlive the test.
+    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
 
     CHECK(traced.width() == size[0]);
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
@@ -140,6 +137,7 @@ INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::co
                                                return store.accumulated_frames(v.id) > 0 ? sg::routine_outcome::executed
                                                                                          : sg::routine_outcome::declined;
                                            }));
+    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));

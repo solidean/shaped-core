@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
@@ -166,6 +167,8 @@ namespace
 template <class Actor>
 void pump_until_idle(Actor& actor)
 {
+    CC_RECORD_SCOPE("cc_test.pump_until_idle");
+
     while (actor.process_messages_if_unthreaded())
     {
     }

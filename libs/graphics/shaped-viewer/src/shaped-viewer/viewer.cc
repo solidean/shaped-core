@@ -26,7 +26,6 @@
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
 
-
 namespace sv
 {
 namespace
@@ -335,6 +334,14 @@ gpu_resource_manager& viewer::resources()
 isize viewer::pending_resource_work() const
 {
     return _impl->resources.pending_work_count();
+}
+
+cc::shared_async<cc::unit> viewer::background_work()
+{
+    // Today that is the fallback hit group's compile, which every trace starts whether or not it substitutes anything.
+    // A failed compile is finished work too, so the node settles on the dependency's error as well as on its value.
+    auto const& fallback = _impl->resources.shaders.acquire_fallback().shader;
+    return cc::make_async_lazy([](sg::compiled_shader const&) { return cc::unit{}; }, fallback);
 }
 
 void viewer::install_capture(sr::capture_request req)

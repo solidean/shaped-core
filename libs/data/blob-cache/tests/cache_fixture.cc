@@ -1,5 +1,6 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/file_path.hh>
@@ -86,6 +87,8 @@ cc::unique_ptr<blob_cache> cache_fixture::open_second()
 
 void cache_fixture::drive_until(cc::function_ref<bool()> done)
 {
+    CC_RECORD_SCOPE("bcache_test.drive_until");
+
     // Bounded by TIME, not by cycles: a sibling test sweeping the same registry holds this store's pump while it runs
     // it, and our sweep skips a pump already running.
     // Counting those skips as attempts would give up while somebody else was making the very progress we wait for.
@@ -109,6 +112,8 @@ void cache_fixture::drive_until(cc::function_ref<bool()> done)
 
 void cache_fixture::idle()
 {
+    CC_RECORD_SCOPE("bcache_test.idle");
+
     // Until nothing moves, rather than a fixed number of cycles, for the same reason drive_until is bounded by time:
     // a sibling test sweeping the same registry holds this store's pump while it runs it, and a cycle that skipped a
     // busy pump is not a cycle this store got.

@@ -88,7 +88,7 @@ enum class sv::asset_format : sv::u8
 /// flight — they are the only caller-supplied code an import runs, and the import is what moved off the main thread.
 /// So whatever they close over has to tolerate that: a resolver holding an open file handle or a mutable cache needs
 /// its own synchronization, and none is provided here.
-/// `material_override` is the exception, since it returns a library id and therefore runs where `sv::asset::poll` does.
+/// `material_override` is the exception: it runs where `sv::asset::poll` does, on the calling thread, so it may touch caller state without a lock.
 struct sv::asset_loader_config
 {
     /// where imported materials are minted; null means the process-wide `sv::acquire_material_library`

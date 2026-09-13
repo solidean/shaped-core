@@ -413,13 +413,16 @@ TEST("record/sampling - what sampling unknown threads costs",
 
     rec_fixture const fixture(deterministic_config());
 
+    // A fixed window is fine here because nothing is asserted: a shorter one only makes the printed load noisier.
+    auto const window_secs = nx::is_thorough() ? 0.5 : 0.05;
+
     cc::println("");
     cc::println("  unknown   ticks   samples   mean tick us   total tick ms   sampler load");
 
     for (auto const unknown : {false, true})
     {
-        auto const r
-            = capture_sampled([] { busy_for_secs(0.5); }, {.rate_hz = 1000.0, .include_unknown_threads = unknown});
+        auto const r = capture_sampled([&] { busy_for_secs(window_secs); },
+                                       {.rate_hz = 1000.0, .include_unknown_threads = unknown});
 
         auto const ticks = r.scopes("record.sample_tick");
 
@@ -429,7 +432,7 @@ TEST("record/sampling - what sampling unknown threads costs",
 
         cc::println("  {:7}   {:5}   {:7}   {:12.1f}   {:13.2f}   {:11.1f}%", unknown ? "yes" : "no", ticks.size(),
                     count_samples(r), ticks.empty() ? 0.0 : total / f64(ticks.size()) * 1e6, total * 1e3,
-                    total / 0.5 * 100);
+                    total / window_secs * 100);
     }
 }
 

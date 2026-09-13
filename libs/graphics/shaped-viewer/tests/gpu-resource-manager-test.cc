@@ -1,6 +1,7 @@
 #include "viewer_test_env.hh"
 
 #include <babel-serializer/geometry/obj.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -416,6 +417,8 @@ INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg:
 
     auto const drain = [&]
     {
+        CC_RECORD_SCOPE("sv_test.drain_pending_work");
+
         auto cmd = ctx.create_command_list();
         auto const spent = m.record_pending_work(*cmd);
         ctx.submit_command_list(cc::move(cmd));
