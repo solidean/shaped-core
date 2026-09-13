@@ -313,6 +313,28 @@ One arm called `slib::create_dxc_spirv_compiler()`, and the other called somethi
 The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
 That branch had two of them and its PR body named one, which is the ratio to expect.
 
+### A guarantee only the old implementation gave is not a regression
+
+When a rewrite stops doing something the old code happened to do, ask whether the API ever promised it before calling the rewrite wrong.
+If the only thing that promised it is a sentence, the defects are that sentence and the callers that leaned on it — not the new behaviour.
+
+pr-171 is the worked case.
+nexus used to run every `main_thread` test in a serial phase of its own, so they never overlapped anything.
+The branch made them ordinary nodes, and the review filed "a blocking `main_thread` body runs other tests nested on its stack" as a bug, recommending the runner serialize them again.
+The maintainer's answer, verbatim:
+
+```raw
+a main_thread TEST runs its body on the mainthread. [...] interleaving and nesting TESTs via this mechanism is completely fair. I'd say the old way nexus did it is simply wrong. if you want one-at-a-time, you need exclusive, NOT main_thread. [...] the fix though, is simple: DO NOT BLOCK.
+```
+
+Re-read that way, the finding turned into three different ones, all real.
+The docs still promised "one at a time among themselves".
+Every `sr::window_system` test and every sv capture test was relying on the old serialization for exclusion it never asked for — a process-wide singleton, and process environment variables.
+And a pin justified by blocking shader compiles was stale: it was written before render-routine init became coroutines, and nobody rechecked it after.
+
+**The tell is a recommendation that restores old behaviour.**
+Before writing one, name the flag or type whose contract covers it; when none does, look for the callers that need a contract they never stated.
+
 ### "No callers in the repo" is not evidence of dead code
 
 It is evidence only for something the repo alone can use.
