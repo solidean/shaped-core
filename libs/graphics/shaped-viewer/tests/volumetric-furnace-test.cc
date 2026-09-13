@@ -248,9 +248,7 @@ image_stats trace_furnace(sg::context& ctx,
 }
 } // namespace
 
-// On the main thread for the same reason every other tracing test is: the shader compiles are driven inline through
-// `try_async_blocking_get`, which does not complete from inside a pool worker.
-TEST("sv - a lossless interior is invisible under a uniform environment", nx::config::main_thread)
+TEST("sv - a lossless interior is invisible under a uniform environment")
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //

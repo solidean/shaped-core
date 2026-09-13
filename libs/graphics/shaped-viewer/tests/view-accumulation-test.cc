@@ -201,9 +201,7 @@ TEST("sv - a view accumulates across frames under its id")
 // It gets its own test because the two paths keep their own bookkeeping: `execute` above resolves the one slot it
 // needs itself, while the plan path resolves every view's slots up front and traces them afterwards.
 // A regression in one is invisible from the other, and this one is the path that matters.
-// Pinned to the main thread, since the routine's shader compiles do not complete from a pool worker and `execute`
-// then silently traces nothing — see pathtraced-view-test.
-TEST("sv - a view accumulates across frames down the plan path", nx::config::main_thread)
+TEST("sv - a view accumulates across frames down the plan path")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())

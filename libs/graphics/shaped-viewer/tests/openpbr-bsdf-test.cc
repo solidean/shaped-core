@@ -152,7 +152,7 @@ struct probe_result
 cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
     auto const shader = sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx);
-    (void)cc::try_async_blocking_get(shader); // no async pool here, so drive the compile inline
+    (void)cc::try_async_blocking_get(shader);
     if (shader->has_error())
         FAIL(cc::format("the BSDF probe shader did not compile:\n{}", shader->try_error()->underlying().to_string()));
 
@@ -428,9 +428,7 @@ sg::context_handle make_probe_context()
 }
 } // namespace
 
-// On the main thread for the same reason the path-traced tests are: the shader compile is driven inline through
-// `try_async_blocking_get`, which does not complete from inside a pool worker.
-TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
+TEST("sv - OpenPBR closure, measured")
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
@@ -452,15 +450,6 @@ TEST("sv - OpenPBR closure, measured", nx::config::main_thread)
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the probe shader");
-
-    // The probe lives in the test binary's own package, so the shared library has to be told about it.
-    // Once per process: `add_package` writes the generated globals the asset handles are read through.
-    static auto const registered = [&]
-    {
-        env.lib->add_package(sv_test::shaders::package());
-        return true;
-    }();
-    CHECK(registered);
 
     auto const surfaces = surfaces_under_test();
 

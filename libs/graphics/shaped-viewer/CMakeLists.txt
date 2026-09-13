@@ -245,6 +245,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 bsdf_probe.hlsl:compute:BsdfProbe
         )
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

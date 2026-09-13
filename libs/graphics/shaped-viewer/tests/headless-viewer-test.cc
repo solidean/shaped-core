@@ -18,9 +18,7 @@ using namespace cc::primitive_defines;
 //
 // This is what a capture run drives, so what it pins is that the authoring surface cannot tell the difference —
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
-// On the main thread because the path tracer's shader compiles run inline through `try_async_blocking_get`, which
-// does not complete from inside a pool worker (same reason as `pathtraced-view-test`).
-TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_thread)
+TEST("sv - headless viewer runs a frame loop with no window")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -100,7 +98,8 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
 // boundary — and a JPEG truncated that way still decodes, flat-filling the tail from the last DC value.
 // That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
 // decoding the result back and checking its extent is the assertion that matters here.
-TEST("sv - a capture writes a complete image and ends the loop", nx::config::main_thread)
+// The capture protocol is process environment, so every test setting it excludes the others.
+TEST("sv - a capture writes a complete image and ends the loop", nx::config::exclusive("capture-environment"))
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -205,7 +204,8 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
 // Nothing discovers capture names any more — a `.capture.json` beside the example declares them — so this is the only
 // thing standing between a renamed callback and a plausible, wrong reference image: the default view, written under
 // the old name's filename, refreshed into the repository by a sweep that reported success.
-TEST("sv - a capture nothing registered fails without writing", nx::config::main_thread)
+// The capture protocol is process environment, so every test setting it excludes the others.
+TEST("sv - a capture nothing registered fails without writing", nx::config::exclusive("capture-environment"))
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -258,7 +258,9 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::main
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-TEST("sv - a capture that times out writes beside the requested path, not to it", nx::config::main_thread)
+// The capture protocol is process environment, so every test setting it excludes the others.
+TEST("sv - a capture that times out writes beside the requested path, not to it",
+     nx::config::exclusive("capture-environment"))
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
