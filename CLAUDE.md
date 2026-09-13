@@ -348,6 +348,8 @@ Each library has a fast-recall API cheat sheet at `libs/<category>/<lib>/cheat-s
 * [nexus](libs/base/nexus/cheat-sheet.md) — how we write tests; the repo is strongly test-driven.
 
 See [docs/guides/cheat-sheets.md](docs/guides/cheat-sheets.md) for the format and how to write one (keep it current when public API changes).
+**When a sheet gains a capability that replaces something, also check the `.shaped-lint.yml` rules, hints and reasons that mention it.**
+A stale "no cc:: equivalent yet" reason sends the next author back to the old way.
 
 ---
 
