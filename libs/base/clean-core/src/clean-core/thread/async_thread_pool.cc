@@ -98,8 +98,11 @@ cc::async_thread_pool::~async_thread_pool()
     CC_RECORD_SCOPE("cc.thread_pool.destroy");
 
     CC_ASSERT(async_scheduler::compute_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_compute_async_scheduler / "
+              "uninstall this pool as the compute scheduler before destroying it (uninstall_compute_async_scheduler / "
               "scoped_compute_async_scheduler)");
+    CC_ASSERT(async_scheduler::io_or_null() != static_cast<async_scheduler*>(this),
+              "uninstall this pool as the io scheduler before destroying it (uninstall_io_async_scheduler / "
+              "scoped_io_async_scheduler)");
 
     _stop.store(true, cc::memory_order_release);
     {
@@ -656,8 +659,11 @@ cc::async_thread_pool::async_thread_pool(int worker_count, async_inline_deps def
 cc::async_thread_pool::~async_thread_pool()
 {
     CC_ASSERT(async_scheduler::compute_or_null() != static_cast<async_scheduler*>(this),
-              "uninstall this pool as the default before destroying it (uninstall_compute_async_scheduler / "
+              "uninstall this pool as the compute scheduler before destroying it (uninstall_compute_async_scheduler / "
               "scoped_compute_async_scheduler)");
+    CC_ASSERT(async_scheduler::io_or_null() != static_cast<async_scheduler*>(this),
+              "uninstall this pool as the io scheduler before destroying it (uninstall_io_async_scheduler / "
+              "scoped_io_async_scheduler)");
 
     // No drain by hand, unlike the threaded destructor: _queue holds real handles, so abandoned work releases its own counts when the vector dies.
     // Same contract though — outstanding graphs are dropped, not run.

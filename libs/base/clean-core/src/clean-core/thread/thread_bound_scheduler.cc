@@ -317,15 +317,14 @@ bool cc::pump_main_thread(double max_ms)
         return more;
     };
 
+    // Only the home's queue can be asked whether work is left; the registry and a threadless scheduler report progress.
+    // So "pending" is either: a loop that sees false has nothing to do but wait.
     if (max_ms <= 0)
-    {
-        (void)cycle(0);
-        return home.has_queued_work();
-    }
+        return cycle(0) || home.has_queued_work();
 
     auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
     while (cycle(deadline))
         if (cc::current_time_steady_secs() >= deadline)
-            return home.has_queued_work();
-    return false;
+            return true;
+    return home.has_queued_work();
 }

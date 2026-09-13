@@ -135,6 +135,6 @@ namespace cc
 ///
 /// Repeats until nothing progresses or `max_ms` elapses; max_ms <= 0 runs one cycle.
 /// The budget is checked between the main home's items, so one long body overruns it.
-/// Returns true if the main home still has work queued.
+/// Returns false only when nothing progressed and the main home has nothing queued, so a loop seeing false may wait.
 bool pump_main_thread(double max_ms = 0);
 } // namespace cc

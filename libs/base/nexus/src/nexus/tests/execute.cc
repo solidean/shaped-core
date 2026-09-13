@@ -4,6 +4,7 @@
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -1973,6 +1974,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                 continue;
             if (cc::pump_main_thread())
                 continue;
+#if !CC_HAS_THREADS
+            // This thread is the only one there is, and it just found nothing to run: whatever the join waits on can never arrive.
+            CC_ASSERT(false, "a main_thread phase cannot progress: every test still pending waits on something no pump "
+                             "will run");
+#endif
             main_home.wait_for_work(1.0);
         }
 
