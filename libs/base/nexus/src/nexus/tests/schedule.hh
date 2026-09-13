@@ -99,6 +99,10 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // Let every test run at full strength rather than narrowed to what a default run can afford.
+    // Read from a test body through nx::is_thorough(); set via --thorough.
+    bool thorough = false;
+
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.
     cc::string junit_xml_file;

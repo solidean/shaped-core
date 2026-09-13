@@ -745,6 +745,9 @@ TEST("feature group")
 - `CHECK(expr)` — Record failure but continue test
 - `REQUIRE(expr)` — Abort test on failure
 
+**Runtime:** a test's runtime must be proportional to what it proves, because `check` pays it once per preset.
+An expensive test is written at full strength and narrowed for the default run under `if (!nx::is_thorough())` — see [nexus' test-runtime](../libs/base/nexus/docs/test-runtime.md).
+
 **Advanced testing:**
 - **Fuzz testing** — Property-based testing with random inputs
 - **Performance testing** — Measure execution characteristics

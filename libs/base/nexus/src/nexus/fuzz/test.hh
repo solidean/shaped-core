@@ -69,6 +69,16 @@ struct nx::fuzz::test
 
     [[nodiscard]] fuzz_operation* get_operation_by_name(cc::string_view name) const;
 
+    // ---- narrowing ---------------------------------------------------------------------------------
+
+    /// Lowers every operation's at-most to `times`, pulling an at-least above it down along with it.
+    /// Meant for after all operations are declared, as the narrowing a default run applies under `if (!nx::is_thorough())`.
+    void cap_max_executions(int times);
+
+    /// Lowers how many seeds execute_fuzz_test searches, 256 by default.
+    /// Each seed is a whole program, so this is the knob that scales the fuzz's runtime linearly.
+    void cap_seed_count(int count);
+
     // ---- execution -------------------------------------------------------------------------------
 
     /// Runs a single deterministic fuzz program for the given seed.
@@ -111,4 +121,5 @@ private:
     cc::string _setup_error;
     bool _setup_ok = false;
     regression_dialect _dialect;
+    int _seed_count = 256;
 };

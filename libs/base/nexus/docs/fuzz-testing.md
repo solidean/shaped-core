@@ -156,6 +156,20 @@ The corruption then surfaces **later, on an unrelated operation**, often as a mi
 > Make fuzz-state values self-cleaning, dropping an open resource in the destructor *and* in move-assignment, so a discarded replay never leaks onto the shared object.
 > And when a minimal reproducer does not reproduce standalone, suspect shared-state pollution from the churn around it rather than the printed steps.
 
+## Narrowing for a default run
+
+`execute_fuzz_test` searches 256 seeds, and each seed is a whole program, so a fuzz over something slow — a GPU context, a database — gets expensive fast.
+Declare it at full strength, then narrow it for the default run after the last operation:
+
+```cpp
+if (!nx::is_thorough())
+    test->cap_seed_count(24);       // programs searched; scales runtime linearly
+// test->cap_max_executions(n);     // lowers every operation's at-most (and an at-least above it)
+```
+
+`dev.py test --thorough` runs the full search.
+[test-runtime](test-runtime.md) has the rules for what a narrowing may cut.
+
 ## Setup errors
 
 If some argument type can never be constructed — no value or operation produces it — `execute_fuzz_test` reports a setup error rather than a finding.

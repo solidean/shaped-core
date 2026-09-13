@@ -634,6 +634,9 @@ So a binary that **crashes before printing anything** is still recorded as a fai
 
 Never run a test binary directly — always go through `dev.py test`, so discovery, capture, and result recording stay consistent.
 
+`uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
+[nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
+
 ## Examples (`example`)
 
 Example executables follow the convention `<lib>-<name>-example` and are built on nexus like the tests, but in the `example` bucket: every build compiles them and no sweep ever runs one.

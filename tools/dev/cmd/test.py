@@ -41,6 +41,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "nx::test_args(). Forwarded to the runner as one string and tokenized there, "
                         "which is why it survives dev.py's own '--' handling. It replaces whatever the test "
                         "declared with nx::config::args, and applies to every test the run selects.")
+    p.add_argument("--thorough", action="store_true",
+                   help="Run every test at full strength rather than narrowed to what a default run affords: "
+                        "tests read it through nx::is_thorough() and raise their seeds, caps and input sizes. "
+                        "Forwarded to the runner as --thorough.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",
                    help="Run the selection up to N times, stopping at the first failing iteration "
                         "(default: 1). For chasing a flake: the build and discovery happen once, and "
@@ -69,6 +73,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     runner_args = list(args.runner_args or [])
     if runner_args and runner_args[0] == "--":
         runner_args = runner_args[1:]
+
+    if args.thorough:
+        runner_args = ["--thorough", *runner_args]
 
     # Prepended, so an explicit `-- --jobs 4` after it still wins by being parsed later.
     if args.jobs is not None:

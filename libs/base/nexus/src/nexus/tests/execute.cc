@@ -27,6 +27,7 @@
 #include <nexus/tests/check.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/section.hh>
+#include <nexus/tests/thorough.hh>
 
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map is not implemented yet
@@ -1072,6 +1073,12 @@ nx::test_schedule_config const* nx::impl::current_config()
     if (ctx == nullptr)
         return nullptr;
     return ctx->config;
+}
+
+bool nx::is_thorough()
+{
+    auto const* const config = nx::impl::current_config();
+    return config != nullptr && config->thorough;
 }
 
 int nx::impl::current_filter_consumed()

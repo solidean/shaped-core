@@ -56,6 +56,17 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexu
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
 
+## Thorough runs (`nx::is_thorough`)
+
+```cpp
+if (!nx::is_thorough())                  // false by default; true under --thorough / `dev.py test --thorough`
+    fuzz->cap_seed_count(24);            // a default run NARROWS the full-strength test: fewer seeds, lower caps,
+                                         //   smaller inputs — never fewer checks. fuzz->cap_max_executions(n) too
+```
+
+A flag, not a bucket: the test runs either way.
+[docs/test-runtime.md](docs/test-runtime.md) has the rules.
+
 ## Examples (`EXAMPLE`)
 
 A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.

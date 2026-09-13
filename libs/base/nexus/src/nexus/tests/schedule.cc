@@ -213,6 +213,7 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         "sweep the example bucket");
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
+    args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
 
     args.group("recording");
