@@ -823,6 +823,7 @@ auto other = self.acquire_exclusive(_token);        // the same, for a dependenc
 //   and an `init` in flight when the generation moves is cancelled and restarted at the new one.
 
 ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initialized, pending, budget_exhausted, is_idle()}
+                                           //    .clock_seconds swaps the clock the budget is spent against (a test advances it)
 //   THE driver. A frame-boundary call: it opens and submits its own command list, so never inside one —
 //   after advance_epoch, before the frame's first acquire.
 //   Runs the phases on the AMBIENT async scheduler and asserts if none is installed; it participates while driving,
