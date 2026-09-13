@@ -4,6 +4,18 @@
 So a second a test wastes is paid several times on every commit, by everyone.
 This page is what keeps a test's runtime proportional to what it proves.
 
+## No deliberate waiting
+
+A test runs as fast as the machine lets it, and never waits a fixed amount of wall-clock time.
+
+- **Wait for the condition, not for a duration.**
+  A test that needs a sampler to have fired, a worker to have drained or a file to have landed waits until that is true, under a cap only a broken build reaches.
+  A fixed window is either too short on a loaded machine, which makes it flaky, or too long everywhere else, which makes it slow — usually both, on different runs.
+- **A timeout is tested by injecting a clock, never by waiting it out.**
+  Timeout behaviour is worth testing, and the code under test takes a time source the test advances instantly.
+  A test that sleeps two seconds to see a two-second timeout fire is wrong, however well it passes.
+- **A green test hits no timeout.** A deadline in a test is a guard that turns a hang into a message, so reaching it is a failure by definition, and a passing run never pays for it.
+
 ## Thorough runs: `nx::is_thorough()`
 
 Some tests get better the longer they run — a fuzz search over more seeds, a sweep over bigger inputs, a statistical check at a tighter margin.

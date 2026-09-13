@@ -229,6 +229,8 @@ Guidance, not invariants — use judgment.
   Above ~800, usually too many responsibilities; two 150-line files always read together are often better merged.
 * **Directory branching ~5–15 direct entries.** Past ~15, split by responsibility (by topic, not alphabetically) or merge tightly-coupled files.
 * **Tests stay fast.** Flag slow ones rather than landing them silently.
+  **No deliberate waiting:** wait for a condition, never for a duration, and test a timeout by injecting a clock.
+  An expensive test narrows itself for the default run under `nx::is_thorough()` — [test-runtime](libs/base/nexus/docs/test-runtime.md).
 * **Codify non-obvious edge cases as tests.** A test that pins a subtle invariant is nearly as valuable as one that catches a bug.
 
 ---

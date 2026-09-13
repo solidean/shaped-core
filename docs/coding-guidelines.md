@@ -746,6 +746,7 @@ TEST("feature group")
 - `REQUIRE(expr)` — Abort test on failure
 
 **Runtime:** a test's runtime must be proportional to what it proves, because `check` pays it once per preset.
+A test never waits a fixed wall-clock time: it waits for the condition it needs, and a timeout is tested by injecting a clock rather than by waiting it out.
 An expensive test is written at full strength and narrowed for the default run under `if (!nx::is_thorough())` — see [nexus' test-runtime](../libs/base/nexus/docs/test-runtime.md).
 
 **Advanced testing:**
