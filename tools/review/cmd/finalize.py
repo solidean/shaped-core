@@ -1,7 +1,7 @@
 """`finalize` — assemble the review's end artifact.
 
 Which artifact depends on the goal, and the result is a draft in every case.
-The tool can gather what was decided; deciding which points are worth someone's afternoon is the agent's job, with the maintainer.
+The tool can gather what was decided; deciding which points improve the codebase enough to send is the agent's job, with the maintainer.
 """
 
 from __future__ import annotations
