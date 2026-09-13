@@ -250,17 +250,21 @@ The exclusions that are rules, each with its measurement:
 
 The gaps that are gaps:
 
-- **More than one space in a group**, which is the only thing standing between a bindless table and this pass.
+- **More than one space in a group.**
   The pass gives group `n` exactly `space<n>`, so a group cannot hold two things that each want a space of their own.
-  Eight bindless tables are exactly that, each numbered from `t0` so that resizing one does not shift the rest.
-  The array itself is not a gap.
-  A table is a *fixed-size* array, because sg rejects an unbounded one on every backend.
-  A bindless table declares a bounded count and treats it as capacity — see [array bindings](../../shaped-graphics/docs/concepts/bindings.md#array-bindings).
-  So `Type name[N]` already covers it, and unbounded arrays are sg's question rather than this pass's.
-  Nothing structural is in the way either.
-  `sg::binding` already carries `space` per binding, and `dx12_binding_group_layout.cc` already emits one descriptor range per binding with its own `RegisterSpace`.
-  What is missing is a derivation that hands out more than one space per group while staying a pure function of the annotations — from `(group, slot)`, say.
-  That is also what would let sv's material permutation take a group of its own and delete `sv::space_of`.
+  Nothing needs one today: sv's eight bindless tables share a group and are laid out end to end, since an array consumes one index per element.
+  That works only because every permutation declares the whole set — a subset would start its first table at `t0` and disagree with the layout.
+  If a table ever has to keep its register range across a partial declaration, this is what it would take, and `sg::binding` already carries `space` per binding.
+
+**A hand-written address is an error**, in any source carrying an attribute.
+
+`register(...)` and `[[vk::...]]` are the two ways a source states one, and both are the pass's to write.
+A shader that carries an attribute has handed its addresses over, so one it writes itself is either dead text or a collision waiting to happen.
+Q8's own failure, in fact: a stage that does not reference a binding leaves it unnumbered.
+
+A source carrying **no** attribute is not interpreted at all and keeps whatever it wrote.
+That is what lets ordinary HLSL through — the vulkan backend's own tier-2 shaders, anything compiled outside a package — and it is the same property that makes the rewrite byte for byte.
+There is no opt-out mark and there should not be one: a dialect whose purpose is portability cannot have a supported way to leave it.
 
 And one that is neither, because HLSL cannot say it at all:
 
@@ -630,16 +634,6 @@ The parse is what everything else is built on, and its subset will move once rea
 
 ## What this does not address
 
-- **sv's bindless tables.**
-  A table is a fixed-size array in a space of its own, and the grammar expresses the array but not the space.
-  Two earlier versions of this section had the reason wrong, so both are worth naming.
-  One space per group is not the obstacle, since one space per group is exactly one space per table.
-  `resources/bindless_tables.cc` already numbers one per table from 1, and `material/shader_generator.cc` emits a fixed-size array into each — byte for byte what an annotated namespace produces.
-  Nor is a free group number the obstacle: a register space is per register *class*, so a group's `s` registers never meet a table's `t` registers in the same space.
-  That is what `sv_sampler_i` relies on in space 0 today.
-  What is actually missing is the pass handing out more than one space per *group*, since eight tables want eight.
-  `sg::binding` carries `space` per binding and dx12 emits a descriptor range per binding, so this is a derivation to choose rather than a constraint to work around.
-
 - **Native 16-bit types.**
   Not a portability limit — SM 6.2 plus `-enable-16bit-types`, and on Vulkan `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, which is Turing and up, RDNA and up, Intel Xe and most mobile.
   Three things are missing, and none of them is a table entry.
@@ -651,8 +645,9 @@ The parse is what everything else is built on, and its subset will move once rea
   `min16float` is a minimum-precision hint rather than a size, and should stay 32-bit whatever happens.
   Nothing in the tree uses any of them today.
 
-- **Making a hand-written address an error.**
-  Every shader in a package is authored through the pass now, so nothing anyone wrote is in the way.
-  The material permutation is: `compile_source` routes its generated text through the rewrite like any other source.
-  That text hand-writes a `register()` per bindless table and per sampler, neither of which the grammar can express.
-  There is no opt-out mark and there should not be one, so the error waits on the table above rather than on a flag.
+- **A binding that is not a group's.**
+  Every address a shader in a package carries is the pass's now, and a hand-written one is an error — see "The supported subset" above.
+  What has no expression at all is a binding belonging to no group.
+  sg's `pipeline_layout_description::static_samplers` binds samplers straight to registers, outside any group layout, and nothing in the grammar says that.
+  Nothing in the tree uses it.
+

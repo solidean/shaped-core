@@ -139,6 +139,17 @@ struct parser
     };
     cc::vector<struct_body> struct_bodies;
 
+    /// An address the source writes for itself, noted where it was found.
+    ///
+    /// Noted rather than reported on sight: whether it is a mistake depends on whether this source uses the
+    /// dialect at all, and that is only known once the whole file has been read.
+    struct hand_written_address
+    {
+        hlsl_location location;
+        cc::string_view what;
+    };
+    cc::optional<hand_written_address> hand_written;
+
     // What has been declared so far, for the collisions a namespace does not catch on its own.
     cc::set<cc::string_view> group_names;
     cc::set<u32> group_numbers;
@@ -155,6 +166,16 @@ struct parser
     [[nodiscard]] bool is_identifier(cc::string_view text) const
     {
         return !at_end() && current().kind == hlsl_token_kind::identifier && current().text == text;
+    }
+
+    [[nodiscard]] bool is_punctuation_at(isize index, char c) const
+    {
+        return index < tokens.size() && tokens[index].kind == hlsl_token_kind::punctuation && tokens[index].text[0] == c;
+    }
+
+    [[nodiscard]] bool is_identifier_at(isize index, cc::string_view text) const
+    {
+        return index < tokens.size() && tokens[index].kind == hlsl_token_kind::identifier && tokens[index].text == text;
     }
 
     /// The location to blame when the source ran out, which is the last one there was.
@@ -240,6 +261,17 @@ struct parser
             }
 
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
+
+            // `register(...)` and `[[vk::...]]` are the two ways a source states an address, and both are the
+            // pass's to write.
+            // Only the FIRST is kept: one message naming one line is what a reader acts on.
+            if (!hand_written.has_value())
+            {
+                if (is_identifier("register"))
+                    hand_written = hand_written_address{current().location, "register()"};
+                else if (is_punctuation('[') && is_punctuation_at(at + 1, '[') && is_identifier_at(at + 2, "vk"))
+                    hand_written = hand_written_address{current().location, "[[vk::...]]"};
+            }
 
             if (is_identifier("struct") && record_struct_body())
                 continue;
@@ -1045,6 +1077,20 @@ struct parser
 
     auto groups = p.run();
     CC_RETURN_IF_ERROR(groups);
+
+    // A hand-written address is an error in a source that uses this dialect, and nothing at all in one that does
+    // not.
+    //
+    // The two halves of that matter equally.
+    // A shader carrying an attribute has handed its addresses to the pass, and one it writes itself is either
+    // dead text or a collision waiting to happen — Q8's own failure, since a stage that does not reference a
+    // binding leaves it unnumbered.
+    // A shader carrying no attribute is not interpreted at all, which is what keeps ordinary HLSL — the vulkan
+    // backend's own tier-2 shaders, anything compiled outside a package — compiling exactly as written.
+    if (!p.annotations.empty() && p.hand_written.has_value())
+        return cc::error(cc::format("{}: {} is written by hand, and every address in a shader this pass reads is "
+                                    "the pass's — declare the binding in a '#pragma sc group' namespace instead",
+                                    to_string(p.hand_written.value().location), p.hand_written.value().what));
 
     // After the walk, so the struct an inline-constants block names may be declared on either side of it.
     CC_RETURN_IF_ERROR(p.layout_inline_constants());

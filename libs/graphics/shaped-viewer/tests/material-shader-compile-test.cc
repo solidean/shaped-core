@@ -34,9 +34,20 @@ namespace
 {
 /// A compute entry that reaches the generated function the way a closest-hit will: through an `sv::instance` read out of the
 /// instance table, so `sv::make_context` and the byte layout it walks are compiled too rather than only the material itself.
+// The harness's own bindings go through the pass like anything else.
+//
+// They used to write `register(t0, space0)` and `register(u0)` by hand, which is now an error in any source
+// carrying an attribute -- and this one does, since the generated material above declares the bindless group.
+// Group 0 is free here: the compute entry below includes no epilogue, so pt_bindings is not in this translation
+// unit.
 constexpr cc::string_view test_entry = R"hlsl(
-StructuredBuffer<sv::instance> sv_test_instances : register(t0, space0);
-RWStructuredBuffer<float4> sv_test_out : register(u0);
+#pragma sc group 0
+namespace sv_test_bindings
+{
+    StructuredBuffer<sv::instance> sv_test_instances;
+    RWStructuredBuffer<float4> sv_test_out;
+}
+using namespace sv_test_bindings;
 
 [numthreads(1, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID)

@@ -103,11 +103,9 @@ ms group=0
   color index=0 type=readonly_texture count=1 dim=tex_2d_ms
 
 
---- case everything carrying no attribute is left alone, including a hand-written register
+--- case text carrying no attribute is left alone, a comment's directive included
 --- hlsl
 #pragma pack_matrix(row_major)
-
-Texture2D<float4> hand_written : register(t0, space5);
 
 /* a block comment holding #pragma sc group 9, which is text and not a directive */
 
@@ -124,6 +122,44 @@ namespace frame
 --- groups
 frame group=0
   albedo index=0 type=readonly_texture count=1 dim=tex_2d
+
+
+--- case a hand-written register is an error once the file uses the dialect at all
+--- hlsl
+Texture2D<float4> hand_written : register(t0, space5);
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 1: register() is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
+
+
+--- case the Vulkan spelling of an address is refused the same way
+--- hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> hand_written;
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 1: [[vk::...]] is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
+
+
+--- case but a file that uses NO attribute keeps whatever addresses it wrote
+--- hlsl
+#pragma pack_matrix(row_major)
+
+Texture2D<float4> hand_written : register(t0, space5);
+[[vk::binding(0, 0)]] SamplerState samp;
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {}
+--- groups
 
 
 --- case the marker ends at a word boundary, so `sc` is not a prefix of another pragma

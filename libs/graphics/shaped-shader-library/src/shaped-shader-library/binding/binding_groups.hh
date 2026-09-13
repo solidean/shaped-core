@@ -184,8 +184,9 @@ namespace slib
 /// an error naming the line — a directive that silently does nothing is the failure this design exists to avoid,
 /// and silently doing nothing is exactly what DXC makes of a pragma it does not know.
 /// Text carrying no attribute is not interpreted, so the rewrite provably touches only what it parsed.
-/// That is a property of the edit model rather than a supported way to write addresses by hand: a shader that
-/// does is not portable, and the pass will come to reject it.
+/// That is a property of the edit model rather than a way to write addresses by hand: in a source carrying an
+/// attribute, a `register(...)` or `[[vk::...]]` is an error naming the line.
+/// A source carrying none keeps whatever it wrote, which is what lets ordinary HLSL through unchanged.
 ///
 /// The supported subset inside an annotated namespace is small on purpose: `Type name;` and `Type name[N];`,
 /// where `N` is a decimal literal and `Type` is a name from the pass's table, optionally with a flat `<...>`

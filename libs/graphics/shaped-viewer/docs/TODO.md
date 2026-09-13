@@ -482,17 +482,6 @@ What follows is everything else the importer left behind.
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
 
-- **A hand-written binding address cannot be made an error yet.**
-  Every shader in a package is now authored through the pass, so the remaining obstacle is not a shader anyone wrote.
-  It is the material permutation: `slib::shader_library::compile_source` routes generated text through
-  `rewrite_binding_groups` like any other source, and that text hand-writes a `register()` per bindless table and per sampler.
-  The samplers are the entry above.
-  The tables are the other half, and only their *space* is missing — the grammar already has `Type name[N]`, so the array itself is expressible.
-  `sg::binding` carries `space` per BINDING rather than per group — `bindless->layout()` is one group layout holding eight bindings with eight different spaces.
-  So sg's model already covers this, and it is the pass that simplifies.
-  A per-binding space attribute is what closes it, roughly the size of `#pragma sc attribute format=`.
-  Until then the error would reject every material, and a dialect whose purpose is portability must not gain an opt-out mark to work around that.
-
 - **The path tracer cannot use its generated group struct, only the pass's addresses.**
   Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, and
   `collect_samplers` appends one static sampler per `sv_sampler_i` the permutation declares.

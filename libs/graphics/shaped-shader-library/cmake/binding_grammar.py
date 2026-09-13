@@ -644,6 +644,12 @@ class _Parser:
         self.struct_bodies: list[tuple[str, int, int]] = []
         self.group_names: set[str] = set()
         self.group_numbers: set[int] = set()
+
+        # An address the source writes for itself, as (location, what), or None.
+        #
+        # Noted rather than reported on sight: whether it is a mistake depends on whether this source uses the
+        # dialect at all, and that is only known once the whole file has been read.
+        self.hand_written: tuple[Location, str] | None = None
         self.binding_names: set[str] = set()
 
     def at_end(self) -> bool:
@@ -712,6 +718,16 @@ class _Parser:
 
             self.reject_unclaimed(pending)
 
+            # `register(...)` and `[[vk::...]]` are the two ways a source states an address, and both are the
+            # pass's to write.
+            # Only the FIRST is kept: one message naming one line is what a reader acts on.
+            if self.hand_written is None:
+                if self.is_identifier("register"):
+                    self.hand_written = (self.current().location, "register()")
+                elif (self.is_punctuation("[") and self.is_punctuation_at(self.at + 1, "[")
+                      and self.is_identifier_at(self.at + 2, "vk")):
+                    self.hand_written = (self.current().location, "[[vk::...]]")
+
             if self.is_identifier("struct") and self.record_struct_body():
                 continue
 
@@ -719,6 +735,12 @@ class _Parser:
 
         self.reject_unclaimed(pending)
         return groups
+
+    def is_punctuation_at(self, index: int, c: str) -> bool:
+        return index < len(self.tokens) and self.tokens[index].kind == "punctuation" and self.tokens[index].text == c
+
+    def is_identifier_at(self, index: int, text: str) -> bool:
+        return index < len(self.tokens) and self.tokens[index].kind == "identifier" and self.tokens[index].text == text
 
     def record_struct_body(self) -> bool:
         """Notes where an unannotated `struct <name> { ... }` body is and skips it.
@@ -1314,6 +1336,20 @@ def parse_binding_groups(hlsl: str) -> Bindings:
 
     parser = _Parser(lex(hlsl))
     groups = parser.run()
+
+    # A hand-written address is an error in a source that uses this dialect, and nothing at all in one that does
+    # not.
+    #
+    # The two halves of that matter equally.
+    # A shader carrying an attribute has handed its addresses to the pass, and one it writes itself is either dead
+    # text or a collision waiting to happen -- Q8's own failure, since a stage that does not reference a binding
+    # leaves it unnumbered.
+    # A shader carrying no attribute is not interpreted at all, which is what keeps ordinary HLSL -- the vulkan
+    # backend's own tier-2 shaders, anything compiled outside a package -- compiling exactly as written.
+    if parser.annotations and parser.hand_written is not None:
+        location, what = parser.hand_written
+        raise BindingError(f"{location}: {what} is written by hand, and every address in a shader this pass reads "
+                           f"is the pass's \u2014 declare the binding in a '#pragma sc group' namespace instead")
 
     # After the walk, so the struct an inline-constants block names may be declared on either side of it.
     parser.layout_inline_constants()

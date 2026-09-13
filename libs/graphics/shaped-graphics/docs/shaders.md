@@ -196,7 +196,8 @@ Two of them are still said by hand today, and the third is what the binding prep
 
   A rewriting pass writes every address before the compiler sees the source, so neither target's spelling appears in a shader.
   The pass rewrites only what it parsed, so text carrying no attribute comes back byte for byte — which is a property of the edit model rather than a way to opt out.
-  A hand-written address is on its way out: it is not portable, and a dialect whose purpose is portability cannot have a supported way to write one.
+  In a shader that carries an attribute, writing an address by hand is an **error**: a dialect whose purpose is portability has no supported way to leave it.
+  A shader that wants its own addresses is ordinary HLSL, outside a package.
 - **Vertex input locations.**
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
   A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
