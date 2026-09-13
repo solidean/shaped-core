@@ -122,6 +122,14 @@ function(sc_add_shader_package)
         VERBATIM
     )
 
+    # A target of its own over the same outputs, so something other than the package target can be ordered
+    # behind the generator.
+    # The sibling test includes the generated header but consumes neither generated SOURCE, and an include
+    # directory carries no dependency edge -- so without this the test's TU and the generator are unordered, and
+    # whether the header exists when it compiles is up to the scheduler.
+    # Linux and Windows happened to win that race where the Android NDK build lost it.
+    add_custom_target(${PKG_TARGET}-shader-package DEPENDS "${_gen_hh}" "${_gen_cc}")
+
     # Plain PRIVATE sources, never a FILE_SET: the generated header lives in the binary dir, and a FILE_SET
     # hard-errors on anything outside its BASE_DIRS.
     # It is per-target private API anyway -- to publish a shader, re-expose it from your own public header
@@ -188,6 +196,7 @@ function(sc_finalize_shader_packages)
         foreach(_suffix "-test" "-test-web")
             if(TARGET ${_pkg_target}${_suffix})
                 target_include_directories(${_pkg_target}${_suffix} PRIVATE "${_pkg_gen_dir}")
+                add_dependencies(${_pkg_target}${_suffix} ${_pkg_target}-shader-package)
             endif()
         endforeach()
     endforeach()
