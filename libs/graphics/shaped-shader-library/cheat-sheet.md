@@ -211,6 +211,8 @@ namespace frame_bindings
 //   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,
 //   reserved, and a group numbered 9 is refused rather than the block naming a space to avoid.
 //   At most one per translation unit; block_size still comes from reflection, and the mirror is generated.
+//   On SPIR-V each member also gets [[vk::offset(n)]]: -fvk-use-dx-layout does NOT reach a push-constant
+//   block, so without them DXC packs it scalar-tight and the generated mirror is wrong on vulkan.
 // `#pragma sc vertex_input [slot=<n>] [per_instance]` before a struct numbers its members by declaration
 //   order -- [[vk::location(n)]] on SPIR-V, nothing on DXIL, where the semantic already names the input.
 //   ONE counter across every annotated struct in the file, since a location is flat per stage.

@@ -82,6 +82,11 @@ struct parsed_inline_constants
     slib::shader_inline_constants constants;
     isize type_offset = 0;
     isize semicolon_offset = 0;
+
+    /// Where each mirrored member's type token begins, in declaration order.
+    ///
+    /// Parallel to `constants.members`, whose `offset` is the number written at each of these.
+    cc::vector<isize> member_offsets;
 };
 
 /// A vertex input struct, plus where each member's location has to be written.
@@ -722,7 +727,7 @@ struct parser
             auto member = parse_constant_member();
             CC_RETURN_IF_ERROR(member);
 
-            auto const type = slib::impl::value_type_of(member.value().type).value();
+            auto const type = slib::impl::value_type_of(member.value().member.type).value();
 
             // Where the type may start at all, which for a 64-bit scalar is 8 and for a 64-bit vector or a
             // matrix is a whole row — Q14i and Q14g measured both, and neither follows from the 32-bit rules.
@@ -735,9 +740,10 @@ struct parser
             if (size <= 16 && offset % 16 + size > 16)
                 offset += 16 - offset % 16;
 
-            member.value().offset = offset;
+            member.value().member.offset = offset;
             offset += size;
-            constants.members.push_back(cc::move(member.value()));
+            inline_constants.value().member_offsets.push_back(member.value().type_offset);
+            constants.members.push_back(cc::move(member.value().member));
         }
 
         at = saved;
@@ -779,7 +785,7 @@ struct parser
     /// actually hold.
     /// An array is refused rather than mirrored, and Q14b is why: the member after one packs into its last row's
     /// tail, which C++ cannot express.
-    [[nodiscard]] cc::result<slib::shader_struct_member> parse_constant_member()
+    [[nodiscard]] cc::result<parsed_member> parse_constant_member()
     {
         auto const& token = current();
         if (token.kind != hlsl_token_kind::identifier)
@@ -817,7 +823,7 @@ struct parser
             return cc::error(cc::format("{}: '{}' is not a constant block type this pass knows{}", to_string(location),
                                         type_name, slib::impl::rejection_reason_for(type_name)));
 
-        return member;
+        return parsed_member{.member = cc::move(member), .type_offset = type_offset};
     }
 
     /// Consumes one `namespace` declaration, returning the group when a `group` attribute stands before it.
@@ -1223,7 +1229,24 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
             edits.push_back({.offset = constants.semicolon_offset,
                              .text = cc::format(" : register(b0, space{})", constants.constants.space)});
         else
+        {
             edits.push_back({.offset = constants.type_offset, .text = cc::string("[[vk::push_constant]] ")});
+
+            // And the block's layout, stated per member, because SPIR-V does not otherwise get the one DXIL uses.
+            //
+            // `-fvk-use-dx-layout` reaches a cbuffer in a descriptor set and NOT a push-constant block, which DXC
+            // packs scalar-tight whatever that flag says: `{float2; float3; float}` lands at 0/8/20 on SPIR-V
+            // against 0/16/28 on DXIL, and the generated mirror can only carry one of those.
+            // Nothing reports the difference -- both modules compile, both pipelines run, and the shader reads
+            // two of its three members from the wrong place.
+            //
+            // So the offsets go in the source, exactly as the addresses and `column_major` do: the pass already
+            // computed them to lay the mirror out, and this is what makes SPIR-V agree with them.
+            // SPIR-V only -- `-Werror` turns DXIL's "'offset' attribute ignored" into a failed compile.
+            for (auto i = isize(0); i < constants.member_offsets.size(); ++i)
+                edits.push_back({.offset = constants.member_offsets[i],
+                                 .text = cc::format("[[vk::offset({})]] ", constants.constants.members[i].offset)});
+        }
     }
 
     // Every matrix the pass parsed is made column-major, on BOTH arms.

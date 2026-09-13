@@ -794,6 +794,46 @@ TEST("slib - the SPIR-V arm makes it a push-constant block instead")
 
     CHECK(rewritten.value().contains("[[vk::push_constant]] ConstantBuffer<frame_constants> gConstants;"));
     CHECK(!rewritten.value().contains("register("));
+
+    // Every member carries its offset, even where the two layouts would have agreed anyway.
+    CHECK(rewritten.value().contains("[[vk::offset(0)]] float exposure;"));
+}
+
+namespace
+{
+// `tint` cannot straddle the first 16-byte row under the constant-buffer rules, so it lands at 16 and `exposure`
+// at 28 -- and DXC packs a push-constant block scalar-tight, which would put them at 8 and 20 instead.
+constexpr char const* k_straddling_constants_shader = R"(
+struct frame_constants
+{
+    float2 uv_scale;
+    float3 tint;
+    float exposure;
+};
+
+#pragma sc push_constants
+ConstantBuffer<frame_constants> gConstants;
+)";
+} // namespace
+
+TEST("slib - a push-constant block's SPIR-V offsets are the ones DXIL uses")
+{
+    // The bug this pins is silent on both arms: `-fvk-use-dx-layout` reaches a cbuffer in a descriptor set and
+    // not a push-constant block, so without the attributes below SPIR-V reads `tint` and `exposure` from 8 and
+    // 20 while the generated C++ mirror writes them at 16 and 28.
+    // Both modules compile and both pipelines run; only the pixels are wrong.
+    auto const spirv = slib::rewrite_binding_groups(k_straddling_constants_shader, sg::shader_format::spirv);
+    REQUIRE(spirv.has_value());
+
+    CHECK(spirv.value().contains("[[vk::offset(0)]] float2 uv_scale;"));
+    CHECK(spirv.value().contains("[[vk::offset(16)]] float3 tint;"));
+    CHECK(spirv.value().contains("[[vk::offset(28)]] float exposure;"));
+
+    // DXIL already lays the block out this way, and `-Werror` turns its "'offset' attribute ignored" into a
+    // failed compile -- so the attribute must not reach that arm.
+    auto const dxil = slib::rewrite_binding_groups(k_straddling_constants_shader, sg::shader_format::dxil);
+    REQUIRE(dxil.has_value());
+    CHECK(!dxil.value().contains("vk::offset"));
 }
 
 namespace

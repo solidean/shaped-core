@@ -168,6 +168,14 @@ Q8 applies here too, which is why the attribute must write a `register()` at all
 `block_size` keeps coming from reflection, which is how a routine reads it today and is never wrong.
 The generator also emits the block's C++ mirror, from the struct the `ConstantBuffer` names, so `sizeof` is true rather than asserted.
 That struct must be declared in the same file, which is what a mirror needs and what every block in the tree already does.
+
+**The SPIR-V arm also states the block's layout, member by member.**
+`-fvk-use-dx-layout` reaches a `ConstantBuffer` in a descriptor set and *not* a push-constant block, which DXC packs scalar-tight whatever that flag says.
+So `{float2; float3; float}` lands at 0/8/20 on SPIR-V against the 0/16/28 DXIL uses, and one C++ mirror cannot be right for both.
+
+Nothing reports that difference: both modules compile, both pipelines run, and the shader reads two of its three members from the wrong place.
+So the offsets go into the source as `[[vk::offset(N)]]`, exactly as the addresses and `column_major` do — the pass already computed them to lay the mirror out.
+DXIL never sees them, because `-Werror` turns its `'offset' attribute ignored` into a failed compile.
 [done]
 
 ### `payload`

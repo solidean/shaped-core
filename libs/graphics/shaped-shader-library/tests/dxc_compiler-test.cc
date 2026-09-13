@@ -392,4 +392,28 @@ TEST("slib - a two-slot vertex input compiles to SPIR-V", exclusive("slib-shader
     CHECK(vs.bytecode.size() > 0);
 }
 
+TEST("slib - a push-constant block is the same size on SPIR-V as the mirror a caller fills",
+     exclusive("slib-shader-library"))
+{
+    // SPIR-V explicitly, not k_target_format: this is the arm that gets it wrong, and a Windows-only run reaches
+    // only the other one — which is how the divergence survived until CI compiled shade.hlsl on Linux.
+    //
+    // `-fvk-use-dx-layout` does not reach a push-constant block, so DXC packs shade_constants scalar-tight at
+    // 0/8/20 for a total of 24, against the 0/16/28 and 32 the mirror is built for.
+    // The pass states the offsets per member to close that, and this is the end-to-end proof it worked: the size
+    // DXC computed against the size the generator did.
+    slib::shader_library lib;
+    auto compiler = slib::create_dxc_spirv_compiler();
+    REQUIRE(compiler.has_value());
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(slib_test::shaders::package());
+
+    auto const& compiled = await(slib_test::shaders::shade.compute.main->acquire(sg::shader_format::spirv));
+
+    auto const* constants = find_binding(compiled, "gConstants");
+    REQUIRE(constants != nullptr);
+    REQUIRE(constants->block_size.has_value());
+    CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
+}
+
 #endif
