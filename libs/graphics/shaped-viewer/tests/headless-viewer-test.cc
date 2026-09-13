@@ -251,6 +251,13 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::excl
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
 }
 
+namespace
+{
+// The clock the timeout test below spends its capture against: frozen until the body moves it, so running out takes no time.
+// Only that test reads it, and nexus never runs one test twice at once.
+double g_timeout_test_now = 0.0;
+} // namespace
+
 // A capture that runs out of clock must leave NOTHING at the path it was given.
 //
 // dev.py reads a file at that path as the run having succeeded — the exit code alone cannot tell it otherwise — so an
@@ -258,9 +265,7 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::excl
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-// The capture protocol is process environment, so every test setting it excludes the others.
-TEST("sv - a capture that times out writes beside the requested path, not to it",
-     nx::config::exclusive("capture-environment"))
+TEST("sv - a capture that times out writes beside the requested path, not to it")
 {
     auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
     if (ctx_r.has_error())
@@ -284,36 +289,43 @@ TEST("sv - a capture that times out writes beside the requested path, not to it"
     cc::remove_file(path);
     cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
 
-    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
-    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
-    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "64x48");
+    g_timeout_test_now = 0.0;
+    auto const timeout_seconds = 60.0;
 
-    // Above the accumulation cap, so no amount of waiting reaches it, against a clock that runs out almost at once.
-    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "100000");
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "2");
+    // Above the accumulation cap, so no number of frames settles it; only the clock can end this run.
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = path,
+                                             .size = tg::vec2i(64, 48),
+                                             .accumulate_frames = 100000,
+                                             .timeout_seconds = timeout_seconds,
+                                             .clock_seconds = [] { return g_timeout_test_now; }};
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
 
-    auto frames = 0;
+    auto traced_before_timeout = false;
 
-    // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its material permutations have
-    // compiled, and those compile on the ambient scheduler rather than on this thread.
-    // So a loop guard expressed as a frame count is really a bound on compile latency, and these are expressed as a
-    // deadline instead.
-    // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
+    // WORKAROUND, and the same one sv_test::tick_until carries: the clock is only run out once a frame has traced.
+    // Earlier, the material compiles that frame started would still be in flight when the loop ends, outliving the test.
+    // So the loop guard is a deadline on compile latency rather than a frame count.
     auto const loop_start = cc::current_time_steady_secs();
-    for (auto f : sv::interactive(ctx, "sv-test/capture-timeout"))
+    for (auto f : sv::interactive(ctx, "sv-test/capture-timeout", {}, request))
     {
         auto view = f.window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
         view.add_scene().add_mesh(mesh);
 
-        ++frames;
-        // The capture's own 2 s timeout ends this loop; this only stops a hang from becoming a test timeout.
-        // A deadline rather than a frame count — see the note above.
+        // The whole timeout passes within this frame, so the capture gives up as it ends.
+        if (view.accumulated_frames() > 0)
+        {
+            traced_before_timeout = true;
+            g_timeout_test_now = timeout_seconds;
+        }
+
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
+
+    CHECK(traced_before_timeout);
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
