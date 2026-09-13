@@ -5,7 +5,9 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_type.hh>
@@ -21,7 +23,8 @@
 /// thing that keeps those ids meaningful.
 /// This is why it is not built on `impl::lru_pool`, which every other manager here is.
 ///
-/// Not thread-safe, like the rest of viewer setup.
+/// **Thread-safe**, because the process-wide library is one object every viewer and every parallel test resolves through.
+/// A reference `get` or `get_type` hands out stays valid while other threads register more: nodes never move and nothing is evicted.
 class sv::material_library
 {
 public:
@@ -52,23 +55,31 @@ public:
     [[nodiscard]] material const& get(material_id id) const;
     [[nodiscard]] bool contains(material_id id) const;
 
-    [[nodiscard]] isize type_count() const { return _types.size(); }
-    [[nodiscard]] isize material_count() const { return _materials.size(); }
+    [[nodiscard]] isize type_count() const;
+    [[nodiscard]] isize material_count() const;
 
 private:
-    // Stored in maps rather than vectors for the references, not for the lookup: a `resolved_material` borrows pointers into a
-    // type's declarations and a material's bindings, and cc::map keeps those valid across every later insert.
-    // A vector would invalidate them on a grow, so registering one more material would quietly poison every resolve still in hand.
-    cc::map<material_type_id, material_type> _types;
-    cc::map<cc::hash128, material_type_id> _type_by_hash;
-    cc::map<cc::string, material_type_id> _type_by_name;
+    struct state
+    {
+        // Stored in maps rather than vectors for the references, not for the lookup: a `resolved_material` borrows pointers into a
+        // type's declarations and a material's bindings, and cc::map keeps those valid across every later insert.
+        // A vector would invalidate them on a grow, so registering one more material would quietly poison every resolve still in hand.
+        cc::map<material_type_id, material_type> types;
+        cc::map<cc::hash128, material_type_id> type_by_hash;
+        cc::map<cc::string, material_type_id> type_by_name;
 
-    cc::map<material_id, material> _materials;
-    cc::map<cc::hash128, material_id> _material_by_hash;
-    cc::map<cc::string, material_id> _material_by_name;
+        cc::map<material_id, material> materials;
+        cc::map<cc::hash128, material_id> material_by_hash;
+        cc::map<cc::string, material_id> material_by_name;
 
-    u32 _next_type = 0;
-    u32 _next_material = 0;
+        u32 next_type = 0;
+        u32 next_material = 0;
+    };
+
+    /// Behind a pointer so the library stays movable, and so a move leaves every handed-out reference where it was.
+    cc::unique_ptr<cc::mutex<state>> _state;
+
+    material_library() = default;
 };
 
 namespace sv
@@ -99,8 +110,7 @@ namespace impl
 
 /// The material library every viewer draws from: the caller's provider if they set one, otherwise the built-in default.
 /// Created on the first call and shared by every caller after.
-/// The ACQUISITION is thread-safe — two threads asking at once get one object, not two.
-/// What it hands back is not: the library itself carries the same single-threaded contract the rest of viewer setup does.
+/// The acquisition is thread-safe — two threads asking at once get one object, not two — and so is the library it hands back.
 [[nodiscard]] cc::result<material_library*> acquire_material_library();
 
 /// Registers the builtin types into `lib` — `sv::builtin_material::openpbr`, `pbr` and `unlit`.

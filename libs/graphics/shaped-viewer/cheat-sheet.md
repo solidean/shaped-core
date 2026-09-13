@@ -197,6 +197,7 @@ sv::material_attribute_binding::of("roughness", 0.2f)          // -> a constant 
 sv::material_attribute_binding::of_texture(name, sample)       // -> a uv-sampled binding, from a texture_sample_source
 
 sv::material_library::create()   // -> an empty library; register_builtin_material_types(lib) adds `openpbr`, `pbr` and `unlit`
+                                 //   thread-safe: the process-wide one is shared by every viewer and every parallel test
 lib.register_type(type)          // -> material_type_id, content-addressed; asserts two DIFFERENT types under one name
 lib.acquire_type("pbr")          // -> optional<material_type_id>;  lib.get_type(id) -> material_type const&
 lib.acquire(material)            // -> material_id, content-addressed; HERE every binding is validated against the type
@@ -446,7 +447,7 @@ sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_f
 Gotchas:
 
 - **`load_async` runs on whatever scheduler `cc::async` was given.** With none installed nothing progresses until `wait` drives it — the same degradation every other async here takes.
-- **Minting materials cannot leave the calling thread**, since `material_library` is not thread-safe.
+- **Minting an import's materials happens in `poll`, on the calling thread**, not inside `load_async`'s stages.
   That is why `poll` is a call and not a query: it is where the import's material *definitions* become ids.
 - **`is_ready` is whole-asset, not structure-first.** The mesh list arriving ahead of the payloads needs a mesh whose geometry has not been read, which `create_mesh` has no form for yet.
   What does arrive progressively is the upload, which the managers stream.
