@@ -214,7 +214,7 @@ if(SC_BUILD_TESTS)
 
     # The GPU tests need a dx12 device and DXC to compile the shaders, so they compile only where both exist.
     # dx12-entry.cc brings up one context per adapter and invokes them all against it.
-    # Each SKIPs at runtime when the device reports no ray tracing.
+    # The ray-tracing ones SKIP at runtime when the device reports no ray tracing.
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-viewer-test PRIVATE
             tests/dx12-entry.cc

@@ -12,8 +12,7 @@ using namespace cc::primitive_defines;
 // The cbuffer register (b0) is declared on the pipeline layout as inline_constants and kept out of the group layout.
 // Two dispatches in one list also prove the partial (offset) update: the second rewrites only bias while the earlier scale persists in the root signature.
 //
-// Everything is driven through the backend-agnostic sg::context API — the dx12 WARP device is only how the
-// context is created, never the driver of the work.
+// Everything is driven through the backend-agnostic sg::context API — the dx12 device is only how the context is created, never the driver of the work.
 
 namespace
 {

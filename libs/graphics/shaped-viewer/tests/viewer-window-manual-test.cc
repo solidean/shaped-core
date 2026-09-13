@@ -8,7 +8,6 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-viewer/all.hh>
 
-
 using namespace cc::primitive_defines;
 
 // Interactive demo: a random cloud of flat-shaded PBR triangles, ray-traced into a view target and blitted into a window.

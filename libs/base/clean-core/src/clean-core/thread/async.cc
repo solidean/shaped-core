@@ -7,7 +7,6 @@
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 
-
 using namespace cc::primitive_defines;
 
 // Untemplated core of the async runtime: the per-thread scheduler binding, the singlethreaded scheduler pump, and the node state machine / poll loop.
@@ -198,11 +197,11 @@ namespace
 ///
 /// Only an async awaiting an EXTERNAL push ever gets here — everything a scheduler owns is driven, not polled.
 /// So this trades latency on a path that is already crossing a thread boundary for a driver that costs nothing while it waits.
-constexpr int async_external_poll_ms = 1;
+constexpr f64 async_external_poll_secs = 0.001;
 
 void async_sleep_a_moment()
 {
-    cc::this_thread_sleep_secs(async_external_poll_ms / 1000.0);
+    cc::this_thread_sleep_secs(async_external_poll_secs);
 }
 } // namespace
 

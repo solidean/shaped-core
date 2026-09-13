@@ -109,8 +109,8 @@ The notification wakes the actor's mailbox, so a watched watcher has no interval
   Recreating a deleted source directory mid-session is the only way to hit it.
 - **Mounting while a watch is live.** A mount added afterwards is not picked up.
   Registration freezes at `start_hot_reload` today, which is what makes that affordable.
-- **A timed wait on the actor.** The polling fallback's interval is a `std::this_thread::sleep_for` in 5 ms slices, because there is no `cc::sleep_for` and `cc::threaded_actor` has no timed wait.
-  A `wait_for` hook on the actor would replace both.
+- **A timed wait on the actor.** The polling fallback's interval is a `cc::this_thread_sleep_secs` in 5 ms slices, because `cc::threaded_actor` has no timed wait.
+  A `wait_for` hook on the actor would replace it.
   Only the polling path needs it: a watched one parks on the mailbox, which shutdown already wakes.
 - **Reload for a format nobody acquired.** Deliberate: recompiling a format no one asked for burns the compiler on a shader that is never used.
 

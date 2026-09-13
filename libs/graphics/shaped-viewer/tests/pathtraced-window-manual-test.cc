@@ -11,7 +11,6 @@
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
 #include <typed-geometry/scalar/angle.hh>
 
-
 using namespace cc::primitive_defines;
 
 // Interactive demo: the path-traced Cornell box (global illumination via next-event estimation + diffuse

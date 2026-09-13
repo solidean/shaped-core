@@ -15,8 +15,8 @@ using namespace cc::primitive_defines;
 //
 // The scene is one z=0 triangle (0,0,0)-(1,0,0)-(0,1,0). Two threads each shoot a +z ray: thread 0 aims
 // at (0.25,0.25) inside the triangle (expects a hit), thread 1 aims at (-1,-1) outside it (expects a
-// miss). Everything is driven through the backend-agnostic sg::context API; the WARP device is only how
-// the context is created.
+// miss).
+// Everything is driven through the backend-agnostic sg::context API; the dx12 device is only how the context is created.
 
 namespace
 {
@@ -55,8 +55,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
-    // WARP implements DXR (incl. tier-1.1 inline RT), but gate on the query so this SKIPs rather than fails
-    // on an SDK/device without ray tracing.
+    // Gated on the query so this SKIPs rather than fails on an SDK or device without ray tracing.
     {
         auto probe = ctx.create_command_list();
         bool const supported = probe->raytracing.is_supported();

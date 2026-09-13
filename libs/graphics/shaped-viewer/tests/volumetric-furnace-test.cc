@@ -76,7 +76,7 @@ struct furnace_case
 
     /// The traced image's extent, over the same view whatever it is, so a smaller one draws fewer paths at the same samples per pixel.
     ///
-    /// Small, because this runs on a software device: a scattering interior is the most expensive thing the integrator does,
+    /// Small, because this must also pass on WARP: a scattering interior is the most expensive thing the integrator does,
     /// and the MEAN — which is what the test actually asserts on — converges long before the pixels do.
     tg::vec2i image_size = tg::vec2i(32, 32);
 };

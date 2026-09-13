@@ -6,7 +6,6 @@
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread_pump.hh>
 
-
 using namespace cc::primitive_defines;
 
 namespace cc::impl

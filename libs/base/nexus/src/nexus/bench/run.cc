@@ -436,9 +436,10 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         r.warnings.push_back({
             .kind = warning_kind::did_not_converge,
             .severity = warning_severity::warning,
-            .detail = cc::format(
-                "stopped at {} samples over {:.2f} s with a relative error of {:.1f}%, short of the {:.1f}% asked for",
-                r.samples.size(), elapsed, r.time.relative_error() * 100, cfg.target_relative_error * 100),
+            .detail = cc::format("stopped at {} samples over {:.2f} s ({:.2f} s measured) with a relative error of "
+                                 "{:.1f}%, short of the {:.1f}% asked for",
+                                 r.samples.size(), wall_elapsed, elapsed, r.time.relative_error() * 100,
+                                 cfg.target_relative_error * 100),
         });
     }
 

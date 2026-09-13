@@ -5,6 +5,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/platform/process_metrics.hh>
+#include <clean-core/record/quantity_format.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
@@ -105,7 +107,7 @@ void collect_invoked(nx::test_execution const& exec, std::unordered_set<void con
     }
 }
 
-/// "37% avg cpu load (11.8 cores), 1.42 GB peak ram", or what of it the platform could measure.
+/// "37% avg cpu load (11.8 cores), 1.42 GiB peak ram", or what of it the platform could measure, which may be nothing.
 cc::string describe_resources(nx::test_run_resources const& r)
 {
     auto out = cc::string();
@@ -115,11 +117,8 @@ cc::string describe_resources(nx::test_run_resources const& r)
     {
         if (!out.empty())
             out += ", ";
-        auto const gib = double(r.peak_resident_bytes) / double(1ll << 30);
-        if (gib >= 1)
-            out.appendf("{:.2f} GB peak ram", gib);
-        else
-            out.appendf("{:.0f} MB peak ram", double(r.peak_resident_bytes) / double(1ll << 20));
+        cc::rec::format_quantity_to(out, double(r.peak_resident_bytes), cc::rec::unit_bytes);
+        out += " peak ram";
     }
     return out;
 }
@@ -488,14 +487,14 @@ int nx::run(int argc, char** argv)
                 cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
             cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
         }
-        if (reports_resources)
-            cc::eprintln("{}", describe_resources(resources));
+        if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
+            cc::eprintln("{}", described);
         return 1;
     }
 
     // All tests passed
     cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
-    if (reports_resources)
-        cc::println("{}", describe_resources(resources));
+    if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
+        cc::println("{}", described);
     return 0;
 }

@@ -79,7 +79,7 @@ def summarize_build(
 # ---------------------------------------------------------------------------
 
 def _profile_row(s: TypeStat, *, with_par: bool) -> str:
-    row = f"  {s.type:<14}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
+    row = f"  {s.type:<16}{s.count:>7}{fmt_dur(s.total_s):>11}{fmt_dur(s.span_s):>11}"
     return f"{row}{s.parallelism:>6.1f}x" if with_par else row
 
 
@@ -100,13 +100,13 @@ def print_profile_summary(summary: ProfileSummary, path: str) -> None:
     ui.write_line(console.dim(f"\nProfile written to {path} ({summary.count} job(s))"))
 
     total = summary.leaves[-1] if summary.leaves else None
-    ui.write_line(console.dim(f"  {'leaf jobs':<14}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"))
+    ui.write_line(console.dim(f"  {'leaf jobs':<16}{'count':>7}{'sum':>11}{'span':>11}{'par':>7}"))
     for s in summary.leaves:
         line = _profile_row(s, with_par=True)
         ui.write_line(line if s is total else console.dim(line))
 
     if summary.containers:
-        ui.write_line(console.dim(f"\n  {'containers':<14}{'count':>7}{'sum':>11}{'span':>11}"
+        ui.write_line(console.dim(f"\n  {'containers':<16}{'count':>7}{'sum':>11}{'span':>11}"
                           "   (time already counted above)"))
         for s in summary.containers:
             ui.write_line(console.dim(_profile_row(s, with_par=False)))
@@ -119,7 +119,7 @@ def print_profile_summary(summary: ProfileSummary, path: str) -> None:
 def _fmt_bytes(n: int | None) -> str:
     if n is None:
         return "-"
-    return f"{n / (1 << 30):.2f} GB" if n >= (1 << 30) else f"{n / (1 << 20):.0f} MB"
+    return f"{n / (1 << 30):.2f} GiB" if n >= (1 << 30) else f"{n / (1 << 20):.0f} MiB"
 
 
 def _print_test_table(records: list[dict]) -> None:

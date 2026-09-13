@@ -57,7 +57,7 @@ void test::cap_max_executions(int times)
 {
     CC_ASSERT(times >= 0, "an execution cap must be >= 0");
     for (auto const& op : _operations)
-        if (!op->is_invariant() && op->execute_at_most_times() > times)
+        if (op->execute_at_most_times() > times)
             op->execute_at_most(times);
 }
 

@@ -43,14 +43,11 @@ INVOCABLE_TEST("sg dx12 - the adapter reports the memory on the board", (dx12::d
 {
     REQUIRE(handle != nullptr);
 
-    // A software adapter has no board, and may leave the figure out rather than invent one.
     auto const& adapter = handle->adapter();
-    if (!adapter.is_software)
-        REQUIRE(adapter.dedicated_video_memory_bytes.has_value());
+    REQUIRE(adapter.dedicated_video_memory_bytes.has_value());
 
     // Zero is a real answer for an integrated GPU, so the assertion is only that it is not negative.
-    if (adapter.dedicated_video_memory_bytes.has_value())
-        CHECK(adapter.dedicated_video_memory_bytes.value() >= 0);
+    CHECK(adapter.dedicated_video_memory_bytes.value() >= 0);
 }
 
 INVOCABLE_TEST("sg dx12 - the memory budget is what this process may use, not what the board has",

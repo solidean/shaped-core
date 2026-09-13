@@ -10,7 +10,6 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <cube_shaders.hh>
 
-
 namespace cube_editor
 {
 namespace

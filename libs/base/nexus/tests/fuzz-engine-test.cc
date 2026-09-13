@@ -125,7 +125,7 @@ TEST("fuzz engine - a failing test reports exactly one failed check (no pollutio
     CHECK(exec.count_failed_checks() == 1);
 }
 
-TEST("fuzz engine - an execution cap lowers both bounds, and leaves invariants alone")
+TEST("fuzz engine - an execution cap lowers both bounds")
 {
     auto t = nx::fuzz::test::create();
     t->add_value("x", 0);
@@ -142,6 +142,7 @@ TEST("fuzz engine - an execution cap lowers both bounds, and leaves invariants a
     // A cap never RAISES a bound that was already below it.
     CHECK(dec->execute_at_most_times() == 3);
 
+    // An invariant is capped at zero from the start, which is what keeps the cap from ever scheduling one.
     CHECK(inv->is_invariant());
     CHECK(inv->execute_at_most_times() == 0);
 }

@@ -5,7 +5,7 @@
 
 using namespace cc::primitive_defines;
 
-// The ONLY file in shaped-core allowed to include <chrono>.
+// One of the two files in shaped-core allowed to include <chrono>; thread/thread.cc is the other.
 // It is 1.16 s and 148 files entered on MSVC, so every header that reached for it taxed everything downstream.
 // The .shaped-lint.yml entry beside this file is what keeps that true; see docs/notes/build-times.md.
 

@@ -9,7 +9,7 @@ using namespace cc::primitive_defines;
 // The whole chain, end to end: HLSL through the DXC wrapper, which reflects the texture + sampler bindings.
 // A binding_group_layout + pipeline_layout are built straight from that reflection.
 // A real texture and a dynamic sampler are bound to a compute dispatch, and the sampled result is read back and verified.
-// Everything is driven through the backend-agnostic sg::context API — the dx12 WARP device is only how the context is created.
+// Everything is driven through the backend-agnostic sg::context API — the dx12 device is only how the context is created.
 //
 // Two passes: pass 1 writes a known pattern into the texture as a storage image (UAV), pass 2 samples it as a sampled texture (SRV) through a point/clamp sampler.
 // Writing the pattern on the GPU is what makes the test device-only, with no upload path in the picture.

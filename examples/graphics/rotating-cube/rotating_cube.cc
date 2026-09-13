@@ -31,7 +31,6 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #endif
 
-
 using namespace cc::primitive_defines;
 
 namespace
@@ -351,8 +350,8 @@ EXAMPLE("shaped-graphics/rotating-cube")
     auto dragging = false;
     auto spin = tg::angle_f::make_from_degree(0.0f);
     auto frames = u32(0);
-    auto const start = now_seconds();
-    auto last_time = start;
+    auto last_time = now_seconds();
+    auto const capture_start = capture.clock_seconds();
 
     while (true)
     {
@@ -447,7 +446,7 @@ EXAMPLE("shaped-graphics/rotating-cube")
                 cc::eprintln("capture failed: {}", written.error().to_string());
             break;
         }
-        if (capture.active && time - start > capture.timeout_seconds)
+        if (capture.active && capture.clock_seconds() - capture_start > capture.timeout_seconds)
         {
             cc::eprintln("capture timed out");
             break;

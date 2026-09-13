@@ -7,8 +7,6 @@
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-// Only the polling fallback needs it: a watched reload parks on the mailbox instead, which shutdown already wakes.
-
 using namespace cc::primitive_defines;
 
 namespace

@@ -6,7 +6,6 @@
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
 
-
 void cc::threaded_actor_base::start(threaded_actor_mode mode)
 {
     CC_RECORD_SCOPE("cc.actor.start");
