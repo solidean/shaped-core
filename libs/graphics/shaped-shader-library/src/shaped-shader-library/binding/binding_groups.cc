@@ -291,7 +291,7 @@ struct parser
     [[nodiscard]] static cc::result<cc::unit> reject_unclaimed_static(cc::optional<annotation> const& pending)
     {
         if (pending.has_value())
-            return cc::error(cc::format("{}: a 'static' attribute must stand before a sampler declaration",
+            return cc::error(cc::format("{}: a 'static' attribute applies only inside a group",
                                         to_string(pending.value().location)));
         return cc::unit();
     }

@@ -385,7 +385,15 @@ namespace frame
 #pragma sc static address=clamp_edge
 }
 --- error
-line 5: a 'static' attribute must stand before a sampler declaration
+line 5: a 'static' attribute applies only inside a group
+
+
+--- case a `static` at file scope is an error, even standing before a sampler
+--- hlsl
+#pragma sc static address=clamp_edge
+SamplerState samp;
+--- error
+line 1: a 'static' attribute applies only inside a group
 
 
 --- case a key outside sg::sampler is an error rather than something ignored

@@ -879,7 +879,7 @@ class _Parser:
     @staticmethod
     def reject_unclaimed_static(pending: Annotation | None) -> None:
         if pending is not None:
-            raise BindingError(f"{pending.location}: a 'static' attribute must stand before a sampler declaration")
+            raise BindingError(f"{pending.location}: a 'static' attribute applies only inside a group")
 
     @staticmethod
     def reject_unclaimed(pending: Annotation | None) -> None:
@@ -897,7 +897,7 @@ class _Parser:
         # reject_unclaimed_static already says the right thing; it was reachable only from a namespace's closing
         # brace, so a `static` at file scope fell through to the wrong message.
         if pending.name == "static":
-            Parser.reject_unclaimed_static(pending)
+            _Parser.reject_unclaimed_static(pending)
 
         if pending.name == "attribute":
             raise BindingError(
