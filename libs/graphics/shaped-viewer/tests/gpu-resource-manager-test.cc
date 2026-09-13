@@ -4,7 +4,6 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
@@ -48,13 +47,9 @@ namespace
 }
 } // namespace
 
-TEST("sv - the resource manager's epoch tick is idempotent")
+INVOCABLE_TEST("sv - the resource manager's epoch tick is idempotent", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -75,13 +70,9 @@ TEST("sv - the resource manager's epoch tick is idempotent")
     ctx.block_until_idle();
 }
 
-TEST("sv - the resource manager declares only its configured tables")
+INVOCABLE_TEST("sv - the resource manager declares only its configured tables", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = only(sv::bindless_table::textures_2d, 4)});
     CHECK(m.has_table(sv::bindless_table::textures_2d));
@@ -95,13 +86,9 @@ TEST("sv - the resource manager declares only its configured tables")
     ctx.block_until_idle();
 }
 
-TEST("sv - the resource manager refuses acquires while frozen")
+INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -133,13 +120,9 @@ TEST("sv - the resource manager refuses acquires while frozen")
     ctx.block_until_idle();
 }
 
-TEST("sv - two freezes in one epoch keep the first's indices")
+INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     // The multi-window invariant: window A records against its snapshot, then window B acquires more in the same epoch.
     // B's mints must not disturb what A already handed the GPU, which is what sg's "reclaim only what was NOT
@@ -184,13 +167,9 @@ TEST("sv - two freezes in one epoch keep the first's indices")
     ctx.block_until_idle();
 }
 
-TEST("sv - a pinned texture is declared and outlives its epoch")
+INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     // What a material buffer will hold: an index that stays true across epochs, so the buffer can be uploaded
     // once and cached by content hash rather than re-uploaded whenever the tables move.
@@ -241,13 +220,9 @@ namespace
 }
 } // namespace
 
-TEST("sv - a texture acquire is content-addressed and pins its element")
+INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its element", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -290,13 +265,9 @@ TEST("sv - a texture acquire is content-addressed and pins its element")
     ctx.block_until_idle();
 }
 
-TEST("sv - the same pixels at a different shape are a different texture")
+INVOCABLE_TEST("sv - the same pixels at a different shape are a different texture", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     // The shape is part of the key, not just the bytes: read as 32x8 and as 8x32 these are two textures, and a
     // pool keyed on the bytes alone would hand back the first for the second.
@@ -313,13 +284,9 @@ TEST("sv - the same pixels at a different shape are a different texture")
     ctx.block_until_idle();
 }
 
-TEST("sv - a texture given every mip is complete")
+INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -339,13 +306,10 @@ TEST("sv - a texture given every mip is complete")
     ctx.block_until_idle();
 }
 
-TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one")
+INVOCABLE_TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -376,13 +340,9 @@ TEST("sv - a texture's element is declared for the epoch that acquired it, and o
     ctx.block_until_idle();
 }
 
-TEST("sv - mip generation is queued, not done inline")
+INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     // record_pending_work drives sr::box_filter_mipmap_routine, whose init blocks on its shader compile — so
     // this needs the shared library and a compiler, not just a device.
@@ -426,13 +386,9 @@ TEST("sv - mip generation is queued, not done inline")
     ctx.block_until_idle();
 }
 
-TEST("sv - the work budget spreads mip generation across epochs")
+INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     // record_pending_work drives sr::box_filter_mipmap_routine, whose init blocks on its shader compile — so
     // this needs the shared library and a compiler, not just a device.
@@ -481,13 +437,9 @@ TEST("sv - the work budget spreads mip generation across epochs")
     ctx.block_until_idle();
 }
 
-TEST("sv - a texture policy that wants no mips queues nothing")
+INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.textures_policy = {.generate_mips = false}});
     m.advance_to(ctx.current_epoch());
@@ -531,13 +483,9 @@ namespace
 }
 } // namespace
 
-TEST("sv - an attribute is uploaded once and content-keyed")
+INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -571,13 +519,10 @@ TEST("sv - an attribute is uploaded once and content-keyed")
     ctx.block_until_idle();
 }
 
-TEST("sv - a parameter block is filled at the offsets the generated shader reads")
+INVOCABLE_TEST("sv - a parameter block is filled at the offsets the generated shader reads",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -654,13 +599,9 @@ TEST("sv - a parameter block is filled at the offsets the generated shader reads
     ctx.block_until_idle();
 }
 
-TEST("sv - an instance record names its own geometry and parameters")
+INVOCABLE_TEST("sv - an instance record names its own geometry and parameters", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -721,13 +662,9 @@ TEST("sv - an instance record names its own geometry and parameters")
     ctx.block_until_idle();
 }
 
-TEST("sv - an imported asset uploads and resolves like any other mesh")
+INVOCABLE_TEST("sv - an imported asset uploads and resolves like any other mesh", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -793,13 +730,10 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
     ctx.block_until_idle();
 }
 
-TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
+INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -875,13 +809,10 @@ TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box")
     ctx.block_until_idle();
 }
 
-TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor")
+INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -969,13 +900,10 @@ TEST("sv - a texture still streaming samples a placeholder seeded from the mater
     ctx.block_until_idle();
 }
 
-TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived")
+INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
@@ -1024,13 +952,9 @@ TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arriv
     ctx.block_until_idle();
 }
 
-TEST("sv::mesh - an evicted payload is re-acquired rather than named dead")
+INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than named dead", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto m = sv::gpu_resource_manager::create(ctx, {.bindless = material_tables()});
     m.advance_to(ctx.current_epoch());
