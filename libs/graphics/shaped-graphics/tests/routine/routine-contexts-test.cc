@@ -44,7 +44,7 @@ protected:
 // A dx12 WARP context, or nullptr where none is available (the caller SKIPs).
 sg::context_handle make_warp_context()
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     return ctx.has_value() ? ctx.value() : nullptr;
 }
 } // namespace

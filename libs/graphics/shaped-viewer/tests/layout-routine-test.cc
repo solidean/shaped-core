@@ -39,7 +39,7 @@ TEST("sv - the layout routine builds its shaders and layouts")
     // the shader package, the group layout or the inline-constants block rather than anything about a draw.
     // The tick is what does the work -- prewarm alone would register the routine and build nothing, and this test
     // would pass while proving nothing.
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -59,7 +59,7 @@ TEST("sv - the layout routine builds its shaders and layouts")
 
 TEST("sv - the layout routine records borders, views and a wipe in one pass")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -142,7 +142,7 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
 
 TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

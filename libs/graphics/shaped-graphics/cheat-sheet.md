@@ -175,7 +175,7 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { enable_debug_layer=false; use_warp=false; upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { enable_debug_layer=false; adapter=hardware (or warp / hardware_or_warp, SC_DX12_ADAPTER pins the latter); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 

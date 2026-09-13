@@ -58,7 +58,7 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
 // globals — so this cannot run beside another test that builds one.
 TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclusive("slib-shader-library"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -136,7 +136,7 @@ TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", exclus
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
 TEST("sr - raster box filter mipmap fills a tail of the chain", exclusive("slib-shader-library"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

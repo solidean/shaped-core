@@ -15,7 +15,7 @@ using namespace cc::primitive_defines;
 // carry one section's accumulation into the next.
 TEST("sv - a view accumulates across frames under its id")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -203,7 +203,7 @@ TEST("sv - a view accumulates across frames under its id")
 // A regression in one is invisible from the other, and this one is the path that matters.
 TEST("sv - a view accumulates across frames down the plan path")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

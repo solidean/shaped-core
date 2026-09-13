@@ -421,7 +421,7 @@ constexpr tg::vec3f probe_directions[] = {
 /// A dx12 WARP context, or nullptr where none is available.
 sg::context_handle make_probe_context()
 {
-    auto r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (r.has_error())
         return nullptr;
     return r.value();

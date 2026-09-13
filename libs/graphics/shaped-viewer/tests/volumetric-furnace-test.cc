@@ -265,7 +265,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment")
     SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
          "libs/graphics/shaped-viewer/docs/TODO.md");
 #endif
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

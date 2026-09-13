@@ -84,7 +84,7 @@ inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_ha
 /// Errors on the rare host without WARP, so a caller can SKIP.
 inline cc::result<dx12_context_handle> make_test_context(dx12_config config = {})
 {
-    config.use_warp = true;
+    config.adapter = sg::backend::dx12::dx12_adapter::warp;
     config.enable_debug_layer = true;
     return as_test_context(sg::create_dx12_context(config));
 }
@@ -104,7 +104,7 @@ inline dx12_context_handle make_warp_context()
 /// case that matters, since WARP's are the runtime's and say nothing about what a driver does with one.
 inline dx12_context_handle make_hardware_context(dx12_config config = {})
 {
-    config.use_warp = false;
+    config.adapter = sg::backend::dx12::dx12_adapter::hardware;
     config.enable_debug_layer = true;
     auto ctx = as_test_context(sg::create_dx12_context(config));
     return ctx.has_value() ? ctx.value() : nullptr;

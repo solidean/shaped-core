@@ -687,7 +687,7 @@ A frame carries the whole *window* surface, which carries the whole *view* surfa
 
 ```cpp
 sv::set_acquire_context(p)       // p = sv::context_provider = cc::unique_function<cc::result<sg::context_handle>()>; unset by default
-                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.use_warp = true}); }); pass {} to clear
+                                 //   sv::set_acquire_context([] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp}); }); pass {} to clear
                                  //   called AT MOST ONCE per process: the handle it returns is what every viewer gets, so it needs no static of its own
 sv::acquire_viewer_context()     // -> cc::result<sg::context_handle>; the provider, or the default, memoized
 

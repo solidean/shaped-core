@@ -20,7 +20,7 @@ using namespace cc::primitive_defines;
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
 TEST("sv - headless viewer runs a frame loop with no window")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -101,7 +101,7 @@ TEST("sv - headless viewer runs a frame loop with no window")
 // The capture protocol is process environment, so every test setting it excludes the others.
 TEST("sv - a capture writes a complete image and ends the loop", nx::config::exclusive("capture-environment"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -207,7 +207,7 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::exc
 // The capture protocol is process environment, so every test setting it excludes the others.
 TEST("sv - a capture nothing registered fails without writing", nx::config::exclusive("capture-environment"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -267,7 +267,7 @@ double g_timeout_test_now = 0.0;
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
 TEST("sv - a capture that times out writes beside the requested path, not to it")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

@@ -258,9 +258,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
 
-    auto ctx_r = sg::create_dx12_context({});
-    if (ctx_r.has_error())
-        ctx_r = sg::create_dx12_context({.use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_handle = ctx_r.value();

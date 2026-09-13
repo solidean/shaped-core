@@ -191,10 +191,7 @@ struct orbit_camera
 [[nodiscard]] cc::result<sg::context_handle> create_context()
 {
 #if ROTATING_CUBE_BACKEND_DX12
-    auto ctx = sg::create_dx12_context({});
-    if (ctx.has_error())
-        ctx = sg::create_dx12_context({.use_warp = true}); // WARP draws this correctly, only slower
-    return ctx;
+    return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); // WARP draws this correctly, only slower
 #else
     return sg::create_vulkan_context({});
 #endif

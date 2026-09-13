@@ -51,12 +51,7 @@ cc::unique_ptr<app> app::create(cc::string_view title)
 
     // A real adapter by preference, WARP otherwise: it renders this just as correctly, only slower, so a machine
     // with no usable D3D12 GPU still gets to run the example.
-    auto context = sg::create_dx12_context({});
-    if (context.has_error())
-    {
-        cc::println("no hardware D3D12 adapter ({}) — falling back to WARP", context.error().to_string());
-        context = sg::create_dx12_context({.use_warp = true});
-    }
+    auto context = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     if (context.has_error())
     {
         cc::eprintln("no D3D12 device at all: {}", context.error().to_string());

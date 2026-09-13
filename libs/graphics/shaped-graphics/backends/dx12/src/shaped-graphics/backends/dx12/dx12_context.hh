@@ -40,6 +40,21 @@ enum class sg::backend::dx12::dx12_message_severity : sg::u8
     message,
 };
 
+/// Which adapter a dx12 context is created on.
+enum class sg::backend::dx12::dx12_adapter : sg::u8
+{
+    /// A hardware GPU, and an error where the host has none.
+    hardware,
+
+    /// The WARP software adapter, present on every Windows host, which is what makes a headless run possible.
+    warp,
+
+    /// A hardware GPU where there is one, WARP where there is not.
+    /// The `SC_DX12_ADAPTER` environment variable (`hardware` or `warp`) pins this choice for a whole process, which is how
+    /// a developer reproduces a GPU-less CI run on a machine that has a GPU.
+    hardware_or_warp,
+};
+
 /// Creation config for the dx12 context.
 /// The flags are independent.
 struct sg::backend::dx12::dx12_config
@@ -48,9 +63,8 @@ struct sg::backend::dx12::dx12_config
     /// Best-effort: skipped when it isn't installed.
     bool enable_debug_layer = false;
 
-    /// Use the WARP software adapter instead of a hardware GPU.
-    /// Runs headless, which is what CI uses.
-    bool use_warp = false;
+    /// The adapter the device is created on.
+    dx12_adapter adapter = dx12_adapter::hardware;
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
@@ -598,3 +612,10 @@ namespace sg
 /// Only callers that link the dx12 backend see it.
 [[nodiscard]] cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config = {});
 } // namespace sg
+
+namespace sg::backend::dx12
+{
+/// Whether this host has a D3D12-capable hardware adapter, answered without creating a device.
+/// Asked once per process: adapters do not come and go under a running test suite, and the question costs a factory.
+[[nodiscard]] bool has_hardware_adapter();
+} // namespace sg::backend::dx12

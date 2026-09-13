@@ -44,7 +44,7 @@ void prewarm_every_variant(sg::context& ctx)
 // globals — so this cannot run beside another test that builds one.
 TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-shader-library"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -152,7 +152,7 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
 TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib-shader-library"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -232,7 +232,7 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
 TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive("slib-shader-library"))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

@@ -87,17 +87,9 @@ TEST("sr - imgui window (manual)", nx::config::manual)
                                           .height = 900});
 
     // A real adapter by preference — this is meant to be looked at — but WARP renders it just as correctly, only slower, so a machine without a usable D3D12 GPU still gets to run the test.
-    auto const ctx = [&]
-    {
-        auto hardware = sg::create_dx12_context({});
-        if (hardware.has_value())
-            return hardware.value();
-
-        cc::println("no hardware D3D12 adapter ({}) — falling back to WARP", hardware.error().to_string());
-        auto warp = sg::create_dx12_context({.use_warp = true});
-        REQUIRE(warp.has_value());
-        return warp.value();
-    }();
+    auto const ctx_r = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+    REQUIRE(ctx_r.has_value());
+    auto const ctx = ctx_r.value();
 
     auto compiler = slib::create_dxc_compiler();
     REQUIRE(compiler.has_value());

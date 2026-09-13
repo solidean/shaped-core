@@ -11,7 +11,7 @@
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the trace recorded and ran.
 TEST("sv - view renderer end to end (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -85,7 +85,7 @@ TEST("sv - view renderer end to end (headless)")
 // The index buffer is then not the identity sequence the non-indexed path would synthesize.
 TEST("sv - view renderer renders indexed geometry (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();

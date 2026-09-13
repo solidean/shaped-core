@@ -88,7 +88,7 @@ struct imgui_fixture
 /// Builds a fixture, or null when this machine cannot run the test.
 std::unique_ptr<imgui_fixture> make_fixture()
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (!ctx_r.has_value())
         return nullptr;
     if (!ctx_r.value()->accepts_shader_format(sg::shader_format::dxil))

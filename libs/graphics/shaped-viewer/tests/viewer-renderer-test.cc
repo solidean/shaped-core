@@ -47,7 +47,7 @@ namespace
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the whole frame recorded and ran.
 TEST("sv - viewer renderer places every view in its own rect (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -136,7 +136,7 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 // This is the path an authored-nothing frame takes, and it must not be a silent skip that leaves stale contents.
 TEST("sv - viewer renderer with no views still runs the clear (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -170,7 +170,7 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
 // `preserved()` is what keeps the rendered frame underneath; the overlay here is a plain blit standing in for imgui.
 TEST("sv - an overlay pass draws over the rendered frame (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -255,7 +255,7 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
 // Three view textures plus the output, and one dispatch group ahead of every pass, whatever the depth.
 TEST("sv - viewer renderer composites a nested layout (headless)")
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx_r.has_error())
         SKIP("no Direct3D 12 device (hardware or WARP)");
     sg::context_handle const ctx_h = ctx_r.value();
@@ -382,7 +382,7 @@ TEST("sv - the rendering context is created once and shared")
         [&builds]
         {
             ++builds;
-            return sg::create_dx12_context({.use_warp = true});
+            return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp});
         });
 
     auto const first = sv::acquire_viewer_context();

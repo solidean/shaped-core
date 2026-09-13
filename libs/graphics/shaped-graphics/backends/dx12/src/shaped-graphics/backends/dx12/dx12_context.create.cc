@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -14,6 +15,25 @@ namespace sg::backend::dx12
 {
 namespace
 {
+/// The first hardware adapter that supports D3D12, into `out`; false when there is none.
+/// WARP is skipped here, so falling back to it is always the caller's explicit choice.
+bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
+{
+    for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        DXGI_ADAPTER_DESC1 ad = {};
+        out->GetDesc1(&ad);
+        if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+            continue;
+
+        // A null out-param probes D3D12 support (FL 11_0) without creating a device.
+        if (SUCCEEDED(D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
+            return true;
+    }
+    out = nullptr;
+    return false;
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
@@ -153,6 +173,19 @@ void dx12_context::unregister_message_callback()
 }
 } // namespace sg::backend::dx12
 
+bool sg::backend::dx12::has_hardware_adapter()
+{
+    static bool const has = []
+    {
+        ComPtr<IDXGIFactory4> factory;
+        if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
+            return false;
+        ComPtr<IDXGIAdapter1> adapter;
+        return find_hardware_adapter(factory.Get(), adapter);
+    }();
+    return has;
+}
+
 namespace sg
 {
 cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const& config)
@@ -175,31 +208,27 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&factory)); FAILED(hr))
         return dx12_error(hr, "CreateDXGIFactory2 failed");
 
+    auto choice = config.adapter;
+    if (choice == dx12_adapter::hardware_or_warp)
+    {
+        auto const pinned = cc::environment_variable("SC_DX12_ADAPTER");
+        if (pinned.has_value() && pinned.value() == "warp")
+            choice = dx12_adapter::warp;
+        else if (pinned.has_value() && pinned.value() == "hardware")
+            choice = dx12_adapter::hardware;
+    }
+
     ComPtr<IDXGIAdapter1> adapter;
-    if (config.use_warp)
+    if (choice != dx12_adapter::warp && !find_hardware_adapter(factory.Get(), adapter))
+    {
+        if (choice == dx12_adapter::hardware)
+            return cc::error("no Direct3D 12 capable hardware adapter found");
+        choice = dx12_adapter::warp;
+    }
+    if (choice == dx12_adapter::warp)
     {
         if (HRESULT hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)); FAILED(hr))
             return dx12_error(hr, "IDXGIFactory4::EnumWarpAdapter failed");
-    }
-    else
-    {
-        bool found = false;
-        for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
-        {
-            DXGI_ADAPTER_DESC1 ad = {};
-            adapter->GetDesc1(&ad);
-            if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-                continue; // WARP is opt-in via use_warp, not a silent fallback.
-
-            // Null out-param probes D3D12 support (FL 11_0) without creating a device.
-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
-            {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            return cc::error("no Direct3D 12 capable hardware adapter found");
     }
 
     ComPtr<ID3D12Device> device;
