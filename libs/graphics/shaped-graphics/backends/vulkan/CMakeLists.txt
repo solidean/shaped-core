@@ -154,6 +154,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-buffer-access-test.cc
         tests/vulkan-concurrent-lists-test.cc
         tests/vulkan-compute-test.cc
+        tests/vulkan-entry.cc
         tests/vulkan-raster-test.cc
         tests/vulkan-query-test.cc
         tests/vulkan-raytracing-test.cc
