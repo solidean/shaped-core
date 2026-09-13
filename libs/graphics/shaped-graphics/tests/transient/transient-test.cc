@@ -177,6 +177,14 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
     CHECK(transient_round_trip(ctx, 0)); // epoch 0 on the default budget (heap created here)
 
     ctx->transient.set_budget(isize(512) * 1024);
+    // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
+    // set_budget is deferred, hence the advance that applies it.
+    CC_DEFER
+    {
+        ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
+        ctx->advance_epoch();
+        ctx->block_until_idle();
+    };
     for (int e = 1; e <= 4; ++e)
     {
         ctx->advance_epoch();
@@ -200,6 +208,14 @@ INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (
     REQUIRE(ctx != nullptr);
 
     ctx->transient.set_budget(isize(1) * 1024 * 1024);
+    // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
+    // set_budget is deferred, hence the advance that applies it.
+    CC_DEFER
+    {
+        ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
+        ctx->advance_epoch();
+        ctx->block_until_idle();
+    };
     ctx->transient.set_budget(isize(256) * 1024);
     ctx->transient.set_budget(isize(768) * 1024); // last write wins at the next advance
 

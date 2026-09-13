@@ -5,11 +5,11 @@
 #include <nexus/tests/registry.hh>
 
 // Entry-point drivers for the dx12 backend suite (shaped-graphics-dx12-test).
-// Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs two devices rather than one per test.
+// Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
 // Both carry the debug layer and the fail-on-validation listener; see dx12-test-common.hh.
 //
 // Two adapters, which is the point of having drivers at all:
-//   - hardware: the real GPU; SKIPs when none is available.
+//   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // A test whose subject is the context itself — pristine pool/epoch state, a backend knob, two contexts — stays an ordinary TEST and takes one from make_test_context.
@@ -44,7 +44,10 @@ TEST("sg dx12 backend - hardware")
 {
     auto ctx = dx12::as_test_context(
         sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware}));
-    if (ctx.has_error())
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
     {

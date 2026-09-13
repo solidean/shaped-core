@@ -7,7 +7,7 @@
 
 // Entry-point drivers for sr's GPU tests: each brings up ONE dx12 context and invokes every INVOCABLE_TEST taking an sg::context_handle against it.
 // The adapter rules are libs/graphics/shaped-graphics/docs/testing.md, section "Devices and adapters":
-//   - hardware: the real GPU, and the default; SKIPs when none is available.
+//   - hardware: the real GPU, and the default; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // A child runs under its driver's config, so the drivers carry the exclusion tags the children need.
@@ -57,7 +57,10 @@ TEST("sr dx12 - warp", exclusive("slib-shader-library"), exclusive("sr-imgui-con
 TEST("sr dx12 - hardware", exclusive("slib-shader-library"), exclusive("sr-imgui-context"))
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
-    if (ctx.has_error())
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
     {

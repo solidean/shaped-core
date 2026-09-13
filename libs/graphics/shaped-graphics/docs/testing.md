@@ -29,7 +29,8 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
 - **The hardware adapter is the default.** It is what the code ships on, and it is fast.
   WARP runs where there is no hardware adapter, which is what a headless CI host is, and under `--thorough` as a second pass on a machine that has one.
   The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
-  `SC_DX12_ADAPTER=warp` pins `dx12_adapter::hardware_or_warp` to WARP for a whole process, which is how to reproduce a GPU-less run locally.
+  A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
+  `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
 - **A test passes on any adapter.**
   Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
   Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.

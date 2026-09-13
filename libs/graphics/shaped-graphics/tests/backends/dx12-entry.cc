@@ -12,7 +12,7 @@
 // They carry sg-reload-generation because routine invocables count init runs, and a top-level test's sg::signal_reload would re-run them mid-test.
 // A child's own exclusion tags schedule nothing, since it runs inside its driver's body, so the driver has to hold them.
 // Two adapters are covered, both with the debug layer on:
-//   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI).
+//   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI), and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 
 namespace
@@ -61,7 +61,10 @@ TEST("sg dx12 hardware backend", exclusive("slib-shader-library"), exclusive("sg
 {
     auto ctx
         = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (ctx.has_error())
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
     {

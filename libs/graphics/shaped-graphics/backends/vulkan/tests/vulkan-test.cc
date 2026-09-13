@@ -67,17 +67,17 @@ void exercise_context(vulkan::vulkan_context& ctx)
 // Owns its context: creation is the subject, and so is the epoch state a fresh context starts in.
 TEST("sg vulkan - context", exclusive("vulkan-device"))
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
-    if (ctx.has_error())
-        return; // no Vulkan loader/driver/device (e.g. headless CI) — nothing to exercise.
+    auto const ctx = vulkan::test::make_context({.enable_validation_layers = true});
+    if (ctx == nullptr)
+        SKIP("no vulkan device");
 
-    CHECK(ctx.value()->backend() == sg::backend_kind::vulkan);
+    CHECK(ctx->backend() == sg::backend_kind::vulkan);
 
     // Nothing has finished yet, so the completed epoch is first-1.
-    CHECK(ctx.value()->current_epoch() == sg::epoch::first);
-    CHECK(u64(ctx.value()->completed_epoch()) == u64(sg::epoch::first) - 1);
+    CHECK(ctx->current_epoch() == sg::epoch::first);
+    CHECK(u64(ctx->completed_epoch()) == u64(sg::epoch::first) - 1);
 
-    exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
+    exercise_context(*ctx);
 }
 
 // Owns its context: prefer_software_device is a creation knob.
@@ -85,12 +85,12 @@ TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
 {
     // prefer_software picks a CPU device (e.g. lavapipe) when one is present, and falls back to hardware otherwise.
     // Either way the same paths are exercised.
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .prefer_software_device = true});
-    if (ctx.has_error())
-        return; // no Vulkan-capable device available.
+    auto const ctx = vulkan::test::make_context({.enable_validation_layers = true, .prefer_software_device = true});
+    if (ctx == nullptr)
+        SKIP("no vulkan device");
 
-    CHECK(ctx.value()->backend() == sg::backend_kind::vulkan);
-    exercise_context(static_cast<vulkan::vulkan_context&>(*ctx.value()));
+    CHECK(ctx->backend() == sg::backend_kind::vulkan);
+    exercise_context(*ctx);
 }
 
 INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))
@@ -311,10 +311,10 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once", ex
 {
     // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
     // in-flight epoch and reuse the space it frees.
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .upload_ring_bytes = 64 * 1024});
-    if (ctx.has_error())
-        return; // no Vulkan device.
-    auto& c = static_cast<vulkan::vulkan_context&>(*ctx.value());
+    auto const ctx = vulkan::test::make_context({.enable_validation_layers = true, .upload_ring_bytes = 64 * 1024});
+    if (ctx == nullptr)
+        SKIP("no vulkan device");
+    auto& c = *ctx;
 
     auto buffer = c.create_vulkan_buffer(32 * 1024, sg::buffer_usage::copy_dst, sg::allocation_info{});
     REQUIRE(buffer.has_value());

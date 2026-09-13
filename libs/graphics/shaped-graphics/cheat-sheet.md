@@ -114,6 +114,7 @@ ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_han
 ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
 ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
+sg::context_transient_scope::default_budget_bytes  // isize — that 128 MiB default, e.g. for a test putting it back
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
                                                    //   using any transient resource past its epoch is a hard error (asserts)
 ctx.upload.bytes_to_buffer(buf, cc::pinned_data<byte const>, offset_in_bytes=0)  // void — ASYNC stream host bytes into buf on the copy queue (needs copy_dst); fire-and-forget, pin holds the bytes; later lists reading buf auto-wait; empty = no-op
@@ -175,7 +176,7 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { enable_debug_layer=false; adapter=hardware (or warp / hardware_or_warp, SC_DX12_ADAPTER pins the latter); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { enable_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 

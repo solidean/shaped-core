@@ -6,6 +6,7 @@
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
@@ -32,6 +33,32 @@ bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
     }
     out = nullptr;
     return false;
+}
+
+/// What `SC_DX12_ADAPTER` asks of this process.
+enum class adapter_pin : u8
+{
+    none,
+    hardware,
+    warp,
+};
+
+/// Read on every call rather than once, so a test that sets the variable sees it take effect.
+/// An unrecognized value is ignored, and said so once per process.
+adapter_pin read_adapter_pin()
+{
+    auto const value = cc::environment_variable("SC_DX12_ADAPTER");
+    if (!value.has_value())
+        return adapter_pin::none;
+    if (value.value() == "warp")
+        return adapter_pin::warp;
+    if (value.value() == "hardware")
+        return adapter_pin::hardware;
+
+    static auto warned = cc::atomic_flag();
+    if (!warned.test_and_set())
+        CC_LOG_WARNING("SC_DX12_ADAPTER='{}' is ignored: the accepted values are 'hardware' and 'warp'", value.value());
+    return adapter_pin::none;
 }
 
 /// What DXGI says about the adapter that was picked.
@@ -175,6 +202,9 @@ void dx12_context::unregister_message_callback()
 
 bool sg::backend::dx12::has_hardware_adapter()
 {
+    if (read_adapter_pin() == adapter_pin::warp)
+        return false;
+
     static bool const has = []
     {
         ComPtr<IDXGIFactory4> factory;
@@ -208,19 +238,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&factory)); FAILED(hr))
         return dx12_error(hr, "CreateDXGIFactory2 failed");
 
+    auto const pin = read_adapter_pin();
     auto choice = config.adapter;
-    if (choice == dx12_adapter::hardware_or_warp)
-    {
-        auto const pinned = cc::environment_variable("SC_DX12_ADAPTER");
-        if (pinned.has_value() && pinned.value() == "warp")
-            choice = dx12_adapter::warp;
-        else if (pinned.has_value() && pinned.value() == "hardware")
-            choice = dx12_adapter::hardware;
-    }
+    if (choice == dx12_adapter::hardware_or_warp && pin == adapter_pin::hardware)
+        choice = dx12_adapter::hardware;
 
+    // The warp pin hides hardware from every request, an explicit `hardware` included, not only from hardware_or_warp.
+    auto const hardware_hidden = pin == adapter_pin::warp;
     ComPtr<IDXGIAdapter1> adapter;
-    if (choice != dx12_adapter::warp && !find_hardware_adapter(factory.Get(), adapter))
+    if (choice != dx12_adapter::warp && (hardware_hidden || !find_hardware_adapter(factory.Get(), adapter)))
     {
+        if (choice == dx12_adapter::hardware && hardware_hidden)
+            return cc::error("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER=warp hides them)");
         if (choice == dx12_adapter::hardware)
             return cc::error("no Direct3D 12 capable hardware adapter found");
         choice = dx12_adapter::warp;

@@ -10,7 +10,7 @@
 // Both carry the debug layer and a listener that fails the running test on any validation warning.
 //
 // Two adapters, per libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters:
-//   - hardware: the real GPU; SKIPs when none is available.
+//   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // The invocables run one after another on the one context, so each leaves it as it found it: no open command list, and nothing that outlives its test.
@@ -61,7 +61,10 @@ TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
 {
     auto ctx
         = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (ctx.has_error())
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
     {

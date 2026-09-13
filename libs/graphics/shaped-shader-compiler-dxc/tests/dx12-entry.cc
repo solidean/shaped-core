@@ -1,14 +1,15 @@
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 
 // Entry-point drivers for the whole-chain integration tests: compile HLSL → reflect → bind → run on a device → read back.
-// Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs two devices rather than one per test.
+// Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
 // Several concurrently live WARP devices are what the old shape produced at -jN, and WARP itself faulted under it.
 //
 // Two adapters:
-//   - hardware: the real GPU; SKIPs when none is available.
+//   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // The windowed tests build their own context: they are nx::config::manual, run one at a time by hand, and want a real adapter.
@@ -35,7 +36,10 @@ TEST("ssc::dxc + dx12 - warp backend")
 TEST("ssc::dxc + dx12 - hardware backend")
 {
     auto ctx = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (ctx.has_error())
+    // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
+    if (ctx.has_error() && sg::backend::dx12::has_hardware_adapter())
+        FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
+    else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
         nx::invoke_tests("hardware", ctx.value());
