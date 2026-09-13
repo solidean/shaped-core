@@ -6,7 +6,7 @@
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
 
 // Entry-point drivers for sr's GPU tests: each brings up ONE dx12 context and invokes every INVOCABLE_TEST taking an sg::context_handle against it.
-// The adapter rules are shaped-graphics' docs/testing.md "Devices and adapters":
+// The adapter rules are libs/graphics/shaped-graphics/docs/testing.md, section "Devices and adapters":
 //   - hardware: the real GPU, and the default; SKIPs when none is available.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
