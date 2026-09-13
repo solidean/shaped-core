@@ -2,7 +2,6 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
 // Headless: the layout routine records a whole target's draw list — border bands, placed views and a wipe — in one pass.
@@ -11,7 +10,7 @@
 // What this pins is everything most likely to be wrong and invisible to the plan tests: the shaders compile, one group
 // layout serves all three kinds, the inline-constants block matches the cbuffer, and every pipeline variant
 // (three kinds x blended / not) actually builds.
-// The WARP debug layer validates the transitions for us.
+// The debug layer validates the transitions for us.
 
 using namespace cc::primitive_defines;
 
@@ -33,17 +32,12 @@ namespace
 }
 } // namespace
 
-TEST("sv - the layout routine builds its shaders and layouts")
+INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::context_handle const& ctx_h))
 {
     // Deliberately the narrowest case: prewarm registers the routine and one tick brings it up, so a failure here is
     // the shader package, the group layout or the inline-constants block rather than anything about a draw.
     // The tick is what does the work -- prewarm alone would register the routine and build nothing, and this test
     // would pass while proving nothing.
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
         SKIP("no DXC compiler to build the shaders");
@@ -51,19 +45,18 @@ TEST("sv - the layout routine builds its shaders and layouts")
     // Prewarm names the format, because the routine is one instance per target format — and this is the case that
     // makes that worth it: an application that knows its swapchain format can have the pipelines built before the
     // first frame rather than the frame after.
+    // The context is the driver's and earlier tests may already have brought the routine up, so it is evicted first.
+    // Without that the tick below initializes nothing and the check proves nothing.
+    sv::layout_routine::evict(*ctx_h, sg::pixel_format::bgra8_unorm);
     sv::layout_routine::prewarm(*ctx_h, sg::pixel_format::bgra8_unorm);
     auto const tick = ctx_h->routines.tick_until_idle();
     CHECK(tick.initialized >= 1);
     CHECK(tick.is_idle());
 }
 
-TEST("sv - the layout routine records borders, views and a wipe in one pass")
+INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one pass", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
@@ -140,13 +133,9 @@ TEST("sv - the layout routine records borders, views and a wipe in one pass")
     CHECK(output.width() == output_size[0]);
 }
 
-TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
+INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)

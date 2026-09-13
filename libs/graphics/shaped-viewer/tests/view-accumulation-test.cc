@@ -2,7 +2,6 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -13,13 +12,9 @@ using namespace cc::primitive_defines;
 //
 // Each section uses its own view_id: sections share the enclosing setup rather than re-running it, so a shared id would
 // carry one section's accumulation into the next.
-TEST("sv - a view accumulates across frames under its id")
+INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -201,13 +196,9 @@ TEST("sv - a view accumulates across frames under its id")
 // It gets its own test because the two paths keep their own bookkeeping: `execute` above resolves the one slot it
 // needs itself, while the plan path resolves every view's slots up front and traces them afterwards.
 // A regression in one is invisible from the other, and this one is the path that matters.
-TEST("sv - a view accumulates across frames down the plan path")
+INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

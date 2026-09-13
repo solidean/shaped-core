@@ -42,16 +42,12 @@ namespace
 
 // Headless whole-frame render: three views, each carrying its own cell of the output, driven through viewer_renderer in one call.
 // What this adds over view-renderer-test is the multi-view path: three traces recorded before any pass opens, then one pass over which the viewport / scissor moves per view.
-// The WARP debug layer validates the transitions from three UAV writes to three sampled reads for us.
+// The debug layer validates the transitions from three UAV writes to three sampled reads for us.
 //
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the whole frame recorded and ran.
-TEST("sv - viewer renderer places every view in its own rect (headless)")
+INVOCABLE_TEST("sv - viewer renderer places every view in its own rect (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -134,13 +130,9 @@ TEST("sv - viewer renderer places every view in its own rect (headless)")
 
 // No views at all: the pass still opens, so the output's clear lands and the target is defined.
 // This is the path an authored-nothing frame takes, and it must not be a silent skip that leaves stale contents.
-TEST("sv - viewer renderer with no views still runs the clear (headless)")
+INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
@@ -168,13 +160,9 @@ TEST("sv - viewer renderer with no views still runs the clear (headless)")
 // A GUI drawn over the frame is a *second* pass on the same target, not a share of viewer_renderer's.
 // Every trace has to be recorded before any pass opens, so the frame's pass cannot be handed in from outside.
 // `preserved()` is what keeps the rendered frame underneath; the overlay here is a plain blit standing in for imgui.
-TEST("sv - an overlay pass draws over the rendered frame (headless)")
+INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -253,13 +241,9 @@ TEST("sv - an overlay pass draws over the rendered frame (headless)")
 // This is the case the flat model could not express at all — the middle view renders into its own texture, and the
 // output samples that rather than the leaves.
 // Three view textures plus the output, and one dispatch group ahead of every pass, whatever the depth.
-TEST("sv - viewer renderer composites a nested layout (headless)")
+INVOCABLE_TEST("sv - viewer renderer composites a nested layout (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -373,8 +357,8 @@ TEST("sv - viewer renderer composites a nested layout (headless)")
 //
 // This is what lets viewers run in succession — or side by side — on one device, and it is why a provider needs no
 // caching of its own.
-// It deliberately clears the provider again on the way out; the context it caused to be cached is the
-// same WARP one the rest of this file uses.
+// It deliberately clears the provider again on the way out.
+// It keeps a context of its own rather than taking the driver's, because the provider and its caching are the subject.
 TEST("sv - the rendering context is created once and shared")
 {
     auto builds = 0;
@@ -382,7 +366,7 @@ TEST("sv - the rendering context is created once and shared")
         [&builds]
         {
             ++builds;
-            return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::warp});
+            return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
         });
 
     auto const first = sv::acquire_viewer_context();

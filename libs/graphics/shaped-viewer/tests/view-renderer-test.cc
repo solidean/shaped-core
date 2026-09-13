@@ -2,20 +2,15 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
 // Headless, one view, through the single-view routine on its own: view_renderer path-traces it into the texture kept under the view's id and hands that back — no target, no pass.
 // The frame-level counterpart is viewer-renderer-test; this one pins the half a caller reaches for when it wants the image rather than a composited frame.
 //
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the trace recorded and ran.
-TEST("sv - view renderer end to end (headless)")
+INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -59,7 +54,7 @@ TEST("sv - view renderer end to end (headless)")
 
     // Driven until it actually dispatches — see sv_test::frames_until_executed.
     // Not only so the checks below mean something: a declined trace STARTS the compiles it was missing, and a test
-    // that stops before they land leaves async work carrying a context it is about to destroy.
+    // that stops before they land leaves async work running into the next test on the shared context.
     REQUIRE(sv_test::frames_until_executed(ctx,
                                            [&](sg::command_list& cmd)
                                            {
@@ -68,7 +63,7 @@ TEST("sv - view renderer end to end (headless)")
                                                traced = sv::view_renderer::execute(cmd, v, resources, store);
                                                // The fallback's compile is STARTED by every trace whether or not it
                                                // is needed, so it is waited for here too — otherwise it is still
-                                               // running when this test drops the context it was started against.
+                                               // running when the next test takes the context over.
                                                auto const fallback_settled
                                                    = resources.shaders.acquire_fallback().shader->is_ready();
                                                return store.accumulated_frames(v.id) > 0 && fallback_settled
@@ -83,13 +78,9 @@ TEST("sv - view renderer end to end (headless)")
 // The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
 // A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks the vertex buffer.
 // The index buffer is then not the identity sequence the non-indexed path would synthesize.
-TEST("sv - view renderer renders indexed geometry (headless)")
+INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

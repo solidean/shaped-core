@@ -8,7 +8,6 @@
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 
@@ -18,13 +17,9 @@ using namespace cc::primitive_defines;
 //
 // This is what a capture run drives, so what it pins is that the authoring surface cannot tell the difference —
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
-TEST("sv - headless viewer runs a frame loop with no window")
+INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -98,14 +93,10 @@ TEST("sv - headless viewer runs a frame loop with no window")
 // boundary — and a JPEG truncated that way still decodes, flat-filling the tail from the last DC value.
 // That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
 // decoding the result back and checking its extent is the assertion that matters here.
-// The capture protocol is process environment, so every test setting it excludes the others.
-TEST("sv - a capture writes a complete image and ends the loop", nx::config::exclusive("capture-environment"))
+// The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
+INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -204,14 +195,10 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::exc
 // Nothing discovers capture names any more — a `.capture.json` beside the example declares them — so this is the only
 // thing standing between a renamed callback and a plausible, wrong reference image: the default view, written under
 // the old name's filename, refreshed into the repository by a sweep that reported success.
-// The capture protocol is process environment, so every test setting it excludes the others.
-TEST("sv - a capture nothing registered fails without writing", nx::config::exclusive("capture-environment"))
+// The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
+INVOCABLE_TEST("sv - a capture nothing registered fails without writing", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -265,13 +252,10 @@ double g_timeout_test_now = 0.0;
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-TEST("sv - a capture that times out writes beside the requested path, not to it")
+INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

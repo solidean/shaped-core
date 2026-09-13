@@ -6,7 +6,6 @@
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
@@ -251,7 +250,7 @@ image_stats trace_furnace(sg::context& ctx,
 }
 } // namespace
 
-TEST("sv - a lossless interior is invisible under a uniform environment")
+INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environment", (sg::context_handle const& ctx_h))
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
@@ -265,11 +264,7 @@ TEST("sv - a lossless interior is invisible under a uniform environment")
     SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
          "libs/graphics/shaped-viewer/docs/TODO.md");
 #endif
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

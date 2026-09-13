@@ -2,23 +2,18 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
-// Headless end-to-end path trace on WARP (or a hardware device).
+// Headless end-to-end path trace.
 // It builds a simple Cornell box through the managers, integrates one small view with global illumination, and drives it to completion.
 // Beyond the flat direct-lit raytraced-view test, this exercises the whole GI path.
 // The path-tracing shaders compile through slib, the DXR pipeline + shader table build, the TLAS is built, and the raygen bounces rays with NEE toward the ceiling light.
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
-TEST("sv - path-traced Cornell box (headless)")
+INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -72,7 +67,7 @@ TEST("sv - path-traced Cornell box (headless)")
     cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
 
     // Frame constants: camera + the same light rectangle the geometry emits from + modest sample controls
-    // (kept small so the trace stays fast on the WARP software device).
+    // (kept small so the trace stays cheap on the WARP software device).
     auto fc = sv::pt_frame_constants_gpu{};
     fc.camera = sv::camera_gpu::from(cam);
     // the box light is an axis-aligned XZ rect, emitting straight down
@@ -144,13 +139,10 @@ TEST("sv - path-traced Cornell box (headless)")
     CHECK(records[0].is_indexed == 0u);
 }
 
-TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view")
+INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
     {
         auto probe = ctx.create_command_list();
         auto const supported = probe->raytracing.is_supported();
