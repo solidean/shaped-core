@@ -8,6 +8,7 @@
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
 #if CC_HAS_THREADS
@@ -305,6 +306,84 @@ TEST("async home - an at_home teardown of an abandoned frame runs on the home", 
 
     CHECK(destroyed_on.load() == h.id.load());
     CHECK(h.home->homed_node_count() == 0);
+}
+
+TEST("async home - a teardown that pumps its own home mid-cycle leaves the cycle intact", nx::config::no_scheduler)
+{
+    // A deferred teardown runs outside any body, so a destructor that waits reaches a nested cycle of the same home.
+    // Here it queues more work and pumps twice: the second nested cycle starts a new, smaller batch.
+    // The outer cycle, mid-batch, must neither index past that batch nor run an item twice.
+    struct pumps_on_destruction
+    {
+        cc::thread_bound_scheduler* home = nullptr;
+        cc::vector<cc::shared_async<int>>* late = nullptr;
+        cc::atomic<int>* ran = nullptr;
+
+        pumps_on_destruction(cc::thread_bound_scheduler* h, cc::vector<cc::shared_async<int>>* l, cc::atomic<int>* r)
+          : home(h), late(l), ran(r)
+        {
+        }
+        pumps_on_destruction(pumps_on_destruction&& o) noexcept : home(o.home), late(o.late), ran(o.ran)
+        {
+            o.home = nullptr;
+        }
+        ~pumps_on_destruction()
+        {
+            if (home == nullptr)
+                return;
+            for (auto i = 0; i < 2; ++i)
+                late->push_back(cc::make_async_scheduled_on(*home,
+                                                            [r = ran]
+                                                            {
+                                                                r->fetch_add(1);
+                                                                return 0;
+                                                            }));
+            (void)cc::thread_pump_all();
+            (void)cc::thread_pump_all();
+        }
+    };
+
+    cc::atomic<int> ran = {0};
+    cc::atomic<bool> all_ready = {false};
+    std::thread t(
+        [&]
+        {
+            cc::thread_bound_scheduler home;
+            home.bind_to_current_thread();
+            {
+                cc::vector<cc::shared_async<int>> nodes;
+                cc::vector<cc::shared_async<int>> late;
+                auto const count = [&ran]
+                {
+                    ran.fetch_add(1);
+                    return 0;
+                };
+
+                nodes.push_back(cc::make_async_scheduled_on(home, count)); // so the teardown is not the batch's first item
+
+                auto abandoned = cc::make_async_lazy_on(home, {.teardown = cc::async_teardown::at_home},
+                                                        [p = pumps_on_destruction(&home, &late, &ran)] { return 1; });
+                std::thread([n = cc::move(abandoned)]() mutable { n = nullptr; }).join(); // queues the teardown here
+
+                for (auto i = 0; i < 8; ++i)
+                    nodes.push_back(cc::make_async_scheduled_on(home, count));
+
+                (void)home.pump_cycle();
+                home.drain();
+
+                auto ready = late.size() == 2;
+                for (auto const& n : nodes)
+                    ready = ready && n->is_ready();
+                for (auto const& n : late)
+                    ready = ready && n->is_ready();
+                all_ready.store(ready);
+            }
+            home.drain();
+        });
+    t.join();
+
+    CHECK(all_ready.load());
+    CHECK(ran.load() == 11);
 }
 
 TEST("async home - an anywhere teardown releases the frame where the last handle drops", nx::config::no_scheduler)
@@ -629,14 +708,44 @@ TEST("async home - a yielding main-homed body does not pin pump_main_thread", nx
         REQUIRE(polls.load() > 0);
 
         // One cycle runs what was queued when it started, and a yield re-queues behind that snapshot.
-        // The sweep inside pump_main_thread runs the home a second time, so one call may take two segments, never the rest.
         auto const before = polls.load();
         (void)cc::pump_main_thread();
-        CHECK(polls.load() - before <= 2);
+        CHECK(polls.load() - before <= 1);
 
         while (!root->is_ready() && cc::current_time_steady_secs() < deadline)
             (void)cc::pump_main_thread();
         CHECK(root->is_ready());
     }
     CHECK(polls.load() == 50);
+}
+
+TEST("async home - pump_main_thread checks its budget between items, not between cycles", nx::config::main_thread)
+{
+    cc::vector<cc::shared_async<int>> nodes;
+    for (auto i = 0; i < 1000; ++i)
+        nodes.push_back(cc::make_async_scheduled_on_main([] { return 0; }));
+
+    // A budget far below one item: the first item overruns it, and the rest stay queued.
+    CHECK(cc::pump_main_thread(1e-6));
+    auto ready = isize(0);
+    for (auto const& n : nodes)
+        ready += n->is_ready() ? 1 : 0;
+    CHECK(ready < 1000);
+
+    auto const deadline = cc::current_time_steady_secs() + 10.0;
+    while (cc::pump_main_thread(1.0) && cc::current_time_steady_secs() < deadline)
+    {
+    }
+    for (auto const& n : nodes)
+        CHECK(n->is_ready());
+}
+
+TEST("async home - a node homed to a singlethreaded scheduler runs when that scheduler is drained unbound",
+     nx::config::no_scheduler)
+{
+    cc::singlethreaded_scheduler s;
+    auto const node = cc::make_async_scheduled_on(s, [] { return 7; });
+    s.drain(); // nothing is bound on this thread
+    REQUIRE(node->is_ready());
+    CHECK(node->value() == 7);
 }

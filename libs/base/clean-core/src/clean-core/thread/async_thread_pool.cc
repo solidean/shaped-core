@@ -576,7 +576,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 home->_parked_in.store(this, cc::memory_order_seq_cst);
                 if (home->has_queued_work())
                 {
-                    home->_parked_in.store(nullptr, cc::memory_order_relaxed);
+                    home->clear_parked_in();
                     _sleepers.fetch_sub(1, cc::memory_order_relaxed);
                     continue;
                 }
@@ -595,7 +595,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             }
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
             if (home != nullptr)
-                home->_parked_in.store(nullptr, cc::memory_order_relaxed);
+                home->clear_parked_in();
 
             // _stop without the latch having fired means the pool is going away under us; nothing will complete the
             // root, and staying here would hang shutdown.

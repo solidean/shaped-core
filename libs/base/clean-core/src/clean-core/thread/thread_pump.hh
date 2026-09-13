@@ -87,3 +87,10 @@ bool thread_pump_all_for(double max_ms);
 /// For a leak check at the end of a run: a registration outliving its semantic thread is a bug, and a silent one.
 [[nodiscard]] isize registered_thread_pump_count();
 } // namespace cc
+
+namespace cc::impl
+{
+/// thread_pump_all without the calling thread's home: one sweep of the registry.
+/// For cc::pump_main_thread, which pumps the main home itself under its own budget.
+bool thread_pump_registry();
+} // namespace cc::impl

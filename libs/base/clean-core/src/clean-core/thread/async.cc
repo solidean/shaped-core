@@ -160,6 +160,10 @@ bool cc::singlethreaded_scheduler::run_one()
 
     auto node = cc::move(_queue.back()); // keep it alive across the poll, then release our queue ref
     _queue.remove_back();
+
+    // Bound for the poll, so a node homed here recognizes its home: pumped from an unbound thread, it would be refused and
+    // its queue entry dropped while it stays `scheduled`, which nothing ever queues again.
+    async_worker_scope const scope(*this);
     impl::async_poll_work_item(*node);
     return true;
 }

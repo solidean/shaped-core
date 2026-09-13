@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/thread.hh>
@@ -106,17 +107,17 @@ bool cc::thread_bound_scheduler::try_defer_teardown(async_node_base* node)
 void cc::thread_bound_scheduler::push(item it)
 {
 #if CC_HAS_THREADS
-    async_thread_pool* parked_in = nullptr;
     {
         std::lock_guard const lock(_mutex);
         _incoming.push_back(it);
         // Read under the same mutex the parked owner took for its last look at the queue.
         // Either that look saw this item, or the owner had already announced where it parks, and we wake it there.
-        parked_in = _parked_in.load(cc::memory_order_acquire);
+        // The wake happens under the mutex too: the owner clears _parked_in under it before leaving the pool, so the pool
+        // named here cannot be destroyed while we wake it.
+        if (auto* const parked_in = _parked_in.load(cc::memory_order_acquire))
+            parked_in->wake_home_participants();
     }
     _work_cv.notify_one();
-    if (parked_in != nullptr)
-        parked_in->wake_home_participants();
 #else
     _local.push_back(it);
 #endif
@@ -148,8 +149,6 @@ void cc::thread_bound_scheduler::run(item it)
         return;
     }
 
-    auto const node = async_node_ptr::adopt(it.node);
-
     struct body_scope
     {
         int& depth;
@@ -160,6 +159,8 @@ void cc::thread_bound_scheduler::run(item it)
     };
 
     body_scope const in_body(_body_depth);
+    auto const node
+        = async_node_ptr::adopt(it.node); // dropped inside the body scope: a value's destructor is still one of our bodies
     async_worker_scope const scope(*this);
     impl::async_poll_work_item(*node);
 }
@@ -189,23 +190,51 @@ bool cc::thread_bound_scheduler::has_queued_work() const
 #endif
 }
 
-bool cc::thread_bound_scheduler::pump_cycle()
+bool cc::thread_bound_scheduler::pump_cycle(double deadline_secs)
 {
     if (!is_owner_thread() || _body_depth > 0)
         return false;
 
     // Bounded by what is queued right now: a body that yields re-queues itself behind this snapshot, not in front of it.
+    // The snapshot is moved out before anything runs, because a deferred teardown runs outside any body and may reach a
+    // nested cycle through a blocking wait, which refills _local under our feet.
+    auto batch = cc::vector<item>();
     if (_local_next == _local.size())
     {
-        auto it = item();
-        if (!take_one(it))
-            return false;
-        run(it);
+        _local.clear();
+        _local_next = 0;
+#if CC_HAS_THREADS
+        std::lock_guard const lock(_mutex);
+        cc::swap_by_move(batch, _incoming);
+#else
+        cc::swap_by_move(batch, _local);
+#endif
+    }
+    else
+    {
+        batch.push_back_range(cc::span<item const>(_local).subspan(_local_next));
+        _local.clear();
+        _local_next = 0;
     }
 
-    auto const end = _local.size();
-    while (_local_next < end)
-        run(_local[_local_next++]);
+    if (batch.empty())
+        return false;
+
+    for (isize i = 0; i < batch.size(); ++i)
+    {
+        run(batch[i]);
+
+        // Checked between items, so one long body overruns the budget; what is left goes back to the front of the queue.
+        if (deadline_secs > 0 && i + 1 < batch.size() && cc::current_time_steady_secs() >= deadline_secs)
+        {
+            auto rest = cc::vector<item>();
+            rest.push_back_range(cc::span<item const>(batch).subspan(i + 1));
+            rest.push_back_range(cc::span<item const>(_local).subspan(_local_next));
+            _local = cc::move(rest);
+            _local_next = 0;
+            return true;
+        }
+    }
     return true;
 }
 
@@ -228,9 +257,9 @@ bool cc::thread_bound_scheduler::pump_for(double max_ms)
         return has_queued_work();
     }
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::duration<double, std::milli>(max_ms);
-    while (pump_cycle())
-        if (std::chrono::steady_clock::now() >= deadline)
+    auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
+    while (pump_cycle(deadline))
+        if (cc::current_time_steady_secs() >= deadline)
             return has_queued_work();
     return false;
 }
@@ -276,10 +305,10 @@ bool cc::pump_main_thread(double max_ms)
         return s->try_run_one();
     };
 
-    auto const cycle = [&]
+    auto const cycle = [&](double deadline_secs)
     {
-        auto more = home.pump_cycle();
-        more |= cc::thread_pump_all();
+        auto more = home.pump_cycle(deadline_secs);
+        more |= cc::impl::thread_pump_registry(); // not thread_pump_all: that would run the home again, past the budget
         auto* const compute = async_scheduler::compute_or_null();
         auto* const io = async_scheduler::io_or_null();
         more |= step_threadless(compute);
@@ -289,11 +318,14 @@ bool cc::pump_main_thread(double max_ms)
     };
 
     if (max_ms <= 0)
-        return cycle();
+    {
+        (void)cycle(0);
+        return home.has_queued_work();
+    }
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::duration<double, std::milli>(max_ms);
-    while (cycle())
-        if (std::chrono::steady_clock::now() >= deadline)
-            return true;
+    auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
+    while (cycle(deadline))
+        if (cc::current_time_steady_secs() >= deadline)
+            return home.has_queued_work();
     return false;
 }

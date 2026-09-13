@@ -122,9 +122,16 @@ bool cc::thread_pump_all()
     auto more = false;
     if (auto* const home = cc::impl::async_tls().home)
         more = home->pump_cycle();
+    more |= cc::impl::thread_pump_registry();
+    return more;
+}
 
+bool cc::impl::thread_pump_registry()
+{
     if (g_registration_count.load() == 0)
-        return more;
+        return false;
+
+    auto more = false;
 
     // Snapshot under the lock, call outside it: a pump is free to register or deregister — an actor handler creating
     // another actor does exactly that — and holding the lock across the call would deadlock on it.

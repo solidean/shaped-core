@@ -62,7 +62,8 @@ public:
 public:
     /// Runs queued items until empty or `max_ms` of wall-clock elapses; max_ms <= 0 runs one bounded cycle.
     /// A cycle runs at most what was queued when it started, so a body that yields in a loop cannot pin the caller.
-    /// Returns true if work is still pending.
+    /// The budget is checked between items, so one long body overruns it.
+    /// Returns true if work is still queued.
     bool pump_for(double max_ms);
 
     /// Runs everything queued, including what that work queues in turn, until nothing is left.
@@ -71,8 +72,9 @@ public:
     void drain();
 
     /// One bounded cycle, for the blocking waits that service a home between their own steps.
+    /// Stops between items once the steady clock passes `deadline_secs` (cc::current_time_steady_secs), leaving the rest queued first; 0 is no deadline.
     /// Returns true if anything ran.
-    bool pump_cycle();
+    bool pump_cycle(double deadline_secs = 0);
 
     /// Whether anything is queued; racy by nature, for wait loops that re-check.
     [[nodiscard]] bool has_queued_work() const;
@@ -92,6 +94,14 @@ private:
     };
 
     void push(item it);
+#if CC_HAS_THREADS
+    /// Called by the pool the owner parked in, as it leaves; under _mutex, which is what lets push wake that pool safely.
+    void clear_parked_in()
+    {
+        std::lock_guard const lock(_mutex);
+        _parked_in.store(nullptr, cc::memory_order_relaxed);
+    }
+#endif
     bool take_one(item& out);
     void run(item it);
 
@@ -109,7 +119,7 @@ private:
     std::condition_variable _work_cv;
     cc::vector<item> _incoming;
 
-    /// The pool the owner is parked in as a participant, or null — read by submit under _mutex to wake it there.
+    /// The pool the owner is parked in as a participant, or null — read, woken and cleared only under _mutex.
     cc::atomic<async_thread_pool*> _parked_in = {nullptr};
 #endif
 };
@@ -124,6 +134,7 @@ namespace cc
 /// and io schedulers have no threads of their own — steps those too.
 ///
 /// Repeats until nothing progresses or `max_ms` elapses; max_ms <= 0 runs one cycle.
-/// The budget is checked between items, so one long body overruns it; true means it stopped with work still pending.
+/// The budget is checked between the main home's items, so one long body overruns it.
+/// Returns true if the main home still has work queued.
 bool pump_main_thread(double max_ms = 0);
 } // namespace cc
