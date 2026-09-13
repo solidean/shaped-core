@@ -9,7 +9,7 @@
 
 using namespace cc::primitive_defines;
 
-// Exercises the sg-level built-in cache (ctx.cached) end to end on WARP: group-layout and pipeline-layout
+// Exercises the sg-level built-in cache (ctx.cached) end to end: group-layout and pipeline-layout
 // acquire each dedup to one handle, compute-pipeline acquire dedups to one async node, the async resolves
 // (driven inline here — no pool installed), and the cached pipeline actually dispatches correctly.
 
@@ -37,9 +37,9 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline")
+INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context(); // fresh context -> empty built-in cache
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
@@ -100,9 +100,9 @@ TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + asy
     CHECK(ok);
 }
 
-TEST("sg pipeline_cache - static samplers participate in the layout key")
+INVOCABLE_TEST("sg pipeline_cache - static samplers participate in the layout key",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
@@ -124,9 +124,9 @@ TEST("sg pipeline_cache - static samplers participate in the layout key")
     CHECK(a.get() != b.get());       // a different static sampler => a different cached group layout
 }
 
-TEST("sg pipeline_cache - a different shader yields a different pipeline node")
+INVOCABLE_TEST("sg pipeline_cache - a different shader yields a different pipeline node",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
@@ -152,9 +152,9 @@ TEST("sg pipeline_cache - a different shader yields a different pipeline node")
     (void)cc::try_async_blocking_get(other);
 }
 
-TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key")
+INVOCABLE_TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
@@ -185,9 +185,9 @@ TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipe
     CHECK(a.get() != b.get());       // a different static sampler => a different cached pipeline layout
 }
 
-TEST("sg pipeline_cache - inline constants participate in the pipeline-layout key")
+INVOCABLE_TEST("sg pipeline_cache - inline constants participate in the pipeline-layout key",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 

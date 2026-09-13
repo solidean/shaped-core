@@ -12,7 +12,7 @@
 //   - hardware: the real GPU; SKIPs when none is available.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
-// A test that needs a context of its own — pristine pool/epoch state, or a backend knob — stays an ordinary TEST and takes one from make_test_context.
+// A test whose subject is the context itself — pristine pool/epoch state, a backend knob, two contexts — stays an ordinary TEST and takes one from make_test_context.
 
 namespace
 {
@@ -28,11 +28,16 @@ TEST("sg dx12 backend - warp")
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
         SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
 
-    auto ctx = dx12::make_test_context();
+    auto ctx = dx12::as_test_context(
+        sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp}));
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
+    {
+        // The driver is the one place that knows which adapter it asked for, so the flag is checked here rather than in a test.
+        CHECK(ctx.value()->adapter().is_software);
         nx::invoke_tests("warp", ctx.value());
+    }
 }
 
 TEST("sg dx12 backend - hardware")
@@ -42,7 +47,10 @@ TEST("sg dx12 backend - hardware")
     if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
+    {
+        CHECK(!ctx.value()->adapter().is_software);
         nx::invoke_tests("hardware", ctx.value());
+    }
 }
 
 // One alias per invocable, so `dev.py test "sg dx12 - <name>"` still selects that one test, on both adapters.

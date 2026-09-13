@@ -125,8 +125,9 @@ The invocables under one driver run in turn on one context, so each leaves it as
 Every list is submitted or dropped, and a test that swaps the validation callback reinstalls the failing one before it returns.
 An assertion on a counter the context has already advanced — the epoch, a pool's free count — is written against a snapshot taken at the start of the test rather than against zero.
 
-Write an ordinary `TEST` only when the test needs a context of its own: the context itself is the subject, a backend config knob is, or pristine epoch / pool state a snapshot cannot stand in for.
-`dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and such a test carries `exclusive("gpu")`.
+Write an ordinary `TEST` only when the context itself is the subject: pristine epoch / pool state a snapshot cannot stand in for, a backend config knob, or more than one context.
+`dx12::make_test_context({…})` in [`dx12-test-common.hh`](../backends/dx12/tests/dx12-test-common.hh) is how to get one, and `make_fresh_context()` is the same with no knobs.
+Both take `dx12_adapter::hardware_or_warp`, so such a test follows the adapter rules too.
 The vulkan one is `vulkan::test::make_context({…})` in [`vulkan-test-common.hh`](../backends/vulkan/tests/vulkan-test-common.hh), and its test carries `exclusive("vulkan-device")`.
 
 ### Drive through the abstract API even though the handle is backend-typed

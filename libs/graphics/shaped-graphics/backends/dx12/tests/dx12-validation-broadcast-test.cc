@@ -50,12 +50,12 @@ void provoke_validation_message(dx12::dx12_context& ctx)
 TEST("sg dx12 - a debug-layer message reaches every context's listener")
 {
     // Two contexts, so "which device raised it" and "which listener saw it" are different questions.
-    auto first = dx12::make_warp_context();
+    auto first = dx12::make_fresh_context();
     if (first == nullptr)
-        SKIP("no WARP adapter");
-    auto second = dx12::make_warp_context();
+        SKIP("no dx12 adapter");
+    auto second = dx12::make_fresh_context();
     if (second == nullptr)
-        SKIP("could not create a second WARP context");
+        SKIP("could not create a second dx12 context");
 
     // The provocation is this test's subject, so the shared listener must not fail the test on it.
     dx12::scoped_expected_validation_messages const expect_complaint;
