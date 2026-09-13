@@ -204,4 +204,6 @@ private:
     /// interactive() owns the viewer it opens, so it starts the loop the same way frames() does.
     friend frame_range interactive(cc::string_view id, viewer_config config);
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config);
+    friend frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture);
+    friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config, sr::capture_request capture);
 };

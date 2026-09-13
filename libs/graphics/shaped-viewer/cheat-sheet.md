@@ -696,6 +696,8 @@ sv::interactive("id", cfg)       // -> frame_range owning its viewer; cfg = view
                                  //   headless: no window system, no window, no swapchain, nothing presented — composites into an offscreen texture
                                  //   SC_CAPTURE turns this on by itself and installs a capture, but only for an example its .capture.json declares
 sv::interactive(ctx, "id", cfg)  // the same on a context the caller owns and keeps alive
+sv::interactive([ctx,] "id", cfg, req)  // takes this sr::capture_request instead of the environment; req must be active with an output path
+                                 //   how a test reaches req.clock_seconds, so a capture timeout is advanced rather than waited out
 sv::viewer::try_create("id", cfg) / ::create("id", cfg)        // the viewer by hand; also the (ctx, ...) overloads
 viewer.frames() -> frame_range;  viewer.request_close()
                                  //   yields sv::frame_scope: a frame whose destructor presents, so the loop body needs no present call

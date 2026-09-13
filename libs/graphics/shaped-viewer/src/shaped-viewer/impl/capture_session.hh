@@ -73,7 +73,7 @@ private:
     bool _done = false;
     bool _settled_before_writing = false;
 
-    /// Steady-clock ticks, kept as a double of seconds so this header pulls in no <chrono>.
+    /// The request's `clock_seconds` as the loop opened.
     double _start_seconds = 0.0;
 };
 
