@@ -188,12 +188,12 @@ TEST("bench - pause excludes its span from the measurement", nx::config::exclusi
     // Where it is not, the clock is a call -- ~275 ns on wasm, ~430 ns once threads are on -- which is the same order
     // as the paused span here, so the fraction sits near 0.5 and a fixed threshold falls on either side of it.
     // has_cheap_counter is the right discriminator because the cost of reading the clock is the actual cause.
-    //
-    // Paying for more paused work is not the alternative: warmup budgets on MEASURED time, which the pause excludes,
-    // so it doubles to 131071 iterations here and the body's wall cost multiplies straight through -- 20x the loop
-    // took this test from 2.4 s to 43 s on x86.
     auto const& cal = nx::bench::calibrated();
     CHECK(r.paused_fraction > (cal.has_cheap_counter ? 0.5 : 0.3));
+
+    // The warmup budget is wall time, so the pause cannot hide the body's cost from it.
+    // Charged against measured time instead, the doubling ran to 131071 iterations here — 3.9 s for a 1 ms budget.
+    CHECK(r.warmup_iterations < 4096);
 
     // But it is NOT what the warning fires on.
     // The warning is about the pair's cost against what was MEASURED, and those are different numbers — so it tracks
