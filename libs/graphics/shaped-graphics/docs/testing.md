@@ -19,6 +19,26 @@ uv run dev.py test                                                        # the 
 
 ---
 
+## Devices and adapters
+
+These rules bind every GPU test in the repo — sg's two tiers, and the libraries above sg (sr, sv, the shader compiler) alike.
+
+- **A test binary shares its devices.** One context per adapter, brought up by an entry driver that `nx::invoke_tests`es every test against it, which is the tier-1 shape below.
+  A device is expensive to create and to tear down, and several alive at once contend in the driver.
+  A test builds a context of its own only when the context itself is its subject — creation, teardown, a config knob, pristine epoch or pool state.
+- **The hardware adapter is the default.** It is what the code ships on, and it is fast.
+  WARP runs where there is no hardware adapter, which is what a headless CI host is, and under `--thorough` as a second pass on a machine that has one.
+  The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
+  `SC_DX12_ADAPTER=warp` pins `dx12_adapter::hardware_or_warp` to WARP for a whole process, which is how to reproduce a GPU-less run locally.
+- **A test passes on any adapter.**
+  Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
+  Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.
+- **Never assert bytes that depend on the adapter.**
+  A serialized PSO, a floating-point readback compared exactly, or anything else one driver produces differently from another is not a stable expectation.
+  Compare within a tolerance, or assert the property instead.
+
+---
+
 ## Tier 1 — backend-agnostic API tests (`tests/`)
 
 This is the primary suite and **the default home for a new test.** It validates the public `sg` contract
@@ -37,7 +57,8 @@ INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::contex
 
 It becomes runnable against each backend by two pieces working together:
 
-- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context (dx12 on WARP, …) and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+  The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
@@ -80,7 +101,7 @@ and each topic file is added to the `if(_sg_test_drivers)` block in the library
 
 ## Tier 2 — per-backend suites (`backends/<backend>/tests/`)
 
-Each backend has its **own `*-test` binary**, built only where that backend builds, and running on a software adapter where possible (dx12 → WARP) so it also runs on headless CI.
+Each backend has its **own `*-test` binary**, built only where that backend builds, and runs on the adapters [Devices and adapters](#devices-and-adapters) prescribes.
 Two kinds of test belong here:
 
 1. **Feature smoke tests** — one straightforward end-to-end exercise per feature, confirming the backend's own path works against a live device.
@@ -93,8 +114,9 @@ Two kinds of test belong here:
 ### A tier-2 test is an invocable too, unless it needs its own context
 
 The dx12 suite has the same driver shape as tier 1.
-[`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one WARP and one hardware context, and invokes every `INVOCABLE_TEST` in the binary against each.
-So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`, which also gets it exercised on the real GPU for free.
+[`dx12-entry.cc`](../backends/dx12/tests/dx12-entry.cc) brings up one hardware and one WARP context, and invokes every `INVOCABLE_TEST` in the binary against each.
+The WARP one runs only where the adapter rules call for it.
+So the default for a new tier-2 test is `INVOCABLE_TEST("sg dx12 - …", (dx12::dx12_context_handle const& ctx))`.
 The parameter is the **backend-typed** handle, unlike tier 1's `sg::context_handle`: a suite committed to one backend should not have to downcast to read its guts.
 
 Write an ordinary `TEST` only when the test needs a context of its own: pristine epoch / pool state, or a `dx12_config` knob it is about.

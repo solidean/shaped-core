@@ -9,8 +9,8 @@
 // Both carry the debug layer and the fail-on-validation listener; see dx12-test-common.hh.
 //
 // Two adapters, which is the point of having drivers at all:
-//   - WARP (software): present on any Windows host, so the suite also runs headless on CI.
 //   - hardware: the real GPU; SKIPs when none is available.
+//   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // A test that needs a context of its own — pristine pool/epoch state, or a backend knob — stays an ordinary TEST and takes one from make_test_context.
 
@@ -24,6 +24,10 @@ constexpr char const* hardware_driver = "sg dx12 backend - hardware";
 
 TEST("sg dx12 backend - warp")
 {
+    // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
+    if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
+        SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
+
     auto ctx = dx12::make_test_context();
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
@@ -33,7 +37,8 @@ TEST("sg dx12 backend - warp")
 
 TEST("sg dx12 backend - hardware")
 {
-    auto ctx = dx12::as_test_context(sg::create_dx12_context({.enable_debug_layer = true, .use_warp = false}));
+    auto ctx = dx12::as_test_context(
+        sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware}));
     if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else

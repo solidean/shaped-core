@@ -10,8 +10,8 @@
 // Compiled only where the dx12 backend builds, so Windows.
 // They carry the slib-shader-library tag because the invocables they dispatch stand up a slib::shader_library, which is a process-wide singleton.
 // Two adapters are covered, both with the debug layer on:
-//   - WARP (software): present on any Windows host, so it also runs headless on CI.
 //   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI).
+//   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 
 namespace
 {
@@ -41,7 +41,11 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 
 TEST("sg dx12 warp backend", exclusive("slib-shader-library"))
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
+    if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
+        SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
+
+    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
@@ -53,7 +57,8 @@ TEST("sg dx12 warp backend", exclusive("slib-shader-library"))
 
 TEST("sg dx12 hardware backend", exclusive("slib-shader-library"))
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = false});
+    auto ctx
+        = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else

@@ -27,11 +27,11 @@ That is what lets each backend **evolve on its own schedule** as its API demands
 
 Each backend has its **own `*-test` binary** (`shaped-graphics-dx12-test`), built only where that backend builds.
 The dx12 suite is gated to Windows by CMake, so it needs no `#ifdef`.
-It runs on the **WARP** software adapter, present on any Windows host, so the whole suite also runs on headless CI, and on the real GPU as well when there is one.
+It runs on the hardware adapter, and on the **WARP** software adapter where there is none — a headless CI host — or under `--thorough`; [testing](../testing.md#devices-and-adapters) owns those rules.
 
 Both adapters come from the same mechanism tier 1 uses: two **entry drivers** in [`dx12-entry.cc`](../../backends/dx12/tests/dx12-entry.cc).
 Each brings up one context and `nx::invoke_tests`es every `INVOCABLE_TEST` in the binary against it.
-So the suite costs two devices rather than one per test — the shape it used to have, which was a throughput hazard and needed an `exclusive("gpu")` tag on every test to stay stable.
+So the suite costs at most two devices rather than one per test — the shape it used to have, which was a throughput hazard and needed an `exclusive("gpu")` tag on every test to stay stable.
 **That tag is gone.** Nothing in the dx12 suite is serialized against the GPU any more.
 The two drivers and the dozen tests that build a context of their own run concurrently at `-jN`, so several live `dx12_context`s are the normal state rather than an untested corner.
 An alias per invocable keeps `dev.py test "sg dx12 - <name>"` selecting that one test, on both adapters.
