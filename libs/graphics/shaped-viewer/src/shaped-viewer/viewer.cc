@@ -1,10 +1,12 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -543,6 +545,14 @@ frame viewer::acquire_frame()
     // A frame boundary is where it belongs — after the previous frame's advance_epoch, before this frame's first
     // acquire, and outside any open command list, which is exactly here.
     (void)im.ctx->routines.tick();
+
+#if !CC_HAS_THREADS
+    // Without threads the ambient scheduler has no worker, so what an earlier frame scheduled runs only when this thread steps it.
+    // The tick steps it only while some routine still needs init, so a raytracing pipeline queued after the last one came up would never build.
+    while (cc::ambient_async_scheduler().try_run_one())
+    {
+    }
+#endif
 
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
