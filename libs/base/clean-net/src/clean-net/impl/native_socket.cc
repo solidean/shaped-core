@@ -19,6 +19,7 @@
 // Sorted order puts ws2tcpip first and does not compile.
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 // clang-format on
 #else
 #include <arpa/inet.h>
@@ -329,6 +330,20 @@ cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& wher
         return cc::error(error{.code = error_code::invalid_argument,
                                .native_code = 0,
                                .message = cc::string("connect: the endpoint has no address")});
+
+#if defined(_WIN32)
+    // Windows answers a refused connection by retransmitting the SYN, so a closed port takes about two seconds to
+    // refuse even on loopback, where no SYN can be lost and every retry only delays the answer.
+    // Remote peers keep the default: there a retransmission is what survives a dropped packet.
+    // Best effort, since an older stack without the ioctl still connects, just slowly.
+    if (where.address.is_loopback())
+    {
+        auto rto = TCP_INITIAL_RTO_PARAMETERS{.Rtt = TCP_INITIAL_RTO_UNSPECIFIED_RTT,
+                                              .MaxSynRetransmissions = TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS};
+        auto returned = DWORD(0);
+        (void)::WSAIoctl(raw_of(s), SIO_TCP_INITIAL_RTO, &rto, sizeof(rto), nullptr, 0, &returned, nullptr, nullptr);
+    }
+#endif
 
     if (::connect(raw_of(s), reinterpret_cast<sockaddr const*>(&addr), length) == 0)
         return cc::unit{};
