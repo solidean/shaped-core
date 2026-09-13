@@ -7,7 +7,7 @@
 
 using namespace cc::primitive_defines;
 
-// Inline constants (dx12 root constants) end to end on WARP: Out[i] = i*scale + bias.
+// Inline constants (dx12 root constants) end to end: Out[i] = i*scale + bias.
 // {scale, bias} are written straight onto the command list via cmd.compute.set_inline_constants, rather than through a bound buffer.
 // The cbuffer register (b0) is declared on the pipeline layout as inline_constants and kept out of the group layout.
 // Two dispatches in one list also prove the partial (offset) update: the second rewrites only bias while the earlier scale persists in the root signature.

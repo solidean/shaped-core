@@ -9,7 +9,7 @@
 
 using namespace cc::primitive_defines;
 
-// Inline ray tracing (DXR tier 1.1 RayQuery / TraceRayInline) end to end on WARP, with NO ray-tracing pipeline or shader table.
+// Inline ray tracing (DXR tier 1.1 RayQuery / TraceRayInline) end to end, with NO ray-tracing pipeline or shader table.
 // An ordinary compute dispatch traces against a bound TLAS.
 // This proves the tlas-binding path — binding_type::acceleration_structure, the AS SRV descriptor, and the accel_read hazard — is complete on its own.
 //

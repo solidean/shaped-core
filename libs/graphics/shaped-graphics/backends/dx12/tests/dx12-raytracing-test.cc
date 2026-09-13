@@ -7,7 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
-// Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS on WARP, then check the results.
+// Ray-tracing smoke: build a triangle BLAS and a single-instance TLAS, then check the results.
 // The build, the prebuild sizes, and the instance count are all public sg API.
 // The one dx12-exclusive inspection is the storage buffer's GPU virtual address, which has no public equivalent.
 // It is reached by a dynamic cast to the concrete dx12_blas / dx12_tlas, under the tier-2 "cast only to inspect" rule in libs/graphics/shaped-graphics/docs/testing.md.
@@ -28,7 +28,7 @@ sg::raw_buffer_handle upload_triangle_vertices(dx12::dx12_context_handle const& 
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas on WARP", (dx12::dx12_context_handle const& handle))
+INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
 

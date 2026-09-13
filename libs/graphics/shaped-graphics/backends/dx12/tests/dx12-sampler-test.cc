@@ -10,7 +10,7 @@
 #include <shaped-graphics/binding/sampler.hh>
 
 // dx12 samplers: the sampler -> D3D12 translation, which is pure.
-// Plus, on WARP, that a root signature with a static + a dynamic sampler, and a binding group with a dynamic sampler, are accepted by the debug layer.
+// Plus that a root signature with a static + a dynamic sampler, and a binding group with a dynamic sampler, are accepted by the debug layer.
 // No sampling shader is dispatched, so this covers the descriptor / root-signature wiring only.
 
 namespace
@@ -70,7 +70,7 @@ TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
     CHECK(st.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER);
 }
 
-INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group build on WARP",
+INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group build",
                (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
@@ -135,7 +135,7 @@ INVOCABLE_TEST("sg dx12 - a missing dynamic sampler is rejected at group creatio
     CHECK_THROWS_AS(c.persistent.create_binding_group(layout, {}, wrong), sg::binding_group_exception);
 }
 
-INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature on WARP",
+INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root signature",
                (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
