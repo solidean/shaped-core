@@ -81,3 +81,6 @@ imgui.ini
 # Checked in on purpose; re-included despite the build/binary rules above.
 !tools/bin/
 !tools/bin/**
+
+# Worktrees Claude Code creates for isolated agents; never part of the tree, and a change scope must not see them.
+.claude/worktrees/
