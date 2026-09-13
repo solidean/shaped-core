@@ -206,7 +206,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
 - **Migrate the suites to `ASYNC_TEST`.**
   nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
-  What blocks it is that `cc::async` cannot resume on the main thread, and `ASYNC_TEST` asserts against nexus's `main_thread` flag — which the window and present suites need.
+  The blocker was that `cc::async` could not resume on the main thread; a coroutine now can, with `co_await cc::async_resume_on_main()`.
+  `ASYNC_TEST` still asserts against nexus's `main_thread` flag, so the window and present suites hop inside the test body rather than asking for the flag.
   Closing that in clean-core is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.

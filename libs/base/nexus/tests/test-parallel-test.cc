@@ -109,7 +109,7 @@ TEST("parallel - -j1 runs the tests in schedule order", no_scheduler)
         CHECK(order[i] == cc::format("t{}", i));
 }
 
-TEST("parallel - exclusive tag holders never overlap, and run in schedule order", no_scheduler)
+TEST("parallel - exclusive tag holders never overlap", no_scheduler)
 {
     // "gpu" holders must be serialized against each other while the untagged tests are free to run alongside them.
     cc::atomic<int> gpu_live = {0};
@@ -140,10 +140,15 @@ TEST("parallel - exclusive tag holders never overlap, and run in schedule order"
     CHECK(exec.count_failed_tests() == 0);
     CHECK(gpu_overlaps.load(cc::memory_order_acquire) == 0);
 
-    // An edge fixes the order, not merely the exclusion — so the holders run in the order the schedule listed them.
+    // A lock serializes the holders without fixing their order under -jN: every holder ran, each exactly once.
     REQUIRE(gpu_order.size() == 6);
     for (auto i = 0; i < 6; ++i)
-        CHECK(gpu_order[i] == cc::format("g{}", i));
+    {
+        auto count = 0;
+        for (auto const& g : gpu_order)
+            count += g == cc::format("g{}", i) ? 1 : 0;
+        CHECK(count == 1);
+    }
 }
 
 TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
@@ -185,33 +190,7 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
     CHECK(seen_beside_the_barrier.load(cc::memory_order_acquire) == 0);
 }
 
-TEST("parallel - a no-arg exclusive test is routed off the scheduler entirely", no_scheduler)
-{
-    // Running beside nothing is exactly what the no-scheduler group already delivers, so a barrier is scheduled there instead of as a node with an edge to every test before it.
-    // Observable as the body landing on the run's OWN calling thread.
-    // A plain test may land there too — the caller participates as a worker — so only the barrier's thread is pinned.
-    auto const caller = cc::current_thread_id();
-    auto barrier_thread = cc::thread_id::invalid;
-
-    nx::test_registry reg;
-    for (auto i = 0; i < 4; ++i)
-        reg.add_declaration(cc::format("busy{}", i), {}, [] { CHECK(true); });
-    reg.add_declaration("alone", nx::impl::merge_config(nx::config::exclusive()),
-                        [&]
-                        {
-                            barrier_thread = cc::current_thread_id();
-                            CHECK(true);
-                        });
-
-    auto const schedule = nx::test_schedule::create({}, reg);
-    auto const exec = nx::execute_tests(schedule, with_jobs(4));
-
-    CHECK(exec.count_failed_tests() == 0);
-    CHECK(barrier_thread == caller);
-}
-
-// The routing above must not reach an async body: with no scheduler bound, nothing would drive the root it hands back.
-// This test is the canary — it only passes if an exclusive ASYNC_TEST kept its scheduler.
+// An exclusive ASYNC_TEST holds the phase lock across its suspends, and still has a scheduler to drive the root it hands back.
 ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusive())
 {
     return cc::make_async_lazy<cc::unit>(
@@ -249,11 +228,10 @@ TEST("parallel - a main_thread test runs on the process main thread", no_schedul
     CHECK(pinned_thread == cc::thread_id::main);
 }
 
-TEST("parallel - main_thread and no_scheduler are separate phases, each in schedule order", no_scheduler)
+TEST("parallel - main_thread and no_scheduler are separate phases", no_scheduler)
 {
-    // Both drive their bodies on the calling thread, but they ask for different AMBIENT schedulers — a pool against nothing at all —
-    // and a phase installs one for its whole run, so the two cannot be interleaved.
-    // Phase order is first appearance, so every main_thread body runs before the first no_scheduler one.
+    // A main_thread test is a node in the shared phase, and a no_scheduler one is driven in a phase of its own, so the two cannot be interleaved.
+    // Phase order is first appearance, so every main_thread body runs before the first no_scheduler one; the no_scheduler phase keeps schedule order.
     cc::vector<cc::string> order;
 
     nx::test_registry reg;
@@ -280,14 +258,57 @@ TEST("parallel - main_thread and no_scheduler are separate phases, each in sched
     REQUIRE(order.size() == 6);
     for (auto i = 0; i < 3; ++i)
     {
-        CHECK(order[i] == cc::format("m{}", i));
+        CHECK(order[i].starts_with("m"));
         CHECK(order[3 + i] == cc::format("n{}", i));
     }
 }
 
+#if CC_HAS_THREADS
+TEST("parallel - a main_thread test runs beside the shared phase", no_scheduler)
+{
+    // The overlap is forced rather than hoped for: each side waits, with a deadline, for the other to be live.
+    REQUIRE(cc::current_thread_id() == cc::thread_id::main);
+    cc::atomic<bool> main_live = {false};
+    cc::atomic<bool> pool_live = {false};
+    cc::atomic<bool> main_saw_pool = {false};
+    cc::atomic<bool> pool_saw_main = {false};
+
+    auto const wait_for = [](cc::atomic<bool>& flag)
+    {
+        auto const deadline = cc::current_time_steady_secs() + 10.0;
+        while (!flag.load(cc::memory_order_acquire) && cc::current_time_steady_secs() < deadline)
+            cc::this_thread_yield();
+        return flag.load(cc::memory_order_acquire);
+    };
+
+    nx::test_registry reg;
+    reg.add_declaration("on-main", nx::impl::merge_config(nx::config::main_thread),
+                        [&]
+                        {
+                            main_live.store(true, cc::memory_order_release);
+                            main_saw_pool.store(wait_for(pool_live), cc::memory_order_release);
+                            CHECK(cc::current_thread_id() == cc::thread_id::main);
+                        });
+    reg.add_declaration("on-pool", {},
+                        [&]
+                        {
+                            pool_live.store(true, cc::memory_order_release);
+                            pool_saw_main.store(wait_for(main_live), cc::memory_order_release);
+                            CHECK(true);
+                        });
+
+    auto const schedule = nx::test_schedule::create({}, reg);
+    auto const exec = nx::execute_tests(schedule, with_jobs(4));
+
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(main_saw_pool.load(cc::memory_order_acquire));
+    CHECK(pool_saw_main.load(cc::memory_order_acquire));
+}
+#endif
+
 TEST("parallel - main_thread composes with exclusive()", no_scheduler)
 {
-    // Both route into the same group; the guard is that asking for both still runs the body once, on main, beside nothing.
+    // The body is handed to main, and the phase's exclusive lock keeps everything else out while it runs.
     auto pinned_thread = cc::thread_id::invalid;
     cc::atomic<int> live = {0};
     cc::atomic<int> seen_beside = {0};

@@ -179,8 +179,9 @@ constexpr struct
 } example;
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
-// Expressed as an ordering edge between test nodes rather than a lock, so it is deadlock-free by construction and reproducible: holders run in schedule order.
-// Repeat it to hold several tags — a test then waits for the last holder of each.
+// Expressed as locks the test node takes before its body: one async mutex per tag, and a phase-wide shared lock that this holds exclusively.
+// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs the schedule in order.
+// Repeat it to hold several tags — they are taken in name order, which keeps two multi-tag tests from deadlocking.
 constexpr auto exclusive(char const* tag = nullptr)
 {
     struct excluder
@@ -229,7 +230,8 @@ constexpr struct
 
 // Run this test's body on the process MAIN thread — the one nx::run was entered on.
 // For a test whose subject asserts on it: sr::window_system does, because SDL does.
-// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound.
+// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound, and not that nothing else runs.
+// A main_thread body runs beside the shared phase, and main_thread bodies run one at a time among themselves; add exclusive() to run alone.
 // own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
 constexpr struct
 {

@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/common/time.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
@@ -450,9 +451,10 @@ TEST("async home - a main-homed node completes through pump_main_thread", nx::co
                 return 9;
             });
 
-        auto const deadline_rounds = 100000;
-        for (auto i = 0; i < deadline_rounds && !node->is_ready(); ++i)
-            (void)cc::pump_main_thread();
+        // Bounded by time, not by rounds: the test runs beside the shared phase, so the machine may be busy.
+        auto const deadline = cc::current_time_steady_secs() + 10.0;
+        while (!node->is_ready() && cc::current_time_steady_secs() < deadline)
+            (void)cc::pump_main_thread(1.0);
 
         REQUIRE(node->is_ready());
         CHECK(node->value() == 9);
@@ -497,12 +499,20 @@ TEST("async home - a yielding main-homed body does not pin pump_main_thread", nx
 
     {
         auto const root = cc::async_start(spinner());
+        auto const deadline = cc::current_time_steady_secs() + 10.0;
+
+        // Its first segment runs wherever async_start sent it; pump until it has hopped home and started spinning.
+        while (polls.load() == 0 && cc::current_time_steady_secs() < deadline)
+            (void)cc::pump_main_thread();
+        REQUIRE(polls.load() > 0);
 
         // One cycle runs what was queued when it started, and a yield re-queues behind that snapshot.
+        // The sweep inside pump_main_thread runs the home a second time, so one call may take two segments, never the rest.
+        auto const before = polls.load();
         (void)cc::pump_main_thread();
-        CHECK(polls.load() < 50);
+        CHECK(polls.load() - before <= 2);
 
-        for (auto i = 0; i < 1000 && !root->is_ready(); ++i)
+        while (!root->is_ready() && cc::current_time_steady_secs() < deadline)
             (void)cc::pump_main_thread();
         CHECK(root->is_ready());
     }

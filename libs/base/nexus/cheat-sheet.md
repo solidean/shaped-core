@@ -32,17 +32,18 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 
 // Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
-TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all; a synchronous one is
-                                         //     routed into the no-scheduler group, so it costs no barrier and no node
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all
 TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — NO ambient scheduler at all: none bound, none
                                          //     installed. For a test standing up its own, and REQUIRED to nest
                                          //     nx::execute_tests. Touching an async without one asserts.
 TEST("order matters", singlethreaded) { }//   singlethreaded  — ambient cc::singlethreaded_scheduler: every graph
                                          //     runs inline on the body's thread, in order
 TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
-                                         //     a flag, not a mode, so it composes; own_pool / ASYNC_TEST assert
+                                         //     a flag, not a mode, so it composes; runs BESIDE the shared phase (add
+                                         //     exclusive() to run alone); own_pool / ASYNC_TEST assert
 TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
-// Exclusion is an ORDERING edge, not a lock: holders run in schedule order, which is reproducible by design.
+// Exclusion is LOCKS (cc::async_mutex per tag + a phase-wide shared lock): holders PARK, and run in arrival order
+// under -jN — only -j1 keeps schedule order. Tags are taken in name order, so multi-tag tests cannot deadlock.
 
 #include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
 ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexus awaits the body
@@ -68,7 +69,7 @@ EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run 
     cc::println("{} elements", v.size());
 }
 // The name is a slash path: it is the CLI argument and the gallery entry, so it is an identifier, not a sentence.
-// `main_thread` is baked in, so the body runs on the thread nx::run was entered on, one example at a time.
+// `main_thread` and `exclusive()` are baked in, so the body runs on the thread nx::run was entered on, alone.
 // The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
 ```
 
