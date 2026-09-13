@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -191,7 +193,7 @@ struct politeness_fixture
 };
 } // namespace
 
-TEST("cnet - a request that succeeds is not retried")
+CNET_IO_TEST("cnet - a request that succeeds is not retried")
 {
     auto fixture = politeness_fixture({});
     fixture.under.script = {{.status = 200}};
@@ -203,7 +205,7 @@ TEST("cnet - a request that succeeds is not retried")
     CHECK(fixture.under.calls == 1);
 }
 
-TEST("cnet - a failed idempotent request is retried after a backoff")
+CNET_IO_TEST("cnet - a failed idempotent request is retried after a backoff")
 {
     auto fixture = politeness_fixture({.backoff_base_ms = 250, .backoff_jitter = 0});
     fixture.under.script = {{.fail = true}, {.fail = true}, {.status = 200}};
@@ -229,7 +231,7 @@ TEST("cnet - a failed idempotent request is retried after a backoff")
     CHECK(fixture.under.calls == 3);
 }
 
-TEST("cnet - retries stop at the limit and the failure is handed back")
+CNET_IO_TEST("cnet - retries stop at the limit and the failure is handed back")
 {
     auto fixture = politeness_fixture({.max_retries = 2, .backoff_base_ms = 10, .backoff_jitter = 0});
     fixture.under.script = {{.fail = true}};
@@ -249,7 +251,7 @@ TEST("cnet - retries stop at the limit and the failure is handed back")
     CHECK(fixture.under.calls == 3);
 }
 
-TEST("cnet - a POST is not retried, because sending it twice is a second order")
+CNET_IO_TEST("cnet - a POST is not retried, because sending it twice is a second order")
 {
     auto fixture = politeness_fixture({.backoff_base_ms = 10, .backoff_jitter = 0});
     fixture.under.script = {{.fail = true}, {.status = 200}};
@@ -261,7 +263,7 @@ TEST("cnet - a POST is not retried, because sending it twice is a second order")
     CHECK(fixture.under.calls == 1);
 }
 
-TEST("cnet - a 429 is waited out for exactly as long as it asked")
+CNET_IO_TEST("cnet - a 429 is waited out for exactly as long as it asked")
 {
     auto fixture = politeness_fixture({.backoff_base_ms = 10, .backoff_jitter = 0});
     fixture.under.script = {{.status = 429, .retry_after = "2"}, {.status = 200}};
@@ -280,7 +282,7 @@ TEST("cnet - a 429 is waited out for exactly as long as it asked")
     CHECK(fixture.under.calls == 2);
 }
 
-TEST("cnet - a 503 is retried and a 404 is not")
+CNET_IO_TEST("cnet - a 503 is retried and a 404 is not")
 {
     auto retried = politeness_fixture({.backoff_base_ms = 10, .backoff_jitter = 0});
     retried.under.script = {{.status = 503}, {.status = 200}};
@@ -302,7 +304,7 @@ TEST("cnet - a 503 is retried and a 404 is not")
     CHECK(kept.under.calls == 1);
 }
 
-TEST("cnet - a response that reached the caller is never sent twice")
+CNET_IO_TEST("cnet - a response that reached the caller is never sent twice")
 {
     auto fixture = politeness_fixture({.backoff_base_ms = 10, .backoff_jitter = 0});
 
@@ -317,7 +319,7 @@ TEST("cnet - a response that reached the caller is never sent twice")
     CHECK(fixture.under.calls == 1);
 }
 
-TEST("cnet - only so many requests to one host are in flight at once")
+CNET_IO_TEST("cnet - only so many requests to one host are in flight at once")
 {
     auto fixture = politeness_fixture({.max_concurrent_requests = 2});
     fixture.under.script = {{.status = 200}};
@@ -348,7 +350,7 @@ TEST("cnet - only so many requests to one host are in flight at once")
     CHECK(fixture.client->in_flight("example.test") == 0);
 }
 
-TEST("cnet - the token bucket spaces requests out, and a different host is unaffected")
+CNET_IO_TEST("cnet - the token bucket spaces requests out, and a different host is unaffected")
 {
     auto fixture = politeness_fixture({.requests_per_second = 2, .burst = 1});
     fixture.under.script = {{.status = 200}};
@@ -371,7 +373,7 @@ TEST("cnet - the token bucket spaces requests out, and a different host is unaff
     CHECK(second->try_error() == nullptr);
 }
 
-TEST("cnet - a request that spends its budget waiting fails rather than being sent late")
+CNET_IO_TEST("cnet - a request that spends its budget waiting fails rather than being sent late")
 {
     auto fixture = politeness_fixture({.requests_per_second = 1, .burst = 1});
     fixture.under.script = {{.status = 200}};

@@ -1,8 +1,11 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/common/macros.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/common/cancel.hh>
 #include <clean-net/impl/native_socket.hh>
 #include <clean-net/impl/reactor.hh>
 #include <clean-net/io/io_system.hh>
@@ -151,7 +154,7 @@ struct listener_fixture
 }
 } // namespace
 
-TEST("cnet - an io_system comes up and reports which mode it got")
+CNET_IO_TEST("cnet - an io_system comes up and reports which mode it got")
 {
     auto io = io_system::try_create();
     if (io.has_error())
@@ -170,7 +173,7 @@ TEST("cnet - an io_system comes up and reports which mode it got")
     CHECK(&io.value()->time_source() == &system_clock());
 }
 
-TEST("cnet - the io_system carries a connect and an accept to completion")
+CNET_IO_TEST("cnet - the io_system carries a connect and an accept to completion")
 {
     auto io = io_system::try_create();
     if (io.has_error())
@@ -180,7 +183,7 @@ TEST("cnet - the io_system carries a connect and an accept to completion")
         SKIP("this platform has no sockets");
 }
 
-TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
+CNET_IO_TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
 {
     // The mode a threads-off build and wasm always get, reproduced on a native host so it is debuggable here.
     auto io = io_system::try_create({.unthreaded = true});
@@ -196,7 +199,7 @@ TEST("cnet - an unthreaded io_system is driven by the repo-wide pump alone")
         SKIP("this platform has no sockets");
 }
 
-TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted")
+CNET_IO_TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
@@ -213,7 +216,7 @@ TEST("cnet - an unthreaded reactor starts and stays idle with nothing submitted"
     CHECK(io.value()->pending_count() == 0);
 }
 
-TEST("cnet - a deadline is measured against the clock the io_system was given")
+CNET_IO_TEST("cnet - a deadline is measured against the clock the io_system was given")
 {
     auto clk = manual_clock(0);
     auto io = io_system::try_create({.unthreaded = true, .time_source = &clk});
@@ -247,7 +250,7 @@ TEST("cnet - a deadline is measured against the clock the io_system was given")
     CHECK(receive_op.code == error_code::timed_out);
 }
 
-TEST("cnet - cancelling through the io_system completes the operation as cancelled")
+CNET_IO_TEST("cnet - cancelling through the io_system completes the operation as cancelled")
 {
     auto io = io_system::try_create({.unthreaded = true});
     if (io.has_error())
@@ -273,4 +276,55 @@ TEST("cnet - cancelling through the io_system completes the operation as cancell
     CHECK(wait_for([&] { return receive_op.completed.load(); }));
     CHECK(receive_op.code == error_code::cancelled);
     CHECK(wait_for([&] { return io.value()->pending_count() == 0; }));
+}
+
+CNET_IO_TEST("cnet - submitting into a stopped io_system answers the operation, and the attach that follows is inert")
+{
+    // The one path where `submit` completes the operation itself, so `raw` is destroyed before the call returns.
+    // Every transport attaches a token right after submitting, and reading `raw` there would be a use-after-free --
+    // which is why `attach` takes the submission guard rather than the operation: an empty guard means "already gone".
+    auto io = io_system::try_create({.unthreaded = true});
+    if (io.has_error())
+        SKIP("this platform has no sockets");
+    io.value()->stop();
+
+    struct self_owning_op final : impl::io_operation
+    {
+        cc::unique_ptr<self_owning_op> self;
+        impl::cancel_registration cancellation;
+        bool* destroyed = nullptr;
+        error_code* code = nullptr;
+
+        void on_complete(cc::optional<error> failure) override
+        {
+            auto const keep_alive_until_return = cc::move(self);
+            cancellation.detach();
+            if (failure.has_value())
+                *code = failure.value().code;
+        }
+
+        ~self_owning_op() override { *destroyed = true; }
+    };
+
+    bool destroyed = false;
+    auto code = error_code::unknown;
+
+    auto op = cc::make_unique<self_owning_op>();
+    op->kind = impl::io_op_kind::manual;
+    op->destroyed = &destroyed;
+    op->code = &code;
+
+    auto* const raw = op.get();
+    raw->self = cc::move(op);
+
+    auto const token = cancel_token::create();
+    raw->cancellation.attach(io.value()->submit(raw), token);
+
+    CHECK(destroyed);
+    CHECK(code == error_code::cancelled);
+    CHECK(io.value()->pending_count() == 0);
+
+    // Nothing was registered, so the token has no reference to an operation that no longer exists.
+    token.cancel();
+    CHECK(token.is_cancelled());
 }

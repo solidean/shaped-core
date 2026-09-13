@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
@@ -218,7 +220,7 @@ struct client_fixture
 };
 } // namespace
 
-TEST("cnet - a GET goes out and a response comes back")
+CNET_IO_TEST("cnet - a GET goes out and a response comes back")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
                                    "Content-Type: text/plain\r\n"
@@ -244,7 +246,7 @@ TEST("cnet - a GET goes out and a response comes back")
     CHECK(!fixture.server->last_request.contains("Connection: close"));
 }
 
-TEST("cnet - a chunked response is delivered whole")
+CNET_IO_TEST("cnet - a chunked response is delivered whole")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
                                    "Transfer-Encoding: chunked\r\n"
@@ -259,7 +261,7 @@ TEST("cnet - a chunked response is delivered whole")
     CHECK(response->value().body_text() == "chunk1chunk2");
 }
 
-TEST("cnet - a POST carries its body and its headers")
+CNET_IO_TEST("cnet - a POST carries its body and its headers")
 {
     auto fixture = client_fixture({"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n"});
 
@@ -282,7 +284,7 @@ TEST("cnet - a POST carries its body and its headers")
     CHECK(fixture.server->last_request.contains(payload));
 }
 
-TEST("cnet - a redirect is followed, and the second request is a GET")
+CNET_IO_TEST("cnet - a redirect is followed, and the second request is a GET")
 {
     auto fixture = client_fixture({"HTTP/1.1 302 Found\r\n"
                                    "Location: /elsewhere\r\n"
@@ -315,7 +317,7 @@ TEST("cnet - a redirect is followed, and the second request is a GET")
     CHECK(!fixture.server->last_request.contains("data"));
 }
 
-TEST("cnet - a redirect loop stops at the limit")
+CNET_IO_TEST("cnet - a redirect loop stops at the limit")
 {
     auto fixture = client_fixture({"HTTP/1.1 302 Found\r\nLocation: /again\r\nContent-Length: 0\r\n\r\n"});
 
@@ -327,7 +329,7 @@ TEST("cnet - a redirect loop stops at the limit")
     CHECK(response->value().status() == 302);
 }
 
-TEST("cnet - redirects can be turned off")
+CNET_IO_TEST("cnet - redirects can be turned off")
 {
     auto fixture = client_fixture({"HTTP/1.1 301 Moved\r\nLocation: /new\r\nContent-Length: 0\r\n\r\n"});
 
@@ -338,7 +340,7 @@ TEST("cnet - redirects can be turned off")
     CHECK(response->value().head.headers.get("Location").value() == "/new");
 }
 
-TEST("cnet - a body over the cap is refused rather than buffered")
+CNET_IO_TEST("cnet - a body over the cap is refused rather than buffered")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
                                    "Content-Length: 100\r\n"
@@ -351,7 +353,7 @@ TEST("cnet - a body over the cap is refused rather than buffered")
     CHECK(response->try_error() != nullptr);
 }
 
-TEST("cnet - a sink that pushes back stops the reading and is charged only what it took")
+CNET_IO_TEST("cnet - a sink that pushes back stops the reading and is charged only what it took")
 {
     // Long enough that it cannot arrive in one chunk, and a cap barely above its real length: if the cap counted what
     // the sink was OFFERED rather than what it took, re-offering the same bytes would blow it long before the end.
@@ -429,7 +431,7 @@ TEST("cnet - a sink that pushes back stops the reading and is charged only what 
     CHECK(cc::string_view(consumer->taken) == cc::string_view(body));
 }
 
-TEST("cnet - a streaming response reaches the sink as it arrives")
+CNET_IO_TEST("cnet - a streaming response reaches the sink as it arrives")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
                                    "Transfer-Encoding: chunked\r\n"
@@ -462,7 +464,7 @@ TEST("cnet - a streaming response reaches the sink as it arrives")
     CHECK((*chunks)[1] == "second");
 }
 
-TEST("cnet - a malformed response fails the request rather than being repaired")
+CNET_IO_TEST("cnet - a malformed response fails the request rather than being repaired")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\n"
                                    "Content-Length: 5\r\n"
@@ -476,7 +478,7 @@ TEST("cnet - a malformed response fails the request rather than being repaired")
     CHECK(response->try_error() != nullptr);
 }
 
-TEST("cnet - a URL the client cannot fetch fails before anything happens")
+CNET_IO_TEST("cnet - a URL the client cannot fetch fails before anything happens")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"});
 
@@ -489,7 +491,7 @@ TEST("cnet - a URL the client cannot fetch fails before anything happens")
     CHECK(wrong_scheme->try_error() != nullptr);
 }
 
-TEST("cnet - cancelling a request in flight ends it")
+CNET_IO_TEST("cnet - cancelling a request in flight ends it")
 {
     // A server that never answers: the connection is made and then nothing comes back.
     auto fixture = client_fixture({""});
@@ -506,7 +508,7 @@ TEST("cnet - cancelling a request in flight ends it")
     CHECK(response->try_error()->is_cancelled());
 }
 
-TEST("cnet - a second request to the same origin reuses the connection")
+CNET_IO_TEST("cnet - a second request to the same origin reuses the connection")
 {
     auto fixture = client_fixture(
         {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"});
@@ -530,7 +532,7 @@ TEST("cnet - a second request to the same origin reuses the connection")
     CHECK(!fixture.server->last_request.contains("Connection: close"));
 }
 
-TEST("cnet - a request can refuse to share a connection")
+CNET_IO_TEST("cnet - a request can refuse to share a connection")
 {
     auto fixture = client_fixture(
         {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nab", "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\ncd"});
@@ -549,7 +551,7 @@ TEST("cnet - a request can refuse to share a connection")
     CHECK(fixture.server->accept_count == 2);
 }
 
-TEST("cnet - a pooled connection the server already closed is retried on a fresh one")
+CNET_IO_TEST("cnet - a pooled connection the server already closed is retried on a fresh one")
 {
     auto fixture = client_fixture(
         {"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"});
@@ -571,7 +573,7 @@ TEST("cnet - a pooled connection the server already closed is retried on a fresh
     CHECK(fixture.server->accept_count == 2);
 }
 
-TEST("cnet - a connection is not kept when the response leaves the stream unclean")
+CNET_IO_TEST("cnet - a connection is not kept when the response leaves the stream unclean")
 {
     auto fixture = client_fixture({"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc"});
 

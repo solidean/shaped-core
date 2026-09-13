@@ -117,6 +117,22 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         )
         return result.ok
 
+    def check_dev_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # dev.py's own machinery, which nothing else exercises: the job profile's layout, the change-scope resolver, and
+        # the live progress region.
+        # The region is the one that most needs it — it exists only as escape sequences on a stream, so a frame that
+        # miscounts its own height has no other way of being caught.
+        # Not fixable and not scopable, so fix and scope are ignored.
+        ok = True
+        for runner in ("profile-self-test.py", "changes-self-test.py", "ui-self-test.py"):
+            result = dev.run_step(
+                ["uv", "run", str(ctx.root / "tools" / "dev" / runner)],
+                step_type="selftest", name=runner.removesuffix(".py"),
+                build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            ok = ok and result.ok
+        return ok
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -127,6 +143,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             ctx.policy.default_release.get(system),
             ctx.policy.default_singlethreaded.get(system),
             ctx.policy.default_sanitize.get(system),
+            ctx.policy.default_sanitize_thread.get(system),
         ):
             if sibling:
                 specs.append(sibling)
@@ -167,6 +184,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
                   False, check_deps_licenses),
+        dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region)",
+                  False, check_dev_selftest),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),
         dev.Check("test",

@@ -1,3 +1,5 @@
+#include "cnet-test-types.hh"
+
 #include <clean-core/common/time.hh> // cc::current_time_steady_secs
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
@@ -63,7 +65,7 @@ struct sim_fixture
 };
 } // namespace
 
-TEST("cnet - a simulated link with no conditions set is the transport underneath")
+CNET_IO_TEST("cnet - a simulated link with no conditions set is the transport underneath")
 {
     auto fixture = sim_fixture({});
 
@@ -86,7 +88,7 @@ TEST("cnet - a simulated link with no conditions set is the transport underneath
     CHECK(received->value() == greeting.size());
 }
 
-TEST("cnet - latency is paid on the injected clock rather than in wall-clock time")
+CNET_IO_TEST("cnet - latency is paid on the injected clock rather than in wall-clock time")
 {
     auto fixture = sim_fixture({.latency_ms = 200});
 
@@ -119,7 +121,7 @@ TEST("cnet - latency is paid on the injected clock rather than in wall-clock tim
     CHECK(received->value() == greeting.size());
 }
 
-TEST("cnet - a link cut after N bytes kills the connection mid-stream")
+CNET_IO_TEST("cnet - a link cut after N bytes kills the connection mid-stream")
 {
     auto fixture = sim_fixture({.reset_after_bytes = 8});
 
@@ -153,7 +155,7 @@ TEST("cnet - a link cut after N bytes kills the connection mid-stream")
     CHECK(third->try_error() != nullptr);
 }
 
-TEST("cnet - a link that loses everything refuses the connection")
+CNET_IO_TEST("cnet - a link that loses everything refuses the connection")
 {
     auto fixture = sim_fixture({.loss_probability = 1.0f});
 
@@ -164,7 +166,7 @@ TEST("cnet - a link that loses everything refuses the connection")
     CHECK(connected->try_error() != nullptr);
 }
 
-TEST("cnet - the same seed loses the same operations")
+CNET_IO_TEST("cnet - the same seed loses the same operations")
 {
     // Two links, same seed, same coin flips: a failing run replays from the seed and the conditions alone.
     auto const conditions = link_conditions{.loss_probability = 0.5f, .seed = 12345};

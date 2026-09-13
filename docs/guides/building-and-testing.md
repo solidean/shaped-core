@@ -250,8 +250,20 @@ Its template is [nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-pag
 
 ## Quiet by default, and how to diagnose
 
-dev.py does **not** stream child output.
-For each step it:
+dev.py never streams child output into your scrollback.
+What it does instead depends on where it is running, and the two modes read the same record.
+
+At a **real terminal** it draws a live region at the bottom, one row per running step.
+Each row carries a spinner, an elapsed clock, a progress bar where the step can report one, and the last few lines that step printed.
+A step that succeeds collapses to its one summary line and its rows are erased.
+A step that fails keeps that tail on screen as the evidence, above the usual diagnostic hint.
+So a long run stays one screen tall, and you can see at a glance whether the steps before the current one were fine.
+
+**Piped, redirected, or in CI** — which is every agent-driven run — the region never appears and the output is exactly the terse per-step trace it has always been.
+`--no-progress` selects it explicitly.
+The per-step capture below is common to both modes; the diagnostic hints and the `build_diag` / `test_diag` loop after it are written for this one.
+
+For each step, in both modes, it:
 
 - captures stdout/stderr to `build/<preset>/run-logs/run-log-<name>.{stdout,stderr}.txt`,
 - writes a JSON sidecar in the build dir (`configure.json` / `build.json` / `test.json`),
@@ -272,6 +284,7 @@ These read the artifacts dev.py already emitted, which beats scrolling raw logs.
 Mirroring is additive to capture, so the logs read the same either way; to watch something live as well, reach for the mirror flags under [Useful flags](#useful-flags).
 **Don't pipe dev.py into `tail`/`head`/`grep`.**
 The output is already terse, and `… 2>&1 | tail` reports the pipe's exit code (0) — masking a real failure as success.
+Piping now also changes the mode, so it is doubly not the way to read a run: you lose the live region and gain nothing.
 
 ## Formatting
 
@@ -671,13 +684,15 @@ A `.install/` at the wrong pin is otherwise invisible, and is the thing that mak
 
 ## Sanitizers
 
-The `sanitize-*` presets are Debug builds with AddressSanitizer + UndefinedBehaviorSanitizer
-(`SANITIZE=address,undefined`, wired in the root [CMakeLists.txt](../../CMakeLists.txt)):
+Two families, and they cannot be combined: **`sanitize-*`** is AddressSanitizer + UndefinedBehaviorSanitizer, **`sanitize-thread-*`** is ThreadSanitizer.
+Both are wired through one `SANITIZE` cache variable in the root [CMakeLists.txt](../../CMakeLists.txt).
 
 ```bash
-uv run dev.py test --preset sanitize-linux-clang   # Linux
-uv run dev.py test --preset sanitize-macos-arm-llvm # macOS
-uv run dev.py test --preset sanitize-clang          # Windows (see caveat)
+uv run dev.py test --preset sanitize-linux-clang      # ASan + UBSan, Linux
+uv run dev.py test --preset sanitize-macos-arm-llvm   # ASan + UBSan, macOS
+uv run dev.py test --preset sanitize-clang            # ASan + UBSan, Windows (see caveat)
+uv run dev.py test --preset sanitize-thread-linux-clang    # TSan, Linux
+uv run dev.py test --preset sanitize-thread-macos-arm-llvm # TSan, macOS
 ```
 
 On **Linux and macOS** the clang driver links the sanitizer runtime itself, and these presets are part of the `check` test gate.
@@ -700,11 +715,43 @@ We cannot fix those without diverging from upstream, and a finding nobody will e
 Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
 The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.
 
+### ThreadSanitizer (`sanitize-thread-*`)
+
+`SANITIZE=thread`, and **RelWithDebInfo rather than Debug** — the one place this family's shape differs from the ASan one.
+TSan already costs 5-15x, an unoptimized build compounds it, and optimized-with-symbols is what the tool is tuned for.
+`CC_ASSERT` is therefore on here too.
+
+**Part of the `check` gate on Linux only**, and nowhere else.
+It is a separate full build of the repo at 5-15x test time, so one platform carrying it on every check is the trade.
+That is enough to stop the preset rotting between manual runs, without paying for it three times.
+The macOS preset works and is run by hand; there is no CI leg for either.
+
+Three things to know before reading a report.
+
+**TSan models no fence at all.**
+`cc::atomic_thread_fence` is a no-op to the tool.
+So a release fence paired with a relaxed store — correct by the memory model, and what the chase-lev deque used to do — reads as a missing edge and reports as a race.
+Publication therefore carries its ordering on the store, not on a separate fence, wherever TSan has to be able to check it.
+
+**Uninstrumented libraries report as races.**
+Their atomics look like plain memory, so their internal handoffs surface as findings nobody can act on.
+[tools/cmake/tsan-suppressions.txt](../../tools/cmake/tsan-suppressions.txt) is the runtime list, applied by dev.py on every test run, and each entry says which module and why.
+It is the counterpart of `lsan-suppressions.txt` beside it; the compile-time `sanitizer-ignorelist.txt` cannot help here, because a prebuilt `.so` was never compiled by us.
+
+**A stack walk is not the source's.**
+TSan starts threads through a trampoline the walker cannot get past, and rewrites every access, so `cc::capture_stack` reports frames that are correct but not the ones the code suggests.
+`CC_HAS_THREAD_SANITIZER` exists for exactly that, and for nothing else — it is not a way to skip a test that is merely slow under the tool.
+
 ## Useful flags
 
 - `--mirror-output` / `--verbose` — global (before the subcommand); stream child output / be chatty.
 - `--mirror-test-output` — global; stream only the test binaries live, staying quiet through configure and build.
   The usual choice when you want a binary's own output, such as a benchmark table, without the build wall.
+- `--progress` / `--no-progress` — global; force or disable the live progress region.
+  The default auto-detects: on when stdout and stderr are both a terminal, off when either is piped or redirected, when `TERM=dumb`, or when a CI environment variable is set.
+  `SC_DEV_UI=0` / `1` overrides the detection, and an explicit flag overrides that.
+  It is **independent of the color flags**: `--plain` and `NO_COLOR` say how to render, not whether to, so a monochrome region is still available.
+  Mirroring wins per step — a mirrored step owns the screen and opens no row, while the steps around it still get theirs.
 - `--colored` / `--plain` — global; force or disable colored output.
   The default auto-detects: colored when stdout and stderr are both a terminal, plain when either is piped, such as a run driven by an agent.
   In auto mode the `NO_COLOR` / `FORCE_COLOR` environment conventions are also honored.

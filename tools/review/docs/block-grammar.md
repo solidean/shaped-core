@@ -175,6 +175,23 @@ A block that declines to act satisfies it, because the obligation is to answer r
 
 Comments live in `answers/<entry>.json`, which the server owns, and are tentative until the round is finalized.
 
+## Priced bullets
+
+A list item opening `pro:`, `con:` or `verdict:` is drawn with a green tick, a red cross or an arrow, and the prefix
+is dropped from what the reader sees.
+
+```markdown
+- pro: the hard problems are solved upstream
+- con: it is a policy change rather than an import
+- verdict: correctly rejected
+```
+
+It exists for the [design-critique](entry-types/design-critique.md) entry, where several alternatives are priced
+against each other and the shape of the argument has to be legible before the words are read.
+Nothing stops another block using it, and an entry that prices nothing should not.
+
+Only the first line of a list item is matched, and only inside a list: a paragraph opening `pro:` is left alone.
+
 ## `raw:` — a span that is not a reference
 
 A backticked path becomes a link, and one that resolves to nothing is a validation error.

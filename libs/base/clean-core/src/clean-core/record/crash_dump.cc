@@ -91,6 +91,12 @@ void for_each_published_block(cc::rec::impl::thread_state const& ts, cc::functio
         if (committed == 0)
             continue;
 
+        // The seal pair is plain memory, published by the release store on `is_sealed`, so reading it from a live
+        // chunk races the owner writing it.
+        // A live chunk therefore reports zero, which event_view's interpolation already reads as "only the base pair
+        // is known".
+        auto const is_sealed = c->is_sealed.load(cc::memory_order_acquire);
+
         auto const view = cc::rec::chunk_view{
             .source = c,
             .thread = info,
@@ -99,8 +105,8 @@ void for_each_published_block(cc::rec::impl::thread_state const& ts, cc::functio
             .layer = c->layer,
             .base_cycles = c->base_cycles,
             .base_wall_secs = c->base_wall_secs,
-            .seal_cycles = c->seal_cycles,
-            .seal_wall_secs = c->seal_wall_secs,
+            .seal_cycles = is_sealed ? c->seal_cycles : 0,
+            .seal_wall_secs = is_sealed ? c->seal_wall_secs : 0,
         };
 
         if (!f(view))

@@ -14,42 +14,13 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-import sys
 from pathlib import Path
 
-from ..core import profile
+from ..core import profile, ui
+from ..project.pins import is_current
 
 # Preset name fragments for cross-targets that never use these (host-side) dependencies.
 _NON_NATIVE = ("wasm", "emscripten", "web", "android", "ios")
-
-
-def _pinned_hash(manifest: Path) -> str | None:
-    """Read the first `pin_hash` from a dependency.yml (the authority its install is matched against).
-
-    Scanned by line rather than parsed, so this stays stdlib-only — dev.py declares no dependencies, and this runs on the fast path of every configure.
-    The first entry is the one whose pin `.install/pin.txt` carries, which is why zydis declares Zydis before the Zycore it vendors.
-
-    An upstream shipping one asset per platform declares `pin_hash_<os>` instead, and the host's key is what counts.
-    Taking the bare key there — or another platform's — would make every configure believe the install is stale and
-    re-fetch it, which is exactly the fast path this function exists to keep fast.
-    """
-    if not manifest.is_file():
-        return None
-    host_key = f"pin_hash_{'windows' if sys.platform == 'win32' else 'macos' if sys.platform == 'darwin' else 'linux'}:"
-    fallback = None
-    for line in manifest.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if s.startswith(host_key):
-            return s.split(":", 1)[1].strip().strip('"').strip("'")
-        if fallback is None and s.startswith("pin_hash:"):
-            fallback = s.split(":", 1)[1].strip().strip('"').strip("'")
-    return fallback
-
-
-def _is_current(manifest: Path, pin: Path) -> bool:
-    """True when the install's pin.txt already matches the manifest's pin_hash."""
-    expected = _pinned_hash(manifest)
-    return bool(expected) and pin.is_file() and pin.read_text(encoding="utf-8").strip() == expected
 
 
 def _ensure(
@@ -82,19 +53,20 @@ def _ensure(
 
     manifest = root / "extern" / directory / "dependency.yml"
     pin = root / "extern" / directory / ".install" / "pin.txt"
-    if _is_current(manifest, pin):
+    if is_current(manifest, pin):
         return  # already installed at the pinned release — fast path
 
-    print(f"{name}: {doing} (set {skip_env}=1 to skip) ...", file=sys.stderr)
+    ui.write_line(f"{name}: {doing} (set {skip_env}=1 to skip) ...")
     # Through `uv run`, not sys.executable: the script reads its pin from dependency.yml, so it needs the pyyaml its PEP 723 block declares.
     # Only a real fetch pays that resolution — the fast path above never gets here.
-    with profile.span(name, type="prereq", extra={"script": script_name}):
+    # The fetch script inherits this terminal and narrates itself, so the region parks rather than counting lines it cannot see.
+    # Without that, the next erase deletes as much of the script's own output as the frame was tall.
+    with profile.span(name, type="prereq", extra={"script": script_name}), ui.suspend():
         result = subprocess.run(["uv", "run", str(script)], cwd=root)
     if result.returncode != 0:
-        print(
+        ui.write_line(
             f"{name}: {script_name} failed — {dependent} will be skipped. "
-            f"Run `uv run extern/{directory}/{script_name}` manually to see the error.",
-            file=sys.stderr,
+            f"Run `uv run extern/{directory}/{script_name}` manually to see the error."
         )
 
 

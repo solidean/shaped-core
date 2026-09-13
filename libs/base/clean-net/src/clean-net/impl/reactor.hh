@@ -108,9 +108,20 @@ public:
     /// Taking one here rather than reading the OS is what makes a timeout testable without sleeping through it.
     [[nodiscard]] static cc::result<cc::unique_ptr<reactor>, error> try_create(clock& c);
 
-    /// Hand an operation over.
-    /// It never completes inline -- always from a later `wait`.
+    /// Hand an operation over, inert.
+    /// It never completes inline -- always from a later `wait`, and not even then until `arm` has run.
     void submit(io_operation* op);
+
+    /// Say that the submitter has finished wiring `op` up, so it may now complete.
+    ///
+    /// The two-step exists because the submitter keeps touching the operation after handing it over -- registering it
+    /// with a cancel token above all -- and a completion in between would free the object under it.
+    /// Between the two the reactor watches and remembers readiness but calls nobody, so nothing is lost by waiting.
+    /// Harmless if `op` is not (or no longer) pending, which is what makes a teardown racing an arm safe.
+    ///
+    /// An unarmed entry stays in the watch set, so one whose socket is ready already keeps `wait` returning at once
+    /// rather than parking -- for the one mailbox hop until this lands.
+    void arm(io_operation* op);
 
     /// Ask for `op` to finish with `cancelled` at the next opportunity.
     /// Harmless if it already completed, which is what makes a cancel racing a completion safe rather than a bug.
@@ -151,6 +162,10 @@ private:
     struct entry
     {
         io_operation* op = nullptr;
+
+        /// False between `submit` and `arm`, during which this entry is watched but never completed.
+        bool armed = false;
+
         bool cancelled = false;
         bool signalled = false;
         bool readable = false;

@@ -38,7 +38,7 @@
 //     if (_sleepers == 0) return;              if (found) { unregister; run it; }
 //     ... bump _wake_epoch, notify ...         else wait on _wait_cv
 //
-// The producer's push ends in a relaxed store, and a relaxed store may be reordered past a later load -- on x86 it simply sits in the store buffer.
+// The producer's push ends in a release store, and a release store may still be reordered past a later load -- on x86 it simply sits in the store buffer.
 // So "push, read _sleepers, skip if 0" is NOT safe on its own.
 // The producer could read a stale _sleepers == 0 from before the sleeper registered, while the sleeper reads a stale _bottom from before the push.
 // Both see nothing, the worker sleeps, and the task sits there forever.
@@ -156,7 +156,7 @@ void cc::async_thread_pool::push_local(worker& w, async_node_ptr node)
 
 void cc::async_thread_pool::wake_one()
 {
-    // Our half of the Dekker (see the protocol block): the push above ended in a relaxed store.
+    // Our half of the Dekker (see the protocol block): the push above ended in a release store, which orders what came before it and nothing after.
     // Without this fence the load below could be satisfied from before a sleeper registered, while that sleeper's own scan could be satisfied from before our push.
     // Both would see nothing and the task would strand.
     cc::atomic_thread_fence(cc::memory_order_seq_cst);

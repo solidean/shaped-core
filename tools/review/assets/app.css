@@ -518,6 +518,26 @@ mark.new {
   border-radius: 2px;
 }
 
+/* ---- priced bullets ------------------------------------------------------ */
+/* A design-critique prices each alternative, and the shape of that argument has to be legible before the words are
+   read. `pro:` / `con:` / `verdict:` opening a list item become a tick, a cross and an arrow. */
+
+li.verdict {
+  list-style: none;
+  position: relative;
+}
+
+li.verdict::before {
+  position: absolute;
+  left: -1.3rem;
+  font-weight: 600;
+}
+
+li.verdict.v-pro::before { content: "\2713"; color: var(--good); }
+li.verdict.v-con::before { content: "\2717"; color: var(--bad); }
+li.verdict.v-verdict::before { content: "\2192"; color: var(--text-dim); }
+li.verdict.v-verdict { color: var(--text-dim); }
+
 /* ---- annotation ---------------------------------------------------------- */
 /* Every reference the tool could resolve is underlined, so the page stops being a description of code and starts
    being a way into it. The colour says what the reference asserts: plain, not-yet-written, or on its way out. */

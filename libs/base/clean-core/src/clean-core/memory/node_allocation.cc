@@ -40,7 +40,7 @@ bool node_slab_drain_and_is_fully_free(byte* base, cc::node_class_index idx)
 {
     u64 local = *cc::node_slab_freemap_for_base(base);
 #if CC_HAS_THREADS
-    local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
+    local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_acquire);
     *cc::node_slab_freemap_for_base(base) = local;
 #endif
     return local == cc::node_seed_local_freemaps[isize(idx)];
@@ -294,7 +294,7 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
         cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(orphan)).store(cc::node_owner_token(), cc::memory_order_relaxed);
         // drain remote frees accumulated while orphaned into local
         u64 local = *cc::node_slab_freemap_for_base(orphan);
-        local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_relaxed);
+        local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_acquire);
         *cc::node_slab_freemap_for_base(orphan) = local;
         // track it in the ring regardless of capacity (future remote frees drain on the cold walk)
         node_splice_slab_as_head(slabs, idx, orphan);
@@ -436,7 +436,7 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
 #if CC_HAS_THREADS
         if (freemap == 0) // reclaim cross-thread frees into local
             freemap
-                = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_relaxed);
+                = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_acquire);
 #endif
 
         if (freemap != 0) [[likely]]

@@ -112,6 +112,12 @@ cc::rec::thread_info info_of(thread_state const& ts)
 /// Offers one block of one thread's events to every listener whose layer may see it.
 void dispatch(processing& p, cc::rec::chunk const& c, thread_state const& ts, u32 from, u32 to)
 {
+    // The seal pair is plain memory, published by the release store on `is_sealed`, so this acquire load is what makes
+    // it readable at all -- reading it from a live chunk races the owner writing it.
+    // A live chunk therefore reports zero, which is the same thing event_view's interpolation already reads as
+    // "only the base pair is known".
+    auto const is_sealed = c.is_sealed.load(cc::memory_order_acquire);
+
     auto const view = cc::rec::chunk_view{
         .source = &c,
         .thread = info_of(ts),
@@ -120,8 +126,8 @@ void dispatch(processing& p, cc::rec::chunk const& c, thread_state const& ts, u3
         .layer = c.layer,
         .base_cycles = c.base_cycles,
         .base_wall_secs = c.base_wall_secs,
-        .seal_cycles = c.seal_cycles,
-        .seal_wall_secs = c.seal_wall_secs,
+        .seal_cycles = is_sealed ? c.seal_cycles : 0,
+        .seal_wall_secs = is_sealed ? c.seal_wall_secs : 0,
     };
 
     for (isize i = 0; i < p.listeners.size(); ++i)

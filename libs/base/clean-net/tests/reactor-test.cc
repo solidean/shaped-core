@@ -40,6 +40,17 @@ struct socket_guard
     ~socket_guard() { impl::close_socket(handle); }
 };
 
+/// Hand an operation over and make it live in one step.
+///
+/// The reactor's submit/arm split is for a submitter that keeps wiring the operation up after handing it over -- a
+/// cancel registration above all, which io_system.hh's submission guard exists for.
+/// Nothing here does: these tests own their operations outright and want them live at once.
+void submit_armed(impl::reactor& r, impl::io_operation& op)
+{
+    r.submit(&op);
+    r.arm(&op);
+}
+
 /// Drive the reactor until `done` holds, or give up.
 ///
 /// A bounded budget rather than a spin: a reactor that never completes an operation should fail the test rather than
@@ -95,7 +106,7 @@ TEST("cnet - the reactor completes a loopback connect and accept")
     auto accept_op = capture_op();
     accept_op.kind = impl::io_op_kind::accept;
     accept_op.socket = listener.handle;
-    r.submit(&accept_op);
+    submit_armed(r, accept_op);
 
     auto client_created = impl::create_tcp_socket(ip_family::v4);
     CHECK(client_created.has_value());
@@ -105,7 +116,7 @@ TEST("cnet - the reactor completes a loopback connect and accept")
     connect_op.kind = impl::io_op_kind::connect;
     connect_op.socket = client.handle;
     connect_op.peer = where.value();
-    r.submit(&connect_op);
+    submit_armed(r, connect_op);
 
     CHECK(pump_until(r, [&] { return accept_op.completed && connect_op.completed; }));
     CHECK(connect_op.succeeded());
@@ -143,7 +154,7 @@ TEST("cnet - the reactor moves bytes both ways")
     auto accept_op = capture_op();
     accept_op.kind = impl::io_op_kind::accept;
     accept_op.socket = listener.handle;
-    r.submit(&accept_op);
+    submit_armed(r, accept_op);
 
     auto client_created = impl::create_tcp_socket(ip_family::v4);
     CHECK(client_created.has_value());
@@ -153,7 +164,7 @@ TEST("cnet - the reactor moves bytes both ways")
     connect_op.kind = impl::io_op_kind::connect;
     connect_op.socket = client.handle;
     connect_op.peer = where;
-    r.submit(&connect_op);
+    submit_armed(r, connect_op);
 
     CHECK(pump_until(r, [&] { return accept_op.completed && connect_op.completed; }));
     CHECK(accept_op.succeeded());
@@ -166,7 +177,7 @@ TEST("cnet - the reactor moves bytes both ways")
     send_op.socket = client.handle;
     send_op.buffer = reinterpret_cast<byte*>(const_cast<char*>(greeting));
     send_op.buffer_size = isize(sizeof(greeting) - 1);
-    r.submit(&send_op);
+    submit_armed(r, send_op);
 
     char inbox[64] = {};
     auto receive_op = capture_op();
@@ -174,7 +185,7 @@ TEST("cnet - the reactor moves bytes both ways")
     receive_op.socket = accepted.handle;
     receive_op.buffer = reinterpret_cast<byte*>(inbox);
     receive_op.buffer_size = isize(sizeof(inbox));
-    r.submit(&receive_op);
+    submit_armed(r, receive_op);
 
     CHECK(pump_until(r, [&] { return send_op.completed && receive_op.completed; }));
     CHECK(send_op.succeeded());
@@ -206,7 +217,7 @@ TEST("cnet - a closed peer reads as connection_closed rather than an empty succe
     auto accept_op = capture_op();
     accept_op.kind = impl::io_op_kind::accept;
     accept_op.socket = listener.handle;
-    r.submit(&accept_op);
+    submit_armed(r, accept_op);
 
     auto client_created = impl::create_tcp_socket(ip_family::v4);
     CHECK(client_created.has_value());
@@ -216,7 +227,7 @@ TEST("cnet - a closed peer reads as connection_closed rather than an empty succe
     connect_op.kind = impl::io_op_kind::connect;
     connect_op.socket = client.handle;
     connect_op.peer = where;
-    r.submit(&connect_op);
+    submit_armed(r, connect_op);
 
     CHECK(pump_until(r, [&] { return accept_op.completed && connect_op.completed; }));
     auto const accepted = socket_guard(accept_op.accepted);
@@ -231,7 +242,7 @@ TEST("cnet - a closed peer reads as connection_closed rather than an empty succe
     receive_op.socket = accepted.handle;
     receive_op.buffer = reinterpret_cast<byte*>(inbox);
     receive_op.buffer_size = isize(sizeof(inbox));
-    r.submit(&receive_op);
+    submit_armed(r, receive_op);
 
     CHECK(pump_until(r, [&] { return receive_op.completed; }));
     CHECK(receive_op.failure.has_value());
@@ -264,7 +275,7 @@ TEST("cnet - a refused connection fails with connection_refused")
     connect_op.kind = impl::io_op_kind::connect;
     connect_op.socket = client.handle;
     connect_op.peer = closed.value();
-    r.submit(&connect_op);
+    submit_armed(r, connect_op);
 
     CHECK(pump_until(r, [&] { return connect_op.completed; }));
     CHECK(connect_op.failure.has_value());
@@ -296,7 +307,7 @@ TEST("cnet - a deadline fires without anything having to happen on the socket")
     receive_op.buffer = reinterpret_cast<byte*>(inbox);
     receive_op.buffer_size = isize(sizeof(inbox));
     receive_op.deadline_ns = clk.now_ns() + 30ll * 1000 * 1000 * 1000; // 30 s away, and nobody will ever send
-    r.submit(&receive_op);
+    submit_armed(r, receive_op);
 
     // Nothing has arrived and the clock has not moved, so the operation stays pending.
     CHECK(r.wait(0) == 0);
@@ -346,7 +357,7 @@ TEST("cnet - a cancelled operation completes as cancelled")
     receive_op.socket = s.handle;
     receive_op.buffer = reinterpret_cast<byte*>(inbox);
     receive_op.buffer_size = isize(sizeof(inbox));
-    r.submit(&receive_op);
+    submit_armed(r, receive_op);
 
     CHECK(r.pending_count() == 1);
     r.cancel(&receive_op);
