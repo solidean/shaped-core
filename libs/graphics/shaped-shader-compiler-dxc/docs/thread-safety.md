@@ -52,3 +52,18 @@ DXC would become a **`cc::threaded_actor`** that owns the compiler and takes com
 That is serialization by ownership rather than by lock, which is how the rest of shaped-core serializes a resource that cannot be shared.
 Callers already reach it through an async cache, so they would see a `cc::async<...>` either way.
 The actor would keep the call sites unchanged while making "one thread is inside DXC" a structural property instead of a discipline.
+
+## Where compilation is headed: async
+
+**`ssc::dxc` predates `cc::async`, and its compiler API is synchronous for that reason alone.**
+The intent is for compilation to become async, but how depends on what the finding above turns out to be.
+
+- **Benign.** The lock goes, the synchronous `compiler` stays the API, and the cache keeps compiling on several workers at once.
+  A synchronous core is simpler to use from tools, and nothing about a benign race argues for changing it.
+- **Real.** Callers should park rather than block on DXC.
+  The shape is an async entry point in front of one owner — a `cc::threaded_actor`, or a `cc::async_mutex<compiler>` that the cache awaits — so a queue of compiles never holds a queue of pool workers.
+
+Either way, **preprocessing touches file IO** through the include resolver, and that wants to be async regardless of how the race resolves.
+
+One constraint whichever way it goes: `~compiler` runs from a thread-local destructor at thread exit, where nothing can await.
+So a synchronous guard over libdxcompiler survives any async front for as long as thread-local compilers exist.
