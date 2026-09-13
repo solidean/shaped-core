@@ -138,7 +138,7 @@ cc::result<native_socket, error> reactor::create_wake_channel()
         return cc::error(cc::move(local).error());
     }
 
-    auto connected = connect_socket(s, local.value());
+    auto connected = connect_socket(s, local.value(), false);
     if (connected.has_error())
     {
         close_socket(s);

@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -20,6 +21,9 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Wait for something that should happen, against the wall clock.
 ///
 /// A round count would be a budget in scheduler slices rather than in time, and these tests share the process-wide
@@ -28,6 +32,8 @@ namespace
 /// The assertions that matter here are the counts and the order; nothing below asserts on how long the waiting took.
 bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_for");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 
@@ -52,6 +58,8 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 /// A round count is right here: the point is to hand the machinery every opportunity and then assert nothing moved.
 bool pump_briefly(cc::function_ref<bool()> done, i32 rounds = 200)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_briefly");
+
     for (i32 i = 0; i < rounds; ++i)
     {
         if (done())

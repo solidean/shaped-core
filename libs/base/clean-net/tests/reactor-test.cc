@@ -1,3 +1,4 @@
+#include <clean-core/common/profiling.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-net/common/clock.hh>
 #include <clean-net/impl/reactor.hh>
@@ -12,6 +13,9 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Records the one completion an operation ever gets.
 struct capture_op : impl::io_operation
 {
@@ -57,6 +61,8 @@ void submit_armed(impl::reactor& r, impl::io_operation& op)
 /// hang the suite, and a hung suite is the one failure mode nobody can diagnose from CI.
 bool pump_until(impl::reactor& r, cc::function_ref<bool()> done, i32 max_waits = 500)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     for (i32 i = 0; i < max_waits; ++i)
     {
         if (done())
@@ -275,6 +281,9 @@ TEST("cnet - a refused connection fails with connection_refused")
     connect_op.kind = impl::io_op_kind::connect;
     connect_op.socket = client.handle;
     connect_op.peer = closed.value();
+
+    // Without it, Windows retransmits the SYN and the refusal takes about two seconds to arrive.
+    connect_op.fail_fast_on_refused = true;
     submit_armed(r, connect_op);
 
     CHECK(pump_until(r, [&] { return connect_op.completed; }));

@@ -47,6 +47,16 @@ struct cnet::tcp_options
     ///
     /// Set explicitly either way, because the OS default differs by platform and by sysctl.
     bool v6_only = true;
+
+    /// For a connect to a loopback address, fail at once when the peer refuses rather than retransmitting the SYN.
+    ///
+    /// On Windows a refused loopback connect otherwise takes about 2 s, because the stack retransmits the SYN.
+    /// Other platforms answer a refusal at once, so there this changes nothing.
+    /// **Enabling it also makes a connect to a full listen backlog fail at once instead of retrying.**
+    /// Windows refuses a SYN the queue has no room for, and the retransmissions are what cover the window until the server accepts.
+    /// Off by default for that reason; a caller probing a port it expects to be closed is who it is for.
+    /// A listener ignores it, and a remote peer keeps its retransmissions regardless, since there they survive a lost packet.
+    bool fail_fast_on_refused = false;
 };
 
 /// What a listener is opened with.

@@ -322,7 +322,7 @@ cc::result<cc::unit, error> listen_socket(native_socket s, i32 backlog)
     return cc::unit{};
 }
 
-cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where)
+cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& where, bool fail_fast_on_refused)
 {
     sockaddr_storage addr = {};
     socket_length length = 0;
@@ -332,17 +332,20 @@ cc::result<cc::unit, error> connect_socket(native_socket s, endpoint const& wher
                                .message = cc::string("connect: the endpoint has no address")});
 
 #if defined(_WIN32)
-    // Windows answers a refused connection by retransmitting the SYN, so a closed port takes about two seconds to
-    // refuse even on loopback, where no SYN can be lost and every retry only delays the answer.
-    // Remote peers keep the default: there a retransmission is what survives a dropped packet.
+    // Windows answers a refused connection by retransmitting the SYN, so a closed port takes about two seconds to refuse even on loopback.
+    // Those retries are also what rides out a full listen backlog, which Windows refuses rather than drops.
+    // Turning them off therefore fails a connect burst that would have succeeded once the server accepted, which is why it is opt-in.
+    // Remote peers keep the default regardless: there a retransmission is what survives a dropped packet.
     // Best effort, since an older stack without the ioctl still connects, just slowly.
-    if (where.address.is_loopback())
+    if (fail_fast_on_refused && where.address.is_loopback())
     {
         auto rto = TCP_INITIAL_RTO_PARAMETERS{.Rtt = TCP_INITIAL_RTO_UNSPECIFIED_RTT,
                                               .MaxSynRetransmissions = TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS};
         auto returned = DWORD(0);
         (void)::WSAIoctl(raw_of(s), SIO_TCP_INITIAL_RTO, &rto, sizeof(rto), nullptr, 0, &returned, nullptr, nullptr);
     }
+#else
+    (void)fail_fast_on_refused;
 #endif
 
     if (::connect(raw_of(s), reinterpret_cast<sockaddr const*>(&addr), length) == 0)
@@ -492,7 +495,7 @@ cc::result<cc::unit, error> listen_socket(native_socket, i32)
 {
     return cc::error(no_sockets("listening"));
 }
-cc::result<cc::unit, error> connect_socket(native_socket, endpoint const&)
+cc::result<cc::unit, error> connect_socket(native_socket, endpoint const&, bool)
 {
     return cc::error(no_sockets("connecting"));
 }
