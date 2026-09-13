@@ -267,16 +267,7 @@ struct parser
 
             CC_RETURN_IF_ERROR(reject_unclaimed(pending));
 
-            // `register(...)` and `[[vk::...]]` are the two ways a source states an address, and both are the
-            // pass's to write.
-            // Only the FIRST is kept: one message naming one line is what a reader acts on.
-            if (!hand_written.has_value())
-            {
-                if (is_identifier("register"))
-                    hand_written = hand_written_address{current().location, "register()"};
-                else if (is_punctuation('[') && is_punctuation_at(at + 1, '[') && is_identifier_at(at + 2, "vk"))
-                    hand_written = hand_written_address{current().location, "[[vk::...]]"};
-            }
+            note_hand_written_address();
 
             if (is_identifier("struct") && record_struct_body())
                 continue;
@@ -294,6 +285,57 @@ struct parser
             return cc::error(cc::format("{}: a 'static' attribute applies only inside a group",
                                         to_string(pending.value().location)));
         return cc::unit();
+    }
+
+    /// Notes a hand-written binding address at the cursor, keeping only the first.
+    ///
+    /// Only the four spellings the pass always writes itself, because those are the ones it would either
+    /// duplicate or contradict: `register`, and `[[vk::binding]]`, `[[vk::push_constant]]`, `[[vk::offset]]`.
+    ///
+    /// Every OTHER `[[vk::...]]` passes: `constant_id`, `builtin` and the rest say things the pass has no
+    /// opinion about, and refusing them called an entry-point parameter an address.
+    /// `[[vk::location]]` passes too — the pass writes locations only into a `vertex_input` struct, which
+    /// refuses a `[` before a member anyway.
+    ///
+    /// Only the FIRST is kept: one message naming one line is what a reader acts on.
+    void note_hand_written_address()
+    {
+        if (hand_written.has_value())
+            return;
+
+        if (is_identifier("register"))
+        {
+            hand_written = hand_written_address{current().location, "register"};
+            return;
+        }
+
+        if (!is_punctuation('[') || !is_punctuation_at(at + 1, '[') || !is_identifier_at(at + 2, "vk"))
+            return;
+
+        // The attribute's own name, however `::` happens to lex: the first identifier after `vk` and before
+        // the attribute closes.
+        for (auto scan = at + 3; scan < tokens.size() && !is_punctuation_at(scan, ']'); ++scan)
+        {
+            if (tokens[scan].kind != hlsl_token_kind::identifier)
+                continue;
+
+            // Spelled as literals rather than formatted: `what` is a view, so it has to outlive this call.
+            struct owned_attribute
+            {
+                cc::string_view name;
+                cc::string_view spelling;
+            };
+            constexpr owned_attribute k_owned[] = {
+                {"binding", "[[vk::binding]]"},
+                {"push_constant", "[[vk::push_constant]]"},
+                {"offset", "[[vk::offset]]"},
+            };
+
+            for (auto const& owned : k_owned)
+                if (tokens[scan].text == owned.name)
+                    hand_written = hand_written_address{tokens[scan].location, owned.spelling};
+            return;
+        }
     }
 
     /// Notes where an unannotated `struct <name> { ... }` body is and skips it, or reports that this was not
@@ -323,6 +365,10 @@ struct parser
         auto depth = 1;
         while (!at_end() && depth > 0)
         {
+            // The body is skipped rather than parsed, but not unread: a `[[vk::offset]]` a author wrote on a
+            // member is exactly the number the pass computes, and it is in here rather than out there.
+            note_hand_written_address();
+
             if (is_punctuation('{'))
                 ++depth;
             else if (is_punctuation('}'))

@@ -134,7 +134,7 @@ namespace frame
     Texture2D<float4> albedo;
 }
 --- error
-line 1: register() is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
+line 1: register is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
 
 
 --- case the Vulkan spelling of an address is refused the same way
@@ -147,7 +147,37 @@ namespace frame
     Texture2D<float4> albedo;
 }
 --- error
-line 1: [[vk::...]] is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
+line 1: [[vk::binding]] is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
+
+
+--- case a vk attribute the pass does not own passes through
+--- hlsl
+[[vk::constant_id(0)]] const bool use_shadows = true;
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- groups
+frame group=0
+  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+
+
+--- case an address inside a plain struct body is seen, not skipped with it
+--- hlsl
+struct block
+{
+    [[vk::offset(16)]] float3 tint;
+};
+
+#pragma sc group 0
+namespace frame
+{
+    Texture2D<float4> albedo;
+}
+--- error
+line 3: [[vk::offset]] is written by hand, and every address in a shader this pass reads is the pass's — declare the binding in a '#pragma sc group' namespace instead
 
 
 --- case but a file that uses NO attribute keeps whatever addresses it wrote

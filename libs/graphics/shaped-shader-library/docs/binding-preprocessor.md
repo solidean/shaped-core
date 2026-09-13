@@ -304,9 +304,16 @@ The gaps that are gaps:
 
 **A hand-written address is an error**, in any source carrying an attribute.
 
-`register(...)` and `[[vk::...]]` are the two ways a source states one, and both are the pass's to write.
-A shader that carries an attribute has handed its addresses over, so one it writes itself is either dead text or a collision waiting to happen.
+The four spellings the pass writes are the four it refuses: `register`, `[[vk::binding]]`, `[[vk::push_constant]]` and `[[vk::offset]]`.
+A shader that carries an attribute has handed those over, so one it writes itself is either dead text or a collision waiting to happen.
 Q8's own failure, in fact: a stage that does not reference a binding leaves it unnumbered.
+
+**Every other `[[vk::...]]` passes**, and the list above is exactly why: `constant_id`, `builtin` and the rest say things the pass has no opinion about.
+Refusing them called an entry-point parameter an address.
+`[[vk::location]]` passes too, since the pass writes locations only into a `vertex_input` struct, which refuses a `[` before a member anyway.
+
+The check reaches inside a plain struct body as well as outside it.
+That body is skipped rather than parsed, but not unread: a `[[vk::offset]]` written on a member is exactly the number the pass computes, and it could only ever be in there.
 
 A source carrying **no** attribute is not interpreted at all and keeps whatever it wrote.
 That is what lets ordinary HLSL through — the vulkan backend's own tier-2 shaders, anything compiled outside a package — and it is the same property that makes the rewrite byte for byte.

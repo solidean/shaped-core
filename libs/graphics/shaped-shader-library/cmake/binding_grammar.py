@@ -750,15 +750,7 @@ class _Parser:
 
             self.reject_unclaimed(pending)
 
-            # `register(...)` and `[[vk::...]]` are the two ways a source states an address, and both are the
-            # pass's to write.
-            # Only the FIRST is kept: one message naming one line is what a reader acts on.
-            if self.hand_written is None:
-                if self.is_identifier("register"):
-                    self.hand_written = (self.current().location, "register()")
-                elif (self.is_punctuation("[") and self.is_punctuation_at(self.at + 1, "[")
-                      and self.is_identifier_at(self.at + 2, "vk")):
-                    self.hand_written = (self.current().location, "[[vk::...]]")
+            self.note_hand_written_address()
 
             if self.is_identifier("struct") and self.record_struct_body():
                 continue
@@ -767,6 +759,40 @@ class _Parser:
 
         self.reject_unclaimed(pending)
         return groups
+
+    def note_hand_written_address(self) -> None:
+        """Notes a hand-written binding address at the cursor, keeping only the first.
+
+        Only the four spellings the pass always writes itself, because those are the ones it would either
+        duplicate or contradict: `register`, and `[[vk::binding]]`, `[[vk::push_constant]]`, `[[vk::offset]]`.
+
+        Every OTHER `[[vk::...]]` passes: `constant_id`, `builtin` and the rest say things the pass has no
+        opinion about, and refusing them called an entry-point parameter an address.
+        `[[vk::location]]` passes too -- the pass writes locations only into a `vertex_input` struct, which
+        refuses a `[` before a member anyway.
+
+        Keep in step with binding_groups.cc's note_hand_written_address.
+        """
+        if self.hand_written is not None:
+            return
+
+        if self.is_identifier("register"):
+            self.hand_written = (self.current().location, "register")
+            return
+
+        if not (self.is_punctuation("[") and self.is_punctuation_at(self.at + 1, "[")
+                and self.is_identifier_at(self.at + 2, "vk")):
+            return
+
+        # The attribute's own name, however `::` happens to lex: the first identifier after `vk` and before
+        # the attribute closes.
+        scan = self.at + 3
+        while scan < len(self.tokens) and not self.is_punctuation_at(scan, "]"):
+            if self.tokens[scan].kind == "identifier":
+                if self.tokens[scan].text in ("binding", "push_constant", "offset"):
+                    self.hand_written = (self.tokens[scan].location, f"[[vk::{self.tokens[scan].text}]]")
+                return
+            scan += 1
 
     def is_punctuation_at(self, index: int, c: str) -> bool:
         return index < len(self.tokens) and self.tokens[index].kind == "punctuation" and self.tokens[index].text == c
@@ -797,6 +823,10 @@ class _Parser:
         first = self.at
         depth = 1
         while not self.at_end() and depth > 0:
+            # The body is skipped rather than parsed, but not unread: a `[[vk::offset]]` an author wrote on a
+            # member is exactly the number the pass computes, and it is in here rather than out there.
+            self.note_hand_written_address()
+
             if self.is_punctuation("{"):
                 depth += 1
             elif self.is_punctuation("}"):
