@@ -265,7 +265,9 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
     {
         auto node = impl::async_new_node<T, E>();
         this->node = node.get();
-        node->set_frame(async_coro_frame<async_promise>(std::coroutine_handle<async_promise>::from_promise(*this)));
+        // Behind a reserved home word, so a hop can home the node later without touching the frame.
+        node->template set_homed_frame_emplace<async_coro_frame<async_promise>>(
+            u64(0), std::coroutine_handle<async_promise>::from_promise(*this));
 
         if constexpr (Eager)
             return cc::async_scheduled<T, E>{cc::move(node)};
@@ -514,6 +516,76 @@ struct async_awaiter_yield
     void await_resume() const {}
 };
 
+/// Rehome the coroutine's node and continue there — `co_await cc::async_resume_on(h)`.
+struct async_awaiter_resume_on
+{
+    async_scheduler* home;
+    async_home_options options;
+
+    [[nodiscard]] bool await_ready() const { return false; }
+
+    template <class P>
+    bool await_suspend(std::coroutine_handle<P> h) const
+    {
+        auto& p = h.promise();
+        CC_ASSERT(p.ctx != nullptr, "co_await outside of a compute step");
+
+        // The word is written first, under the node lock, so the yield below routes to the NEW home.
+        (void)p.node->rehome(*home, options);
+
+        // Already running where the home is bound: nothing to hop over.
+        if (async_scheduler::current_or_null() == home)
+            return false;
+
+        p.yielded = true;
+        return true;
+    }
+
+    void await_resume() const {}
+};
+
+/// Replace a homed coroutine's options in place — `co_await cc::async_set_home_options(o)` never suspends.
+struct async_awaiter_set_home_options
+{
+    async_home_options options;
+
+    [[nodiscard]] bool await_ready() const { return false; }
+
+    template <class P>
+    bool await_suspend(std::coroutine_handle<P> h) const
+    {
+        h.promise().node->set_home_options(options);
+        return false;
+    }
+
+    void await_resume() const {}
+};
+
+/// Run `f` as a child homed elsewhere and hand its value back — `co_await cc::async_run_on(h, f)`.
+/// The child is private to the awaiter, so its value is MOVED out rather than referenced.
+template <class U>
+struct async_awaiter_run_on
+{
+    cc::shared_async<U> child;
+    async_awaiter_value<U, async_error> inner = {&child};
+
+    [[nodiscard]] bool await_ready() const { return false; }
+
+    template <class P>
+    bool await_suspend(std::coroutine_handle<P> h)
+    {
+        return inner.await_suspend(h);
+    }
+
+    [[nodiscard]] U await_resume() { return child->take_value(); }
+};
+
+template <class U>
+[[nodiscard]] async_awaiter_run_on<U> async_make_run_on_awaiter(cc::shared_async<U> child)
+{
+    return {cc::move(child)};
+}
+
 /// Fail the coroutine's node without unwinding: it is never resumed, and the frame destroys it while suspended.
 template <class X>
 struct async_awaiter_fail
@@ -605,6 +677,53 @@ shared_async<T, E> async_start(shared_async<T, E> h)
 [[nodiscard]] inline impl::async_awaiter_yield async_yield()
 {
     return {};
+}
+
+/// Continue this coroutine on `home`, and keep it there: every later resume runs on `home` too, until another hop.
+/// Options reset to `options` (by default: home_default inline policy, teardown anywhere).
+/// Does not suspend when the coroutine is already running where `home` is bound.
+///
+///   co_await cc::async_resume_on(cc::main_thread_scheduler());
+///
+/// Threads off, a hop still re-queues: the rest of the body runs at that home's next pump point, as it would with threads.
+[[nodiscard]] inline impl::async_awaiter_resume_on async_resume_on(async_scheduler& home, async_home_options options = {})
+{
+    return {&home, options};
+}
+
+/// async_resume_on(cc::main_thread_scheduler()).
+[[nodiscard]] inline impl::async_awaiter_resume_on async_resume_on_main(async_home_options options = {})
+{
+    return {&impl::async_main_home(), options};
+}
+
+/// async_resume_on(cc::compute_scheduler()).
+[[nodiscard]] inline impl::async_awaiter_resume_on async_resume_on_compute(async_home_options options = {})
+{
+    return {&cc::compute_scheduler(), options};
+}
+
+/// async_resume_on(cc::io_scheduler()) — compute when no io scheduler is installed.
+[[nodiscard]] inline impl::async_awaiter_resume_on async_resume_on_io(async_home_options options = {})
+{
+    return {&cc::io_scheduler(), options};
+}
+
+/// Replace this homed coroutine's options, keeping its home; never suspends.
+/// The coroutine must have a home — hop to one first.
+[[nodiscard]] inline impl::async_awaiter_set_home_options async_set_home_options(async_home_options options)
+{
+    return {options};
+}
+
+/// Run `f` on `home` as a child, and continue here with its value, moved out.
+/// Sugar over a homed child and a plain await: this coroutine's own home is unchanged, and a failing `f` short-circuits it.
+///
+///   auto mesh = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); });
+template <class F>
+[[nodiscard]] auto async_run_on(async_scheduler& home, F&& f)
+{
+    return impl::async_make_run_on_awaiter(cc::make_async_lazy_on(home, cc::forward<F>(f)));
 }
 
 /// Fail this coroutine's node.

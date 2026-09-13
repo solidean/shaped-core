@@ -1,8 +1,10 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/spin.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
 #include <chrono>
@@ -115,8 +117,14 @@ cc::thread_pump_registration cc::register_thread_pump(cc::unique_function<bool()
 
 bool cc::thread_pump_all()
 {
+    // The calling thread's own home first: every blocking wait that sweeps here then also runs the homed steps only this
+    // thread may run, without the home ever sitting in the registry where every other thread's sweep would pay for it.
+    auto more = false;
+    if (auto* const home = cc::impl::async_tls().home)
+        more = home->pump_cycle();
+
     if (g_registration_count.load() == 0)
-        return false;
+        return more;
 
     // Snapshot under the lock, call outside it: a pump is free to register or deregister — an actor handler creating
     // another actor does exactly that — and holding the lock across the call would deadlock on it.
@@ -132,7 +140,6 @@ bool cc::thread_pump_all()
             }
         });
 
-    auto more = false;
     for (auto* const entry : snapshot)
     {
         if (entry->running.exchange(true))

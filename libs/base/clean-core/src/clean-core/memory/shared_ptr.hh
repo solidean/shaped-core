@@ -22,6 +22,8 @@
 //   static void inc_strong(T*);
 //   static shared_release release_strong(T*);  // drop one strong ref; says what the caller must do next
 //   static void destroy_object(T*);            // tear down the payload; called exactly once, when strong hits 0
+//   // optional: static constexpr bool can_defer_destroy = true; destroy_object then returns bool, and true means
+//   // the Traits took over the teardown AND the strong owners' collective weak count — see reset() below.
 //   static void free_storage(T*);              // free the node; called exactly once (see lifetime)
 //   // required only when supports_weak:
 //   static void inc_weak(T*);
@@ -44,6 +46,12 @@
 //
 // Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1.
 // Upcasts to a base with the SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
+
+namespace cc::impl
+{
+template <class Traits>
+inline constexpr bool shared_traits_can_defer_destroy = requires { requires Traits::can_defer_destroy; };
+} // namespace cc::impl
 
 /// What dropping a strong reference leaves for the caller to do, in this order.
 /// `free` without `destroy` never happens; the protocol block above carries the full contract.
@@ -213,7 +221,17 @@ public:
             auto const r = Traits::release_strong(_ptr);
             if (r.destroy)
             {
-                Traits::destroy_object(_ptr);
+                if constexpr (impl::shared_traits_can_defer_destroy<Traits>)
+                {
+                    // Deferred: whoever took the teardown now owns the collective weak count and frees through it.
+                    if (Traits::destroy_object(_ptr))
+                    {
+                        _ptr = nullptr;
+                        return;
+                    }
+                }
+                else
+                    Traits::destroy_object(_ptr);
                 bool do_free = r.free;
                 if constexpr (Traits::supports_weak)
                     if (!do_free) // release the strong owners' collective weak count — only AFTER teardown

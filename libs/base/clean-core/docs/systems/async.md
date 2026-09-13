@@ -467,7 +467,8 @@ Three writers share **one** failure slot on the promise — a dependency short-c
 One heap allocation for the coroutine frame, on top of the node.
 It cannot be elided, since the handle escapes into the node, and it goes through the same slab the node does (`promise_type::operator new`).
 
-The node's stored frame is that one handle: **8 B, always inline**, so a coroutine never spills into the boxed `cc::unique_function`.
+The node's stored frame is that one handle behind a reserved home word: **16 B, always inline**, so a coroutine never spills into the boxed `cc::unique_function`.
+The word is reserved in every coroutine so that a hop can home the node later without touching the frame.
 The useful comparison is therefore *a lambda frame that spills* — above the 24 B budget a closure boxes anyway, so at that size a coroutine costs the same.
 Below it, the small lambda frame remains the zero-allocation path, deliberately.
 
@@ -485,8 +486,8 @@ It is not how you wait for something external — that is a manual node, pushed 
   Take them **by value**.
 * **`T` must be movable** — `co_return` moves the result through the promise.
   An immovable `T` stays on the raw-frame emplace API.
-* **A coroutine can resume on a different thread than it suspended on.**
-  Nothing may be held across a `co_await` that is bound to a thread.
+* **An unhomed coroutine can resume on a different thread than it suspended on.**
+  Nothing may be held across its `co_await` that is bound to a thread — or give it a home, see [Homes](#homes), and every segment runs there.
 * **Dropping a started coroutine's handle does not cancel it**: the schedule queue holds the node, and the system is cooperative throughout.
   Dropping a *cold* one, by contrast, simply destroys it — nothing ever ran.
 * `co_await a` yields a `U const&` **into the node's payload**, so reading it copies nothing — but binding `auto const&` to the result of awaiting a *temporary* dangles once the full-expression ends.
@@ -578,9 +579,11 @@ The spawn tree is the pure-overhead metric — its leaves do nothing, so its ns/
 [benchmarks/async-benchmark](../benchmarks/async-benchmark.md) owns the full table, the method behind it, and which columns of a run survive a throttling laptop.
 
 ### Routing to a specific pool
-There is no task-class or affinity system: every worker in every pool serves all compute work, and steals are always eligible.
+Every worker in a pool serves all of that pool's work, and steals are always eligible.
 A node with no active worker scope and no explicit target routes to the installed **compute** scheduler.
-To drive a graph on a *specific* pool, submit its root there — `pool.blocking_get(root)`, or the lower-level `root->schedule_on(pool)` — rather than pinning the node.
+To start a graph on a *specific* pool, submit its root there — `async_blocking_get_on(pool, root)`, or the lower-level `root->schedule_on(pool)`.
+That places where the graph starts, not where it stays: a woken node migrates to whichever thread wakes it.
+To keep a node on one scheduler for its whole life, give it a home — see [Homes](#homes).
 Build and coexist as many pools as you like; only one may be the installed compute scheduler at a time.
 
 ### Node layout (size & locking)
@@ -594,7 +597,8 @@ So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in 
 * **16 B header** — one `atomic<u64>` intrusive refcount plus one `atomic<u64>` control word.
   The refcount is fused, strong in the high half and weak in the low half, so a handle is one pointer with no separate control block.
   Fusing is what lets the last strong drop test both halves with a **single acquire load** and skip both locked RMWs when it is the sole owner (`cc::fused_refcount`, see [Cost](#cost)).
-  The control word is a **tagged pointer**: a 32-aligned `async_type_ops const*` in the high bits, and the lifecycle state + wake-pending flag + spinlock bit in the low 5 bits.
+  The control word is a **tagged pointer**: a 64-aligned `async_type_ops const*` in the high bits, and the homed flag + lifecycle state + wake-pending flag + spinlock bit in the low 6 bits.
+  The homed bit is the whole of what homes cost an unhomed node: every site that reads it already holds the word in a register.
   There is **no C++ vtable** — `async_type_ops` is a static-constexpr descriptor carrying the typed value/error destructors, the inline frame's invoke/destroy, and the node's size class.
   It is keyed on `(size class, value-teardown, error-teardown, frame-invoke, frame-destroy)` rather than on `(T, E)`, so it **collapses**.
   A trivially-destructible type uses a null teardown.
@@ -625,9 +629,109 @@ So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in 
   It is **type-dependent** — a bigger `T` or `E` widens the payload and the frame slot with it, so the *same* closure can box under `async<int>` and stay inline under `async<big_thing>`.
   And its alignment ceiling is **8, not 16**: the payload is 16-aligned at node offset 16, so a frame at payload + 24 sits at absolute offset 40, and an over-aligned closure is boxed.
   Ask `async<T, E>::frame_fits_inline<F>` rather than restating the numbers — a hand-copied budget goes stale silently, and a silent spill is an allocation per task.
+* **A homed node's frame slot opens with its home word** — the home's scheduler pointer, with the node's home options in its low bits — and the frame sits 8 B behind it.
+  So a homed closure's inline budget is 16 B rather than 24 (`homed_frame_fits_inline<F>`), and every coroutine reserves the word.
+  The word is valid only while the node is unresolved: a value larger than 24 B is built over it, which is why every read of it pairs the homed bit with a not-ready state.
 
 The **semantics and the public API are the contract**.
 The node layout is not, and can change under the hood as the system matures without breaking callers.
+
+## Homes
+
+**A node with a home runs every segment of its frame on that home**: its first poll, every resume after a wake, every yield.
+Without one, a woken node runs wherever the scheduler that woke it is, which is right for compute and wrong for a window, a swapchain or an imgui frame.
+A home is any `async_scheduler` — a pool, or a `cc::thread_bound_scheduler` that exactly one thread drains.
+
+```cpp
+// a factory node, homed at creation
+auto const present = cc::make_async_scheduled_on_main([&](image const& img) { swapchain.present(img); }, rendered);
+
+// a coroutine hops as its first statement, and stays
+cc::shared_async<cc::unit> upload_texture(sg::context& ctx, cc::string path)
+{
+    co_await cc::async_resume_on_main();
+    auto const decoded = decode_png(path);  // cold and unhomed: decoded on compute, never here
+    auto const& img = co_await decoded;     // resumes on main, whichever pool thread finished the decode
+    ctx.upload(img);
+    co_return;
+}
+```
+
+### What a home guarantees
+
+- **Every segment of the node's own frame runs at home.**
+  A wake routes the node home, never to the waking thread.
+- **A homed node is never driven inline off home.**
+  A driver that reaches one on another thread is refused, and treats it like a dependency running elsewhere: schedule, subscribe, park.
+- **A home beats an explicit target.**
+  `schedule_on(pool)` and `async_blocking_get_on(pool, root)` on a homed node mean "wait for its home".
+- **A home is never inherited.**
+  A node a homed body creates or starts is unhomed unless it is created with a home, and a thread home forwards such work to compute.
+- **Reading a result is unconstrained**, from any thread, once the node is ready.
+
+### Spelling one
+
+- **Factories**: `make_async_lazy_on(home, [options,] f, deps...)`, `make_async_scheduled_on(...)`, `make_async_lazy_on_emplace`, and `make_async_lazy_on_main` / `make_async_scheduled_on_main`.
+- **Hops**, coroutines only: `co_await cc::async_resume_on(h[, options])` makes `h` the node's home and resumes there, and every later segment runs on `h` until another hop.
+  It does not suspend when the coroutine is already running where `h` is bound.
+  `async_resume_on_main()`, `_compute()` and `_io()` name the well-known homes.
+- `co_await cc::async_set_home_options(options)` changes options in place and never suspends.
+- `co_await cc::async_run_on(h, f)` runs `f` as a child homed to `h` and hands back its value, without moving the body.
+
+A hop resets options to the target's defaults unless it is given its own, because options describe a node's relation to its *current* home.
+Threads off, a hop still re-queues, so the rest of the body runs at that home's next pump point exactly as it would with threads.
+
+### Options
+
+The home word carries a node's options beside the home, so they cost nothing that is not homed.
+`async_scheduler` is 64-aligned — free, since a process holds a handful — which leaves six bits; three are used, and the rest are room for later options.
+
+- **`inline_deps`** — whether a homed node drives a not-yet-started dependency on its own stack.
+  `any` is the throughput choice; `same_home_only` sends every unhomed cold dependency to compute and parks, so a main-thread body never decodes on main by accident.
+  `home_default` defers to the home: `same_home_only` for a thread home and for the io pool, `any` for a pool.
+- **`teardown`** — `anywhere` (the default), or `at_home`: a homed node dropped before it ever resolved releases its frame's captures on its home.
+  **It covers a never-resolved frame only.**
+  A resolved node already destroyed its frame at home, inside its own poll, and its value is built over the home word, so there is no home left to route a value's teardown to.
+  A type whose destructor is thread-bound has to handle that itself.
+  A deferred teardown needs a live pump: a node abandoned after its home stopped pumping keeps its captures rather than releasing them on the wrong thread.
+
+### Well-known homes
+
+cc names the places work runs, and the application sizes them.
+
+- `cc::main_thread_scheduler()` — a thread home bound by `cc::mark_current_thread_as_main()`, and never destroyed.
+- `cc::compute_scheduler()` — the installed compute pool.
+- `cc::io_scheduler()` — the installed io pool, or compute when there is none.
+
+A library names these rather than creating a pool of its own, which is what keeps several libraries from oversubscribing one machine.
+It still creates a `thread_bound_scheduler` for a thread it genuinely owns.
+
+### Blocking on a home thread
+
+**Every blocking wait on a home's owner thread runs that home between its steps.**
+A main thread blocked in `cc::async_blocking_get` on a graph with a main-homed step in the middle would otherwise wait forever, and the wait and the step usually live in different libraries.
+Pool participation, the no-slot fallback, `async_drive_until_ready` and `cc::thread_pump_all()` all do it; a push to a home whose owner is parked wakes it wherever it parks.
+`thread_pump_all` reaches the home through one TLS read rather than a registry entry, so a threaded sweep with nothing registered stays one atomic load.
+
+**A home is never re-entered from inside one of its own bodies.**
+A blocking wait inside a main-homed body does not run other main-homed bodies, which would see half-finished main-thread state.
+A `co_await` is unaffected — it returns to the pump — and so is driving a same-home dependency inline, which is the body asking for exactly that node.
+The price is that such a wait on a same-home node deadlocks, inside one function rather than across libraries; turn the wait into a `co_await`.
+This is provisional, and worth revisiting with a real use case for nesting.
+
+### The loop's pump
+
+`cc::pump_main_thread(max_ms)` is the event loop's call on the main thread: the main home, one sweep of the pump registry, and — where compute and io have no threads of their own — a step of each.
+It repeats until nothing progresses or the budget is spent, checking between items, so one long body overruns the budget and the return value says work is still pending.
+A cycle runs only what was queued when it started, so a body that yields in a loop cannot pin the loop.
+A user home has the same `pump_for(max_ms)`.
+
+### Strands, not built
+
+A home that any thread may drain, one item at a time, is a strand.
+It would give exclusion for synchronous sections that cannot deadlock.
+Exclusion never outlives a segment, and a node has one home at a time, so nothing ever holds one exclusion while waiting for another.
+It is not built, because the async mutex covers the cases that exist and a strand cannot hold across a suspend.
 
 ## Ambient context
 

@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_tls.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
 #include <chrono> // the poll interval a driver waiting on an external push sleeps for
@@ -241,8 +242,14 @@ namespace
 /// So this trades latency on a path that is already crossing a thread boundary for a driver that costs nothing while it waits.
 constexpr int async_external_poll_ms = 1;
 
-void async_sleep_a_moment()
+void async_wait_a_moment()
 {
+    // A thread with a home waits on that home instead: a push to it ends the wait at once, rather than after the interval.
+    if (auto* const home = cc::impl::async_tls().home)
+    {
+        home->wait_for_work(double(async_external_poll_ms));
+        return;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(async_external_poll_ms));
 }
 } // namespace
@@ -259,10 +266,12 @@ void cc::impl::async_drive_until_ready(async_node_base& root)
 
         // The scheduler ran out of work it could do here, so what is left is somebody else's push.
         // Some of those pushers have no thread to push from, and this blocked thread is the only one there is.
+        // The sweep also runs this thread's own home, if it has one, which is how a main thread blocked on a graph
+        // still runs the main-homed steps of that graph.
         if (cc::thread_pump_all())
             continue;
 
-        async_sleep_a_moment();
+        async_wait_a_moment();
     }
 }
 
@@ -285,7 +294,7 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
         if (std::chrono::steady_clock::now() >= deadline)
             return root.is_ready();
 
-        async_sleep_a_moment();
+        async_wait_a_moment();
     }
 
     return true;
@@ -309,40 +318,67 @@ cc::async_scheduler& cc::ambient_async_scheduler()
 
 void cc::async_node_base::schedule()
 {
+    // The lock is taken by hand rather than by lock_scope, so the homed tail can release it before submitting without the unhomed path carrying a branch after the unlock.
+    // Nothing between lock and unlock throws.
+    spin_lock();
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    auto const s = async_node_state((w & state_mask) >> state_shift);
+
+    // terminal, already runnable, or a manual node (only external completion makes those ready)
+    if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
     {
-        lock_scope g(this);
-        auto const s = load_state(cc::memory_order_relaxed);
-
-        // terminal, already runnable, or a manual node (only external completion makes those ready)
-        if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
-            return;
-
-        if (s == async_node_state::running)
-        {
-            // a second poller must never run this node: record a re-poll request; the active poller reconciles
-            // at its next park point instead of parking.
-            set_wake();
-            return;
-        }
-
-        // Ambient write site 1 of 3: a COLD node is being handed to a queue, so it takes the context of whoever hands it over.
-        // Deliberately not the `blocked` case, which is a wake — see the ambient section in libs/base/clean-core/docs/systems/async.md.
-        if (s == async_node_state::cold)
-            impl::async_ambient_store(ambient(), impl::async_tls().ambient);
-
-        // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
-        store_state(async_node_state::scheduled);
+        spin_unlock();
+        return;
     }
 
+    if (s == async_node_state::running)
+    {
+        // a second poller must never run this node: record a re-poll request; the active poller reconciles
+        // at its next park point instead of parking.
+        set_wake();
+        spin_unlock();
+        return;
+    }
+
+    // Ambient write site 1 of 3: a COLD node is being handed to a queue, so it takes the context of whoever hands it over.
+    // Deliberately not the `blocked` case, which is a wake — see the ambient section in libs/base/clean-core/docs/systems/async.md.
+    if (s == async_node_state::cold)
+        impl::async_ambient_store(ambient(), impl::async_tls().ambient);
+
+    // A homed node routes home, never to whichever thread happens to wake it.
+    if ((w & homed_bit) != 0) [[unlikely]]
+    {
+        submit_home_and_unlock();
+        return;
+    }
+
+    // cold or blocked -> make runnable (we route exactly once, below, after releasing the lock)
+    store_state(async_node_state::scheduled);
+    spin_unlock();
     route_after_schedule();
+}
+
+CC_COLD_FUNC void cc::async_node_base::submit_home_and_unlock()
+{
+    // Held lock, homed node, cold / blocked / running: the frame slot still holds the word.
+    auto* const home = impl::async_home_of(home_word());
+    store_state_clear_wake(async_node_state::scheduled);
+    spin_unlock();
+    home->submit(async_node_ptr::from_alive(this)); // strong > 0: our caller holds a handle
+}
+
+void cc::async_node_base::release_home()
+{
+    impl::async_home_of(home_word())->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
 }
 
 void cc::async_node_base::schedule_on(async_scheduler& target)
 {
-    bool do_submit = false;
+    async_scheduler* destination = nullptr;
     {
         lock_scope g(this);
-        auto const s = load_state(cc::memory_order_relaxed);
+        auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+        auto const s = async_node_state((w & state_mask) >> state_shift);
 
         if (is_ready_state(s) || s == async_node_state::scheduled || s == async_node_state::external_pending)
             return; // terminal, already runnable elsewhere, or a manual node
@@ -356,12 +392,14 @@ void cc::async_node_base::schedule_on(async_scheduler& target)
         if (s == async_node_state::cold) // see schedule(): the same write site, on the explicit-target path
             impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
+        // A home beats an explicit target: asking a pool to drive a homed root means waiting for its home.
+        destination = (w & homed_bit) != 0 ? impl::async_home_of(home_word()) : &target;
+
         store_state(async_node_state::scheduled);
-        do_submit = true;
     }
 
-    if (do_submit)
-        target.submit(async_node_ptr::from_alive(this)); // strong > 0: our caller holds a handle
+    if (destination != nullptr)
+        destination->submit(async_node_ptr::from_alive(this)); // strong > 0: our caller holds a handle
 }
 
 void cc::async_node_base::route_after_schedule()
@@ -386,17 +424,47 @@ void cc::async_node_base::route_after_schedule()
                      "async_worker_scope");
 }
 
-bool cc::async_node_base::try_begin_running()
+u64 cc::async_node_base::try_begin_running()
 {
     lock_scope g(this);
-    auto const s = load_state(cc::memory_order_relaxed);
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    auto const s = async_node_state((w & state_mask) >> state_shift);
 
     // another poller owns it, it is terminal, or it awaits external completion -> not runnable here
     if (is_ready_state(s) || s == async_node_state::running || s == async_node_state::external_pending)
-        return false;
+        return 0;
+
+    auto run = u64(1);
+    if ((w & homed_bit) != 0) [[unlikely]]
+    {
+        // A homed node runs only where its home is bound; anywhere else it is left for whoever routes it home.
+        run = home_word();
+        if (async_scheduler::current_or_null() != impl::async_home_of(run))
+            return 0;
+    }
 
     store_state_clear_wake(async_node_state::running); // start fresh; any wake during this run re-sets it
-    return true;
+    return run;
+}
+
+u64 cc::async_node_base::try_begin_running_as_dep(async_scheduler* required_home)
+{
+    lock_scope g(this);
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    auto const s = async_node_state((w & state_mask) >> state_shift);
+
+    if (is_ready_state(s) || s == async_node_state::running || s == async_node_state::external_pending)
+        return 0;
+
+    // Checked under OUR lock, where the word cannot be overwritten by a racing resolution: the driver never reads it.
+    if ((w & homed_bit) == 0)
+        return 0;
+    auto const run = home_word();
+    if (impl::async_home_of(run) != required_home)
+        return 0;
+
+    store_state_clear_wake(async_node_state::running);
+    return run;
 }
 
 void cc::async_node_base::reschedule_self()
@@ -405,15 +473,24 @@ void cc::async_node_base::reschedule_self()
     // Bypasses the wake-suppression in schedule(), which would leave a running node un-enqueued.
     // A yield stays on the current, compatible worker, so route_after_schedule takes the local hot path.
     {
-        lock_scope g(this);
-        CC_ASSERT(load_state(cc::memory_order_relaxed) == async_node_state::running, "yield from a non-running node");
+        // Checked before the lock, which is taken by hand: an assert that reports and returns must not leave it held.
+        // Only the running poller moves a running node's state, and that is this thread.
+        CC_ASSERT(load_state(cc::memory_order_acquire) == async_node_state::running, "yield from a non-running node");
+        spin_lock();
 
         // Ambient write site 2 of 3, and the easiest to overlook.
         // A node driven INLINE as someone's dependency was never scheduled, so it carries no context yet; without this it would come back off the queue with none.
         // Unconditional rather than cold-only: we are running, so the installed context IS this node's, and a repeat store writes the same word.
         impl::async_ambient_store(ambient(), impl::async_tls().ambient);
 
+        if (is_homed()) [[unlikely]]
+        {
+            submit_home_and_unlock(); // a hop rewrote the word just before yielding, so this is the NEW home
+            return;
+        }
+
         store_state_clear_wake(async_node_state::scheduled);
+        spin_unlock();
     }
     route_after_schedule();
 }
@@ -581,11 +658,13 @@ void cc::impl::async_cont_head::remove(async_node_base* dependent)
     if (_head == 0)
         return;
 
+    // Identity by address and liveness by the strong half, with no strong handle minted.
+    // Locking one would make this call the last owner whenever the dependent's other owner drops concurrently, and
+    // its teardown would then run here, under the dependency's spinlock.
     if ((_head & tag_is_list) == 0)
     {
         auto w = async_node_weak::adopt(inline_dep()); // borrow our hand-held ref for the liveness test
-        auto const sp = w.lock();
-        if (!sp.is_valid() || sp.get() == dependent)
+        if (w.get() == dependent || !w.get()->has_strong_owners())
             _head = 0; // dropped: w's destructor pays the dec_weak
         else
             _head = reinterpret_cast<u64>(w.release()); // kept: hand the ref back to the inline slot
@@ -598,10 +677,7 @@ void cc::impl::async_cont_head::remove(async_node_base* dependent)
         auto* const next = c->_next;
         bool drop = false;
         if (c->_fn == nullptr)
-        {
-            auto sp = c->_weak.lock();
-            drop = !sp.is_valid() || sp.get() == dependent;
-        }
+            drop = c->_weak.get() == dependent || !c->_weak.get()->has_strong_owners();
         if (drop)
         {
             if (prev != nullptr)
@@ -666,12 +742,23 @@ void cc::async_node_base::drop_ready_pending_deps()
     deps().remove_ready();
 }
 
-void cc::async_node_base::schedule_pending_deps(async_node_base* except)
+void cc::async_node_base::schedule_pending_deps(async_node_base* except, async_scheduler* offload)
 {
     // Only COLD deps: those are the ones nobody has taken responsibility for yet.
     // A dep that is already scheduled or running is accounted for, and one that is `blocked` is parked on its OWN deps.
     // schedule() would drag that back to `scheduled` and re-enqueue it, and it would just re-subscribe and re-park.
     // Down a chain past the inline depth cap, that turns every park into a re-poll storm.
+    if (offload != nullptr) [[unlikely]]
+    {
+        // A home keeping its thread for itself: unhomed deps go to the offload target, homed ones to their homes.
+        deps().for_each(
+            [except, offload](impl::async_dep_entry e)
+            {
+                if (e.dep() != except && e.dep()->is_cold())
+                    e.dep()->schedule_on(*offload);
+            });
+        return;
+    }
     deps().for_each(
         [except](impl::async_dep_entry e)
         {
@@ -781,13 +868,28 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     return false;
 }
 
+bool cc::async_node_base::destroy_payload()
+{
+    // The homed test rides on the word teardown reads anyway.
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    auto const s = async_node_state((w & state_mask) >> state_shift);
+    if ((w & homed_bit) != 0) [[unlikely]]
+        return teardown_payload_or_defer(s);
+    teardown_payload_as(s);
+    return false;
+}
+
 void cc::async_node_base::teardown_payload()
+{
+    teardown_payload_as(load_state(cc::memory_order_relaxed));
+}
+
+CC_FORCE_INLINE void cc::async_node_base::teardown_payload_as(async_node_state const s)
 {
     // Strong-0 teardown, so nothing races us.
     // If ready, the unresolved arm is already gone and the payload holds the resolved value/error, so destroy that, typed, via the ops table.
     // Otherwise the arm is live: unsubscribe, since the frame still pins the deps, then destroy the whole arm of frame + deps + conts.
     // The intrusive counts and _ops stay alive for outstanding weak refs; free_storage reclaims the raw node later.
-    auto const s = load_state(cc::memory_order_relaxed);
     if (s == async_node_state::ready_value)
     {
         if (auto const f = ops()->teardown_value) // null for a trivially-destructible value type
@@ -800,11 +902,44 @@ void cc::async_node_base::teardown_payload()
     }
     else
     {
+        // Strong-0, so nothing races the read: a never-resolved homed node stops counting against its home.
+        auto* const home
+            = (s != async_node_state::external_pending && is_homed()) ? impl::async_home_of(home_word()) : nullptr;
         unsubscribe_all();
         destroy_frame();                  // a never-resolved frame (dropped cold, or parked) — a plain ~F, so
                                           // no re-entrancy contract applies here; it just releases its captures
         unresolved().~async_unresolved(); // deps + conts
+        if (home != nullptr)
+            home->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
     }
+}
+
+CC_COLD_FUNC bool cc::async_node_base::teardown_payload_or_defer(async_node_state const s)
+{
+    auto const deferrable = (s == async_node_state::cold || s == async_node_state::blocked)
+                         && ops()->frame_destroy != nullptr
+                         && impl::async_home_options_of(home_word()).teardown == async_teardown::at_home;
+    if (deferrable)
+    {
+        // The sole-owner fast path leaves the counts reading (1,1) through teardown.
+        // Deferring outlives this call, so make them say what is true — no strong owner, and the one collective weak
+        // count the home is about to own — before anyone else can look.
+        // Nobody can race this store: reading (1,1) proved there is no other reference to race with.
+        if ((_counts.load(cc::memory_order_acquire) >> 32) != 0)
+            _counts.store(cc::fused_refcount::weak_unit, cc::memory_order_relaxed);
+
+        if (impl::async_home_of(home_word())->try_defer_teardown(this))
+            return true;
+    }
+
+    teardown_payload_as(s);
+    return false;
+}
+
+void cc::impl::async_run_deferred_teardown(async_node_base* node)
+{
+    node->teardown_payload();
+    auto const collective = async_node_weak::adopt(node); // dropping it frees the node if nothing else holds a weak count
 }
 
 // ============================================================================
@@ -849,10 +984,46 @@ cc::async_step_status cc::async_node_base::invoke_frame_step(async_context_base&
 
 void cc::async_node_base::poll()
 {
-    if (!try_begin_running())
-        return; // another poller owns it, it is terminal, or it is a manual node awaiting external completion
+    auto const run = try_begin_running();
+    if (run == 0)
+        return; // another poller owns it, it is terminal, a manual node awaiting external completion, or homed elsewhere
+    poll_running(run);
+}
 
+void cc::async_node_base::poll_as_dep(async_scheduler& required_home)
+{
+    auto const run = try_begin_running_as_dep(&required_home);
+    if (run == 0)
+        return;
+    poll_running(run);
+}
+
+namespace
+{
+/// The same-home-only restriction a homed driver's word asks for, if any, and where its refused dependencies go instead.
+CC_COLD_FUNC CC_DONT_INLINE void resolve_inline_policy(u64 const run,
+                                                       cc::async_scheduler*& same_home_only,
+                                                       cc::async_scheduler*& offload)
+{
+    auto* const home = cc::impl::async_home_of(run);
+    auto policy = cc::impl::async_home_options_of(run).inline_deps;
+    if (policy == cc::async_inline_deps::home_default)
+        policy = home->default_inline_deps;
+    if (policy != cc::async_inline_deps::same_home_only)
+        return;
+
+    same_home_only = home;
+    offload = cc::async_scheduler::compute_or_null();
+    if (offload == home)
+        offload = nullptr; // homed to compute itself: plain scheduling already lands there
+}
+} // namespace
+
+// Force-inlined into both callers, so an unhomed poll() pays no extra call for the split.
+CC_FORCE_INLINE void cc::async_node_base::poll_running(u64 const run)
+{
     unsubscribe_all(); // re-evaluate dependencies from scratch this turn
+
 
     // Install this node's ambient context, if it has one, for the whole poll — the frame, anything it calls, and any node it spawns.
     //
@@ -875,6 +1046,14 @@ void cc::async_node_base::poll()
 
         if (!deps().empty())
         {
+            // A homed node whose policy keeps its home's thread for itself drives only same-home dependencies inline.
+            // Everything else goes to compute, and this node parks rather than running foreign work on its home.
+            // Resolved here, on the dependency branch, from the word try_begin_running handed back: a leaf never looks.
+            async_scheduler* same_home_only = nullptr;
+            async_scheduler* offload = nullptr;
+            if (run != 1) [[unlikely]]
+                resolve_inline_policy(run, same_home_only, offload);
+
             // Eager depth-first drive: rather than parking, satisfy one dependency right here by driving it
             // inline on this stack -- better locality, no scheduler round-trip, no wakeup.
             // We fall back to subscribe+park only when the picked dep cannot be completed inline, or the depth cap is hit.
@@ -889,11 +1068,14 @@ void cc::async_node_base::poll()
                 // The siblings are worth publishing only if someone could actually steal them, so a
                 // singlethreaded scheduler publishes nothing and drives the whole graph on this stack.
                 if (ctx.scheduler != nullptr && ctx.scheduler->has_steal_capable_peers)
-                    schedule_pending_deps(pick);
+                    schedule_pending_deps(pick, offload);
 
                 {
                     inline_depth_guard const ds;
-                    pick->poll();
+                    if (same_home_only != nullptr) [[unlikely]]
+                        pick->poll_as_dep(*same_home_only);
+                    else
+                        pick->poll();
                 }
                 if (pick->is_ready())
                     continue; // progress: drop the finished dep and re-evaluate (drives siblings left-to-right)
@@ -903,7 +1085,7 @@ void cc::async_node_base::poll()
             // About to park, so nothing on this stack will drive them.
             // Every remaining dep must be made runnable here, or nobody ever wakes us -- require() deliberately
             // does not, and the depth-cap path above skips the inline drive entirely.
-            schedule_pending_deps(nullptr);
+            schedule_pending_deps(nullptr, offload);
 
             // Install wakeup continuations late, then decide whether to park.
             bool const found_ready = subscribe_to_pending_deps();
@@ -954,4 +1136,49 @@ void cc::async_node_base::poll()
             return;
         }
     }
+}
+
+// ============================================================================
+// async_node_base — homes
+// ============================================================================
+
+cc::async_scheduler* cc::async_node_base::home_or_null()
+{
+    lock_scope g(this);
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    if ((w & homed_bit) == 0 || is_ready_state(async_node_state((w & state_mask) >> state_shift)))
+        return nullptr;
+    return impl::async_home_of(home_word());
+}
+
+bool cc::async_node_base::rehome(async_scheduler& home, async_home_options options)
+{
+    async_scheduler* previous = nullptr;
+    {
+        lock_scope g(this);
+        auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+        CC_ASSERT(async_node_state((w & state_mask) >> state_shift) == async_node_state::running,
+                  "rehome is for a node's own running frame");
+        if ((w & homed_bit) != 0)
+            previous = impl::async_home_of(home_word());
+        home_word() = impl::async_make_home_word(&home, options);
+        _state_and_ops.store(w | homed_bit, cc::memory_order_release);
+    }
+
+    if (previous == &home)
+        return true;
+    home._homed_nodes.fetch_add(1, cc::memory_order_relaxed);
+    if (previous != nullptr)
+        previous->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
+    return false;
+}
+
+void cc::async_node_base::set_home_options(async_home_options options)
+{
+    lock_scope g(this);
+    auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+    CC_ASSERT((w & homed_bit) != 0, "set_home_options on a node that has no home — hop to one first");
+    CC_ASSERT(async_node_state((w & state_mask) >> state_shift) == async_node_state::running,
+              "set_home_options is for a node's own running frame");
+    home_word() = impl::async_make_home_word(impl::async_home_of(home_word()), options);
 }

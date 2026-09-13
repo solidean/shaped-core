@@ -792,7 +792,7 @@ cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; 
 i32 p = cc::recommended_worker_count();   // >= 1 always; machine, affinity mask and cgroup quota, whichever binds
                                           //   (platform/resource_limits.hh) — the number to size a pool from
 auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
-cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread; nothing does it implicitly
+cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread AND binds cc::main_thread_scheduler(); nothing does it implicitly
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel
 
 #include <clean-core/thread/spin.hh>
@@ -828,6 +828,9 @@ auto reg = cc::register_thread_pump([&] { return step_once(); }); // -> RAII; tr
 cc::thread_pump_all();                    // -> bool; one cycle of every registration. One atomic load when empty
 cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == stopped on the budget
 cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
+// thread_pump_all also runs the CALLING thread's own home (thread_bound_scheduler), so every wait loop services it.
+cc::pump_main_thread(4.0);                // the event loop's call (thread_bound_scheduler.hh): main home + registry +
+                                          //   (threads off) compute/io; true == stopped on the budget with work pending
 // GOTCHA: a pump must NOT block on another registration - it holds the only thread, so that one never runs.
 //   Sweep from inside a pump instead (this one is skipped, the others run). Blocking on a GPU fence / OS handle is fine.
 ```
@@ -929,6 +932,19 @@ cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root
 // It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
 // inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
 // a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
+// HOMES (#include <clean-core/thread/thread_bound_scheduler.hh>) — a node pinned to a scheduler runs EVERY segment
+// of its frame there: first poll, each resume after a wake, each yield. Unhomed nodes pay nothing (docs "Homes").
+auto p = cc::make_async_scheduled_on_main([&] { present(); });            // homed factory; also _lazy_on_main
+auto q = cc::make_async_lazy_on(home, {.inline_deps = cc::async_inline_deps::any}, f, deps...); // any scheduler
+co_await cc::async_resume_on_main();     // coroutine hop: STICKY rehome (options reset); no suspend if already there
+co_await cc::async_resume_on_compute();  // / _io() / async_resume_on(h, opts)
+co_await cc::async_set_home_options({.teardown = cc::async_teardown::at_home}); // never suspends; must be homed
+auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); }); // child elsewhere, value moved out
+cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
+// inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)
+// teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on the home; resolved values anywhere
+// GOTCHA: children a homed body starts are NOT homed (they go to compute). A home is never re-entered: a blocking wait
+//   inside a homed body does not run that home's other bodies — co_await instead. A home must outlive its homed nodes.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)

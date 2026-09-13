@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/thread/async_node.hh> // cc::impl::async_bind_main_thread_home
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 
@@ -122,7 +123,11 @@ void cc::mark_current_thread_as_main()
               "cc::current_thread_id()");
     CC_ASSERT(!g_main_claimed.exchange(true, cc::memory_order_relaxed) || tl_thread_id == thread_id::main,
               "another thread already claimed cc::thread_id::main");
+    if (tl_thread_id == thread_id::main)
+        return; // marked again, as a nested run does: the main home is already bound
+
     tl_thread_id = thread_id::main;
+    cc::impl::async_bind_main_thread_home();
 }
 
 #if CC_HAS_THREADS

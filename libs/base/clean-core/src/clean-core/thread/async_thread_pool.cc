@@ -1,6 +1,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 
 #if CC_HAS_THREADS
 #include <clean-core/string/print.hh>
@@ -68,7 +69,8 @@ int cc::async_thread_pool::default_worker_count()
 // Always steal-capable, even at worker_count == 1.
 // The external slots mean a foreign blocking_get caller is a second participant that can steal from the worker and be stolen from.
 // So the poll loop must keep publishing dependencies rather than assume it is alone and drive them all inline.
-cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(true)
+cc::async_thread_pool::async_thread_pool(int worker_count, async_inline_deps default_inline_deps)
+  : async_scheduler(true, default_inline_deps)
 {
     // Spawning N OS threads, which is where a slow start-up is.
     CC_RECORD_SCOPE("cc.thread_pool.create");
@@ -391,12 +393,27 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     worker* const held_slot = current_worker();
     bool const reuse = held_slot != nullptr && held_slot->pool == this;
 
+    // The home this thread must keep running while it waits — unless the wait is inside one of that home's own bodies,
+    // which never re-enter it.
+    auto* home = cc::impl::async_tls().home;
+    if (home != nullptr && home->_body_depth > 0)
+        home = nullptr;
+
     worker* const slot = reuse ? held_slot : try_claim_external_slot();
     if (slot == nullptr)
     {
         // No free slot: hand the root over and park on it alone.
         // Deaf to injected work, but harmlessly so — with no slot there is nothing this thread could have run anyway.
         root.schedule_on(*this);
+
+        // Except a thread that owns a home: the root may need a step only that home runs, so it must never park deaf to it.
+        if (home != nullptr)
+        {
+            while (!root.is_ready())
+                if (!home->pump_cycle())
+                    home->wait_for_work(1.0);
+            return;
+        }
 
         struct sync
         {
@@ -460,6 +477,10 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         // Anything the root forks off is still published normally by the poll loop, so a real graph still spreads.
         root.poll();
 
+        // A homed root this thread may not run was refused and is still cold; send it home, or nothing ever will.
+        if (root.is_cold())
+            root.schedule_on(*this);
+
         // A parked participant sleeps in the pool's OWN protocol rather than on the root alone, so that work arriving
         // for the pool wakes it exactly as it wakes a worker.
         //
@@ -503,6 +524,10 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 continue;
             }
 
+            // This thread's own home, if it has one: a main thread blocked on a graph still runs that graph's main-homed steps.
+            if (home != nullptr && home->pump_cycle())
+                continue;
+
             // Dry, so spin like a worker before giving up.
             // The rest of the graph is in flight on the pool and work may come back to us within nanoseconds, whereas parking costs microseconds.
             bool found = false;
@@ -532,6 +557,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             // ourselves, then re-scan, so a push that raced our registration cannot strand.
             // Anything we queued stays stealable while we sleep.
             i64 const epoch = _wake_epoch.load(cc::memory_order_acquire);
+            i64 const home_epoch = _home_epoch.load(cc::memory_order_acquire);
             _sleepers.fetch_add(1, cc::memory_order_seq_cst);
             cc::atomic_thread_fence(cc::memory_order_seq_cst);
 
@@ -542,6 +568,20 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                 continue;
             }
 
+            // The home's half of the same argument, paired through the home's mutex instead of a fence.
+            // Announce where we park, then look at the queue under that mutex.
+            // A submit that lands after the look reads the announcement under the same mutex and bumps _home_epoch, which the wait below checks.
+            if (home != nullptr)
+            {
+                home->_parked_in.store(this, cc::memory_order_seq_cst);
+                if (home->has_queued_work())
+                {
+                    home->_parked_in.store(nullptr, cc::memory_order_relaxed);
+                    _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+                    continue;
+                }
+            }
+
             {
                 std::unique_lock<std::mutex> lk(_wait_m);
                 _wait_cv.wait(lk,
@@ -549,10 +589,13 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                               {
                                   return waiter.done.load(cc::memory_order_relaxed)
                                       || _stop.load(cc::memory_order_relaxed)
-                                      || _wake_epoch.load(cc::memory_order_relaxed) != epoch;
+                                      || _wake_epoch.load(cc::memory_order_relaxed) != epoch
+                                      || (home != nullptr && _home_epoch.load(cc::memory_order_relaxed) != home_epoch);
                               });
             }
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+            if (home != nullptr)
+                home->_parked_in.store(nullptr, cc::memory_order_relaxed);
 
             // _stop without the latch having fired means the pool is going away under us; nothing will complete the
             // root, and staying here would hang shutdown.
@@ -569,7 +612,21 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     }
 }
 
+void cc::async_thread_pool::wake_home_participants()
+{
+    {
+        std::lock_guard<std::mutex> const lk(_wait_m);
+        _home_epoch.fetch_add(1, cc::memory_order_relaxed);
+    }
+    _wait_cv.notify_all(); // workers wake spuriously, see no change of their own, and go back to sleep
+}
+
 #else // CC_HAS_THREADS == 0
+
+void cc::async_thread_pool::wake_home_participants()
+{
+    // Nobody parks without threads.
+}
 
 // ============================================================================
 // The pool without threads
@@ -587,7 +644,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 // The limit is real and worth stating: a graph parked on work only another thread could deliver never completes here.
 // blocking_get's is_ready() assert reports that instead of hanging, which is the honest failure -- no thread could ever arrive to make it true.
 
-cc::async_thread_pool::async_thread_pool(int worker_count) : async_scheduler(false)
+cc::async_thread_pool::async_thread_pool(int worker_count, async_inline_deps default_inline_deps)
+  : async_scheduler(false, default_inline_deps)
 {
     // The count is accepted and ignored rather than asserted on: callers pass worker-count-shaped numbers unconditionally,
     // and refusing them here would be exactly the platform branch this fallback exists to remove.
@@ -645,14 +703,23 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     // Drive the root here rather than schedule() it, for the same reason the threaded path does: it is work we are about to do anyway.
     // There, publishing races a thief for it; here it would just be a queue round trip.
     root.poll();
+    if (root.is_cold())
+        root.schedule_on(*this); // a homed root was refused here: send it home
 
-    // Then pump whatever it queued.
+    // Then pump whatever it queued, and this thread's home, which is every home there is without threads.
     // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver.
-    while (!root.is_ready() && !_queue.empty())
+    auto* const home = cc::impl::async_tls().home;
+    while (!root.is_ready())
     {
-        async_node_ptr n = cc::move(_queue.back());
-        _queue.pop_back();
-        impl::async_poll_work_item(*n);
+        if (!_queue.empty())
+        {
+            async_node_ptr n = cc::move(_queue.back());
+            _queue.pop_back();
+            impl::async_poll_work_item(*n);
+            continue;
+        }
+        if (home == nullptr || !home->pump_cycle())
+            break;
     }
 
     // Drop the entries that are already finished.
@@ -685,7 +752,7 @@ cc::scoped_async_homes::scoped_async_homes(config cfg)
 
     if (cfg.io_workers > 0)
     {
-        _io = cc::make_unique<async_thread_pool>(cfg.io_workers);
+        _io = cc::make_unique<async_thread_pool>(cfg.io_workers, async_inline_deps::same_home_only);
         install_io_async_scheduler(*_io);
     }
 }

@@ -25,6 +25,11 @@ rules:
       - src/clean-core/thread/threaded_actor.hh
 
   - kind: allow-include
+    value: [<mutex>, <condition_variable>]
+    reason: a thread home's owner parks with a deadline and is woken by a submit under the same mutex, and cc::mutex::wait has no deadline
+    files: src/clean-core/thread/thread_bound_scheduler.hh
+
+  - kind: allow-include
     value: <ctime>
     reason: localtime_s / localtime_r are the only portable route to a LOCAL calendar breakdown, and <chrono>'s zoned_time wants a tzdb
     files: src/clean-core/common/time.cc

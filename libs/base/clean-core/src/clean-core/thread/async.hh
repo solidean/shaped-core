@@ -155,6 +155,11 @@ public:
     static constexpr bool frame_fits_inline
         = isize(sizeof(F)) <= frame_capacity && alignof(F) <= impl::async_frame_align;
 
+    /// True if F is stored inline behind a home word — the budget of a homed node, and of every coroutine, is 8 B smaller.
+    template <class F>
+    static constexpr bool homed_frame_fits_inline
+        = isize(sizeof(F)) + impl::async_home_word_bytes <= frame_capacity && alignof(F) <= impl::async_frame_align;
+
 private:
     alignas(16) byte _payload[payload_bytes]; // the offset-16 slot; base reaches it via payload()
 };
@@ -192,6 +197,18 @@ template <class G>
 void async_frame_destroy(void* frame)
 {
     static_cast<G*>(frame)->~G();
+}
+
+/// The same pair for a frame that sits behind a home word: the slot opens with the word, and G starts 8 B in.
+template <class G>
+async_step_status async_homed_frame_invoke(void* slot, cc::async_context_base& ctx)
+{
+    return async_frame_invoke<G>(static_cast<byte*>(slot) + async_home_word_bytes, ctx);
+}
+template <class G>
+void async_homed_frame_destroy(void* slot)
+{
+    async_frame_destroy<G>(static_cast<byte*>(slot) + async_home_word_bytes);
 }
 
 /// Fail `n` on its failure channel E from the exception being handled.
@@ -255,6 +272,17 @@ inline constexpr cc::async_type_ops const& async_type_ops_for_frame
                        async_teardown_ptr<E>(),
                        &async_frame_invoke<G>,
                        &async_frame_destroy<G>,
+                       async_frame_except_ptr<E>()>;
+
+/// The descriptor for an async<T, E> whose frame slot opens with a home word and holds a G behind it.
+/// A homed node's, and every coroutine's: a coroutine reserves the word so it can hop without reallocating.
+template <class T, class E, class G>
+inline constexpr cc::async_type_ops const& async_type_ops_for_homed_frame
+    = async_type_ops_v<cc::node_class_index_for<async_typed_node<T, E>>(),
+                       async_teardown_ptr<T>(),
+                       async_teardown_ptr<E>(),
+                       &async_homed_frame_invoke<G>,
+                       &async_homed_frame_destroy<G>,
                        async_frame_except_ptr<E>()>;
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
@@ -423,6 +451,24 @@ public:
             using boxed_t = typename async::frame_type;
             this->template install_frame<async::frame_capacity, boxed_t>(
                 &impl::async_type_ops_for_frame<T, E, boxed_t>,
+                boxed_t::template create_from<F>(cc::default_node_allocator(), cc::forward<Args>(args)...));
+        }
+    }
+
+    /// Install the compute frame behind a home word, building it in place from `args`.
+    /// `home_word` 0 only reserves the word (a coroutine's frame); a non-zero word homes the node — see impl::async_make_home_word.
+    /// Call before the node is shared, as the homed factories do.
+    template <class F, class... Args>
+    void set_homed_frame_emplace(u64 home_word, Args&&... args)
+    {
+        if constexpr (async::template homed_frame_fits_inline<F>)
+            this->template install_homed_frame<async::frame_capacity, F>(&impl::async_type_ops_for_homed_frame<T, E, F>,
+                                                                         home_word, cc::forward<Args>(args)...);
+        else
+        {
+            using boxed_t = typename async::frame_type;
+            this->template install_homed_frame<async::frame_capacity, boxed_t>(
+                &impl::async_type_ops_for_homed_frame<T, E, boxed_t>, home_word,
                 boxed_t::template create_from<F>(cc::default_node_allocator(), cc::forward<Args>(args)...));
         }
     }
@@ -797,6 +843,26 @@ auto async_make_node(F&& f, Deps&&... deps)
     node->set_frame(async_make_frame<result_t, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
     return node;
 }
+
+// the homed twin of async_make_node
+template <class T, class E, class F, class... Deps>
+auto async_make_homed_node(u64 home_word, F&& f, Deps&&... deps)
+{
+    using result_t = async_result_type<T, F, Deps...>::type;
+    static_assert(!std::is_void_v<result_t>, "the frame must return a value (wrap void as cc::unit)");
+    static_assert(!std::is_same_v<result_t, async_step_status>,
+                  "a raw async_context frame resolves via ctx and returns a status, not a value — give the "
+                  "result type explicitly, e.g. make_async_lazy_on<int>(...)");
+
+    using frame_t = decltype(async_make_frame<result_t, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
+    auto node = async_new_node<result_t, E>();
+    node->template set_homed_frame_emplace<frame_t>(
+        home_word, async_make_frame<result_t, E>(cc::forward<F>(f), cc::forward<Deps>(deps)...));
+    return node;
+}
+
+template <class F>
+inline constexpr bool async_is_home_options = std::is_same_v<std::remove_cvref_t<F>, async_home_options>;
 } // namespace impl
 
 // ============================================================================
@@ -848,6 +914,78 @@ template <class T = impl::async_deduce_result, class E = async_error, class F, c
     if (impl::async_can_schedule_here())
         node->schedule();
     return node;
+}
+
+// ============================================================================
+// creation — homed
+// ============================================================================
+//
+// A homed node runs every segment of its frame on `home`: its first poll, every resume after a wake, every yield.
+// It is never driven inline off home, and asking another scheduler to drive it means waiting for its home.
+// The model is "Homes" in libs/base/clean-core/docs/systems/async.md.
+
+/// make_async_lazy, homed to `home` with default options.
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+    requires(!impl::async_is_home_options<F>)
+[[nodiscard]] auto make_async_lazy_on(async_scheduler& home, F&& f, Deps&&... deps)
+{
+    return impl::async_make_homed_node<T, E>(impl::async_make_home_word(&home, {}), cc::forward<F>(f),
+                                             cc::forward<Deps>(deps)...);
+}
+
+/// make_async_lazy, homed to `home` with `options`.
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+[[nodiscard]] auto make_async_lazy_on(async_scheduler& home, async_home_options options, F&& f, Deps&&... deps)
+{
+    return impl::async_make_homed_node<T, E>(impl::async_make_home_word(&home, options), cc::forward<F>(f),
+                                             cc::forward<Deps>(deps)...);
+}
+
+/// make_async_lazy_emplace, homed to `home`: the immovable-frame form.
+template <class T, class E = async_error, class F, class... Args>
+[[nodiscard]] shared_async<T, E> make_async_lazy_on_emplace(async_scheduler& home,
+                                                            async_home_options options,
+                                                            Args&&... args)
+{
+    auto node = impl::async_new_node<T, E>();
+    node->template set_homed_frame_emplace<impl::async_frame_holder<T, E, F>>(
+        impl::async_make_home_word(&home, options), cc::forward<Args>(args)...);
+    return node;
+}
+
+/// make_async_scheduled, homed to `home` with default options: submitted to its home at once.
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+    requires(!impl::async_is_home_options<F>)
+[[nodiscard]] auto make_async_scheduled_on(async_scheduler& home, F&& f, Deps&&... deps)
+{
+    auto node = make_async_lazy_on<T, E>(home, cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    node->schedule(); // a home is always somewhere to route to
+    return node;
+}
+
+/// make_async_scheduled, homed to `home` with `options`.
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+[[nodiscard]] auto make_async_scheduled_on(async_scheduler& home, async_home_options options, F&& f, Deps&&... deps)
+{
+    auto node = make_async_lazy_on<T, E>(home, options, cc::forward<F>(f), cc::forward<Deps>(deps)...);
+    node->schedule();
+    return node;
+}
+
+/// make_async_lazy_on(cc::main_thread_scheduler(), ...).
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+    requires(!impl::async_is_home_options<F>)
+[[nodiscard]] auto make_async_lazy_on_main(F&& f, Deps&&... deps)
+{
+    return make_async_lazy_on<T, E>(impl::async_main_home(), cc::forward<F>(f), cc::forward<Deps>(deps)...);
+}
+
+/// make_async_scheduled_on(cc::main_thread_scheduler(), ...).
+template <class T = impl::async_deduce_result, class E = async_error, class F, class... Deps>
+    requires(!impl::async_is_home_options<F>)
+[[nodiscard]] auto make_async_scheduled_on_main(F&& f, Deps&&... deps)
+{
+    return make_async_scheduled_on<T, E>(impl::async_main_home(), cc::forward<F>(f), cc::forward<Deps>(deps)...);
 }
 
 /// Create an async completed externally via async<T>::push_value / push_error — a promise-style node.

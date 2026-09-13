@@ -58,7 +58,9 @@ struct cc::async_thread_pool final : async_scheduler
     /// Starts `worker_count` (>= 1) worker threads.
     /// Defaults to one FEWER than the hardware concurrency: a thread driving a graph participates as a worker for the duration, so the default leaves it a core.
     /// Without threads nothing is started and the count is ignored.
-    explicit async_thread_pool(int worker_count = default_worker_count());
+    /// `default_inline_deps` is what a node homed to this pool gets for `home_default` — `any` for compute, `same_home_only` for an io pool.
+    explicit async_thread_pool(int worker_count = default_worker_count(),
+                               async_inline_deps default_inline_deps = async_inline_deps::any);
 
     /// cc::recommended_worker_count() - 1, floored at 1 — see the constructor on why it is not the full count.
     /// 0 without threads: whoever drives a graph is the only worker there ever is.
@@ -101,6 +103,9 @@ public:
     /// Worker THREADS, excluding the external slots that participating foreign threads borrow.
     /// 0 without threads: whoever drives is the only worker there is.
     [[nodiscard]] int worker_count() const { return _thread_count; }
+
+    /// Wakes every participant parked in this pool so it re-checks its thread's home; called by a thread home's submit.
+    void wake_home_participants();
 
     // internal
 private:
@@ -177,7 +182,8 @@ private:
     // There is deliberately no counter of claimable tasks: a worker's scan of the deques already answers "is there work", authoritatively and without shared writes.
     // A counter would be a hot-path RMW serving a cold-path question — see the protocol block in the .cc.
     alignas(64) cc::atomic<i64> _wake_epoch = {0}; // bumped only when a sleeper actually needs waking
-    cc::atomic<int> _sleepers = {0};               // workers blocked on (or committing to) _wait_cv
+    cc::atomic<i64> _home_epoch = {0}; // bumped when a parked participant's home receives work; workers ignore it
+    cc::atomic<int> _sleepers = {0};   // workers blocked on (or committing to) _wait_cv
     cc::atomic<bool> _stop = {false};
     std::mutex _wait_m;
     std::condition_variable _wait_cv;
@@ -202,6 +208,7 @@ private:
 /// Libraries never create pools of their own for either role; they reach these through cc::compute_scheduler() and
 /// cc::io_scheduler(), which is what keeps several libraries from oversubscribing one machine.
 /// With `io_workers == 0` no io pool is created, and cc::io_scheduler() falls back to compute.
+/// The io pool is built with `same_home_only`, so work homed to io never runs a CPU-bound dependency on threads sized for blocking.
 /// Must be constructed and destroyed on the same thread, like the install/uninstall pair it wraps.
 struct cc::scoped_async_homes
 {

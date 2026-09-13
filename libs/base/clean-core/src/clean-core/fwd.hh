@@ -342,13 +342,17 @@ enum class async_error_kind : u8;  // an ordinary error, or a cancellation (thre
 enum class async_step_status : u8; // what one compute step reports back to the poll loop
 enum class async_node_state : u8;  // a node's lifecycle state, moved by CAS
 struct async_error;
-struct alignas(32) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
+struct alignas(64) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
 struct async_node_base;
 namespace impl
 {
 struct async_node_traits;
 }
 struct async_scheduler;
+enum class async_teardown : u8;    // where a homed node's never-resolved frame is destroyed (thread/async_node.hh)
+enum class async_inline_deps : u8; // whether a homed node drives its dependencies inline
+struct async_home_options;
+struct thread_bound_scheduler; // a home one owner thread drains (thread/thread_bound_scheduler.hh)
 struct async_worker_scope;
 struct async_no_worker_scope;
 struct singlethreaded_scheduler;

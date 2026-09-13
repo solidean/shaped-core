@@ -128,6 +128,26 @@ Instruction counts for the same two points, from the pinned disassembly probes:
 For 64 B of storage plus an alloc *and* a dealloc, that is not alarming.
 [Cost](../systems/async.md#cost) reads those counts as a design constraint — which of the eight atomics are inherent, and which are the queue round-trip.
 
+### Homes
+
+Homes were required to cost an unhomed node nothing measurable, so the same two probes were traced before and after they landed.
+Both runs are `relwithdebinfo-clang` on an AMD Ryzen 9 7950X3D, since the tracer needs a PDB; the absolute counts differ from the table above for that reason, and the delta is the point.
+
+| probe | before homes | after homes |
+|---|---|---|
+| `make_async_manual<int>` created and dropped | 142 instructions, 0 atomics | 142 instructions, 0 atomics |
+| driven `make_async_lazy<i64>` leaf | 684 instructions, 10 atomics, 150 memory reads | 687 instructions, 10 atomics, 150 memory reads |
+
+The three instructions are the homed-bit tests on words each site already holds, and the policy branch in the dependency loop.
+A first version cost 29; the fixes that removed the rest — one word load per resolve, homed routing in a cold tail, the policy resolved only off the leaf path — are the shape to keep.
+
+`bench-async-home - wake latency` times a homed node from submit to done, measured from the submitting thread, with the owner parked between items (release, same machine):
+
+| case | per node |
+|---|---|
+| submit to a parked home | 0.35 µs |
+| submit to a 1-worker pool, unhomed (reference) | 0.25 µs |
+
 ### Grain, and the fork floor
 
 The pool benchmark pins one grain per case — 8192 for parallel-for and reduction, 1024, 4096 and 65536 for the others — and sweeps worker count.
@@ -173,6 +193,7 @@ Either drive them directly, or let the plot scripts do it and chart the result:
 uv run dev.py benchmark "bench-async-grain - grain x size sweep" --timeout 0
 uv run dev.py benchmark "bench-async-grain - fork floor thread sweep" --timeout 0
 uv run dev.py benchmark "bench-async-grain - drive round-trip"
+uv run dev.py benchmark "bench-async-home - wake latency"
 
 uv run libs/base/clean-core/tests/benchmarks/async/grain-plot.py
 uv run libs/base/clean-core/tests/benchmarks/async/fork-floor-plot.py
