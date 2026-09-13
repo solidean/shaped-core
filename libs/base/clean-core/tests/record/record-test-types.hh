@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/listener.hh>
 #include <clean-core/record/overhead.hh>
 #include <clean-core/record/recording.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -66,6 +68,21 @@ inline cc::rec::config deterministic_config()
 [[nodiscard]] constexpr bool threads_available()
 {
     return CC_HAS_THREADS != 0;
+}
+
+/// Burns this thread until the running sampler has taken `samples` more samples, and returns the seconds that took.
+///
+/// The sampler only covers threads the recorder knows, so the caller must have recorded something on this thread.
+/// `cap_secs` is reached only by a sampler that is not sampling; the caller then proceeds and its assertions fail.
+inline f64 burn_until_sampled(u64 samples, f64 cap_secs = 5.0)
+{
+    auto const target = cc::rec::sampling_statistics().taken + samples;
+    auto const start = cc::current_time_steady_secs();
+    u64 volatile sink = 0;
+    while (cc::rec::sampling_statistics().taken < target && cc::current_time_steady_secs() - start < cap_secs)
+        for (int i = 0; i < 4096; ++i)
+            sink = sink + u64(i);
+    return cc::current_time_steady_secs() - start;
 }
 
 /// A recording's event sequence, block by block, as something two recordings can be compared on.

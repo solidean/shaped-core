@@ -2,7 +2,6 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
-#include <clean-core/common/time.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/record/hot_functions.hh>
@@ -61,15 +60,11 @@ CC_DONT_INLINE void recurse_then_log(int depth)
     (void)sink;
 }
 
-CC_DONT_INLINE void burn_for_secs(f64 secs)
+/// The mark joins this thread to the set the sampler covers.
+CC_DONT_INLINE void busy_until_sampled(u64 samples)
 {
     CC_RECORD_MARK("busy");
-
-    auto const start = cc::current_time_steady_secs();
-    u64 volatile sink = 0;
-    while (cc::current_time_steady_secs() - start < secs)
-        for (int i = 0; i < 4096; ++i)
-            sink = sink + u64(i);
+    burn_until_sampled(samples);
 }
 
 cc::rec::recording capture(cc::function_ref<void()> body, bool with_sampling)
@@ -79,7 +74,7 @@ cc::rec::recording capture(cc::function_ref<void()> body, bool with_sampling)
         scoped_listener const reg(rl);
         if (with_sampling)
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0});
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             body();
         }
         else
@@ -121,7 +116,7 @@ REC_TEST("record/hot - every sample lands in exactly one self bucket")
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const r = capture([] { burn_for_secs(0.25); }, true);
+    auto const r = capture([] { busy_until_sampled(20); }, true);
     auto const report = cc::rec::hot_functions(r);
 
     REQUIRE(report.sample_count > 0);
@@ -251,7 +246,7 @@ REC_TEST("record/hot - a report renders as something a human can read")
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const r = capture([] { burn_for_secs(0.2); }, true);
+    auto const r = capture([] { busy_until_sampled(5); }, true);
     auto const report = cc::rec::hot_functions(r);
 
     REQUIRE(report.sample_count > 0);
