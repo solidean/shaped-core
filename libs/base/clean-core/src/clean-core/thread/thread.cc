@@ -1,6 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
-#include <clean-core/common/utility.hh> // cc::max
+#include <clean-core/common/utility.hh>    // cc::max
 #include <clean-core/thread/async_node.hh> // cc::impl::async_bind_main_thread_home
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
@@ -9,7 +9,6 @@
 // Outside the CC_HAS_THREADS guard: the OS's own thread id and its scheduler tick describe the PLATFORM, and a
 // single-threaded build still runs on one.
 #if defined(_WIN32)
-#include <clean-core/common/utility.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <timeapi.h> // timeBeginPeriod / timeEndPeriod, which <Windows.h> does not pull in under LEAN_AND_MEAN
 #elif defined(__APPLE__)
