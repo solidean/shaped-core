@@ -1,6 +1,9 @@
+// The scope templates below are members of these, and the generated package header no longer pulls a
+// context in -- it names no context type, now that create/bind live on the scopes rather than on a group.
 #include "fake_compiler.hh"
 
 #include <nexus/test.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 

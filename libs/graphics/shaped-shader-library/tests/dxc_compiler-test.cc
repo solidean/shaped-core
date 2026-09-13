@@ -4,6 +4,7 @@
 
 #include <clean-core/common/log.hh>
 #include <nexus/test.hh>
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -345,9 +346,24 @@ TEST("slib - an inline-constants block reflects at b0 in the space it named", ex
     auto const* constants = find_binding(compiled, "gConstants");
     REQUIRE(constants != nullptr);
     CHECK(constants->type == sg::binding_type::uniform_buffer);
-    CHECK(constants->index == 0);
-    REQUIRE(constants->space.has_value());
-    CHECK(constants->space.value() == 9);
+
+    // The two targets describe the same block differently, and the difference is the whole point of the feature.
+    //
+    // DXIL gives it a root-constant register in a space, so there is an address to check.
+    // SPIR-V makes it a push-constant block, which lives in no descriptor set and therefore carries neither a
+    // group nor a space — and that absence is exactly what tells a caller an inline-constants block apart from a
+    // `cbuffer` in a set (see ssc's impl/spirv_reflection.cc).
+    if constexpr (k_target_format == sg::shader_format::dxil)
+    {
+        CHECK(constants->index == 0);
+        REQUIRE(constants->space.has_value());
+        CHECK(constants->space.value() == slib::inline_constants_space);
+    }
+    else
+    {
+        CHECK(!constants->space.has_value());
+        CHECK(!constants->group_index.has_value());
+    }
 
     // block_size keeps coming from reflection, which is how a routine reads it today.
     //
