@@ -88,7 +88,10 @@ def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
 
 
 def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
-    """Add one `testcase` job per test from the timings sidecar nexus wrote under --timings-json.
+    """Add one job per test from the timings sidecar nexus wrote under --timings-json.
+
+    A test that dispatched children through nx::invoke_tests is a `testcase-driver` container rather than a `testcase` leaf.
+    Its slice encloses its children's, which are entries of their own, so summing both would count that time twice.
 
     Silently adds nothing when the file is missing or unreadable — a crash before the report, or a runner that is not nexus.
     The step itself is still in the profile, so the run's time stays accounted for.
@@ -97,14 +100,19 @@ def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> No
         doc = json.loads(timings_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    profile.add_jobs([
-        profile.Job(
-            name=t["name"], type="testcase", start=float(t["start"]), end=float(t["end"]),
-            extra={"binary": binary, "preset": preset, "thread": t.get("thread"), "failed": t.get("failed", False)},
-        )
-        for t in doc.get("tests", [])
-        if "name" in t and "start" in t and "end" in t
-    ])
+    jobs = []
+    for t in doc.get("tests", []):
+        if "name" not in t or "start" not in t or "end" not in t:
+            continue
+        children = int(t.get("children", 0))
+        extra = {"binary": binary, "preset": preset, "thread": t.get("thread"), "failed": t.get("failed", False)}
+        if children > 0:
+            extra["children"] = children
+        jobs.append(profile.Job(
+            name=t["name"], type="testcase-driver" if children > 0 else "testcase",
+            start=float(t["start"]), end=float(t["end"]), extra=extra, container=children > 0,
+        ))
+    profile.add_jobs(jobs)
 
 
 def _test_extra(xml_path: Path) -> str:

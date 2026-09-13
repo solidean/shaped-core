@@ -361,6 +361,47 @@ TEST("export - the timings sidecar places every test on the wall clock, in the o
     CHECK(second["failed"].as_bool());
 }
 
+// dev.py files an entry carrying `children` as a container, so the driver's slice and its children's are not summed.
+TEST("export - the timings sidecar marks a driver with its children, and still emits each child", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_invocable_declaration(
+        "child", {}, cc::arg_types_of(cc::signature<void(int)>{}), [](cc::span<nx::typed_value*> in)
+        { nx::impl::invoke_with_values([](int x) { CHECK(x >= 0); }, in, cc::signature<void(int)>{}); });
+    reg.add_declaration("driver", {},
+                        []
+                        {
+                            nx::invoke_tests("a", 1);
+                            nx::invoke_tests("b", 2);
+                        });
+    reg.add_declaration("plain", {}, [] { CHECK(true); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    auto const doc = babel::json::read(nx::write_timings_json("my-suite", exec)).value();
+
+    auto const tests = doc.root()["tests"];
+    REQUIRE(tests.size() == 4);
+
+    auto const driver = entry_named(tests, "driver");
+    REQUIRE(driver.is_valid());
+    CHECK(driver["children"].as_double() == 2);
+
+    auto const plain = entry_named(tests, "plain");
+    REQUIRE(plain.is_valid());
+    CHECK(!plain.has("children"));
+
+    auto const child_a = entry_named(tests, "driver / a / child");
+    auto const child_b = entry_named(tests, "driver / b / child");
+    REQUIRE(child_a.is_valid());
+    REQUIRE(child_b.is_valid());
+    CHECK(!child_a.has("children"));
+
+    // The driver's interval encloses its children's, which is exactly why it cannot be a leaf.
+    CHECK(driver["start"].as_double() <= child_a["start"].as_double());
+    CHECK(child_b["end"].as_double() <= driver["end"].as_double());
+}
+
 TEST("export - junit report carries what the run cost the machine, and only what was measured", no_scheduler)
 {
     nx::test_registry reg;

@@ -12,6 +12,7 @@ An `external` job was harvested or fanned out — a compile edge, a child's per-
 
 A job that encloses another is an **aggregate**: its time is its children's, so adding it to a per-type total would double-count.
 `classify` marks that, which is what lets the summary report the leaves separately from the containers they sit in.
+An external job cannot be found to enclose anything, so its source says so instead, by setting `container`.
 """
 
 from __future__ import annotations
@@ -71,6 +72,8 @@ class Job:
     `type` is the kind of job ("build", "compile", "test", "lint", ...) and doubles as the lane pool under `per-type` allocation.
     `origin` is "driver" for a job this process timed itself and "external" for a harvested or fanned-out one; it decides which layout the job gets.
     `extra` is free-form and is carried through to the trace viewer's argument pane, so it must stay JSON-serializable.
+    `container` is set by a source that KNOWS the job encloses others, such as a test driver and its dispatched children.
+    It is the only way an external job becomes an aggregate, since overlap between external jobs says nothing about structure.
     `group`, `lane`, `depth` and `aggregate` are filled by `classify` and `allocate_lanes`.
     """
 
@@ -80,6 +83,7 @@ class Job:
     end: float
     extra: dict = field(default_factory=dict)
     origin: str = "driver"
+    container: bool = False
     group: str = ""
     lane: int = -1
     depth: int = 0
@@ -108,6 +112,8 @@ class Job:
             d["lane"] = self.lane
         if self.origin == "driver":
             d["depth"] = self.depth
+        if self.container:
+            d["container"] = True
         if self.extra:
             d["extra"] = self.extra
         return d
@@ -121,6 +127,7 @@ class Job:
             end=float(d.get("end", 0.0)),
             extra=d.get("extra") or {},
             origin=str(d.get("origin") or "driver"),
+            container=bool(d.get("container", False)),
         )
 
 
@@ -267,10 +274,11 @@ def _containment_key(job: Job) -> tuple[float, float]:
 def classify(jobs: list[Job]) -> None:
     """Mark which jobs enclose another, and how deep each driver job sits.
 
-    Only a driver job can be an aggregate, and that restriction is the load-bearing part.
+    Only a driver job can be FOUND to be an aggregate, and that restriction is the load-bearing part.
     Enclosing another job means something for a driver span, which wraps its children on one call stack: a build step really does account for the compiles inside it.
     Between two external jobs it means nothing at all: a six-second compile encloses a fast one that ran on a different core.
     Reading that as structure would file most of the fan-out as "container" and empty out the leaf table.
+    A job whose source declared it a `container` is an aggregate whatever its origin, since that is structure the source knows rather than a reading of intervals.
 
     Containment is **strict**, and is resolved over distinct intervals rather than over jobs.
     Two jobs with the same interval are peers, not one inside the other, so a step whose only child exactly matches it stays a leaf rather than swallowing it.
@@ -280,7 +288,7 @@ def classify(jobs: list[Job]) -> None:
     """
     ordered = sorted(jobs, key=_containment_key)
     for job in ordered:
-        job.aggregate = False
+        job.aggregate = job.container
         job.depth = 0
 
     # Distinct intervals, ordered so that an interval precedes everything it could contain.
@@ -511,7 +519,8 @@ def to_chrome_trace(jobs: list[Job], *, argv: list[str] | None = None) -> dict:
             "cat": j.type,
             "ts": round((j.start - t0) * 1e6),
             "dur": max(1, round(j.duration_s * 1e6)),
-            "args": {"type": j.type, "leaf": j.is_leaf, "start_epoch": round(j.start, 6), **j.extra},
+            "args": {"type": j.type, "leaf": j.is_leaf, "container": j.container, "start_epoch": round(j.start, 6),
+                     **j.extra},
         })
 
     _make_tracks_monotone(events)
@@ -594,13 +603,14 @@ def _jobs_from_chrome(events: object) -> list[Job]:
         start = args.get("start_epoch")
         if not isinstance(start, (int, float)):
             continue
-        extra = {k: v for k, v in args.items() if k not in ("type", "start_epoch")}
+        extra = {k: v for k, v in args.items() if k not in ("type", "leaf", "container", "start_epoch")}
         jobs.append(Job(
             name=str(e.get("name", "")),
             type=str(e.get("cat") or args.get("type") or ""),
             start=float(start),
             end=float(start) + float(e.get("dur", 0)) / 1e6,
             extra=extra,
+            container=bool(args.get("container", False)),
         ))
     return jobs
 

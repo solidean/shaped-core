@@ -30,6 +30,8 @@ void emit_test(babel::json::array_writer& tests,
         t.write("end", exec.finished_at_steady_s + steady_to_wall);
         t.write("thread", exec.thread);
         t.write("failed", exec.is_considered_failing());
+        if (!exec.nested.empty())
+            t.write("children", exec.nested.size());
     }
 
     auto const child_prefix = name + " / ";

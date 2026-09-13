@@ -244,6 +244,39 @@ def test_concurrent_fan_out_never_contains_itself() -> None:
     check(abs(compiles.total_s - 6.4) < 1e-9, f"with their full sum, got {compiles.total_s}")
 
 
+def test_declared_container_is_an_aggregate_whatever_its_origin() -> None:
+    """A test driver encloses its dispatched children, and only the sidecar knows that — overlap alone never would."""
+    driver_case = profile.Job(name="sg dx12 backend", type="testcase-driver", start=0.0, end=10.0, container=True)
+    child_a = job("sg dx12 backend / dx12 / clears", "testcase", 1.0, 4.0)
+    child_b = job("sg dx12 backend / dx12 / copies", "testcase", 4.0, 9.0)
+    jobs = [driver_case, child_a, child_b]
+    for j in jobs:
+        j.origin = "external"
+    profile.classify(jobs)
+
+    check(driver_case.aggregate, "an external job declared a container is an aggregate")
+    check(child_a.is_leaf and child_b.is_leaf, "and its children stay leaves")
+
+    summary = profile.summarize(jobs)
+    leaf = next(s for s in summary.leaves if s.type == "testcase")
+    check(abs(leaf.total_s - 8.0) < 1e-9, f"only the children's 3+5 seconds are leaf time, got {leaf.total_s}")
+    check([s.type for s in summary.containers] == ["testcase-driver"], "the driver lands in the containers table")
+
+    # Both still reach the trace, and the flag survives a round trip through it.
+    profile.lay_out(jobs, mode="global")
+    doc = profile.to_chrome_trace(jobs)
+    check(len([e for e in doc["traceEvents"] if e["ph"] == "X"]) == 3, "the driver and both children are drawn")
+    reloaded = profile._jobs_from_chrome(doc["traceEvents"])
+    by_name = {j.name: j for j in reloaded}
+    check(by_name["sg dx12 backend"].container, "a re-read trace keeps the driver a container")
+    check(not by_name["sg dx12 backend / dx12 / clears"].container, "and a child a leaf")
+    check("leaf" not in by_name["sg dx12 backend"].extra, "the computed leaf flag is not read back as stale extra data")
+
+    document = profile.to_document(jobs, lane_mode="global", track_count=1, argv=[])
+    reread = [profile.Job.from_dict(d) for d in document["jobs"]]
+    check(sum(j.container for j in reread) == 1, "the job document round-trips the flag too")
+
+
 def test_driver_depth_follows_the_call_stack() -> None:
     """Driver jobs nest exactly, so depth must reproduce the call stack that produced them."""
     invocation = driver("check", "invocation", 0.0, 100.0)
@@ -462,6 +495,7 @@ TESTS = [
     test_per_type_pools_are_independent,
     test_classify_finds_containers,
     test_concurrent_fan_out_never_contains_itself,
+    test_declared_container_is_an_aggregate_whatever_its_origin,
     test_driver_depth_follows_the_call_stack,
     test_adjacent_siblings_stay_siblings,
     test_split_summary_does_not_double_count,
