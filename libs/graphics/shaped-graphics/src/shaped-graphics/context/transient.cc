@@ -86,13 +86,16 @@ cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isi
                     s.last_epoch = epoch_now;
                 }
 
+                // The head sits wherever the previous allocation ended, which a usage with a stricter alignment may not accept.
+                // So each allocation starts at the head rounded up to its own alignment, never at the head itself.
                 memory_requirements const reqs = s.heap->memory_requirements_for_buffer(size_in_bytes, usage);
-                if (s.head + reqs.size_in_bytes > s.budget)
+                auto const offset = cc::int_round_up_to_multiple(s.head, reqs.alignment_in_bytes);
+                if (offset + reqs.size_in_bytes > s.budget)
                     return allocation_info{.scope = lifetime_scope::transient}; // over budget: committed fallback
 
-                allocation_info a = s.heap->acquire_allocation_for_buffer(size_in_bytes, usage, s.head);
+                allocation_info a = s.heap->acquire_allocation_for_buffer(size_in_bytes, usage, offset);
                 a.scope = lifetime_scope::transient;
-                s.head += reqs.size_in_bytes;
+                s.head = offset + reqs.size_in_bytes;
                 return a;
             });
         CC_RETURN_IF_ERROR(reserved);

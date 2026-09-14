@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -137,6 +138,33 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
             ok = false;
     }
     CHECK(ok);
+}
+
+// The bump head ends wherever the last allocation ended, and a usage with a stricter alignment must not start there.
+// Odd sizes across differently aligned usages, all in one epoch, is the order that used to hand a raytracing scratch
+// buffer a misaligned offset — found when the test order became random.
+INVOCABLE_TEST("sg - transient buffers of different usages in one epoch each land on their own alignment",
+               (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const usages = {
+        sg::buffer_usages(sg::buffer_usage::copy_src),
+        sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst,
+        sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src,
+        sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst,
+        sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst,
+    };
+
+    auto buffers = cc::vector<sg::raw_buffer_handle>();
+    for (auto const size : {isize(1), isize(3), isize(17)})
+        for (auto const usage : usages)
+        {
+            // An offset a usage does not accept is an assert inside the allocator, which fails this test here.
+            buffers.push_back(ctx->transient.create_raw_buffer(size, usage));
+            REQUIRE(buffers.back() != nullptr);
+        }
+    CHECK(buffers.size() == 15);
 }
 
 INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::context_handle const& ctx))
