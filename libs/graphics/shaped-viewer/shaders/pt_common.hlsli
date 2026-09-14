@@ -1,6 +1,8 @@
 #pragma once
 
+#include "background.hlsli" // Background + the SH evaluation the miss and the hits use
 #include "camera.hlsli"
+#include "instance.hlsli" // sv::instance — the per-item table the group below declares
 #include "light.hlsli"
 
 // Shared state for the path tracer's ray-tracing shaders: the per-frame constants, the ray payload, and the
@@ -19,7 +21,13 @@ static const int pt_roulette_after = 16;
 // A guard against a dispatch that never ends rather than a quality control — see the roulette in pathtrace.hlsl.
 static const int pt_scatter_cap = 4096;
 
-cbuffer FrameConstants : register(b0)
+// The per-frame constants, mirroring sv::pt_frame_constants_gpu (pathtrace_routine.hh) lane-for-lane.
+//
+// A `struct` plus a `ConstantBuffer` rather than a `cbuffer` block, because a group namespace holds
+// declarations: `cbuffer` opens a scope, and the pass refuses one there rather than numbering something whose
+// members it would have to hoist.
+// Declared out here for the same reason, since the struct is a scope too.
+struct FrameConstants
 {
     Camera camera; // pinhole camera basis (see sv::camera_gpu::from)
 
@@ -28,6 +36,41 @@ cbuffer FrameConstants : register(b0)
     // path-tracer controls (accum_frame drives progressive accumulation: 0 restarts, >0 blends in place)
     int  samples_per_pixel;  int max_bounces;  uint rng_seed;  uint accum_frame;
 };
+
+// Every resource this pipeline's stages share, declared once for all of them.
+//
+// A closest-hit is GENERATED per material permutation and compiled at runtime, so `scene` used to be written
+// twice by hand — here and in pt_material_hit.hlsli — with a comment asserting the two matched.
+// One declaration is what makes them match; slib's binding pass writes the addresses into each stage.
+// See shaped-shader-library/docs/binding-preprocessor.md.
+//
+// Nothing here has to leave a register free for anyone.
+// A material permutation's samplers used to be hand-numbered `s0`.. in space 0, which only held because this
+// group declared no sampler — a coupling between two files that nothing enforced.
+// They are a group of their own now (`sv::material_sampler_group`), and the pass writes their addresses too.
+#pragma sc group 0
+namespace pt_bindings
+{
+    RaytracingAccelerationStructure scene;
+
+    // The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into.
+    //
+    // Read-modify-write at the dispatch's OWN pixel, which is what lets one texture do the job of a ping-pong pair.
+    // `accum_frame` is the number of frames already folded in, so a frame's weight is 1 / (accum_frame + 1) — the
+    // estimate is per view rather than per pixel, and the CPU restarts it by sending 0.
+    RWTexture2D<float4> Output;
+
+    /// The per-item table, indexed by `InstanceID()` — mirrors `sv::instance_gpu`.
+    /// An ordinary binding rather than a bindless one: there is exactly one table, and what varies per instance is
+    /// what it *points* at.
+    StructuredBuffer<sv::instance> Instances;
+
+    ConstantBuffer<Background> background;
+
+    // Declared LAST so the four addresses above are the ones they always were: the pass runs one counter across
+    // register classes, so appending is the one edit to a shared group that moves nothing.
+    ConstantBuffer<FrameConstants> frame;
+}
 
 // One path segment, in and out.
 //
@@ -88,7 +131,7 @@ float pt_mis_weight(float pdf_this, float pdf_other)
 // The rect's area. Its full edges are 2u and 2v, so the parallelogram is |cross(2u, 2v)| = 4 |cross(u, v)|.
 float pt_light_area()
 {
-    return 4.0 * length(cross(light.u, light.v));
+    return 4.0 * length(cross(pt_bindings::frame.light.u, pt_bindings::frame.light.v));
 }
 
 // The solid-angle pdf of reaching the light along a direction, given the squared distance to the point reached and the
@@ -109,6 +152,8 @@ bool pt_light_intersect(float3 origin, float3 dir, out float t_hit, out float co
 {
     t_hit = 0.0;
     cos_light = 0.0;
+
+    AreaLight light = pt_bindings::frame.light;
 
     float denom = dot(dir, light.normal);
     if (denom >= -1e-9)

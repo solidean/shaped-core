@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <sv_shaders.hh> // sv::shaders::layout_bindings, for the group-creation test at the bottom
 
 // Headless: the layout routine records a whole target's draw list — border bands, placed views and a wipe — in one pass.
 //
@@ -177,4 +178,94 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
     co_await ctx.idle_completion();
 
     CHECK(output.width() == 32);
+}
+
+ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samplers it does not resupply",
+                     (sg::context_handle const& ctx_h))
+{
+    // The pairing the two halves of the API have to make: `acquire_binding_group_layout<G>(runtime_samplers)`
+    // bakes a sampler G left dynamic into the layout, and `create_binding_group(layout, G{...})` then gathers
+    // that same sampler from G's own field.
+    //
+    // dx12 refuses a static sampler supplied per group outright, so without the drop this create throws --
+    // which is what makes the samplers overload unusable with the create rather than merely redundant.
+    auto& ctx = *ctx_h;
+
+    using group = sv::shaders::layout_bindings;
+
+    sg::named_sampler const runtime[]
+        = {{.name = "source_sampler", .sampler = {.min_filter = sg::sampler_filter::nearest}}};
+    auto const layout = ctx.cached.acquire_binding_group_layout<group>(runtime);
+    REQUIRE(layout != nullptr);
+
+    // The layout owns it now, which is the precondition the create has to respect.
+    REQUIRE(layout->static_samplers().size() == 1);
+    CHECK(layout->static_samplers()[0].name == "source_sampler");
+
+    auto const source = make_source(ctx, 8, 8);
+    auto const g = ctx.transient.create_binding_group(
+        layout,
+        group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+    CHECK(g != nullptr);
+
+    // And the layout a bare acquire gives has none, so the same create passes the gathered sampler through.
+    auto const plain = ctx.cached.acquire_binding_group_layout<group>();
+    REQUIRE(plain != nullptr);
+    CHECK(plain->static_samplers().empty());
+    CHECK(plain != layout); // the samplers are part of the identity, so these are different layouts
+
+    auto const g2 = ctx.transient.create_binding_group(
+        plain, group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+    CHECK(g2 != nullptr);
+
+    // And BOUND, which is the half a create alone cannot reach: every backend's bind_group asserts the group's
+    // layout against the one the bound pipeline was built with, so a group created against a layout the pipeline
+    // does not carry is caught here and nowhere earlier.
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build layout.hlsl");
+
+    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
+    auto const ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
+
+    auto const* const compiled_vs = vs->try_value();
+    auto const* const compiled_ps = ps->try_value();
+    REQUIRE(compiled_vs != nullptr);
+    REQUIRE(compiled_ps != nullptr);
+
+    auto const* const constants_binding = [&]() -> sg::binding const*
+    {
+        for (auto const& b : compiled_vs->bindings)
+            if (b.type == sg::binding_type::uniform_buffer)
+                return &b;
+        return nullptr;
+    }();
+    REQUIRE(constants_binding != nullptr);
+
+    auto const pipeline_layout
+        = ctx.cached.acquire_pipeline_layout({.groups = {layout}, .inline_constants = *constants_binding});
+    auto pipeline = ctx.cached.acquire_raster_pipeline(
+        sg::raster_pipeline_description{.layout = pipeline_layout,
+                                        .vertex_shader = *compiled_vs,
+                                        .fragment_shader = *compiled_ps,
+                                        .topology = sg::primitive_topology::triangle_list,
+                                        .rasterization = {.cull = sg::cull_mode::none},
+                                        .color_targets = {{.format = sg::pixel_format::rgba16_float}}});
+    auto const built = co_await pipeline;
+    REQUIRE(built != nullptr);
+
+    auto const target = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 8, .height = 8, .usage = sg::texture_usage::render_target});
+    auto cmd = ctx.create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
+        scope.bind_pipeline(*built);
+        scope.bind<group>(*g);
+    }
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
 }

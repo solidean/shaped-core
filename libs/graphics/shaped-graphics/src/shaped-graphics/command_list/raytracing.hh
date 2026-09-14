@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
@@ -45,6 +46,15 @@ public:
     /// Binds `group` at slot `group_index` of the bound pipeline's layout, validated against it.
     /// Ray tracing binds through the pipeline's global root signature, like compute.
     void bind_group(int group_index, binding_group const& group);
+
+    /// Binds `group` at the index the generated group `G` declares, so no call site writes the number.
+    /// The backend still checks that index against the layout the group was built for — this only saves
+    /// spelling it.
+    template <declared_binding_group G>
+    void bind(binding_group const& group)
+    {
+        bind_group(G::group_index, group);
+    }
 
     /// Traces a `width` x `height` x `depth` grid of rays, launching the raygen shader at `raygen` in `table`.
     /// Each dimension must be >= 1, and their product <= 2^30.

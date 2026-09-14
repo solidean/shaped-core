@@ -60,6 +60,8 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/preprocess-test.cc
         tests/compile-test.cc
+        tests/portable-hlsl-spike-test.cc
+        tests/constant-packing-spike-test.cc
     )
     sc_nexus_binary(shaped-shader-compiler-dxc-test KINDS tests)
 
@@ -90,6 +92,7 @@ if(SC_BUILD_TESTS)
             tests/end-to-end-inline-constants-test.cc
             tests/end-to-end-inline-raytracing-test.cc
             tests/end-to-end-raytracing-test.cc
+            tests/payload-packing-spike-test.cc
             tests/end-to-end-raster-test.cc
             tests/end-to-end-raster-stages-test.cc
             tests/end-to-end-raster-cache-test.cc

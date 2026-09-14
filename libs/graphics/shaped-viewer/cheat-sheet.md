@@ -287,7 +287,7 @@ Gotchas:
 
 ```cpp
 sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; material_parameter_layout layout; vector<sg::sampler> samplers; hash128 key;}
-                                 //   samplers[i] is what `sv_sampler_i` must be bound to; the text names a register and nothing else records the state
+                                 //   samplers[i] is what `sv_sampler_i` must be bound to; the generated text names no register, and nothing else records the state
 sv::hlsl_type_of(format)         // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
 sv::material_shader_options      // { entry_point = "sv_evaluate_material"; runtime_include; epilogue_include; bindless_config const*; }
                                  //   epilogue_include is emitted AFTER the entry function, for code that CALLS it
@@ -307,7 +307,7 @@ sv::material_slot_kind           // constant | attribute_descriptor (an sv::attr
 slib::shader_library::compile_source(src, stage, entry, format, {.include_dir = "sv_shaders"})  // -> sg::async_compiled_shader
 ```
 
-The generated source is, in order: the runtime include, only the bindless tables this permutation touches, one `SamplerState` per
+The generated source is, in order: the runtime include, every budgeted bindless table (a subset would renumber them), one `SamplerState` per
 distinct sampler, then the entry function.
 That function declares one local per signature attribute — a parameter-block load, a barycentric interpolation, or a uv sample —
 and then runs the type's fragment verbatim over them.
@@ -326,7 +326,7 @@ Gotchas:
 - **Every bindless index is wrapped in `NonUniformResourceIndex`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **The runtime lives in `namespace sv`**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
-  `sv_` survives only for `sv_sampler_i` and the entry point, which are file scope and cannot be namespaced without changing what reflection reports.
+  `sv_` survives only for `sv_sampler_i` and the entry point, whose names are what reflection reports and what the trace matches on.
 - **An attribute name is pasted in as a local**, so `material_type::create` rejects one that is not a plain identifier, is an HLSL keyword or builtin type, starts with `sv_`, or is `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on an include edit** — the key hashes the resolution and the options, not the include's contents.
@@ -549,7 +549,10 @@ A manager never hashes anything itself, so hash load stays where the caller sche
 ```cpp
 sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
 sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: gBindlessTextures2D, gBindlessBuffers, …
-sv::space_of(table)         // -> u32 — one register space per table, so a category needs no register-offset math
+sv::bindless_group          // -> int — the ONE group every table shares; the binding pass numbers them in declaration order
+sv::bindless_declarations(cfg)  // -> cc::string — the annotated HLSL namespace declaring every budgeted table, for the generator to emit
+sv::material_sampler_group  // -> int — the group a permutation's OWN samplers go in, separate from the tables'; its layout is the third in the pipeline layout
+sv::material_sampler_namespace  // -> cc::string_view — the annotated namespace the generator emits them into
 sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0 OMITS the table; a non-zero count < 2 ASSERTS (sg reads 1 as a scalar binding)
 sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
 sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context

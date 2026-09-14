@@ -38,3 +38,4 @@ rules:
     files:
       - tests/end-to-end-raster-cache-test.cc
       - tests/shader_cache-test.cc
+      - tests/payload-packing-spike-test.cc

@@ -8,6 +8,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_dred.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
@@ -16,9 +17,37 @@ namespace sg::backend::dx12
 {
 namespace
 {
-/// The first hardware adapter that supports D3D12, into `out`; false when there is none.
+/// Whether an HRESULT says the GPU went away rather than that it cannot do what was asked.
+///
+/// The distinction decides whether looking at the NEXT adapter is sensible: an adapter that does not support
+/// feature level 11_0 is simply not a candidate, and one that just reset is a machine in trouble.
+[[nodiscard]] bool is_device_loss_hresult(HRESULT hr)
+{
+    return hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_HUNG;
+}
+
+/// What searching for a hardware adapter found.
+enum class adapter_search
+{
+    found,       ///< `out` holds it
+    none,        ///< no hardware adapter supports D3D12 here
+    device_lost, ///< one reported a reset/removal, and that is NOT a reason to go and use a different GPU
+};
+
+struct adapter_search_result
+{
+    adapter_search status = adapter_search::none;
+    HRESULT device_loss_hr = S_OK;
+};
+
+/// The first hardware adapter that supports D3D12, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
-bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
+///
+/// **A device-loss HRESULT stops the search rather than skipping the adapter.**
+/// Treating a reset GPU as "unsuitable" and quietly moving to the next one migrates the whole process to a
+/// different physical device, which nobody asked for and which surfaces much later as something unrelated.
+/// A reset is what `is_device_lost()` exists to report, so it is reported.
+adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
 {
     for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
     {
@@ -28,11 +57,18 @@ bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
-        if (SUCCEEDED(D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
-            return true;
+        HRESULT const hr = D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr);
+        if (SUCCEEDED(hr))
+            return {.status = adapter_search::found};
+
+        if (is_device_loss_hresult(hr))
+        {
+            out = nullptr;
+            return {.status = adapter_search::device_lost, .device_loss_hr = hr};
+        }
     }
     out = nullptr;
-    return false;
+    return {.status = adapter_search::none};
 }
 
 /// What `SC_DX12_ADAPTER` asks of this process.
@@ -151,24 +187,60 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
         log_debug_layer_message(level, description);
 }
 
-// Turns the D3D12 debug layer on, at most once for the whole process, and reports whether it is available.
+// Whether the one-shot below has RUN, whatever it found.
+// Deliberately not the same question as whether the layer is on: a host without the Graphics Tools feature has nothing
+// to activate, and must not look like a process that could still activate one -- otherwise the best-effort miss turns
+// into a hard refusal for every later context.
+cc::atomic<bool>& debug_layer_activation_attempted()
+{
+    static cc::atomic<bool> attempted = false;
+    return attempted;
+}
+
+// Whether the layer is actually validating this process, which is the question the message callback asks.
+cc::atomic<bool>& debug_layer_active()
+{
+    static cc::atomic<bool> active = false;
+    return active;
+}
+
+// Whether this process has brought up a D3D12 device yet.
+// Set once a device is created, WARP included -- the debug layer is process-wide, so a software device closes the window just as a hardware one does.
+cc::atomic<bool>& process_has_device()
+{
+    static cc::atomic<bool> has_device = false;
+    return has_device;
+}
+// Activates the D3D12 debug layer for the whole process, at most once, and reports whether it is available.
 //
 // EnableDebugLayer is a PROCESS-wide switch rather than a per-device one, so calling it per context creation is both redundant and unsafe:
 // with several contexts coming up at once, one thread flipping it while another is inside CreateDXGIFactory2 makes that call fail with DXGI_ERROR_INVALID_CALL.
 // A function-local static gives thread-safe once-only initialization and hands every later caller the same answer.
 //
+// It must also precede this process's FIRST DEVICE, which is the constraint with teeth.
+// Arming the layer once a device exists does not merely fail to validate it: on an NVIDIA driver it RESETS the adapter,
+// and every D3D12CreateDevice probe on that adapter then returns DXGI_ERROR_DEVICE_RESET while the GPU itself is fine.
+// A process that wants validation therefore has to ask for it on the first context it creates, which is what debug_layer_activation_attempted guards below.
+//
+// One-way by construction, and deliberately so: a context created earlier may still be relying on the layer, so nothing here ever turns it back off.
+//
 // Best-effort: the layer needs the "Graphics Tools" feature, and a host without it runs unvalidated rather than failing to create a context.
-bool enable_debug_layer_once()
+bool activate_global_debug_layer_once()
 {
-    static bool const enabled = []
+    static bool const active = []
     {
+        // Marked before anything can fail, and before any device exists: this records that the process has had its
+        // one chance to activate, which is what the late-activation guard tests.
+        debug_layer_activation_attempted() = true;
+
         ComPtr<ID3D12Debug> debug;
         if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
             return false;
         debug->EnableDebugLayer();
+        debug_layer_active() = true;
         return true;
     }();
-    return enabled;
+    return active;
 }
 
 // Routes D3D12 validation messages to dx12_message_callback, with `ctx` as the listener to consult.
@@ -211,7 +283,9 @@ bool sg::backend::dx12::has_hardware_adapter()
         if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
             return false;
         ComPtr<IDXGIAdapter1> adapter;
-        return find_hardware_adapter(factory.Get(), adapter);
+        // A reset adapter is still a hardware adapter: answering `false` here would quietly hand the run to
+        // WARP, which is the same substitution this function's caller is trying to avoid.
+        return find_hardware_adapter(factory.Get(), adapter).status != adapter_search::none;
     }();
     return has;
 }
@@ -231,8 +305,27 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // It also makes concurrent context creation fail: CreateDXGIFactory2 with it set intermittently returns DXGI_ERROR_INVALID_CALL when several threads are in there at once.
     // So it was pure cost.
     UINT const factory_flags = 0;
-    if (config.enable_debug_layer)
-        enable_debug_layer_once();
+    // Refused rather than done anyway: activating the layer now would reset the adapter, and that would surface
+    // later as a GPU looking broken to every context this process creates afterwards.
+    if (config.activate_global_debug_layer && !debug_layer_activation_attempted() && process_has_device())
+    {
+        // Only refused when there is something to refuse.
+        // Asking whether the layer exists activates nothing, and a host without the Graphics Tools feature has no late
+        // activation to perform -- so the request is the documented best-effort miss rather than the hazard, and it
+        // must not fail a context that would simply have run unvalidated.
+        ComPtr<ID3D12Debug> debug;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+            return dx12_error(E_INVALIDARG, "the dx12 debug layer must be activated before this process creates its "
+                                            "first device; ask for it on the first context instead");
+    }
+
+    if (config.activate_global_debug_layer)
+        activate_global_debug_layer_once();
+
+    // Before the device, and that is the whole constraint: the runtime decides at creation whether to carry the
+    // bookkeeping, so arming it afterwards records nothing.
+    if (config.enable_dred)
+        enable_dred_once();
 
     ComPtr<IDXGIFactory4> factory;
     if (HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&factory)); FAILED(hr))
@@ -246,7 +339,15 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // The warp pin hides hardware from every request, an explicit `hardware` included, not only from hardware_or_warp.
     auto const hardware_hidden = pin == adapter_pin::warp;
     ComPtr<IDXGIAdapter1> adapter;
-    if (choice != dx12_adapter::warp && (hardware_hidden || !find_hardware_adapter(factory.Get(), adapter)))
+    auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
+
+    // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
+    // a different one would hide that behind whatever goes wrong next.
+    if (search.status == adapter_search::device_lost)
+        return dx12_error(search.device_loss_hr, "the hardware adapter reports a device reset or removal; "
+                                                 "something already running on this GPU took it down");
+
+    if (choice != dx12_adapter::warp && search.status != adapter_search::found)
     {
         if (choice == dx12_adapter::hardware && hardware_hidden)
             return cc::error("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER=warp hides them)");
@@ -263,6 +364,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ComPtr<ID3D12Device> device;
     if (HRESULT hr = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
+    process_has_device() = true;
 
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -310,7 +412,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     // With the debug layer live, route validation messages through the context, so a listener can be set on it later.
     // Registered here rather than right after device creation: the callback needs the context to consult.
-    if (config.enable_debug_layer)
+    //
+    // Keyed on the layer actually being active, NOT on this context having asked for it: a context created after
+    // something else activated it is validated all the same, and its messages belong on a listener rather than stderr.
+    if (debug_layer_active())
         ctx->_message_callback_cookie = register_debug_callback(ctx->_device.Get(), ctx.get());
 
     // Completion timelines first: every copyable resource takes its groups from this pool at construction, so it

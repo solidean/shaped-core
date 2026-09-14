@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, sg::slotted_view
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>               // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
@@ -106,6 +108,36 @@ public:
                                                             cc::span<named_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
+    /// The same, keyed by layout slot rather than by binding name — see sg::slotted_view.
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle layout,
+                                                            cc::span<slotted_view const> views,
+                                                            cc::span<named_sampler const> samplers = {});
+
+    /// Builds a group from the generated group struct `G`, against a layout the caller already holds.
+    ///
+    /// Which scope you call is the lifetime: a group rebuilt every frame belongs on `ctx.transient`, one that
+    /// outlives an epoch on `ctx.persistent`.
+    ///
+    /// **The layout is passed in rather than acquired here**, because a group is created on the frame path —
+    /// once per texture switch in an imgui pass — and acquiring hashes the declared table and takes the
+    /// pipeline cache's lock to look it up.
+    /// Acquire it once, in init, with `ctx.cached.acquire_binding_group_layout<G>()`.
+    ///
+    /// A sampler `G` gathered that `layout` already declares static is dropped rather than passed on: dx12
+    /// refuses a static sampler supplied per group, so sending it would be an error rather than a duplicate.
+    ///
+    /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
+    /// on a lost device.
+    template <declared_binding_group G>
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
+    {
+        cc::vector<slotted_view> views;
+        cc::vector<named_sampler> samplers;
+        group.gather(views, samplers);
+        impl::drop_static_samplers(*layout, samplers);
+        return create_binding_group(layout, views, samplers);
+    }
+
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
     /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
     /// The change takes effect at the next advance_epoch, which drains in-flight work and resizes the transient heap; until then the current budget stays in force.
@@ -133,6 +165,10 @@ private:
 
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                             cc::span<named_view const> views,
+                                                                            cc::span<named_sampler const> samplers = {});
+
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<slotted_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
     friend class context;

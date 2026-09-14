@@ -419,6 +419,13 @@ Its scope is `libs/`, `docs/`, `tools/`, `.claude/` and the root meta files.
 These rot silently, because a moved file breaks links in *other*, untouched files, so the scan is always full-repo and `--all` does not affect it.
 It reports each offender as `file:line: reason`.
 
+**`shader-grammar` builds a target even under `--no-test`.**
+It is the one gate that is not purely static.
+The binding pass exists twice — in C++ for the runtime rewriter, in Python for the package generator — and one shared corpus is what keeps the two agreeing.
+Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
+So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
+It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
+
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
 It builds and runs the suite across five build variants:
 

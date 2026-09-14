@@ -15,7 +15,8 @@ namespace
 /// A group layout carrying nothing but its identity and its bindings, which is all these tests read.
 struct fake_group_layout final : sg::binding_group_layout
 {
-    fake_group_layout(cc::hash128 h, cc::vector<sg::binding> bindings) : sg::binding_group_layout(h, cc::move(bindings))
+    fake_group_layout(cc::hash128 h, cc::vector<sg::binding> bindings, cc::vector<sg::named_sampler> static_samplers)
+      : sg::binding_group_layout(h, cc::move(bindings), cc::move(static_samplers))
     {
     }
 };
@@ -25,8 +26,10 @@ sg::binding_group_layout_handle group_of(cc::span<sg::binding const> bindings,
 {
     auto declared = cc::vector<sg::binding>();
     declared.push_back_range(bindings);
+    auto declared_samplers = cc::vector<sg::named_sampler>();
+    declared_samplers.push_back_range(static_samplers);
     return std::make_shared<fake_group_layout>(sg::impl::binding_group_layout_hash(bindings, static_samplers),
-                                               cc::move(declared));
+                                               cc::move(declared), cc::move(declared_samplers));
 }
 
 sg::binding uniform(cc::string_view name, u32 index)

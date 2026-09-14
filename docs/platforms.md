@@ -130,6 +130,28 @@ The one behavioral difference is in-place resize.
 mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
 So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.
 
+## Example backend (`SC_EXAMPLE_BACKEND`)
+
+`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12` or `vulkan`.
+
+`auto` takes dx12 wherever one exists, which on Windows means the vulkan arm is never reached by default.
+So the setting exists to reach it: building `rotating-cube` both ways is how one HLSL source is shown to really serve both backends.
+
+**Every graphical example reads it**, not only the one that supports both backends — a setting the rest ignore is a setting that lies.
+Three outcomes, and which one an example gets depends on what it supports:
+
+- **A backend that was not built is a configure error**, for every example.
+  The setting named something this build does not have, and falling back silently would hide that.
+- **A built backend the example cannot use gives a stub** under the example's own name: it prints what was chosen and what the example supports, and exits non-zero.
+  A stub rather than nothing, so `dev.py example` still resolves the name and says why it cannot run.
+  It links nothing graphical, because the real target would link a backend that does not exist on that leg.
+- **Otherwise the example builds against it**, `auto` resolving to the example's own first choice.
+
+An example whose *own* gate fails — no DXC, no DXR, no SDL3 — still returns as it did, and contributes no target at all.
+That gate is about what the machine has; this setting is about what the build was asked for.
+
+It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry is present whether or not any example is gated out by a missing shader compiler.
+
 ## Build types
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.

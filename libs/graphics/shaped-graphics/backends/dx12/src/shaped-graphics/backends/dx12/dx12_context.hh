@@ -13,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
+#include <shaped-graphics/backends/dx12/dx12_dred.hh> // note_device_removed_if_lost appends dred_report
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
@@ -62,9 +63,38 @@ enum class sg::backend::dx12::dx12_adapter : sg::u8
 /// The flags are independent.
 struct sg::backend::dx12::dx12_config
 {
-    /// Enable the D3D12 debug/validation layer.
-    /// Best-effort: skipped when it isn't installed.
-    bool enable_debug_layer = false;
+    /// Ask for the D3D12 debug/validation layer, which is a PROCESS-WIDE switch and not a per-context one.
+    ///
+    /// `true` activates it for the whole process, if it is not active already.
+    /// `false` means only that THIS context does not ask for it, and never that this context runs unvalidated:
+    /// once anything has activated the layer, every context created afterwards is validated too.
+    ///
+    /// **There is no way to deactivate it, and none is offered.**
+    /// D3D12 makes the switch one-way, and a context that asked for validation is still relying on it -- so a later
+    /// `false` must not, and does not, take it away.
+    /// That asymmetry is why this is named for activating rather than for enabling.
+    ///
+    /// There is no per-device alternative to reach for either.
+    /// ID3D12DebugDevice is obtained FROM a device that already carries the layer and only tunes it; a device created
+    /// without the layer cannot be given one afterwards.
+    ///
+    /// **It must be activated before this process creates its first device.**
+    /// Activating it later is undefined per the D3D12 contract, and on at least one NVIDIA driver it RESETS the
+    /// adapter: D3D12CreateDevice on it then fails with DXGI_ERROR_DEVICE_RESET for seconds while the GPU is healthy.
+    /// So create_dx12_context REFUSES a late activation instead of performing it, and the caller asks on the first
+    /// context the process creates.
+    /// dx12-debug-layer-order-manual-test.cc demonstrates the reset in raw D3D12.
+    ///
+    /// Best-effort: skipped when the layer isn't installed.
+    bool activate_global_debug_layer = false;
+
+    /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
+    ///
+    /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
+    /// turning on where a removal is what you are chasing.
+    /// Independent of the debug layer: DRED is the runtime's own bookkeeping and needs no Graphics Tools.
+    /// See libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_dred.hh.
+    bool enable_dred = false;
 
     /// The adapter the device is created on.
     dx12_adapter adapter = dx12_adapter::hardware;
@@ -154,7 +184,7 @@ public:
     }
 
     /// Routes this device's debug-layer messages to `callback` instead of stderr.
-    /// Only ever called when the context was created with enable_debug_layer, and only for messages raised after creation returned.
+    /// Only ever called while the debug layer is active in this process, and only for messages raised after creation returned.
     /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.
     /// Passing an empty function restores the stderr default.
     void set_message_callback(cc::unique_function<void(dx12_message_severity, cc::string_view)> callback)
@@ -285,6 +315,11 @@ public:
         sg::raytracing_shader_table_description const& desc,
         sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                                cc::span<sg::slotted_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
+                                                                                sg::lifetime_scope scope) override;
+
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
                                                                                 cc::span<sg::named_view const> views,
                                                                                 cc::span<sg::named_sampler const> samplers,
                                                                                 sg::lifetime_scope scope) override;
@@ -307,7 +342,10 @@ private:
             reason = _device->GetDeviceRemovedReason();
         if (reason == S_OK)
             return false;
-        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, u32(reason)));
+        // DRED is empty unless it was armed and the runtime has something to say, so this appends nothing in
+        // the default configuration and the whole breadcrumb trail when it was asked for.
+        mark_device_lost(
+            cc::format("{} (device removed, reason=0x{:08X}){}", what, u32(reason), dred_report(_device.Get())));
         return true;
     }
 
@@ -322,6 +360,15 @@ private:
     }
 
 public:
+    /// Asks the device whether it has been removed, and marks the context lost when it has.
+    /// Returns whether the device is gone.
+    ///
+    /// Device loss is otherwise noticed only by an operation that fails on it, so a reset that lands after the
+    /// last submit leaves `is_device_lost()` false.
+    /// This is the authoritative answer: it consults GetDeviceRemovedReason directly, and folds the DRED report
+    /// into the loss reason like every other detection point.
+    bool poll_device_removal() { return note_device_removed_if_lost(S_OK, "device removal poll"); }
+
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");

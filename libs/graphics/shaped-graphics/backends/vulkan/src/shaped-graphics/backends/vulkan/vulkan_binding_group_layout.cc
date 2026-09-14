@@ -167,8 +167,10 @@ cc::result<vulkan_binding_group_layout_handle> vulkan_binding_group_layout::crea
     }
 
     auto owned = cc::vector<sg::binding>::create_copy_of(bindings);
+    auto owned_samplers = cc::vector<sg::named_sampler>::create_copy_of(static_samplers);
     return vulkan_binding_group_layout_handle(std::make_shared<vulkan_binding_group_layout>(
-        ctx, hash, cc::move(owned), layout, cc::move(slot_samplers), isize(layout_size), cc::move(binding_offsets)));
+        ctx, hash, cc::move(owned), cc::move(owned_samplers), layout, cc::move(slot_samplers), isize(layout_size),
+        cc::move(binding_offsets)));
 }
 
 isize vulkan_binding_group_layout::descriptor_offset_of(isize slot, int element) const

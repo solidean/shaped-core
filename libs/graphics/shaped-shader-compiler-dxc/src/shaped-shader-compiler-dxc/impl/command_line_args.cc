@@ -128,6 +128,16 @@ cc::result<arg_storage> build_compile_args(shader_description const& desc, compi
     {
         a.emplace_back(L"-spirv");
         a.emplace_back(L"-fspv-target-env=vulkan1.3");
+
+        // Four divergences between the targets that a shader cannot see and an author cannot annotate away.
+        // Each one makes SPIR-V behave the way the DXIL arm already does, so one source means one behaviour.
+        a.emplace_back(L"-fvk-use-dx-layout"); // D3D constant-buffer packing, so one CPU struct serves both
+        a.emplace_back(L"-fvk-support-nonzero-base-vertex"); // SV_VertexID excludes the base vertex, VertexIndex includes it
+        a.emplace_back(L"-fvk-support-nonzero-base-instance"); // the same for SV_InstanceID against InstanceIndex
+        a.emplace_back(L"-fvk-use-dx-position-w");             // FragCoord.w is the reciprocal of SV_Position.w
+
+        // `-fvk-invert-y` must never join them: the vulkan backend already flips through a negative-height viewport
+        // (vulkan_command_list.raster.cc), and the flag would flip a second time.
     }
     if (opts.debug_info)
     {
