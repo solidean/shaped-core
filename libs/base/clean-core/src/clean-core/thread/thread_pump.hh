@@ -73,7 +73,7 @@ namespace cc
 /// A thread parked in a cc::async_thread_pool never sweeps.
 /// That is deliberate, and it is what makes an unthreaded component deterministic: were parked pool threads to sweep, every
 /// post to a component would hand its handlers to whichever unrelated thread happened to be parked, racing the loop that
-/// owns it — see "Who drives a pump" in docs/systems/async.md.
+/// owns it — see "Who drives a pump" in ../../../docs/systems/async.md.
 /// So a coroutine awaiting an unthreaded component must run where such a loop is: homed to the main thread, or on a
 /// thread that pumps.
 ///
