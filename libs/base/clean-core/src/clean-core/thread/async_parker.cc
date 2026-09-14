@@ -1,6 +1,6 @@
 #include <clean-core/common/assert.hh>
-#include <clean-core/thread/async_node.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>

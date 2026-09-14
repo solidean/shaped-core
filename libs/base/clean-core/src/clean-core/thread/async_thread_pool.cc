@@ -703,7 +703,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         }
         if (home != nullptr && home->pump_cycle())
             continue;
-        if (!cc::impl::thread_pump_registry())
+        // A pump may resume work onto this queue while reporting no progress of its own, so the queue decides.
+        if (!cc::impl::thread_pump_registry() && _queue.empty())
             break;
     }
 
