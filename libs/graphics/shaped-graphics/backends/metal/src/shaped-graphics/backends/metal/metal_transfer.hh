@@ -27,6 +27,10 @@
 /// The reverse — a transfer waiting for the frame's writes — rides the submission timeline the epoch system already
 /// keeps, which is why there is only one new event here rather than two.
 ///
+/// A resource's storage is held for the duration by the handle the completion handler keeps, and released explicitly
+/// inside it: a caller is free to drop its last handle the moment an async transfer is issued, and the copy is still
+/// running.
+///
 /// Every transfer's bytes are staged in a buffer of its own rather than a ring: a ring's reclamation is tied to the
 /// epoch cycle, and an off-frame transfer is precisely the thing that does not follow it.
 class sg::backend::metal::metal_transfer_system
@@ -46,8 +50,22 @@ public:
                                                         isize offset_in_bytes,
                                                         isize size_in_bytes);
 
-    /// The timeline value a command list must wait for before it may touch `buffer`, or 0 for none.
+    /// Copy `pixels` into one region of one subresource, off the frame path.
+    /// `pixels` is tightly packed, the layout `staging_layout_of` describes.
+    void upload_to_texture(sg::raw_texture_handle texture,
+                           cc::pinned_data<byte const> const& pixels,
+                           sg::subresource_index const& subresource,
+                           sg::texture_region const& region);
+
+    /// Read one region of one subresource back to the host, off the frame path.
+    [[nodiscard]] sg::bytes_future download_from_texture(sg::raw_texture_handle texture,
+                                                         sg::subresource_index const& subresource,
+                                                         sg::texture_region const& region);
+
+    /// The timeline value a command list must wait for before it may touch this resource, or 0 for none.
+    /// One overload per kind, because a list tracks its buffers and its textures separately.
     [[nodiscard]] u64 pending_value_for(sg::raw_buffer const& buffer) const;
+    [[nodiscard]] u64 pending_value_for(sg::raw_texture const& texture) const;
 
     /// The event a wait is expressed on; the direct queue waits on it at submit.
     [[nodiscard]] MTL::SharedEvent* timeline() const { return _timeline; }
@@ -66,17 +84,26 @@ private:
         u64 previous = 0;
     };
 
-    /// Claims the next value for `buffer` and hands back the one it replaces.
+    /// Claims the next value for `resource` and hands back the one it replaces.
     /// Both under one lock, because the previous value is exactly what the new transfer has to wait for.
-    [[nodiscard]] claimed claim_value(sg::raw_buffer const& buffer);
+    [[nodiscard]] claimed claim_value(void const* resource);
 
-    /// Drops `buffer`'s entry once `value` has completed, unless a newer transfer has since claimed it.
-    void forget_value(sg::raw_buffer const& buffer, u64 value);
+    /// Drops `resource`'s entry once `value` has completed, unless a newer transfer has since claimed it.
+    void forget_value(void const* resource, u64 value);
 
-    /// Orders the transfer queue behind the last direct-queue submission that named `buffer`, and behind that buffer's
-    /// own previous transfer.
+    /// Orders the transfer queue behind the last direct-queue submission that named the resource, and behind that
+    /// resource's own previous transfer.
     /// Called with the command buffer open, since an MTL4 queue wait is queue-sequential like the commit it precedes.
-    void wait_for_queues(metal_buffer const& buffer, u64 previous_transfer);
+    void wait_for_queues(submission_stamp const& stamp, u64 previous_transfer);
+
+    /// Commits `command_buffer`, signals `value`, and releases everything the transfer owns once it has run.
+    /// `on_complete` runs first, inside the same handler, and is where a download copies its bytes out.
+    void commit(MTL4::CommandBuffer* command_buffer,
+                MTL4::CommandAllocator* allocator,
+                MTL::Buffer* staging,
+                void const* resource,
+                u64 value,
+                cc::unique_function<void()> on_complete);
 
     /// The next timeline value, claimed under `_state` so a value and its record are published together.
     struct state
@@ -87,7 +114,8 @@ private:
         /// Keyed on the resource's address, which is safe because an entry is erased when its resource's transfers
         /// have all completed — the recycled-address hazard needs a *cache* that outlives the resource, and this does
         /// not.
-        cc::map<sg::raw_buffer const*, u64> pending_by_buffer;
+        /// One map for buffers and textures alike: the addresses cannot collide, and the question is the same one.
+        cc::map<void const*, u64> pending_by_resource;
     };
 
     metal_context* _ctx = nullptr;

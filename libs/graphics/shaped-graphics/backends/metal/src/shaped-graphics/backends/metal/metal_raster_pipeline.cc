@@ -6,6 +6,8 @@
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_raster_state.hh>
 
+#include <mutex>
+
 namespace sg::backend::metal
 {
 namespace
@@ -122,6 +124,7 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     }
 
     NS::Error* pipeline_error = nullptr;
+    auto const compile_guard = std::lock_guard(pipeline_compilation_lock());
     auto* const state = _compiler->newRenderPipelineState(descriptor, nullptr, &pipeline_error);
 
     descriptor->release();

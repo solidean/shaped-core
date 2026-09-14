@@ -4,8 +4,9 @@
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
-#include <shaped-graphics/resource/raw_texture.hh> // sg::texture_dimension
-#include <shaped-graphics/types.hh>                // sg::texture_usages
+#include <shaped-graphics/resource/raw_texture.hh>    // sg::texture_dimension
+#include <shaped-graphics/resource/texture_region.hh> // sg::texture_region
+#include <shaped-graphics/types.hh>                   // sg::texture_usages
 
 // Translating sg's texel formats and texture shapes into Metal's.
 //
@@ -32,4 +33,24 @@ namespace sg::backend::metal
 /// Metal has no copy bits at all — every texture can be a copy source and destination — so `copy_src` and `copy_dst`
 /// map to nothing, the way they are implicit on D3D12.
 [[nodiscard]] MTL::TextureUsage texture_usage_of(sg::texture_usages usage);
+
+} // namespace sg::backend::metal
+
+/// How the bytes of one texture region are laid out in staging memory.
+///
+/// Tightly packed, which is what sg hands over and expects back: rows follow each other with no padding, and a
+/// block-compressed format counts whole blocks, since a partial block at an edge still costs a full one.
+struct sg::backend::metal::texture_staging_layout
+{
+    isize bytes_per_row = 0;
+    isize bytes_per_image = 0;
+    isize size_in_bytes = 0;
+};
+
+namespace sg::backend::metal
+{
+
+/// The staging layout for `region` of a texture in `format`.
+/// Shared by the inline and the off-frame transfer paths, which stage identically.
+[[nodiscard]] texture_staging_layout staging_layout_of(sg::pixel_format format, sg::texture_region const& region);
 } // namespace sg::backend::metal

@@ -171,4 +171,21 @@ MTL::TextureUsage texture_usage_of(sg::texture_usages usage)
     // way they are implicit on D3D12.
     return out;
 }
+
+texture_staging_layout staging_layout_of(sg::pixel_format format, sg::texture_region const& region)
+{
+    auto const block_extent = isize(sg::format_block_extent(format));
+    auto const block_size = isize(sg::format_block_size(format));
+
+    auto const blocks_x = (isize(region.size[0]) + block_extent - 1) / block_extent;
+    auto const blocks_y = (isize(region.size[1]) + block_extent - 1) / block_extent;
+
+    auto const bytes_per_row = blocks_x * block_size;
+    auto const bytes_per_image = bytes_per_row * blocks_y;
+    return {
+        .bytes_per_row = bytes_per_row,
+        .bytes_per_image = bytes_per_image,
+        .size_in_bytes = bytes_per_image * isize(region.size[2]),
+    };
+}
 } // namespace sg::backend::metal

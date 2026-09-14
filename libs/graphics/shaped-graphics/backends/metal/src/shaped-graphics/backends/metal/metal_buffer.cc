@@ -14,17 +14,6 @@ void metal_buffer::on_expired() const
     release_storage();
 }
 
-void metal_buffer::stamp_submission(u64 value) const
-{
-    auto previous = _last_used_submission.load(std::memory_order_relaxed);
-    while (previous < value
-           && !_last_used_submission.compare_exchange_weak(previous, value, std::memory_order_release,
-                                                           std::memory_order_relaxed))
-    {
-        // The CAS refreshes `previous` on every failure, so the loop ends as soon as someone stamped higher.
-    }
-}
-
 void metal_buffer::release_storage() const
 {
     // An empty buffer owns no MTLBuffer, and a second call owns nothing either — but either may still carry finalizers,

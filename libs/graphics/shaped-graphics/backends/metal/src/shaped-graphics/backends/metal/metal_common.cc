@@ -1,9 +1,16 @@
 #include "metal_common.hh"
 
 #include <cstdlib> // setenv, the only way to configure Metal's validation layer
+#include <mutex>
 
 namespace sg::backend::metal
 {
+std::mutex& pipeline_compilation_lock()
+{
+    static std::mutex lock;
+    return lock;
+}
+
 void arm_validation_layer()
 {
     // `assert` rather than `abort`: Metal parses this value itself and asserts on one it does not know, so `abort`

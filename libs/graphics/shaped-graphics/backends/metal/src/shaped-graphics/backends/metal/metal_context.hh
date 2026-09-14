@@ -151,7 +151,7 @@ public:
 
     /// Record `token` on every resource `list` touched, so a later off-frame transfer defers behind this list.
     /// The reverse of `highest_pending_transfer`, and the other half of the sync between the two queues.
-    void stamp_touched_buffers(metal_command_list& list, sg::submission_token token);
+    void stamp_touched_resources(metal_command_list& list, sg::submission_token token);
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///

@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
+#include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_raster_state.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
@@ -25,34 +26,6 @@ namespace sg::backend::metal
 {
 namespace
 {
-/// How the bytes of one texture region are laid out in staging memory.
-///
-/// Tightly packed, which is what sg hands over and expects back: rows follow each other with no padding, and a
-/// block-compressed format counts whole blocks, since a partial block at an edge still costs a full one.
-struct texture_staging_layout
-{
-    isize bytes_per_row = 0;
-    isize bytes_per_image = 0;
-    isize size_in_bytes = 0;
-};
-
-[[nodiscard]] texture_staging_layout staging_layout_of(sg::pixel_format format, sg::texture_region const& region)
-{
-    auto const block_extent = isize(sg::format_block_extent(format));
-    auto const block_size = isize(sg::format_block_size(format));
-
-    auto const blocks_x = (isize(region.size[0]) + block_extent - 1) / block_extent;
-    auto const blocks_y = (isize(region.size[1]) + block_extent - 1) / block_extent;
-
-    auto const bytes_per_row = blocks_x * block_size;
-    auto const bytes_per_image = bytes_per_row * blocks_y;
-    return {
-        .bytes_per_row = bytes_per_row,
-        .bytes_per_image = bytes_per_image,
-        .size_in_bytes = bytes_per_image * isize(region.size[2]),
-    };
-}
-
 [[nodiscard]] MTL::LoadAction load_action_of(sg::target_op op)
 {
     switch (op)

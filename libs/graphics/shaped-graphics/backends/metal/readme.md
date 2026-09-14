@@ -144,6 +144,15 @@ Each of these is a fact about Metal rather than a gap in the backend.
   The residency set catches it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
   `callback_mutex` in `metal_common.hh` is `cc::mutex`'s shape with a lock that is always real.
   Three pieces of state hold one — the residency set, the transfer system's pending map, the feedback sink's context pointer — and everything else keeps `cc::mutex`.
+- **An async texture transfer needs no layout settling, where dx12 needs a whole command list for it.**
+  A D3D12 copy queue cannot run layout barriers, so dx12 submits a direct-queue fixup before it stamps the job.
+  Metal textures have no layout at all, so the off-frame path is the buffer path with a footprint: same queue, same two waits, `staging_layout_of` in place of a byte count.
+- **Concurrent pipeline compilation aborts inside the driver.**
+  Two threads in `MTL4Compiler::newRenderPipelineState` — on *different* compilers, from different contexts — abort in `_os_unfair_lock_corruption_abort` under `AGXG16GFamilyCompiler`.
+  About one run in five on an M4 under macOS 26, and it is the driver rather than the validation layer: it reproduces with `MTL_DEBUG_LAYER=0`.
+  So every pipeline build is taken under `pipeline_compilation_lock()`, process-wide rather than per context.
+  The state being corrupted is the device's, and a Mac hands the same device to everyone who asks.
+  `sg metal - pipelines build concurrently from several contexts` is the gate, and it is probabilistic: without the lock it takes the binary down within a run or two.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
 

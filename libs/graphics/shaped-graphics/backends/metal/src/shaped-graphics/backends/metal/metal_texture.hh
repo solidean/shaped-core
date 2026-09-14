@@ -32,6 +32,9 @@ public:
     /// The same type buffers use: a Metal texture has no layout, so it has no state a buffer does not also have.
     [[nodiscard]] cc::mutex<metal_resource_access>& access() const { return _access; }
 
+    /// The direct-queue submission that last named this texture; see `submission_stamp`.
+    [[nodiscard]] submission_stamp& submission() const { return _submission; }
+
     /// The id an argument buffer names this texture by.
     /// Metal 4 binds a resource id rather than a descriptor, so this is the whole of what a binding writes.
     [[nodiscard]] u64 gpu_resource_id() const { return _texture != nullptr ? _texture->gpuResourceID()._impl : u64(0); }
@@ -44,4 +47,5 @@ private:
     mutable MTL::Texture* _texture = nullptr;
     sg::memory_heap_handle _heap;
     mutable cc::mutex<metal_resource_access> _access;
+    mutable submission_stamp _submission; // mutable: a list declares against a handle to const
 };

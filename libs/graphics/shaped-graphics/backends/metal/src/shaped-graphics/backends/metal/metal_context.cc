@@ -156,7 +156,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     // The token is claimed here rather than after the commit so the stamp below lands before submit returns: a caller
     // that issues an async transfer on the very next line must find this list already named.
     auto const token = _epochs.claim_submission_token();
-    stamp_touched_buffers(list, token);
+    stamp_touched_resources(list, token);
 
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
@@ -246,6 +246,8 @@ u64 metal_context::highest_pending_transfer(metal_command_list& list) const
     u64 highest = 0;
     for (auto const& touched : list.touched_buffers())
         highest = cc::max(highest, _transfers.pending_value_for(*touched));
+    for (auto const& touched : list.touched_textures())
+        highest = cc::max(highest, _transfers.pending_value_for(*touched));
     return highest;
 }
 
@@ -270,10 +272,12 @@ void metal_context::finalize_touched_buffers(metal_command_list& list)
     }
 }
 
-void metal_context::stamp_touched_buffers(metal_command_list& list, sg::submission_token token)
+void metal_context::stamp_touched_resources(metal_command_list& list, sg::submission_token token)
 {
     for (auto const& touched : list.touched_buffers())
-        static_cast<metal_buffer const&>(*touched).stamp_submission(u64(token));
+        static_cast<metal_buffer const&>(*touched).submission().raise(u64(token));
+    for (auto const& touched : list.touched_textures())
+        static_cast<metal_texture const&>(*touched).submission().raise(u64(token));
 }
 
 cc::result<std::unique_ptr<sg::command_list>> metal_context::try_create_command_list()
@@ -405,12 +409,12 @@ void metal_context::async_upload_bytes_to_buffer(raw_buffer_handle buffer,
     _transfers.upload_to_buffer(cc::move(buffer), data, offset_in_bytes);
 }
 
-void metal_context::async_upload_bytes_to_texture(raw_texture_handle,
-                                                  cc::pinned_data<byte const>,
-                                                  subresource_index const&,
-                                                  texture_region const&)
+void metal_context::async_upload_bytes_to_texture(raw_texture_handle texture,
+                                                  cc::pinned_data<byte const> data,
+                                                  subresource_index const& subresource,
+                                                  texture_region const& region)
 {
-    SG_METAL_UNIMPLEMENTED("async texture upload");
+    _transfers.upload_to_texture(cc::move(texture), data, subresource, region);
 }
 
 sg::bytes_future metal_context::async_download_bytes_from_buffer(raw_buffer_handle buffer,
@@ -420,11 +424,11 @@ sg::bytes_future metal_context::async_download_bytes_from_buffer(raw_buffer_hand
     return _transfers.download_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
-sg::bytes_future metal_context::async_download_bytes_from_texture(raw_texture_handle,
-                                                                  subresource_index const&,
-                                                                  texture_region const&)
+sg::bytes_future metal_context::async_download_bytes_from_texture(raw_texture_handle texture,
+                                                                  subresource_index const& subresource,
+                                                                  texture_region const& region)
 {
-    SG_METAL_UNIMPLEMENTED("async texture download");
+    return _transfers.download_from_texture(cc::move(texture), subresource, region);
 }
 
 sg::stream_upload_handle metal_context::stream_bytes_to_buffer(raw_buffer_handle,

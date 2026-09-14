@@ -6,6 +6,9 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
+#include <atomic>
+#include <thread>
+
 // Raster, end to end: a pipeline built from a metallib, a rendering scope that clears and draws, and the target read
 // back.
 //
@@ -66,6 +69,52 @@ TEST("sg metal - a raster pipeline builds from a metal library")
     // The depth and stencil test is a separate object here, bound on the encoder rather than baked into the pipeline —
     // so it exists even for a pipeline with no depth attachment at all.
     CHECK(pipeline.value()->depth_stencil_state() != nullptr);
+}
+
+TEST("sg metal - pipelines build concurrently from several contexts")
+{
+    auto const probe = mtl::test::make_context();
+    if (probe == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // **Concurrent MTL4 pipeline compilation aborts inside the driver**, in `_os_unfair_lock_corruption_abort` under
+    // `AGXG16GFamilyCompiler`, and it is the driver rather than the validation layer — it reproduces with
+    // MTL_DEBUG_LAYER=0.
+    // So the backend takes every compile under one process-wide lock, and this is what says so.
+    //
+    // Separate contexts on purpose: a per-context lock would pass a test that shares one, and the state the driver
+    // corrupts is the device's — which a Mac hands out once, to everyone who asks.
+    //
+    // Without the lock this aborts the binary in roughly one run in five, so it is a probabilistic gate: a regression
+    // shows up within a few runs of the suite rather than on the first.
+    constexpr auto thread_count = 8;
+    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+    auto built = std::atomic<int>(0);
+    auto ready = std::atomic<int>(0);
+
+    for (auto i = 0; i < thread_count; ++i)
+        threads.emplace_back(
+            [&]
+            {
+                auto const ctx = mtl::test::make_context();
+                if (ctx == nullptr)
+                    return;
+
+                // Line the threads up so they reach the compiler together rather than one after another.
+                ready.fetch_add(1, std::memory_order_acq_rel);
+                while (ready.load(std::memory_order_acquire) < thread_count)
+                    std::this_thread::yield();
+
+                // No CHECK on a spawned thread: it would not be attributed to the running test, and what is being
+                // proven is the aggregate below — plus the absence of an abort, which no check can express.
+                if (make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm).has_value())
+                    built.fetch_add(1, std::memory_order_acq_rel);
+            });
+
+    for (auto& t : threads)
+        t.join();
+
+    CHECK(built.load(std::memory_order_acquire) == thread_count);
 }
 
 TEST("sg metal - a rendering scope clears and draws")

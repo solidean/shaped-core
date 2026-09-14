@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/metal/fwd.hh> // where every backend type is declared, autorelease_scope included
 #include <shaped-graphics/fwd.hh>                // also what puts the bare sized aliases in scope inside sg
 
+#include <atomic>
 #include <mutex>
 
 /// `cc::mutex`'s shape, held by a lock that is real whether or not this build has threads.
@@ -42,6 +43,34 @@ private:
     std::mutex _mutex;
 };
 
+/// The newest direct-queue submission that named a resource, or 0 when none has.
+///
+/// **Two queues, two directions, two stamps.**
+/// A command list defers behind the transfers in flight for the resources it touches, which the transfer system's own
+/// map answers; this is the other direction, and it is what an off-frame transfer waits on before it copies.
+/// Without it an async download of a buffer a list has just filled reads whatever was there before.
+///
+/// Held by `metal_buffer` and `metal_texture` alike, since the hazard is the resource's, not the kind's.
+struct sg::backend::metal::submission_stamp
+{
+    [[nodiscard]] u64 get() const { return _value.load(std::memory_order_acquire); }
+
+    /// Raises the stamp to `value`, never lowering it.
+    /// Lists on different threads may stamp out of order, and the wait has to cover the newest of them.
+    void raise(u64 value)
+    {
+        auto previous = _value.load(std::memory_order_relaxed);
+        while (previous < value
+               && !_value.compare_exchange_weak(previous, value, std::memory_order_release, std::memory_order_relaxed))
+        {
+            // The CAS refreshes `previous` on every failure, so the loop ends as soon as someone stamped higher.
+        }
+    }
+
+private:
+    std::atomic<u64> _value = {0};
+};
+
 namespace sg::backend::metal
 {
 /// The OS version this backend refuses below, and the reason the whole backend is Metal 4.
@@ -54,6 +83,19 @@ namespace sg::backend::metal
 /// Stated as a hard floor rather than probed per capability, and refused by name: see
 /// libs/graphics/shaped-graphics/docs/writing-a-backend.md.
 inline constexpr int k_required_macos_major = 26;
+
+/// The process-wide lock every `MTL4Compiler` pipeline build is taken under.
+///
+/// **Concurrent MTL4 pipeline compilation corrupts a lock inside the driver.**
+/// Two threads in `newRenderPipelineState` — on *different* compilers, from different contexts — abort in
+/// `_os_unfair_lock_corruption_abort` under `AGXG16GFamilyCompiler`, roughly one run in five on an M4 under macOS 26.
+/// It is the driver rather than the validation layer: it reproduces with `MTL_DEBUG_LAYER=0`.
+///
+/// Process-wide rather than per context, because the state being corrupted is the device's and a Mac hands the same
+/// device to every context that asks.
+/// The cost is that two threads building pipelines wait for each other, which is the same shape as a shader cache
+/// miss and far cheaper than the alternative.
+[[nodiscard]] std::mutex& pipeline_compilation_lock();
 
 } // namespace sg::backend::metal
 

@@ -5,6 +5,8 @@
 #include <shaped-graphics/backends/metal/metal_binding_layout.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 
+#include <mutex>
+
 namespace sg::backend::metal
 {
 void metal_compute_pipeline::release_backend_objects()
@@ -53,6 +55,7 @@ cc::result<metal_compute_pipeline_handle> metal_context::create_metal_compute_pi
     pipeline_descriptor->setComputeFunctionDescriptor(function_descriptor);
 
     NS::Error* pipeline_error = nullptr;
+    auto const compile_guard = std::lock_guard(pipeline_compilation_lock());
     auto* const state = _compiler->newComputePipelineState(pipeline_descriptor, nullptr, &pipeline_error);
 
     pipeline_descriptor->release();
