@@ -9,10 +9,11 @@
 
 /// The bindless tables sv declares, and the binding-group layout they turn into.
 ///
-/// The layout is hand-written rather than reflected out of a shader: sv owns the contract, so the manager is
+/// The layout is sv's own rather than reflected out of a shader: sv owns the contract, so the manager is
 /// constructible before any shader has compiled, and a routine's init order cannot decide whether a resource
 /// can be acquired.
-/// What a shader must do in exchange is declare the names below, in the space this header names.
+/// `bindless_declarations` emits the HLSL that matches it, and the binding pass writes every address in it —
+/// so a shader declares the tables by including that text, never by naming a register.
 
 /// One bindless table — one array binding, one shader-visible dimension.
 ///

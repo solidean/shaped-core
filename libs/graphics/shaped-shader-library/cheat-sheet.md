@@ -146,27 +146,19 @@ slib::rewrite_binding_groups(hlsl, format)
 A `path:binding:namespace` entry generates a typed struct for one group, in `<NAMESPACE>::<namespace>`:
 
 ```cpp
-using group = my::shaders::frame_bindings::group;
-group::group_index                 // -> constexpr sg::u32; the number the attribute gave
+using group = my::shaders::frame_bindings;   // the annotated namespace IS the type
+group::group_index                 // -> constexpr int; the number the attribute gave
 group::declared_bindings()         // -> cc::span<sg::binding const>; the WHOLE table, in slot order
 group::declared_samplers()         // -> cc::span<sg::named_sampler const>; the ones marked `static`
-group::acquire_layout(ctx)         // -> sg::binding_group_layout_handle; constant, no reflection consulted
-group::acquire_layout(ctx, samplers)  // + static samplers for the ones the shader left undeclared;
-                                   //   a declared one WINS, and supplying it again asserts
 group::self_check()                // -> cc::string; empty while the table still describes its own shader
 <NAMESPACE>::self_check()          // -> cc::string; every group in the package, for the owning target's test
                                    //   NOT called on the render path: it re-parses the embedded source
                                    //   a LIBRARY's generated header reaches its sibling <target>-test, which is what calls this
                                    //   (sc_finalize_shader_packages hands it the include dir)
-group{.albedo = tex.as_readonly_view(), .linear_sampler = {}, ...}.create(ctx)
-                                   // -> sg::binding_group_handle; binds by SLOT, no name lookup
-                                   //   throws sg::binding_group_exception / device_lost_exception; try_create is the result twin
-                                   //   no layout check: create acquires its own, so a foreign one cannot reach it
-group{...}.create(ctx, sg::lifetime_scope::transient)  // a group rebuilt every frame belongs here, not in persistent
-group::bind(scope, *handle)        // void; binds at group_index, so no call site writes the number
 // one member per binding: sg::bound_view for a resource, sg::sampler for a (non-static) sampler.
 // a `static` sampler has NO member -- it is baked into the layout, though it still takes its slot.
 // the layout is built from the full DECLARED table, not from whatever subset one stage reflected.
+// the struct is DATA: acquiring, creating and binding are sg's scopes' -- see the section below.
 ```
 
 A `path:vertex_input:struct` entry generates the C++ struct the buffer holds, plus its `sg::vertex_layout_of`:
@@ -185,8 +177,10 @@ my::shaders::pt_payload::max_payload_size   // constexpr cc::isize; what the pip
 my::shaders::frame_constants               // the inline-constants mirror, with HLSL's padding
 // a constant block REPRODUCES a layout rather than defining one: an element may not straddle a 16-byte row,
 //   a row is filled before it is left, and the total rounds up to a row (spike Q14).
-// the block's struct must be declared in the same file, and the subset is scalars, vectors and bool --
-//   an array or a matrix is refused, because the member after one packs into its last row.
+// the block's struct must be declared in the same file. scalars, vectors, bool and the float4xC matrices;
+//   an array or a nested struct is refused, because the member after one packs into its last row (Q14b, Q14d).
+// on SPIR-V the pass also writes [[vk::offset(n)]] per member: -fvk-use-dx-layout does NOT reach a
+//   push-constant block, so without them DXC packs it scalar-tight and the mirror reads the wrong bytes.
 ```
 
 ```hlsl

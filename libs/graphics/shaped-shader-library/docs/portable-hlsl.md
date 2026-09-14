@@ -11,7 +11,7 @@ Three things diverge between the targets, and each has an answer of its own:
   Answered by the [binding preprocessor](binding-preprocessor.md), which has landed for groups.
   The shader declares them as annotated namespaces, and a rewriting pass writes every address for both targets.
 - **Vertex input locations** — sg identifies an attribute by its HLSL semantic and SPIR-V has none.
-  Answered by the same pass, through its [`vertex_input` attribute](binding-preprocessor.md#vertex_input); the shader writes a `__spirv__` fork by hand until it lands.
+  Answered by the same pass, through its [`vertex_input` attribute](binding-preprocessor.md#vertex_input), which has landed.
 - **Silent behavioural divergences** — cbuffer layout, base vertex, `SV_Position.w`.
   Answered by the [compile flags](#compile-flags), which have landed.
 
@@ -66,12 +66,12 @@ But that ties the two together: a space used purely as a namespace would silentl
 
 The binding preprocessor assigns both itself instead, from the group number alone.
 The set is the number; the space is whatever the pass decides — today `space<n>`, which is a choice it can change without any shader changing.
-That is a rule about what the *pass emits*, not a global mapping DXC applies to every space — a binding declared outside an annotated namespace keeps whatever space it wrote by hand.
+That is a rule about what the *pass emits*, not a global mapping DXC applies to every space — a binding in a file carrying NO attribute keeps whatever space it wrote by hand.
 
 ## Vertex input locations
 
 sg identifies a vertex attribute by its HLSL semantic, SPIR-V has no semantics, and the vulkan backend therefore falls back to the attribute's position in the layout.
-So a Vulkan-targeted shader spells its locations out today, in the order sg's vertex layout lists them, and gets them right by hand:
+A Vulkan-targeted shader outside the dialect spells its locations out, in the order sg's vertex layout lists them, and gets them right by hand:
 
 ```hlsl
 #ifdef __spirv__
@@ -99,9 +99,9 @@ The same parse then emits the `sg::vertex_layout_of` specialization, so the C++ 
 `pipeline_layout_description::inline_constants` is a push-constant range on SPIR-V and root constants on DXIL, and a plain `ConstantBuffer` is neither.
 Under SPIR-V it becomes a descriptor in a set that the pipeline layout never binds, so a shader that does not say what it wants declares a resource nothing feeds.
 
-Today the shader forks by hand, `[[vk::push_constant]]` against `register(b0)`.
+Outside the dialect a shader forks by hand, `[[vk::push_constant]]` against `register(b0)`.
 The [`push_constants` attribute](binding-preprocessor.md#push_constants) replaces that fork.
-It also adds the thing a fork cannot give: the space is stated, so an inline-constants block cannot collide with a group's `b` registers.
+It also adds what a fork cannot give: the space is stated, so an inline-constants block cannot collide with a group's `b` registers.
 
 ## Validation
 

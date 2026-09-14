@@ -17,9 +17,8 @@ namespace
 {
 /// Whether `b` is one of the manager's bindless tables rather than a binding of the trace's own.
 ///
-/// A generated closest-hit declares the tables it touches, in sv's spaces, so they come back through reflection like
-/// anything else — and they must not: the manager owns that schema, binds it as its own group, and a permutation
-/// declaring three of the eight tables would otherwise produce a group layout that is a subset of it.
+/// A generated closest-hit declares every budgeted table, so they come back through reflection like anything
+/// else — and they must not: the manager owns that schema and binds it as its own group.
 [[nodiscard]] bool is_bindless_table(sg::binding const& b)
 {
     for (auto i = u32(0); i < u32(bindless_table::count_); ++i)

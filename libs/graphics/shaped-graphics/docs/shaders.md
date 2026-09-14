@@ -178,7 +178,7 @@ Every path that resolves becomes a reload dependency of the shader that pulled i
 One `.hlsl` serves dx12 and vulkan, and the package compiles it once per format the context accepts.
 What differs is that **SPIR-V has none of HLSL's implicit addressing** — no register classes, no semantics — so three things have to be said out loud.
 
-Two of them are still said by hand today, and the third is what the binding preprocessor is being built for.
+All three are the binding preprocessor's now, and it has landed.
 
 - **Bindings.**
   SPIR-V needs a set and a binding number on every resource.
@@ -202,12 +202,15 @@ Two of them are still said by hand today, and the third is what the binding prep
   sg identifies an attribute by its HLSL semantic and SPIR-V has no semantics, so the vulkan backend falls back to the attribute's position.
   A Vulkan-targeted shader therefore annotates each one with `[[vk::location(n)]]`, in the order the sg vertex layout lists them.
   A mismatch is silent: the pipeline builds and the geometry is wrong.
-  The same design takes this over, numbering an annotated struct's members and generating the `sg::vertex_layout_of` that matches.
+  The same design takes this over: it numbers an annotated struct's members and generates the `sg::vertex_layout_of` that matches, so neither the locations nor the C++ layout is written by hand.
 - **Inline constants.**
   A plain `cbuffer`/`ConstantBuffer` becomes a descriptor in a set under SPIR-V, while `pipeline_layout_description::inline_constants` is a push-constant range.
   A shader that does not say so declares a resource the pipeline layout never binds, so the block needs `[[vk::push_constant]]` there and a plain `register(b0)` on DXIL.
+  `#pragma sc push_constants` takes both over, and the block's member OFFSETS with them: `-fvk-use-dx-layout` does not reach a push-constant block, so the pass states each one as `[[vk::offset(n)]]`.
 
-**Every `[[vk::…]]` attribute a shader still writes by hand has to be forked on `__spirv__`.**
+**Every OTHER `[[vk::…]]` attribute a shader writes by hand still has to be forked on `__spirv__`.**
+The pass owns four spellings — `register`, `[[vk::binding]]`, `[[vk::push_constant]]` and `[[vk::offset]]` — and refuses them in a file carrying an attribute.
+Everything else, `[[vk::constant_id]]` and `[[vk::builtin]]` among them, is still the shader's to write and to guard.
 DXC reports an unrecognised attribute as `-Wignored-attributes` and ssc compiles with `-WX`, so an unguarded annotation is a compile error on DXIL rather than a no-op:
 
 ```hlsl

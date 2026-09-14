@@ -99,7 +99,7 @@ namespace sv
 {
 /// The HLSL for `r`, plus the parameter layout it reads.
 ///
-/// The source is, in order: the runtime include, the bindless tables this permutation touches, one `SamplerState` per distinct
+/// The source is, in order: the runtime include, every budgeted bindless table, one `SamplerState` per distinct
 /// sampler it samples with, then the entry function.
 /// That function declares one local per signature attribute — a constant loaded from the parameter block, a mesh attribute
 /// interpolated across the hit triangle, or a texture sampled through its uv attribute — and then runs the type's fragment

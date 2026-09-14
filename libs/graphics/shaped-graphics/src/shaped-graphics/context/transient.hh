@@ -113,14 +113,21 @@ public:
                                                             cc::span<slotted_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
-    /// Builds a group from the generated group struct `G`, against the layout `G` itself declares.
+    /// Builds a group from the generated group struct `G`, against a layout the caller already holds.
     ///
     /// Which scope you call is the lifetime: a group rebuilt every frame belongs on `ctx.transient`, one that
     /// outlives an epoch on `ctx.persistent`.
     ///
-    /// Throws sg::binding_group_exception, or sg::device_lost_exception on a lost device.
-    /// What can actually fail is the descriptor allocation and the device — never a mismatched layout, since
-    /// the layout is built from `G`'s own constant table rather than passed in.
+    /// **The layout is passed in rather than acquired here**, because a group is created on the frame path —
+    /// once per texture switch in an imgui pass — and acquiring hashes the declared table and takes the
+    /// pipeline cache's lock to look it up.
+    /// Acquire it once, in init, with `ctx.cached.acquire_binding_group_layout<G>()`.
+    ///
+    /// A sampler `G` gathered that `layout` already declares static is dropped rather than passed on: dx12
+    /// refuses a static sampler supplied per group, so sending it would be an error rather than a duplicate.
+    ///
+    /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
+    /// on a lost device.
     template <declared_binding_group G>
     [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
     {

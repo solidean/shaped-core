@@ -99,7 +99,8 @@ A second vocabulary between HLSL and sg would be one more table to keep in step 
 
 **A file is scanned whole.**
 The pass looks for attributes everywhere, not only inside annotated namespaces, because `push_constants`, `payload` and `vertex_input` all attach at file scope.
-Everything carrying no attribute is passed through byte for byte, so a shader may keep hand-written `register()` declarations at file scope indefinitely.
+Everything carrying no attribute is passed through byte for byte, which is what lets a file outside the dialect keep its own addresses.
+A file INSIDE it is bound by the rule below: see "A hand-written address is an error".
 
 ### `group`
 
@@ -117,7 +118,8 @@ The number is the SPIR-V set, and it is the only address anyone writes.
 Today group `n` gets `space<n>`, which is a choice and not a law.
 What has to hold is weaker and more important: an address must be a pure function of the annotations.
 The stages of one pipeline are separate translation units, rewritten independently, and their shared bindings have to land on the same numbers.
-`space = group` satisfies that trivially; so would a rule handing each array binding a space of its own, which is what a bindless table wants.
+`space = group` satisfies that trivially, and one space per group is all anything in the tree needs today.
+A group's bindings are numbered in declaration order, so a table declared as an array sits inside its group rather than needing one of its own.
 Changing the function changes no shader.
 
 **One annotated namespace is declared exactly once, in one file, in one block.**
@@ -147,7 +149,7 @@ The keys are `sg::sampler`'s fields and everything omitted takes its default, wh
 Two shorthands make it writable: `filter=linear` sets all three filters, `address=clamp_edge` sets all three axes.
 The tuple form addresses them individually, in the field order `sg::sampler` declares.
 
-The generated struct exposes what the shader declared as a constant, and `acquire_layout` also takes runtime samplers for a sampler the shader left undeclared.
+The generated struct exposes what the shader declared as a constant, and `ctx.cached.acquire_binding_group_layout<G>(samplers)` takes runtime samplers for one the shader left undeclared.
 **A declared sampler wins**: passing a runtime sampler for one the shader already declared is an error, not an override.
 The merged list puts the declared samplers first and appends only names they do not already carry, so the shader wins in every build and the assertion is what names the mistake in a checked one.
 [done]
@@ -155,12 +157,12 @@ The merged list puts the declared samplers first and appends only names they do 
 ### `push_constants`
 
 ```hlsl
-#pragma sc push_constants space=9
+#pragma sc push_constants
 ConstantBuffer<frame_constants> frame;
 ```
 
 Inline constants — dx12 root constants, Vulkan push constants — reach a shader through `pipeline_layout_description::inline_constants` rather than through a group.
-The register is always `b0`, since a pipeline layout carries at most one such binding, so the only number to state is the space.
+The register is always `b0` and the space is reserved (`slib::inline_constants_space`), so the attribute takes no arguments at all.
 That space matters: an inline-constants block sharing a space with a group's `b` registers is exactly the collision this pass exists to prevent.
 
 Q8 applies here too, which is why the attribute must write a `register()` at all — a constants block referenced by one stage of a two-stage pipeline gets a register only in that stage.
@@ -379,12 +381,12 @@ Mapping them onto the structured types would only have moved the failure later.
 The refusal names `StructuredBuffer<T>` and `RWStructuredBuffer<T>` instead.
 
 **The table is checked against DXC rather than trusted.**
-The generated `acquire_layout` compares its constant table against the compiled shader's reflected bindings — name, type, index, count, texture dimension, and a constant block's `block_size`.
+The generated table is compared against the compiled shader's reflected bindings — name, type, index, count, texture dimension, and a constant block's `block_size`.
 The comparison is one-directional, because reflection reports only what the entry point referenced and its set is therefore a subset.
 
 One comparison, two reactions.
 At first acquire the table and the shader come from the same build, so a mismatch means the generator is wrong.
-That is what the per-package self-check below establishes, from a test rather than from `acquire_layout`.
+That is what the per-package self-check below establishes, from a test rather than from a layout acquire.
 After a hot reload the shader is legitimately newer than the table, so the same mismatch produces a failed shader.
 That is an error on the async node naming the binding that moved and what changed about it, the way a broken edit already does.
 So the comparison returns its difference rather than asserting internally, and each caller reacts.
@@ -479,7 +481,7 @@ So the tokenizer exists twice — once in Python for the generator, once in C++ 
   Parse the embedded source with `parse_binding_groups`, compare against the table Python produced from the same bytes, and fail with the first difference.
   Its corpus is every shader anyone declares, and it grows without anyone remembering to extend it.
 
-  **It runs from a test rather than from `acquire_layout`.**
+  **It runs from a test rather than from an acquire.**
   Parsing every embedded source is a build-time property to establish once, not something a frame should pay for.
   An assert on the render path only ever ran in a checked build anyway, so it could not fail a build either.
   `<NAMESPACE>::self_check()` folds every group in the package into one message, beside the per-group `group::self_check()`.
@@ -534,37 +536,30 @@ For `frame_bindings` in namespace `shaders`:
 namespace shaders::frame_bindings
 {
 /// The bindings frame_bindings declares, in slot order. Generated; do not edit.
-struct group
+struct frame_bindings
 {
     sg::bound_view albedo;
 
-    /// The samplers the shader declared `static`, ready to hand to acquire_layout.
+    /// The samplers the shader declared `static`, ready to hand to the layout acquire.
     struct declared_sampler { cc::string_view name; sg::sampler sampler; };
     static constexpr declared_sampler static_samplers[] = { /* ... */ };
-
-    /// The layout these declarations define — constant, so no reflection is consulted.
-    /// The samplers overload supplies ones the shader did not declare; a sampler it did declare is an error.
-    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(sg::context& ctx);
-    [[nodiscard]] static sg::binding_group_layout_handle acquire_layout(sg::context& ctx,
-                                                                       cc::span<sg::named_sampler const> samplers);
-
-    /// Builds a group from the fields above, against the layout acquire_layout gives.
-    /// The scope is the caller's because the lifetime is: a group rebuilt every frame belongs in `transient`.
-    /// Throws, since what can fail is the descriptor allocation and the device; try_create is the result twin.
-    [[nodiscard]] sg::binding_group_handle create(
-        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;
-    [[nodiscard]] cc::result<sg::binding_group_handle> try_create(
-        sg::context& ctx, sg::lifetime_scope scope = sg::lifetime_scope::persistent) const;
-
-    /// Binds at the group index the annotation gave, so no call site writes the number.
-    static void bind(auto& scope, sg::binding_group const& g);
+    /// Everything else is DATA. The verbs are sg's scopes', constrained on sg::declared_binding_group:
+    ///
+    ///     auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>();
+    ///     auto const g = ctx.transient.create_binding_group(layout, shaders::frame_bindings{...});
+    ///     scope.bind<shaders::frame_bindings>(*g);
+    ///
+    /// so the generator emits no API of its own.
+    [[nodiscard]] static cc::span<sg::binding const> declared_bindings();
+    [[nodiscard]] static cc::span<sg::named_sampler const> declared_samplers();
+    void gather(cc::vector<sg::slotted_view>&, cc::vector<sg::named_sampler>&) const;
 };
 }
 ```
 
-backed by a `constexpr` binding table the generator emits, which is what makes `acquire_layout` free of reflection.
+backed by a `constexpr` binding table the generator emits, which is what makes the layout acquire free of reflection.
 
-`bind` is why binding a group by name needs no sg change: the namespace names the group, the marker numbers it, and the generated struct carries both.
+`bind<G>` is why binding a group by name needs no sg change: the namespace names the group, the marker numbers it, and the generated struct carries both.
 
 ### The generated mirror structs
 
@@ -650,9 +645,8 @@ Every other layout in the tree is built from reflected bindings, where position 
 
 `binding_slot` widens with it, from "meaningful only inside a `staging_binding_group`" to "a position in the layout's `bindings()`", and that doc change lands in the same commit.
 A slot from the wrong layout would otherwise be in range, wrong and silent, where a wrong *name* is an error message today.
-The generated `create()` closes that by construction rather than by a check.
-It calls its own `acquire_layout`, so the layout is built from the same constant table the slots came from and no foreign one can reach it.
-A caller that does hold a layout from elsewhere compares `binding_group_layout::structural_hash`.
+The layout a caller passes to `create_binding_group` closes that by construction rather than by a check.
+It is acquired from the same constant table the slots came from, so a slot and the layout it indexes cannot come from different groups.
 
 **The one piece of genuine work here** is dx12's split layout.
 It keeps separate `view_slots` and `sampler_slots` vectors, so a position in `bindings()` is not a position in `view_slots` once samplers interleave.

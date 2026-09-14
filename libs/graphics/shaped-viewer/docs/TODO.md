@@ -486,13 +486,12 @@ What follows is everything else the importer left behind.
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
 
-- **The path tracer cannot use its generated group struct, only the pass's addresses.**
-  Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, and
-  `collect_samplers` appends one static sampler per `sv_sampler_i` the permutation declares.
-  So the layout is built from merged reflection and bound by name, and `pt_common.hlsli` registers no
-  `path:binding:namespace` entry — a generated struct nobody can call `create_binding_group` on would only mislead.
-  Two things would close it: the templated create comparing the layout's declared-binding PREFIX rather than its whole
-  `structural_hash`, and the material generator declaring its samplers through the pass, which is the entry above.
+- **The path tracer cannot use a generated group struct for its own bindings, only the pass's addresses.**
+  Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, so the trace's
+  own group is built from merged reflection and `pt_common.hlsli` registers no `path:binding:namespace` entry.
+  What would close it is a generated struct for a permutation at all: the group is assembled at runtime, so
+  there is no annotated namespace for the generator to have emitted one from.
+  The permutation's own samplers no longer block it: they are declared through the pass, in a group of their own.
 
 - **`mesh_is_indexed` still rides in `frame_constants_gpu`**, for `pbr_raytrace_routine` alone.
   The path tracer reads it per instance now, out of `instance_gpu`, and its own frame block no longer carries it.
