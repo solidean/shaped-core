@@ -182,4 +182,6 @@ int main()
 
     add_executable(${target} "${_stub}")
     set_target_properties(${target} PROPERTIES FOLDER "examples")
+    # Registered under the name it stands in for, so dev.py still treats the target as an example binary.
+    sc_nexus_binary(${target} KINDS examples)
 endfunction()

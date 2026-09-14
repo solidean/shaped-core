@@ -159,7 +159,25 @@ def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
             for name, data in load_target_models(build_dir, build_type).items()
         ]
     targets.sort(key=lambda t: t.name)
+    if kinds is not None:
+        _refuse_unregistered_nexus_binaries(targets, build_dir)
     return targets
+
+
+def _refuse_unregistered_nexus_binaries(targets: list[Target], build_dir: Path) -> None:
+    """Stop when an executable named like a test or example binary is missing from the manifest.
+
+    With a manifest, the name is a convention rather than the registration, so a binary that skipped
+    sc_nexus_binary would otherwise build and pass while none of its tests run.
+    """
+    missing = [t.name for t in targets
+               if t.kind == "EXECUTABLE" and t.name.endswith(("-test", "-example")) and not t.nexus_kinds]
+    if missing:
+        raise SystemExit(
+            f"error: {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} named like a nexus test or example "
+            f"binary but missing from {build_dir / 'nexus-binaries.json'}, so dev.py would never run it.\n"
+            f"Add `sc_nexus_binary(<target> KINDS tests)` (or `KINDS examples`) after its add_executable — "
+            f"see libs/base/nexus/cmake/NexusBinaries.cmake.")
 
 
 def executables(targets: list[Target]) -> list[Target]:

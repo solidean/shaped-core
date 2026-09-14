@@ -111,6 +111,8 @@ A binary run with nothing selected runs its `default_entry` app or command, or p
 A substring filter given without `--tests` is an error that names `--tests` as the fix.
 
 dev.py tells nexus binaries apart by the `nexus-binaries.json` manifest configure writes beside the build, not by a `-test` or `-example` suffix.
+**A new test target needs `sc_nexus_binary(<target> KINDS tests)` after its `add_executable`.**
+dev.py refuses a `*-test` or `*-example` executable the manifest does not name, rather than silently never running it.
 `dev.py run` refuses a binary that holds only tests or examples, and runs one registered as a `tool` even when it carries tests too.
 
 ## Reproducing an order: `--seed N`
