@@ -76,6 +76,11 @@ metal_command_list::~metal_command_list()
         _buffer->release();
     if (_allocator != nullptr)
         _allocator->release();
+
+    // The slot too, which submit and drop release and this path used to leak.
+    // A leaked slot is permanent: the allocator hands out a bounded set, so enough of them exhaust the pool, and every
+    // later advance_epoch sees a list that is not there.
+    _metal_context.slots().release(_slot);
 }
 
 MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
@@ -815,6 +820,9 @@ bool metal_command_list::query_timestamps_supported() const
 
 sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
 {
-    SG_METAL_UNIMPLEMENTED("recording a GPU timestamp");
+    // Callable rather than fatal, which is the contract for an unsupported backend: the caller gets an invalid query
+    // that never becomes ready, and code written against a backend that has timestamps still runs here.
+    // A stub would abort instead — and in a release build, where CC_ASSERT is off, take the process with it.
+    return {};
 }
 } // namespace sg::backend::metal

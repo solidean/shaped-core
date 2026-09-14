@@ -135,7 +135,7 @@ backends/                                       # each subclasses the abstract s
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): device + resource creation; recording is stubbed
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): device, queue, epochs, command-list lifecycle; everything else asserts
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real through presentation, transfer and streaming — the whole tier-1 suite passes; ray tracing and GPU timestamps are the gaps
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat

@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -36,6 +37,7 @@ void metal_context::create_staging_rings(isize upload_bytes, isize download_byte
     // Before the rings, so their own buffers can declare themselves resident as they are made.
     _residency.create(_device, _queue);
     _transfers.create(*this);
+    _streams.create(*this);
 
     _upload_ring.lock([&](metal_staging_ring& r) { r.create(_device, upload_bytes, "sg inline upload ring"); });
     _download_ring.lock([&](metal_staging_ring& r) { r.create(_device, download_bytes, "sg inline download ring"); });
@@ -80,6 +82,10 @@ bool metal_context::supports(sg::feature f) const
 
 void metal_context::advance_epoch()
 {
+    // Before any state change, so a caller catching this still has a usable context.
+    CC_ASSERT(_slots.live_count() == 0, "all command lists opened this epoch must be submitted or dropped before "
+                                        "advancing");
+
     // Auto-expire the closing epoch's transient resources before the epoch is packaged.
     //
     // The transient bump heap resets its head every epoch, so the next epoch's first allocation aliases these bytes.
@@ -148,6 +154,8 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     // One wait covers the whole list, on the highest value any of its resources claimed.
     if (auto const wait = highest_pending_transfer(list); wait > 0)
         _queue->wait(_transfers.timeline(), wait);
+
+    wait_for_streams(list);
 
     // Finalize every buffer this list touched, in submission order — that ordering is what makes each resource's
     // `current` mean "after everything submitted so far".
@@ -272,6 +280,27 @@ void metal_context::finalize_touched_buffers(metal_command_list& list)
     }
 }
 
+void metal_context::wait_for_streams(metal_command_list& list)
+{
+    auto const wait_on = [&](metal_transfer_system::stream_wait const& wait, auto const& resource)
+    {
+        if (wait.event == nullptr)
+            return;
+
+        if (resource->claim_stream_wait_warning(wait.value))
+            CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the "
+                           "whole transfer lands. Wait on the stream handle yourself before using the resource, or "
+                           "call promote_to_async on it if the wait is what you want");
+
+        _queue->wait(wait.event, wait.value);
+    };
+
+    for (auto const& touched : list.touched_buffers())
+        wait_on(_transfers.pending_stream_wait(touched.get()), touched);
+    for (auto const& touched : list.touched_textures())
+        wait_on(_transfers.pending_stream_wait(touched.get()), touched);
+}
+
 void metal_context::stamp_touched_resources(metal_command_list& list, sg::submission_token token)
 {
     for (auto const& touched : list.touched_buffers())
@@ -326,6 +355,9 @@ void metal_context::shutdown()
     // After the drain above, so nothing in flight still names these bytes.
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    // Before the transfer system: the actor commits onto its queue, and a job still in flight would name a queue
+    // that is already gone.
+    _streams.shutdown();
     _transfers.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
@@ -373,14 +405,24 @@ void metal_context::shutdown_no_throw() noexcept
 
 void metal_context::block_until_transfers_drained()
 {
-    // Both halves: an inline download's copy-out, and everything the off-frame queue still owes.
-    while (_transfers.has_pending())
-        std::this_thread::yield();
+    // Every loop here pumps, because an unthreaded build runs the streaming actor on whoever waits — so a wait that
+    // only yields is a wait for something nothing will ever do.
+    //
+    // A condition rather than a duration throughout: the handlers run on a dispatch queue we do not own, so there is
+    // nothing to join and nothing whose timing is ours to predict.
+    auto const spin = [](auto&& still_pending)
+    {
+        while (still_pending())
+        {
+            if (!cc::thread_pump_all())
+                std::this_thread::yield();
+        }
+    };
 
-    // A condition rather than a duration: the handler runs on a dispatch queue we do not own, so there is nothing to
-    // join and nothing whose timing is ours to predict.
-    while (_pending_downloads.load(std::memory_order_acquire) > 0)
-        std::this_thread::yield();
+    // Streaming first: its jobs commit onto the transfer queue, so draining it can add to what the next loop waits on.
+    spin([&] { return _streams.has_pending(); });
+    spin([&] { return _transfers.has_pending(); });
+    spin([&] { return _pending_downloads.load(std::memory_order_acquire) > 0; });
 }
 
 cc::result<sg::swapchain_handle> metal_context::try_create_swapchain(swapchain_description const& desc)
@@ -431,65 +473,98 @@ sg::bytes_future metal_context::async_download_bytes_from_texture(raw_texture_ha
     return _transfers.download_from_texture(cc::move(texture), subresource, region);
 }
 
-sg::stream_upload_handle metal_context::stream_bytes_to_buffer(raw_buffer_handle,
-                                                               cc::pinned_data<byte const>,
-                                                               isize,
+// The resident forms build a source of one always-ready chunk, so there is one implementation underneath rather than
+// a second thing to keep correct.
+// `stream_scope` needs nothing here: the narrow scopes are a creation-time property on the other two backends, and a
+// Metal resource has no equivalent to declare — sg has already checked the usage flags by this point.
+
+sg::stream_upload_handle metal_context::stream_bytes_to_buffer(raw_buffer_handle buffer,
+                                                               cc::pinned_data<byte const> data,
+                                                               isize offset_in_bytes,
                                                                stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming bytes to a buffer");
+    return _streams.upload_to_buffer(cc::move(buffer), sg::make_pinned_stream_source(cc::move(data), 0), offset_in_bytes);
 }
 
-sg::stream_upload_handle metal_context::stream_bytes_to_texture(raw_texture_handle,
-                                                                cc::pinned_data<byte const>,
-                                                                subresource_index const&,
-                                                                texture_region const&,
+sg::stream_upload_handle metal_context::stream_bytes_to_texture(raw_texture_handle texture,
+                                                                cc::pinned_data<byte const> data,
+                                                                subresource_index const& subresource,
+                                                                texture_region const& region,
                                                                 stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming bytes to a texture");
+    return _streams.upload_to_texture(cc::move(texture), sg::make_pinned_stream_source(cc::move(data), 0), subresource,
+                                      region);
 }
 
-sg::stream_upload_handle metal_context::stream_source_to_buffer(raw_buffer_handle,
-                                                                std::unique_ptr<stream_source>,
-                                                                isize,
+sg::stream_upload_handle metal_context::stream_source_to_buffer(raw_buffer_handle buffer,
+                                                                std::unique_ptr<stream_source> source,
+                                                                isize offset_in_bytes,
                                                                 stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming a source to a buffer");
+    return _streams.upload_to_buffer(cc::move(buffer), cc::move(source), offset_in_bytes);
 }
 
-sg::stream_upload_handle metal_context::stream_source_to_texture(raw_texture_handle,
-                                                                 std::unique_ptr<stream_source>,
-                                                                 subresource_index const&,
-                                                                 texture_region const&,
+sg::stream_upload_handle metal_context::stream_source_to_texture(raw_texture_handle texture,
+                                                                 std::unique_ptr<stream_source> source,
+                                                                 subresource_index const& subresource,
+                                                                 texture_region const& region,
                                                                  stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming a source to a texture");
+    return _streams.upload_to_texture(cc::move(texture), cc::move(source), subresource, region);
 }
 
-sg::stream_download_handle metal_context::stream_bytes_from_buffer(raw_buffer_handle, isize, isize, stream_scope)
+sg::stream_download_handle metal_context::stream_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                   isize offset_in_bytes,
+                                                                   isize size_in_bytes,
+                                                                   stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming bytes from a buffer");
+    return _streams.download_from_buffer(cc::move(buffer), {}, offset_in_bytes, size_in_bytes);
 }
 
-sg::stream_download_handle metal_context::stream_bytes_from_texture(raw_texture_handle,
-                                                                    subresource_index const&,
-                                                                    texture_region const&,
+sg::stream_download_handle metal_context::stream_bytes_from_texture(raw_texture_handle texture,
+                                                                    subresource_index const& subresource,
+                                                                    texture_region const& region,
                                                                     stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming bytes from a texture");
+    return _streams.download_from_texture(cc::move(texture), {}, subresource, region);
 }
 
-sg::stream_download_handle metal_context::stream_to_sink_from_buffer(raw_buffer_handle, stream_sink, isize, isize, stream_scope)
+sg::stream_download_handle metal_context::stream_to_sink_from_buffer(raw_buffer_handle buffer,
+                                                                     stream_sink sink,
+                                                                     isize offset_in_bytes,
+                                                                     isize size_in_bytes,
+                                                                     stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming a buffer to a sink");
+    return _streams.download_from_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes);
 }
 
-sg::stream_download_handle metal_context::stream_to_sink_from_texture(raw_texture_handle,
-                                                                      stream_sink,
-                                                                      subresource_index const&,
-                                                                      texture_region const&,
+sg::stream_download_handle metal_context::stream_to_sink_from_texture(raw_texture_handle texture,
+                                                                      stream_sink sink,
+                                                                      subresource_index const& subresource,
+                                                                      texture_region const& region,
                                                                       stream_scope)
 {
-    SG_METAL_UNIMPLEMENTED("streaming a texture to a sink");
+    return _streams.download_from_texture(cc::move(texture), cc::move(sink), subresource, region);
+}
+
+void metal_context::set_stream_upload_ratio(float ratio)
+{
+    _streams.set_upload_ratio(ratio);
+}
+
+void metal_context::set_stream_download_ratio(float ratio)
+{
+    _streams.set_download_ratio(ratio);
+}
+
+void metal_context::set_stream_upload_aging(float per_second)
+{
+    _streams.set_upload_aging(per_second);
+}
+
+void metal_context::set_stream_download_aging(float per_second)
+{
+    _streams.set_download_aging(per_second);
 }
 
 cc::result<sg::raw_buffer_handle> metal_context::try_create_raw_buffer(isize size_in_bytes,

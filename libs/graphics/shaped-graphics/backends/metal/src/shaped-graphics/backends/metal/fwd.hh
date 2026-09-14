@@ -11,6 +11,8 @@ template <class T>
 struct callback_mutex;         // cc::mutex's shape, but real even without SC_THREADS (see metal_common.hh)
 struct submission_stamp;       // the last direct-queue submission that named a resource (see metal_common.hh)
 struct texture_staging_layout; // how one texture region's bytes sit in staging (see metal_format.hh)
+struct metal_stream_job;       // one streaming transfer as its actor owns it (see metal_stream.hh)
+class metal_stream_system;     // the ctx.stream tier (see metal_stream.hh)
 struct metal_config;           // device creation knobs (see metal_context.hh)
 class metal_context;
 /// A backend-typed context handle: an sg::context_handle known to point at a metal_context.

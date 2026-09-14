@@ -31,6 +31,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
     src/shaped-graphics/backends/metal/metal_staging_ring.cc
+    src/shaped-graphics/backends/metal/metal_stream.cc
     src/shaped-graphics/backends/metal/metal_swapchain.cc
 )
 
@@ -55,6 +56,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_format.hh
     src/shaped-graphics/backends/metal/metal_texture.hh
     src/shaped-graphics/backends/metal/metal_transfer.hh
+    src/shaped-graphics/backends/metal/metal_stream.hh
     src/shaped-graphics/backends/metal/metal_texture_view_cache.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
     src/shaped-graphics/backends/metal/metal_memory_heap.hh

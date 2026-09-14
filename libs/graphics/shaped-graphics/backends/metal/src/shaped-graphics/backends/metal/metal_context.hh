@@ -19,6 +19,7 @@
 #include <shaped-graphics/backends/metal/metal_residency.hh>
 #include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
+#include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/backends/metal/metal_texture_view_cache.hh>
 #include <shaped-graphics/backends/metal/metal_transfer.hh>
@@ -86,6 +87,8 @@ public:
     /// The off-frame transfer queue and its ordering timeline.
     [[nodiscard]] metal_transfer_system& transfers() { return _transfers; }
 
+    [[nodiscard]] metal_stream_system& streams() { return _streams; }
+
     /// MTLSamplerStates for bound sampler values, shared context-wide.
     [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
 
@@ -152,6 +155,12 @@ public:
     /// Record `token` on every resource `list` touched, so a later off-frame transfer defers behind this list.
     /// The reverse of `highest_pending_transfer`, and the other half of the sync between the two queues.
     void stamp_touched_resources(metal_command_list& list, sg::submission_token token);
+
+    /// Make `list` wait for every streaming transfer still filling a resource it touched, warning once per stream.
+    ///
+    /// The wait is what makes a stream as safe as an async transfer rather than a documented data race, and it is
+    /// also a stall — so the first list it costs is told, unless `promote_to_async` already declared it intended.
+    void wait_for_streams(metal_command_list& list);
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
@@ -249,6 +258,11 @@ private:
                                                                      texture_region const& region,
                                                                      stream_scope scope) override;
 
+    void set_stream_upload_ratio(float ratio) override;
+    void set_stream_download_ratio(float ratio) override;
+    void set_stream_upload_aging(float per_second) override;
+    void set_stream_download_aging(float per_second) override;
+
     [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
                                                                       buffer_usages usage,
                                                                       allocation_info const& alloc) override;
@@ -291,6 +305,7 @@ private:
     metal_residency_set _residency;
     metal_sampler_cache _samplers;
     metal_transfer_system _transfers;
+    metal_stream_system _streams;
     metal_texture_view_cache _texture_views;
     MTL4::Compiler* _compiler = nullptr;
     cc::mutex<metal_staging_ring> _upload_ring;

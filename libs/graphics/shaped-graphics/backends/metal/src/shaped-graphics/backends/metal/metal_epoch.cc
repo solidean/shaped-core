@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/thread/thread_pump.hh>
 
 namespace sg::backend::metal
 {
@@ -17,7 +18,15 @@ constexpr u64 k_wait_slice_ms = 1000;
 void wait_for_value(MTL::SharedEvent* event, u64 value)
 {
     while (event->signaledValue() < value)
-        (void)event->waitUntilSignaledValue(value, k_wait_slice_ms);
+    {
+        // **A GPU fence here is not necessarily outside the pump registry**, which is the assumption a bare wait would
+        // make — see clean-core/thread/thread_pump.hh.
+        // A command list waiting on a streaming transfer reaches its fence only once the streaming actor signals it,
+        // and in an unthreaded build that actor runs on whoever waits.
+        // So pump first, and park only briefly while there is still work only this thread can do.
+        auto const pumped = cc::thread_pump_all();
+        (void)event->waitUntilSignaledValue(value, pumped ? u64(1) : k_wait_slice_ms);
+    }
 }
 } // namespace
 

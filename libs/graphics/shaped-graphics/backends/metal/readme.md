@@ -154,6 +154,26 @@ Each of these is a fact about Metal rather than a gap in the backend.
   So every pipeline build is taken under `pipeline_compilation_lock()`, process-wide rather than per context.
   The state being corrupted is the device's, and a Mac hands the same device to everyone who asks.
   `sg metal - pipelines build concurrently from several contexts` is the gate, and it is probabilistic: without the lock it takes the binary down within a run or two.
+- **Streaming needs a third queue, and that is correctness rather than tuning.**
+  An MTL4 queue is sequential: a wait blocks everything committed after it.
+  An async transfer ordering behind an in-flight stream therefore blocks the stream's own copies too, when they share a queue — so the stream never finishes and the wait never clears.
+  A second queue for streaming removes the cycle for one object.
+- **A streaming transfer needs a timeline per resource, which the async tier does not.**
+  A list touching a streamed resource waits for the *whole* transfer, including chunks the actor has not staged yet — so the value is reserved when the transfer is admitted and signalled when it ends.
+  On one shared timeline that is unsound: transfers finish out of order, and a later one signalling its value would report an earlier one complete.
+  Per resource it is sound, because sg runs two transfers of one resource in submission order.
+  The event is signalled by the CPU rather than the queue, since what it reports is a job ending — which may be a cancellation with no GPU work at all.
+- **A streaming transfer's direct-queue wait is read once, at admission, and reading it per chunk deadlocks.**
+  A list touching a streamed resource waits for the whole transfer, so a chunk staged after that list was submitted would wait for a list waiting for it.
+  Admission is also what the contract says: the extent is the caller's alone from the call onward, so a list submitted later has no claim to order ahead of the stream.
+- **A GPU fence is not always outside the pump registry.**
+  clean-core's `thread_pump.hh` says blocking on a GPU fence is fine because nothing registered has to run for it to be signalled — and the streaming tier breaks that premise.
+  A list waiting on a streaming transfer reaches its fence only once the actor signals it, and in an unthreaded build that actor runs on whoever waits.
+  So every wait in this backend pumps, and the singlethreaded preset is where forgetting it shows up as a hang rather than as a slow test.
+- **Metal orders the async tier against in-flight streams, where dx12 does not.**
+  The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
+  `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
+  docs/TODO.md records the gap on the backend that still has it.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
 

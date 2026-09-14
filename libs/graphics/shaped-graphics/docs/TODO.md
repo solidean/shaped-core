@@ -15,6 +15,20 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Pinned as deliberate by `sg metal - a compute pipeline builds from a metal library`, so closing it is a failing test
   rather than something nobody notices.
 
+- **`context::_device_lost` is a plain bool, and metal writes it from a driver thread.**
+  Every other piece of sticky context state is guarded or atomic; this one is a bare `bool` set by `mark_device_lost`
+  and read by `is_device_lost` on any thread.
+  It was sound while no backend wrote it from a thread sg does not own.
+  Metal is the first that does: its only error channel is the `MTL4CommitFeedback` handler, which runs on a dispatch
+  queue Apple owns, and that handler calls `report_feedback_error` and so `mark_device_lost`.
+  dx12 polls `GetDeviceRemovedReason` from the calling thread and vulkan's debug callback normally arrives on it too,
+  so neither backend exposed this.
+  The race is benign in practice — a sticky flag written once with one value — and it is still a data race a
+  sanitizer is entitled to report, on a field every backend reads per frame.
+  The fix is `cc::atomic<bool>` plus the release/acquire pair, which costs nothing on the read path; what makes it a
+  question rather than a patch is that `SC_THREADS=OFF` turns `cc::atomic` back into a plain value, and a driver
+  thread does not go away with that flag — so it may want the same treatment metal's own callback state got.
+
 - **Transfer.** Still open:
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
@@ -25,7 +39,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The async tier does not — a download job reads `_pending_async_upload_value` and no stream value, and the upload side mirrors that.
     So `ctx.stream.bytes_to_buffer` followed by `ctx.download.bytes_from_buffer` on one resource is unordered, and the readback can beat the stream.
     Found while writing [tests/transfer/stream-test.cc](../tests/transfer/stream-test.cc)'s stream-wait test, whose first draft used the async tier as the consumer and read zeroes on dx12.
-    The fix mirrors what the command lists already do, in the async enqueue paths of both backends.
+    The fix mirrors what the command lists already do, in dx12's async enqueue paths.
+    Metal already does it: its streaming timeline is per resource, so an async transfer waits on the same value a
+    command list would — which is also what makes `promote_to_async` a pure statement of intent there.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.

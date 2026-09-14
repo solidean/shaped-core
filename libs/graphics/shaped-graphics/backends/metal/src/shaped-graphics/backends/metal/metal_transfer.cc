@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
+#include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 
 #include <thread>
@@ -33,11 +34,18 @@ void metal_transfer_system::create(metal_context& ctx)
     descriptor->release();
     CC_ASSERT(_queue != nullptr, "the metal device refused a transfer queue");
 
+    auto* const stream_descriptor = MTL4::CommandQueueDescriptor::alloc()->init();
+    stream_descriptor->setLabel(ns_string("sg stream queue"));
+    _stream_queue = ctx.device()->newMTL4CommandQueue(stream_descriptor, &error);
+    stream_descriptor->release();
+    CC_ASSERT(_stream_queue != nullptr, "the metal device refused a streaming queue");
+
     _timeline = ctx.device()->newSharedEvent();
     CC_ASSERT(_timeline != nullptr, "the metal device refused a transfer timeline");
 
     // The transfer queue's work touches the same resources the frame's does, so it needs the same residency set.
     ctx.residency().attach_to(_queue);
+    ctx.residency().attach_to(_stream_queue);
 }
 
 metal_transfer_system::claimed metal_transfer_system::claim_value(void const* resource)
@@ -65,7 +73,7 @@ void metal_transfer_system::forget_value(void const* resource, u64 value)
         });
 }
 
-void metal_transfer_system::wait_for_queues(submission_stamp const& stamp, u64 previous_transfer)
+void metal_transfer_system::wait_for_queues(void const* resource, submission_stamp const& stamp, u64 previous_transfer)
 {
     // A transfer reads or writes bytes the direct queue may still be producing, and the two queues share no timeline of
     // their own — so the copy defers behind the last command list that named this resource.
@@ -78,6 +86,15 @@ void metal_transfer_system::wait_for_queues(submission_stamp const& stamp, u64 p
     // it back have to be told, or the download's copy overlaps the upload's.
     if (previous_transfer > 0)
         _queue->wait(_timeline, previous_transfer);
+
+    // And behind any streaming transfer still filling this resource.
+    //
+    // **Metal orders the async tier against streams, where dx12 does not** — see libs/graphics/shaped-graphics/docs/TODO.md, which records the gap
+    // on the backend that has it.
+    // The per-resource streaming timeline is what makes it cheap here: an async transfer waits on the same value a
+    // command list would, and `promote_to_async` is then purely the statement of intent it is documented to be.
+    if (auto const wait = pending_stream_wait(resource); wait.event != nullptr)
+        _queue->wait(wait.event, wait.value);
 }
 
 void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
@@ -168,7 +185,7 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(mtl_buffer.submission(), claim.previous);
+    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim.previous);
     encoder->copyFromBuffer(staging, 0, mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), NS::UInteger(data.size()));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -214,7 +231,7 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(mtl_buffer.submission(), claim.previous);
+    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim.previous);
     encoder->copyFromBuffer(mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), staging, 0, NS::UInteger(size_in_bytes));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -277,7 +294,7 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(mtl_texture.submission(), claim.previous);
+    wait_for_queues(texture.get(), mtl_texture.submission(), claim.previous);
     encoder->copyFromBuffer(
         staging, 0, NS::UInteger(layout.bytes_per_row), NS::UInteger(layout.bytes_per_image),
         MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
@@ -318,7 +335,7 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(mtl_texture.submission(), claim.previous);
+    wait_for_queues(texture.get(), mtl_texture.submission(), claim.previous);
     encoder->copyFromTexture(
         mtl_texture.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
         MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
@@ -348,6 +365,81 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
 }
 
+void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buffer,
+                                                MTL4::CommandAllocator* allocator,
+                                                cc::unique_function<void()> on_complete)
+{
+    _pending.fetch_add(1, std::memory_order_acq_rel);
+
+    auto* const pending = &_pending;
+    auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
+
+    auto* const options = MTL4::CommitOptions::alloc()->init();
+    options->addFeedbackHandler(^void(MTL4::CommitFeedback*) {
+      (*finish)();
+      pending->fetch_sub(1, std::memory_order_acq_rel);
+    });
+
+    MTL4::CommandBuffer const* const buffers[] = {command_buffer};
+    _stream_queue->commit(buffers, 1, options);
+    options->release();
+
+    // No value signalled here: a streaming batch is one slice of a transfer, and what a waiter waits for is the
+    // transfer ending — which is the per-resource stream timeline rather than this one.
+    _ctx->epochs().retire_allocator_with_epoch(allocator);
+}
+
+void metal_transfer_system::order_stream_copy(metal_stream_job const& job)
+{
+    if (job.direct_wait > 0)
+        _stream_queue->wait(_ctx->epochs().submission_timeline(), job.direct_wait);
+}
+
+u64 metal_transfer_system::reserve_stream_value(void const* resource)
+{
+    return _state.lock(
+        [&](state& s)
+        {
+            auto& timeline = s.stream_timelines[resource];
+            if (timeline.event == nullptr)
+            {
+                timeline.event = _ctx->device()->newSharedEvent();
+                CC_ASSERT(timeline.event != nullptr, "the metal device refused a streaming timeline");
+            }
+            return timeline.next_value++;
+        });
+}
+
+void metal_transfer_system::signal_stream_value(void const* resource, u64 value)
+{
+    _state.lock(
+        [&](state& s)
+        {
+            auto* const timeline = s.stream_timelines.get_ptr(resource);
+            if (timeline == nullptr || timeline->event == nullptr)
+                return;
+            if (timeline->event->signaledValue() < value)
+                timeline->event->setSignaledValue(value);
+        });
+}
+
+metal_transfer_system::stream_wait metal_transfer_system::pending_stream_wait(void const* resource) const
+{
+    return _state.lock(
+        [&](state& s) -> stream_wait
+        {
+            auto const* const timeline = s.stream_timelines.get_ptr(resource);
+            if (timeline == nullptr || timeline->event == nullptr)
+                return {};
+
+            // `next_value` is one past the highest reserved, and a value already signalled needs no wait.
+            auto const highest = timeline->next_value - 1;
+            if (highest == 0 || timeline->event->signaledValue() >= highest)
+                return {};
+            return {.event = timeline->event, .value = highest};
+        });
+}
+
 void metal_transfer_system::shutdown()
 {
     if (_queue == nullptr)
@@ -358,8 +450,19 @@ void metal_transfer_system::shutdown()
     while (_pending.load(std::memory_order_acquire) > 0)
         std::this_thread::yield();
 
+    _state.lock(
+        [](state& s)
+        {
+            for (auto&& [resource, timeline] : s.stream_timelines)
+                if (timeline.event != nullptr)
+                    timeline.event->release();
+            s.stream_timelines.clear();
+        });
+
     _timeline->release();
     _timeline = nullptr;
+    _stream_queue->release();
+    _stream_queue = nullptr;
     _queue->release();
     _queue = nullptr;
     _ctx = nullptr;
