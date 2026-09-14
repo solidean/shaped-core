@@ -99,7 +99,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (d
 // The transient descriptor region is a deliberately tiny 32 slots, so 40 iterations wrap the ring several times.
 // Proves the transient descriptor ring and transient buffer heap reclaim end-to-end on the GPU: no exhaustion, and every epoch's result is correct (Output[i] == i*2).
 // The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
-TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
+ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 {
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
     REQUIRE(ctx_r.has_value());
@@ -139,7 +139,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx->submit_command_list(cc::move(down));
 
-        ctx->block_until_idle();
+        co_await ctx->idle_completion();
         auto const data = future.try_get_data();
         REQUIRE(data.has_value());
         bool ok = true;
@@ -157,7 +157,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 // Each group takes 1 descriptor; 50 iterations far exceed the region, so the group's range must be
 // returned to the free list (epoch-deferred) and reused — a bump allocator would exhaust after 4. The
 // hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
-TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
+ASYNC_TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
 {
     // 4 persistent slots
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
@@ -178,7 +178,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
         REQUIRE(group != nullptr); // never exhausts: released ranges are reclaimed
         group.reset();             // drop -> schedules the range's deferred free
         ctx->advance_epoch();
-        ctx->block_until_idle(); // retire -> the finalizer returns it to the free list
+        co_await ctx->idle_completion(); // retire -> the finalizer returns it to the free list
     }
     CHECK(true);
 }

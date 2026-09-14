@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 // Backend-internal invariant tests for the per-queue command allocator / command list pool.
@@ -13,7 +15,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - command allocators are recycled across epochs")
+ASYNC_TEST("sg dx12 - command allocators are recycled across epochs")
 {
     auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);
@@ -27,7 +29,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     CHECK(free_count() == 0); // still in flight — captured by the current epoch
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(free_count() == 1); // reset and returned to the free pool on retire
 
     // The next list reuses the pooled allocator rather than creating a new one.
@@ -36,7 +38,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
     CHECK(free_count() == 0);
     c.submit_dx12_command_list(cc::move(cmd2.value()));
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(free_count() == 1);
 }
 

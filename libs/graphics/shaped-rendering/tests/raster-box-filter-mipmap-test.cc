@@ -45,13 +45,13 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
 }
 
 /// The red channel of the first texel of a tightly-packed rgba8 readback, or -1 when nothing landed.
-[[nodiscard]] int first_red(sg::context& ctx, sg::bytes_future const& future)
+[[nodiscard]] cc::shared_async<int> first_red(sg::context& ctx, sg::bytes_future const& future)
 {
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     auto const data = future.try_get_bytes();
     if (!data.has_value() || data.value().span().empty())
-        return -1;
-    return int(u8(data.value().span()[0]));
+        co_return -1;
+    co_return int(u8(data.value().span()[0]));
 }
 } // namespace
 
@@ -112,8 +112,8 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     ctx.advance_epoch();
     co_await ctx.idle_completion();
 
-    auto const srgb_value = first_red(ctx, srgb_future);
-    auto const unorm_value = first_red(ctx, unorm_future);
+    auto const srgb_value = co_await first_red(ctx, srgb_future);
+    auto const unorm_value = co_await first_red(ctx, unorm_future);
 
     // The two answers to "average 0 and 255", and the whole reason the sRGB one goes through a render target.
     //
@@ -185,6 +185,8 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
 
     // Averaging equal texels reproduces them exactly whatever space the average is taken in, so both generated
     // levels carry the supplied value — a level chained off the one before it, not off the base.
-    CHECK(first_red(ctx, level_2) == int(supplied));
-    CHECK(first_red(ctx, level_3) == int(supplied));
+    auto const level_2_red = co_await first_red(ctx, level_2);
+    auto const level_3_red = co_await first_red(ctx, level_3);
+    CHECK(level_2_red == int(supplied));
+    CHECK(level_3_red == int(supplied));
 }

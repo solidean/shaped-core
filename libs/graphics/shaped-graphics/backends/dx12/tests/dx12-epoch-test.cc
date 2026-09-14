@@ -16,7 +16,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - epoch advance and retire")
+ASYNC_TEST("sg dx12 - epoch advance and retire")
 {
     auto handle = dx12::make_fresh_context(); // fresh: this asserts the epoch counter's initial value
     REQUIRE(handle != nullptr);
@@ -27,7 +27,7 @@ TEST("sg dx12 - epoch advance and retire")
     CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
     CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
 }

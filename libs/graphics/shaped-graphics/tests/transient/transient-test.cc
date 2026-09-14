@@ -31,11 +31,11 @@ sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usag
 
 // Uploads 256 bytes of pattern(seed+i) into a fresh transient buffer, downloads them, and returns whether
 // every byte matched — the round-trip that proves a transient buffer names live, distinct storage.
-bool transient_round_trip(sg::context_handle const& ctx, int seed)
+cc::shared_async<bool> transient_round_trip(sg::context_handle const& ctx, int seed)
 {
     auto buf = ctx->transient.create_raw_buffer(256, copy_both);
     if (!buf)
-        return false;
+        co_return false;
 
     byte src[256];
     for (int i = 0; i < 256; ++i)
@@ -43,24 +43,24 @@ bool transient_round_trip(sg::context_handle const& ctx, int seed)
 
     auto up = ctx->create_command_list();
     if (!up)
-        return false;
+        co_return false;
     up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
     ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
     if (!down)
-        return false;
+        co_return false;
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     if (!bytes.has_value() || bytes.value().size() != 256)
-        return false;
+        co_return false;
     for (int i = 0; i < 256; ++i)
         if (bytes.value()[i] != pattern(seed + i))
-            return false;
-    return true;
+            co_return false;
+    co_return true;
 }
 
 struct particle
@@ -90,10 +90,11 @@ INVOCABLE_TEST("sg - zero-size transient buffer allocates nothing", (sg::context
     CHECK(buf->is_valid());
 }
 
-INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    CHECK(transient_round_trip(ctx, 0));
+    auto const transient_round_trip_ok_1 = co_await transient_round_trip(ctx, 0);
+    CHECK(transient_round_trip_ok_1);
 }
 
 ASYNC_INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::context_handle const& ctx))
@@ -186,13 +187,14 @@ ASYNC_INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg:
 
 // The transient heap resets its bump head each epoch, so successive epochs alias the same storage.
 // Every epoch's data must still round-trip while a couple of epochs stay in flight.
-INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     for (int e = 0; e < 8; ++e)
     {
-        CHECK(transient_round_trip(ctx, e * 7 + 1));
+        auto const transient_round_trip_ok_2 = co_await transient_round_trip(ctx, e * 7 + 1);
+        CHECK(transient_round_trip_ok_2);
         ctx->advance_epoch();
         ctx->block_until_epochs_in_flight(2); // keep at most 2 epochs in flight
     }
@@ -200,26 +202,27 @@ INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (sg::con
 
 // set_budget is deferred: it records a pending budget the next advance_epoch applies (draining in-flight
 // work, resizing the heap). Data must keep round-tripping across a shrink and a grow.
-INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    CHECK(transient_round_trip(ctx, 0)); // epoch 0 on the default budget (heap created here)
+    auto const transient_round_trip_ok_3 = co_await transient_round_trip(ctx, 0);
+    CHECK(transient_round_trip_ok_3); // epoch 0 on the default budget (heap created here)
 
     ctx->transient.set_budget(isize(512) * 1024);
     // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
-    // set_budget is deferred, hence the advance that applies it.
+    // set_budget is deferred, hence the advance that applies it; the advance drains what it has to, so nothing here waits.
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
         ctx->advance_epoch();
-        ctx->block_until_idle();
     };
     for (int e = 1; e <= 4; ++e)
     {
         ctx->advance_epoch();
         ctx->block_until_epochs_in_flight(2); // first advance drains + resizes to the pending 512 KiB
-        CHECK(transient_round_trip(ctx, e));
+        auto const transient_round_trip_ok_4 = co_await transient_round_trip(ctx, e);
+        CHECK(transient_round_trip_ok_4);
     }
 
     ctx->transient.set_budget(isize(2) * 1024 * 1024);
@@ -227,31 +230,32 @@ INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::co
     {
         ctx->advance_epoch();
         ctx->block_until_epochs_in_flight(2);
-        CHECK(transient_round_trip(ctx, e));
+        auto const transient_round_trip_ok_5 = co_await transient_round_trip(ctx, e);
+        CHECK(transient_round_trip_ok_5);
     }
 }
 
 // The setter is repeatable and touches no GPU state, so the last value before an advance wins.
 // The old API asserted on a second call, or after first use — this pins the new, forgiving contract.
-INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient budget setter is repeatable before an advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     ctx->transient.set_budget(isize(1) * 1024 * 1024);
     // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
-    // set_budget is deferred, hence the advance that applies it.
+    // set_budget is deferred, hence the advance that applies it; the advance drains what it has to, so nothing here waits.
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
         ctx->advance_epoch();
-        ctx->block_until_idle();
     };
     ctx->transient.set_budget(isize(256) * 1024);
     ctx->transient.set_budget(isize(768) * 1024); // last write wins at the next advance
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
-    CHECK(transient_round_trip(ctx, 3));
+    co_await ctx->idle_completion();
+    auto const transient_round_trip_ok_6 = co_await transient_round_trip(ctx, 3);
+    CHECK(transient_round_trip_ok_6);
 }
 
 INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", (sg::context_handle const& ctx))

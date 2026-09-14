@@ -23,7 +23,8 @@ namespace dx12 = sg::backend::dx12;
 // Each 256-byte buffer occupies a 64 KiB placement (D3D12's default resource alignment), so a 512 KiB budget fits only a handful.
 // Yet the bump head resets every epoch, so successive epochs alias the same storage and every epoch's data still round-trips.
 // The 512 KiB budget is set deferred and takes effect from the second epoch on.
-INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -34,7 +35,6 @@ INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (
     {
         c.transient.set_budget(sg::context_transient_scope::default_budget_bytes);
         c.advance_epoch();
-        c.block_until_idle();
     };
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
@@ -58,7 +58,7 @@ INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (
         auto future = down->download.bytes_from_buffer(buf, 0, 256);
         c.submit_command_list(cc::move(down));
 
-        c.block_until_idle();
+        co_await c.idle_completion();
         auto const bytes = future.try_get_bytes();
         REQUIRE(bytes.has_value());
         bool matches = true;

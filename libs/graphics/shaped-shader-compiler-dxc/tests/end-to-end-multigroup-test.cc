@@ -1,5 +1,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -31,8 +33,8 @@ void main(uint3 tid : SV_DispatchThreadID)
 )";
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 group between dispatches",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 group between dispatches",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -117,7 +119,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
 
     // Dispatch with slot 0 fixed and slot 1 = g1, then read Out back.
     // The handles assert on failure so the lambda stays free of nexus macros, which need the enclosing test frame.
-    auto run = [&](sg::binding_group_handle const& g1) -> cc::vector<u32>
+    // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
+    auto run = [&](sg::binding_group_handle const& g1) -> cc::shared_async<cc::vector<u32>>
     {
         auto disp = ctx.create_command_list();
         disp->compute.bind_pipeline(*pipeline);
@@ -130,17 +133,17 @@ INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-1 grou
         auto future = down->download.data_from_buffer<u32>(out_buf, 0, count);
         ctx.submit_command_list(cc::move(down));
 
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
         auto const data = future.try_get_data();
         cc::vector<u32> result;
         for (auto const v : data.value())
             result.push_back(v);
-        return result;
+        co_return result;
     };
 
     // Same slot-0 group, different slot-1 group => A[i]+1 then A[i]+100.
-    auto const r1 = run(g1_b1);
-    auto const r2 = run(g1_b2);
+    auto const r1 = co_await run(g1_b1);
+    auto const r2 = co_await run(g1_b2);
     REQUIRE(r1.size() == isize(count));
     REQUIRE(r2.size() == isize(count));
 

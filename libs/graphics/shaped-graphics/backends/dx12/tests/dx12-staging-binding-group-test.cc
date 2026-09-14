@@ -63,25 +63,25 @@ void dispatch_through(sg::context_handle const& ctx, sg::compute_pipeline const&
 }
 
 // Whether the buffer holds the shader's output, i*2 for every element.
-bool holds_doubled(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf)
+cc::shared_async<bool> holds_doubled(sg::context_handle const& ctx, sg::raw_buffer_handle const& buf)
 {
     auto down = ctx->create_command_list();
     REQUIRE(down != nullptr);
     auto future = down->download.data_from_buffer<u32>(buf, 0, k_count);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(k_count));
     for (int i = 0; i < k_count; ++i)
         if (data.value()[i] != u32(i) * 2)
-            return false;
-    return true;
+            co_return false;
+    co_return true;
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -110,7 +110,8 @@ INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx12_con
     auto const to_first = staging->snapshot();
     REQUIRE(to_first != nullptr);
     dispatch_through(ctx, *pipeline, *to_first);
-    CHECK(holds_doubled(ctx, first));
+    auto const holds_doubled_ok_1 = co_await holds_doubled(ctx, first);
+    CHECK(holds_doubled_ok_1);
 
     // Re-point the one binding: the next snapshot is a different group, and it writes the other buffer.
     staging->set_binding(out, sg::buffer<u32>::from_raw(second).as_readwrite_buffer());
@@ -118,7 +119,8 @@ INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx12_con
     REQUIRE(to_second != nullptr);
     CHECK(to_second != to_first);
     dispatch_through(ctx, *pipeline, *to_second);
-    CHECK(holds_doubled(ctx, second));
+    auto const holds_doubled_ok_2 = co_await holds_doubled(ctx, second);
+    CHECK(holds_doubled_ok_2);
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it",
@@ -150,7 +152,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
     co_await ctx->idle_completion();
 
     dispatch_through(ctx, *pipeline, *group);
-    CHECK(holds_doubled(ctx, buf));
+    auto const holds_doubled_ok_3 = co_await holds_doubled(ctx, buf);
+    CHECK(holds_doubled_ok_3);
 
     // Still clean across all of that — nothing was set, so the cached snapshot is still the answer.
     CHECK(!staging->is_dirty());
@@ -160,7 +163,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
 // Snapshot and release repeatedly on a tiny persistent descriptor region (4 slots).
 // Each snapshot takes 1 descriptor, so 50 rounds far exceed the region: the minted group's range must be
 // returned to the free list (epoch-deferred) and reused, exactly as a directly-created persistent group's is.
-TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
+ASYNC_TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
 {
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
     REQUIRE(ctx_r.has_value());
@@ -185,7 +188,7 @@ TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
         REQUIRE(group != nullptr); // never exhausts: released ranges are reclaimed
         group.reset();
         ctx->advance_epoch();
-        ctx->block_until_idle();
+        co_await ctx->idle_completion();
     }
     CHECK(true);
 }

@@ -109,7 +109,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - compute dispatch writes a structured buffer",
 // reused once the epoch that wrote its descriptors has retired, and a GPU reading recycled bytes would show up as
 // wrong data rather than as a validation message.
 // Owns its context: the hand-sized heap is a vulkan_config knob, and the work itself is all public sg API.
-TEST("sg vulkan - transient binding groups and buffers recycle across epochs", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - transient binding groups and buffers recycle across epochs", exclusive("vulkan-device"))
 {
     // Small enough that 40 epochs cannot all fit, large enough for one group's set plus alignment.
     auto handle = vulkan::test::make_context(
@@ -151,7 +151,7 @@ TEST("sg vulkan - transient binding groups and buffers recycle across epochs", e
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx.submit_command_list(cc::move(down));
 
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
         auto const data = future.try_get_data();
         REQUIRE(data.has_value());
         for (int i = 0; i < count; ++i)
@@ -172,7 +172,7 @@ TEST("sg vulkan - transient binding groups and buffers recycle across epochs", e
 // The region is sized so that it does: holding the 50 groups instead of releasing them fails this test, which is what
 // makes the free list load-bearing here rather than merely present.
 // Owns its context for the same reason: the tiny region is a vulkan_config knob.
-TEST("sg vulkan - persistent binding groups free and reuse their descriptor range", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - persistent binding groups free and reuse their descriptor range", exclusive("vulkan-device"))
 {
     auto handle = vulkan::test::make_context(
         {.enable_validation_layers = true, .descriptor_heap_bytes = 256, .descriptor_transient_fraction = 0.5f});
@@ -198,7 +198,7 @@ TEST("sg vulkan - persistent binding groups free and reuse their descriptor rang
         // Releasing here stages the range's return; the advance below is what actually runs it.
         group = nullptr;
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
     }
     CHECK(all_created);
 }

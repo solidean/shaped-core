@@ -73,14 +73,15 @@ sg::raw_texture_handle make_texture(sg::context_handle const& ctx)
 }
 
 // Read the texture back through a command list, which is the consumer that has to compose with the transfer.
-cc::optional<cc::pinned_data<byte const>> read_back(sg::context_handle const& ctx, sg::raw_texture_handle const& tex)
+cc::shared_async<cc::optional<cc::pinned_data<byte const>>> read_back(sg::context_handle const& ctx,
+                                                                      sg::raw_texture_handle const& tex)
 {
     auto cmd = ctx->create_command_list();
     CC_ASSERT(cmd != nullptr, "command list creation failed");
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
-    ctx->block_until_idle();
-    return future.try_get_bytes();
+    co_await ctx->idle_completion();
+    co_return future.try_get_bytes();
 }
 } // namespace
 
@@ -142,7 +143,7 @@ ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-re
         ctx->submit_command_list(cc::move(cmd));
     }
 
-    auto const second = read_back(ctx, tex);
+    auto const second = co_await read_back(ctx, tex);
     REQUIRE(second.has_value());
     CHECK(matches(second.value(), 29)).context("the texture did not survive an async transfer taken in between");
 
@@ -192,7 +193,7 @@ ASYNC_INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list fi
         ctx->submit_command_list(cc::move(cmd));
     }
 
-    auto const bytes = read_back(ctx, tex);
+    auto const bytes = co_await read_back(ctx, tex);
     REQUIRE(bytes.has_value());
     CHECK(matches(bytes.value(), 67));
 

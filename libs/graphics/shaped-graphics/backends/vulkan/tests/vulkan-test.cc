@@ -310,7 +310,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - an inline upload records, submits and reclaims
 }
 
 // Owns its context: upload_ring_bytes is a creation knob, and the ring has to be far smaller than the default.
-TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
 {
     // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
     // in-flight epoch and reuse the space it frees.
@@ -334,7 +334,7 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once", ex
     }
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(!c.is_device_lost());
 }
 

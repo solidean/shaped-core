@@ -286,7 +286,7 @@ TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slic
     }
 }
 
-TEST("sg dx12 - inline texture upload splits across the ring seam")
+ASYNC_TEST("sg dx12 - inline texture upload splits across the ring seam")
 {
     // A ring that holds the region + its staging slack (tight 768 + padded 256 + 512 alignment = 1536).
     // Parking the cursor 512 bytes before the seam forces the 768-byte region to split — 2 padded rows
@@ -307,7 +307,7 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
         src[i] = float(i) + 0.5f;
 
     ctx->advance_epoch();
-    ctx->block_until_idle(); // drain, then park the ring cursor just before the seam
+    co_await ctx->idle_completion(); // drain, then park the ring cursor just before the seam
     c._upload_inline.debug_set_cursor(u64(park));
     auto const before = c._upload_inline.debug_cursor();
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
@@ -320,7 +320,7 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
     auto down = ctx->create_command_list();
     auto fut = down->download.bytes_from_texture(tex.value());
     ctx->submit_command_list(cc::move(down));
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
@@ -331,7 +331,7 @@ TEST("sg dx12 - inline texture upload splits across the ring seam")
     CHECK(ok);
 }
 
-TEST("sg dx12 - inline texture download splits across the ring seam")
+ASYNC_TEST("sg dx12 - inline texture download splits across the ring seam")
 {
     constexpr isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
     constexpr isize park = ring_bytes - 512;
@@ -353,7 +353,7 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     ctx->submit_command_list(cc::move(up));
 
     ctx->advance_epoch();
-    ctx->block_until_idle(); // drain, then park the readback ring cursor just before the seam
+    co_await ctx->idle_completion(); // drain, then park the readback ring cursor just before the seam
     c._download_inline.debug_set_cursor(u64(park));
     auto const before = c._download_inline.debug_cursor();
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
@@ -362,7 +362,7 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     auto fut = down->download.bytes_from_texture(tex.value()); // the seam-straddling readback splits here
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     auto const* got = reinterpret_cast<float const*>(bytes.value().data());
@@ -373,7 +373,7 @@ TEST("sg dx12 - inline texture download splits across the ring seam")
     CHECK(ok);
 }
 
-TEST("sg dx12 - async texture copy splits across staging windows")
+ASYNC_TEST("sg dx12 - async texture copy splits across staging windows")
 {
     // Tiny 512-byte async windows: each holds exactly one 256-padded row, so an 8x8 R32_FLOAT (8 rows)
     // is packed across several windows on both the upload and readback copy queues.
@@ -392,7 +392,7 @@ TEST("sg dx12 - async texture copy splits across staging windows")
     ctx->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
     auto fut = ctx->download.bytes_from_texture(tex);
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = fut.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(sizeof(src)));
