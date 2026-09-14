@@ -327,6 +327,22 @@ is part of finishing the milestone rather than a chore left behind.
 The context's own answer is worth making stricter than the extension list: it is true only once the entry points have
 resolved too, so a driver advertising an extension it does not implement reports false rather than crashing later.
 
+## An object the API hands back may be owned by a scope you closed
+
+Metal's is an autorelease pool, and the shape generalizes to any API whose factory returns something it still owns.
+
+`renderCommandEncoder` hands back an *autoreleased* object.
+A backend that opens a pool for the duration of `begin_rendering` — which it should, or every temporary accumulates —
+and stores that encoder for `end_rendering` has stored a pointer the pool frees on the way out.
+
+**The freed object is usually still readable**, so this does not fail where it happens.
+It failed in the scope's destructor, several frames of C++ later, as a bare segfault with no validation message and a
+stack that named only `objc_msgSend`.
+A sanitizer run named the destructor in one go, after probes through the creating function had found nothing — which is
+the lesson worth keeping more than the retain itself.
+
+Retain what you store, and check the ownership convention for every factory whose result outlives its call.
+
 ## The pointer-into-a-growing-vector trap
 
 Vulkan's create-info structs are a graph of pointers into caller memory, all of which must stay valid until the create

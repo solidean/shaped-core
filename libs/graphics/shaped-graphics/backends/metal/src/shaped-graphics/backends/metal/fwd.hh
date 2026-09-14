@@ -22,6 +22,7 @@ class metal_binding_group;
 class metal_binding_group_layout;
 class metal_pipeline_layout;
 class metal_compute_pipeline;
+class metal_raster_pipeline;
 class metal_staging_binding_group;
 class metal_texture_view_cache; // MTLTextures for bound texture views (see metal_texture_view_cache.hh)
 class metal_sampler_cache;      // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
@@ -39,6 +40,7 @@ using metal_binding_group_handle = std::shared_ptr<metal_binding_group const>;
 using metal_binding_group_layout_handle = std::shared_ptr<metal_binding_group_layout const>;
 using metal_pipeline_layout_handle = std::shared_ptr<metal_pipeline_layout const>;
 using metal_compute_pipeline_handle = std::shared_ptr<metal_compute_pipeline>;
+using metal_raster_pipeline_handle = std::shared_ptr<metal_raster_pipeline>;
 
 
 /// The domain every recording site in the Metal backend is attributed to.

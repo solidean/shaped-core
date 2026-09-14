@@ -5,8 +5,8 @@
 Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
-Compute pipelines build from a metallib and dispatch, and textures create, bind and transfer.
-Raster, presentation, async transfer and streaming still assert.
+Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, and raster draws.
+Presentation, async transfer and streaming still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -71,6 +71,20 @@ Each of these is a fact about Metal rather than a gap in the backend.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
   vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
   Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
+- **A raster pipeline is three objects where dx12 and vulkan have one.**
+  MTL4 splits what a D3D12 PSO folds together.
+  The render pipeline state carries the shaders, the vertex layout and the colour attachments' blending.
+  The depth and stencil test is a separate `MTLDepthStencilState` bound on the encoder.
+  Cull mode, fill mode, winding and depth bias are encoder calls rather than pipeline state at all.
+  The third group is replayed on every `bind_pipeline`, which is what keeps it consistent with the pipeline a caller believes is bound.
+- **Attachment formats are not pipeline state.**
+  MTL4's render pipeline descriptor has no depth or stencil attachment format at all, and its colour formats are only what the blend descriptor needs.
+  The render pass establishes the rest at encode time.
+  sg's `depth_stencil_format` is therefore carried for validation rather than for building.
+  That is the opposite of dx12's DSVFormat and vulkan's dynamic-rendering formats.
+- **A barrier is flushed before the render encoder opens, not inside it.**
+  Vulkan forbids a barrier inside a dynamic-rendering instance and closes the pass around one.
+  Here the declares are simply flushed first, which costs nothing a frame that transitions its targets up front was not already paying.
 - **A pipeline is built through an explicit compiler object.**
   MTL4 makes compilation an `MTL4Compiler` the context owns, where Metal 3 hid it behind the device.
   A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.

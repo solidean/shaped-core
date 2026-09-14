@@ -563,10 +563,10 @@ cc::result<sg::compute_pipeline_handle> metal_context::try_create_compute_pipeli
     return cc::result<sg::compute_pipeline_handle>(create_metal_compute_pipeline(desc, scope));
 }
 
-cc::result<sg::raster_pipeline_handle> metal_context::try_create_raster_pipeline(raster_pipeline_description const&,
-                                                                                 lifetime_scope)
+cc::result<sg::raster_pipeline_handle> metal_context::try_create_raster_pipeline(raster_pipeline_description const& desc,
+                                                                                 lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create raster pipelines yet");
+    return cc::result<sg::raster_pipeline_handle>(create_metal_raster_pipeline(desc, scope));
 }
 
 cc::result<sg::raytracing_pipeline_handle> metal_context::try_create_raytracing_pipeline(

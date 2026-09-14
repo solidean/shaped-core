@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/backends/metal/metal_memory_heap.hh>
+#include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_residency.hh>
 #include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
@@ -116,6 +117,9 @@ public:
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<metal_pipeline_layout_handle> create_metal_pipeline_layout(
         sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<metal_raster_pipeline_handle> create_metal_raster_pipeline(
+        sg::raster_pipeline_description const& desc,
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<metal_compute_pipeline_handle> create_metal_compute_pipeline(
         sg::compute_pipeline_description const& desc,

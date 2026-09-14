@@ -25,6 +25,8 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_texture_view_cache.cc
     src/shaped-graphics/backends/metal/metal_feedback.cc
     src/shaped-graphics/backends/metal/metal_memory_heap.cc
+    src/shaped-graphics/backends/metal/metal_raster_pipeline.cc
+    src/shaped-graphics/backends/metal/metal_raster_state.cc
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
     src/shaped-graphics/backends/metal/metal_staging_ring.cc
@@ -53,6 +55,8 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_texture_view_cache.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
     src/shaped-graphics/backends/metal/metal_memory_heap.hh
+    src/shaped-graphics/backends/metal/metal_raster_pipeline.hh
+    src/shaped-graphics/backends/metal/metal_raster_state.hh
     src/shaped-graphics/backends/metal/metal_residency.hh
     src/shaped-graphics/backends/metal/metal_staging_binding_group.hh
     src/shaped-graphics/backends/metal/metal_staging_ring.hh
@@ -81,6 +85,7 @@ if(SC_BUILD_TESTS)
         tests/metal-barrier-test.cc
         tests/metal-binding-test.cc
         tests/metal-compute-test.cc
+        tests/metal-raster-test.cc
         tests/metal-test.cc
         tests/metal-texture-test.cc
         tests/metal-transfer-test.cc

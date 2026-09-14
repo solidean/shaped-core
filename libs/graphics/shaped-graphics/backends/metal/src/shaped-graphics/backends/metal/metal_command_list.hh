@@ -128,6 +128,16 @@ private:
     /// A render pass needs the compute one closed first.
     void end_encoder();
 
+    /// The render encoder of the open rendering scope; null outside one.
+    [[nodiscard]] MTL4::RenderCommandEncoder* render_encoder() const { return _render_encoder; }
+
+    /// Declare access on everything the bound groups name, and flush — the shape a draw and a dispatch share.
+    void declare_bound_groups(pipeline_stage_flags stages);
+
+    /// Write a group's argument-buffer address into the table and remember what it names.
+    /// Shared by the compute and raster bind paths, which differ only in which encoder is open.
+    void bind_group_to_table(int group_index, binding_group const& group);
+
     /// Declare `access` on `buffer` for the op about to be recorded, and remember it for the finalize at submit.
     void declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access);
 
@@ -173,6 +183,10 @@ private:
     cc::vector<sg::raw_texture_handle> _pending_textures;
 
     MTL4::ArgumentTable* _argument_table = nullptr;
+    MTL4::RenderCommandEncoder* _render_encoder = nullptr;
+
+    /// The pipeline of the open rendering scope, for the primitive type a draw is issued with.
+    metal_raster_pipeline const* _bound_raster = nullptr;
 
     /// The pipeline currently bound, for the workgroup size a thread-count dispatch divides by.
     metal_compute_pipeline const* _bound_compute = nullptr;
@@ -181,6 +195,7 @@ private:
     /// by reference and has no handle to take.
     /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
     cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
+    cc::vector<sg::raw_texture_handle> _group_textures[sg::max_binding_groups];
 
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///

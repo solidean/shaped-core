@@ -7,6 +7,8 @@
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
+#include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
+#include <shaped-graphics/backends/metal/metal_raster_state.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 
@@ -50,6 +52,29 @@ struct texture_staging_layout
         .size_in_bytes = bytes_per_image * isize(region.size[2]),
     };
 }
+
+[[nodiscard]] MTL::LoadAction load_action_of(sg::target_op op)
+{
+    switch (op)
+    {
+    case sg::target_op::preserve:
+        return MTL::LoadActionLoad;
+    case sg::target_op::clear:
+        return MTL::LoadActionClear;
+    case sg::target_op::discard:
+        return MTL::LoadActionDontCare;
+    }
+    return MTL::LoadActionLoad;
+}
+
+/// What happens to an attachment at pass end.
+///
+/// `discard` means the contents are undefined afterwards, so there is nothing to store — which on a tiler is a real
+/// bandwidth saving rather than bookkeeping.
+[[nodiscard]] MTL::StoreAction store_action_of(sg::target_op op)
+{
+    return op == sg::target_op::discard ? MTL::StoreActionDontCare : MTL::StoreActionStore;
+}
 } // namespace
 
 metal_command_list::metal_command_list(metal_context& ctx,
@@ -85,7 +110,9 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     if (_encoder != nullptr)
         return _encoder;
 
-    _encoder = _buffer->computeCommandEncoder();
+    // Retained for the same reason the render encoder is: an autoreleased object outlives this call only by whichever
+    // pool happens to be current, and a submit opens one of its own.
+    _encoder = _buffer->computeCommandEncoder()->retain();
 
     // Every encoder opens by waiting on everything already committed to this queue, and closes by publishing its own
     // work — the two halves of MTL4's queue barrier pair.
@@ -128,6 +155,7 @@ void metal_command_list::end_encoder()
     if (_encoder == nullptr)
         return;
     _encoder->endEncoding();
+    _encoder->release();
     _encoder = nullptr;
 }
 
@@ -505,7 +533,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     encoder->setArgumentTable(argument_table());
 }
 
-void metal_command_list::compute_bind_group(int group_index, binding_group const& group)
+void metal_command_list::bind_group_to_table(int group_index, binding_group const& group)
 {
     CC_ASSERT(group_index >= 0 && group_index < sg::max_binding_groups, "group index is out of range");
 
@@ -519,12 +547,22 @@ void metal_command_list::compute_bind_group(int group_index, binding_group const
     // The group's argument buffer address goes into the table's buffer slot, which IS the MSL [[buffer(N)]] index.
     argument_table()->setAddress(mtl_group.argument_address(), NS::UInteger(group_index));
 
-    // The buffers are copied rather than the group held: a binding_group arrives by reference and has no handle to
-    // take, and what a dispatch needs is the access list rather than the group itself.
+    // The resources are copied rather than the group held: a binding_group arrives by reference and has no handle to
+    // take, and what a draw or dispatch needs is the access list rather than the group itself.
     auto& slot_buffers = _group_buffers[group_index];
     slot_buffers.clear();
     for (auto const& buffer : mtl_group.bound_buffers())
         slot_buffers.push_back(buffer);
+
+    auto& slot_textures = _group_textures[group_index];
+    slot_textures.clear();
+    for (auto const& texture : mtl_group.bound_textures())
+        slot_textures.push_back(texture);
+}
+
+void metal_command_list::compute_bind_group(int group_index, binding_group const& group)
+{
+    bind_group_to_table(group_index, group);
 }
 
 void metal_command_list::compute_dispatch(int x, int y, int z)
@@ -537,11 +575,7 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
 
     // Everything the bound groups name is read by this dispatch, so it is declared now rather than at bind time: a
     // group bound and then rebound before any dispatch never ran, and should leave no barrier behind.
-    for (auto const& slot_buffers : _group_buffers)
-        for (auto const& buffer : slot_buffers)
-            declare_buffer(buffer, sg::pipeline_stage_flag::compute,
-                           sg::access_flag::shader_read | sg::access_flag::shader_write);
-    flush_barriers();
+    declare_bound_groups(sg::pipeline_stage_flag::compute);
 
     auto const size = _bound_compute->workgroup_size();
     compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
@@ -563,25 +597,6 @@ void metal_command_list::compute_declare_array_texture_access(cc::string_view, c
     SG_METAL_UNIMPLEMENTED("declaring compute array texture access");
 }
 
-void metal_command_list::raster_begin_rendering(rendering_info const&)
-{
-    SG_METAL_UNIMPLEMENTED("opening a rendering scope");
-}
-
-void metal_command_list::raster_end_rendering()
-{
-    SG_METAL_UNIMPLEMENTED("closing a rendering scope");
-}
-
-void metal_command_list::raster_bind_pipeline(raster_pipeline const&)
-{
-    SG_METAL_UNIMPLEMENTED("binding a raster pipeline");
-}
-
-void metal_command_list::raster_bind_group(int, binding_group const&)
-{
-    SG_METAL_UNIMPLEMENTED("binding a raster binding group");
-}
 
 void metal_command_list::raster_bind_vertex_buffers(int, cc::span<vertex_buffer_view const>)
 {
@@ -593,39 +608,193 @@ void metal_command_list::raster_bind_index_buffer(index_buffer_view const&)
     SG_METAL_UNIMPLEMENTED("binding an index buffer");
 }
 
-void metal_command_list::raster_set_viewport(viewport const&)
-{
-    SG_METAL_UNIMPLEMENTED("setting the viewport");
-}
-
-void metal_command_list::raster_set_scissor(tg::aabb2i const&)
-{
-    SG_METAL_UNIMPLEMENTED("setting the scissor rect");
-}
-
-void metal_command_list::raster_set_stencil_reference(u32)
-{
-    SG_METAL_UNIMPLEMENTED("setting the stencil reference");
-}
-
-void metal_command_list::raster_set_blend_constants(tg::vec4f)
-{
-    SG_METAL_UNIMPLEMENTED("setting the blend constants");
-}
 
 void metal_command_list::raster_set_inline_constants(cc::span<byte const>, cc::optional<isize>)
 {
     SG_METAL_UNIMPLEMENTED("raster inline constants");
 }
 
-void metal_command_list::raster_draw(draw_config const&)
-{
-    SG_METAL_UNIMPLEMENTED("a draw");
-}
 
 void metal_command_list::raster_draw_indexed(draw_indexed_config const&)
 {
     SG_METAL_UNIMPLEMENTED("an indexed draw");
+}
+
+void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
+{
+    for (auto const& slot_buffers : _group_buffers)
+        for (auto const& buffer : slot_buffers)
+            declare_buffer(buffer, stages, sg::access_flag::shader_read | sg::access_flag::shader_write);
+    for (auto const& slot_textures : _group_textures)
+        for (auto const& texture : slot_textures)
+            declare_texture(texture, stages, sg::access_flag::shader_read | sg::access_flag::shader_write);
+    flush_barriers();
+}
+
+void metal_command_list::raster_begin_rendering(rendering_info const& info)
+{
+    CC_ASSERT(_render_encoder == nullptr, "a rendering scope is already open");
+
+    // Declare and flush BEFORE the render encoder opens.
+    //
+    // A barrier cannot be emitted inside a render pass here any more than it can on vulkan, and closing and reopening
+    // the pass around one — which vulkan does — would need every load op forced to LOAD to keep the contents.
+    // Doing it first is cheaper, and it is what a frame that transitions its targets up front already gets.
+    for (auto const& target : info.color_targets)
+        declare_texture(target.view.texture(), sg::pipeline_stage_flag::render_target, sg::access_flag::color_write);
+    if (info.depth_stencil_target.has_value())
+        declare_texture(info.depth_stencil_target.value().view.texture(), sg::pipeline_stage_flag::depth_stencil_target,
+                        sg::access_flag::depth_write);
+    flush_barriers();
+
+    // The compute encoder has to close first: Metal allows one encoder open at a time.
+    end_encoder();
+    auto const scope = autorelease_scope();
+    auto* const descriptor = MTL4::RenderPassDescriptor::alloc()->init();
+
+    auto width = 0;
+    auto height = 0;
+
+    for (auto i = isize(0); i < info.color_targets.size(); ++i)
+    {
+        auto const& target = info.color_targets[i];
+        auto const& mtl_texture = static_cast<metal_texture const&>(*target.view.texture());
+        auto* const attachment = descriptor->colorAttachments()->object(NS::UInteger(i));
+        attachment->setTexture(mtl_texture.texture());
+        attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
+        attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
+        attachment->setLoadAction(load_action_of(target.op));
+        attachment->setStoreAction(store_action_of(target.op));
+        attachment->setClearColor(MTL::ClearColor(target.clear_color[0], target.clear_color[1], target.clear_color[2],
+                                                  target.clear_color[3]));
+
+        width = target.view.width();
+        height = target.view.height();
+    }
+
+    if (info.depth_stencil_target.has_value())
+    {
+        auto const& target = info.depth_stencil_target.value();
+        auto const& mtl_texture = static_cast<metal_texture const&>(*target.view.texture());
+
+        auto* const attachment = descriptor->depthAttachment();
+        attachment->setTexture(mtl_texture.texture());
+        attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
+        attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
+        attachment->setLoadAction(load_action_of(target.op));
+        attachment->setStoreAction(store_action_of(target.op));
+        attachment->setClearDepth(target.clear_depth);
+
+        width = width != 0 ? width : target.view.width();
+        height = height != 0 ? height : target.view.height();
+    }
+    // **Retained, because it outlives the pool this function opened.**
+    // `renderCommandEncoder` hands back an autoreleased object, and the scope above drains when this returns — so an
+    // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed
+    // memory.
+    // It cost a sanitizer run to see, because the freed object is usually still readable.
+    _render_encoder = _buffer->renderCommandEncoder(descriptor)->retain();
+    descriptor->release();
+    CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
+
+    // Every encoder is ordered against the queue on open, the same as the compute one.
+    _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
+
+    auto const vp = info.viewport.has_value()
+                      ? info.viewport.value()
+                      : sg::viewport{.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(width), float(height))};
+    _render_encoder->setViewport(
+        MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth});
+
+    auto const rect
+        = info.scissor.has_value()
+            ? MTL::ScissorRect{NS::UInteger(info.scissor.value().min[0]), NS::UInteger(info.scissor.value().min[1]),
+                               NS::UInteger(info.scissor.value().max[0] - info.scissor.value().min[0]),
+                               NS::UInteger(info.scissor.value().max[1] - info.scissor.value().min[1])}
+            : MTL::ScissorRect{0, 0, NS::UInteger(width), NS::UInteger(height)};
+    _render_encoder->setScissorRect(rect);
+
+    _produced_queue_work = true;
+}
+
+void metal_command_list::raster_end_rendering()
+{
+    CC_ASSERT(_render_encoder != nullptr, "no rendering scope is open");
+
+    // Publish this pass to whatever is committed after it — the producer half of the queue barrier pair.
+    _render_encoder->barrierAfterStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
+    _render_encoder->endEncoding();
+    _render_encoder->release();
+    _render_encoder = nullptr;
+    _bound_raster = nullptr;
+}
+
+void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
+{
+    CC_ASSERT(_render_encoder != nullptr, "binding a raster pipeline needs an open rendering scope");
+
+    auto const& mtl_pipeline = static_cast<metal_raster_pipeline const&>(pipeline);
+    _bound_raster = &mtl_pipeline;
+
+    _render_encoder->setRenderPipelineState(mtl_pipeline.state());
+    if (mtl_pipeline.depth_stencil_state() != nullptr)
+        _render_encoder->setDepthStencilState(mtl_pipeline.depth_stencil_state());
+
+    // Cull, fill, winding and depth bias are encoder state here rather than pipeline state, so they are replayed on
+    // every bind — which is what keeps them consistent with the pipeline a caller believes is bound.
+    auto const& raster = mtl_pipeline.rasterization();
+    _render_encoder->setCullMode(cull_mode_of(raster.cull));
+    _render_encoder->setTriangleFillMode(fill_mode_of(raster.fill));
+    _render_encoder->setFrontFacingWinding(winding_of(raster.front));
+    _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
+
+    _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+}
+
+void metal_command_list::raster_bind_group(int group_index, binding_group const& group)
+{
+    CC_ASSERT(_render_encoder != nullptr, "binding a group needs an open rendering scope");
+    bind_group_to_table(group_index, group);
+}
+
+void metal_command_list::raster_set_viewport(viewport const& vp)
+{
+    CC_ASSERT(_render_encoder != nullptr, "setting the viewport needs an open rendering scope");
+    _render_encoder->setViewport(
+        MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth});
+}
+
+void metal_command_list::raster_set_scissor(tg::aabb2i const& rect)
+{
+    CC_ASSERT(_render_encoder != nullptr, "setting the scissor needs an open rendering scope");
+    _render_encoder->setScissorRect(MTL::ScissorRect{NS::UInteger(rect.min[0]), NS::UInteger(rect.min[1]),
+                                                     NS::UInteger(rect.max[0] - rect.min[0]),
+                                                     NS::UInteger(rect.max[1] - rect.min[1])});
+}
+
+void metal_command_list::raster_set_stencil_reference(u32 reference)
+{
+    CC_ASSERT(_render_encoder != nullptr, "setting the stencil reference needs an open rendering scope");
+    _render_encoder->setStencilReferenceValue(reference);
+}
+
+void metal_command_list::raster_set_blend_constants(tg::vec4f constants)
+{
+    CC_ASSERT(_render_encoder != nullptr, "setting the blend constants needs an open rendering scope");
+    _render_encoder->setBlendColor(constants[0], constants[1], constants[2], constants[3]);
+}
+
+void metal_command_list::raster_draw(draw_config const& config)
+{
+    CC_ASSERT(_render_encoder != nullptr, "a draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "a draw needs a bound raster pipeline");
+
+    if (config.vertex_range.size == 0 || config.instance_range.size == 0)
+        return;
+
+    _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()),
+                                    NS::UInteger(config.vertex_range.offset), NS::UInteger(config.vertex_range.size),
+                                    NS::UInteger(config.instance_range.size), NS::UInteger(config.instance_range.offset));
 }
 
 bool metal_command_list::raytracing_is_supported() const
