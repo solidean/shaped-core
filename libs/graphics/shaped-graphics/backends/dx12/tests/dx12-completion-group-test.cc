@@ -113,7 +113,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated 
     c.upload.bytes_to_buffer(slow, cc::make_pinned_data(big));
     auto stream = c.stream.bytes_to_buffer(quick, cc::make_pinned_data(tiny));
 
-    REQUIRE(cc::try_async_blocking_get(stream.completion()).has_value());
+    auto const awaited_16 = co_await cc::async_as_result(stream.completion());
+    REQUIRE(awaited_16.has_value());
 
     // The stream is done, which says nothing about `slow`.
     // Every byte of it must still arrive: on the shared timeline the readback's wait was satisfied by the stream's

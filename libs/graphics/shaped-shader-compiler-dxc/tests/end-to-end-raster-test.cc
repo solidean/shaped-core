@@ -92,7 +92,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a 
     desc.topology = sg::primitive_topology::triangle_list;
     desc.rasterization.cull = sg::cull_mode::none; // avoid winding-vs-culling concerns in the test
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     // The render target (rgba8, readable back) and the triangle's vertices (all red).

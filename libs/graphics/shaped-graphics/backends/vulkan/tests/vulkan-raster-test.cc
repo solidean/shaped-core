@@ -88,7 +88,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
     REQUIRE(pipeline_layout != nullptr);
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = pipeline_layout,
         .vertex_shader = make_shader(
             sg::shader_stage::vertex,
@@ -100,7 +100,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
             "ps_main"),
         .vertex_input = make_vertex_layout(),
         .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-    }));
+    });
     REQUIRE(pipeline != nullptr);
 
     auto cmd = ctx.create_command_list();
@@ -189,8 +189,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
     auto compute_group_layout = ctx.cached.acquire_binding_group_layout(compute_shader.bindings);
     auto compute_pipeline_layout
         = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {compute_group_layout}});
-    auto compute_pipeline = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = compute_shader, .layout = compute_pipeline_layout}));
+    auto compute_pipeline = co_await ctx.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = compute_shader, .layout = compute_pipeline_layout});
     REQUIRE(compute_pipeline != nullptr);
 
     sg::named_view const compute_out
@@ -215,7 +215,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
         {.x = -1.0f, .y = 3.0f, .r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
     };
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = raster_pipeline_layout,
         .vertex_shader = make_shader(
             sg::shader_stage::vertex,
@@ -227,7 +227,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
                                        "ps_from_buffer"),
         .vertex_input = make_vertex_layout(),
         .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-    }));
+    });
     REQUIRE(pipeline != nullptr);
 
     sg::named_view const raster_in = {.name = "Values", .view = sg::buffer<u32>::from_raw(values).as_readonly_buffer()};
@@ -282,7 +282,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
 // the code below.
 // Declaring the handle before the context is the deterministic form of the same thing.
 // Owns its context: the context's teardown is the subject.
-TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-device"))
 {
     sg::raster_pipeline_handle pipeline; // declared first, so it is destroyed LAST — after the context
     {
@@ -294,7 +294,7 @@ TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-
         auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
         REQUIRE(pipeline_layout != nullptr);
 
-        pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
             .layout = pipeline_layout,
             .vertex_shader = make_shader(
                 sg::shader_stage::vertex,
@@ -306,7 +306,7 @@ TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-
                 "ps_main"),
             .vertex_input = make_vertex_layout(),
             .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-        }));
+        });
         REQUIRE(pipeline != nullptr);
     } // the context releases the pipeline's device objects here, and validation must stay quiet
 }

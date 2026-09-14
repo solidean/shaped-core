@@ -224,7 +224,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
-    (void)cc::try_async_blocking_get(permutation->shader);
+    co_await cc::async_settled(permutation->shader);
     REQUIRE(permutation->shader->has_error());
 
     // With nothing to stand in for it the trace is a no-op — the old all-or-nothing behavior, still what a caller

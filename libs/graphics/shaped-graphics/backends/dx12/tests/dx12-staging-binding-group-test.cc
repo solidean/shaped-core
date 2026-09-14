@@ -90,8 +90,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     auto first = make_output_buffer(ctx);
@@ -131,8 +131,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
     sg::compiled_shader const shader = make_double_shader();
     auto group_layout = ctx->cached.acquire_binding_group_layout(shader.bindings);
     auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
-    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     auto buf = make_output_buffer(ctx);

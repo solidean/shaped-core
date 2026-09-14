@@ -4,9 +4,11 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
@@ -36,7 +38,7 @@ ssc::dxc::shader_description make_desc()
 }
 } // namespace
 
-TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
+ASYNC_TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -44,7 +46,7 @@ TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
     auto async_shader = cache.compile(make_desc());
     REQUIRE(async_shader != nullptr);
 
-    sg::compiled_shader shader = cc::async_blocking_get(async_shader);
+    sg::compiled_shader shader = co_await async_shader;
     CHECK(shader.stage == sg::shader_stage::compute);
     CHECK(shader.format == sg::shader_format::dxil);
     CHECK(!shader.bytecode.empty());
@@ -54,7 +56,7 @@ TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
     CHECK(shader.bindings[0].name == cc::string_view("Output"));
 }
 
-TEST("ssc::dxc shader_cache - same key returns the same async node")
+ASYNC_TEST("ssc::dxc shader_cache - same key returns the same async node")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -74,11 +76,11 @@ TEST("ssc::dxc shader_cache - same key returns the same async node")
 
     // Identity is all this test asks about, but the nodes are real compiles running on the ambient scheduler —
     // so they are finished here rather than abandoned mid-flight, which the run would report as leaked work.
-    (void)cc::try_async_blocking_get(a);
-    (void)cc::try_async_blocking_get(c);
+    co_await cc::async_settled(a);
+    co_await cc::async_settled(c);
 }
 
-TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
+ASYNC_TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -88,7 +90,7 @@ TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
     desc.source = "[numthreads(1,1,1)] void main() { this is not valid HLSL }";
 
     auto async_shader = cache.compile(desc);
-    auto const outcome = cc::try_async_blocking_get(async_shader);
+    auto const outcome = co_await cc::async_as_result(async_shader);
     CHECK(outcome.has_error());
 }
 

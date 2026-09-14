@@ -84,8 +84,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     // Two independent outputs so the two dispatches don't alias: out1 for the full set, out2 for the partial.

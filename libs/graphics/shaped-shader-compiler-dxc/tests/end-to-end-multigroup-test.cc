@@ -66,8 +66,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-
 
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout0, group_layout1}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     // Buffers: A[i]=i, and two slot-1 inputs B1[i]=1, B2[i]=100. Out is read back after each dispatch.

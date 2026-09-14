@@ -11,6 +11,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/material/material_library.hh>
@@ -201,10 +203,10 @@ TEST("sv - a swizzled sample and an alpha cutout compile")
     check_compiles(resolved);
 }
 
-TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
+ASYNC_TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
 {
     if (!sv_test::shared_env().has_compiler)
-        return;
+        co_return;
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
@@ -230,7 +232,7 @@ TEST("sv - a generated permutation compiles as the path tracer's closest-hit")
                              {.include_dir = "sv_shaders", .label = "<generated closest-hit>"});
 
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get(shader);
+    co_await cc::async_settled(shader);
     if (shader->has_error())
         FAIL(cc::format("{}\n--- source ---\n{}", shader->try_error()->underlying().to_string(), g.source));
     REQUIRE(shader->has_value());

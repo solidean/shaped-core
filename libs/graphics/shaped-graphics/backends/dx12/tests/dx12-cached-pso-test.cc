@@ -261,8 +261,8 @@ ASYNC_INVOCABLE_TEST("sg cached PSO - a garbage blob degrades to a fresh build",
     co_await check_doubles(ctx, *res.value(), group_layout, 256);
 }
 
-INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -285,5 +285,5 @@ INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
     CHECK(a.get() == b.get());
 
     // One node, and a real PSO build on the ambient scheduler — finished here rather than left running past the test.
-    (void)cc::try_async_blocking_get(a);
+    co_await cc::async_settled(a);
 }

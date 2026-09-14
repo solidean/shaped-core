@@ -108,16 +108,14 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     REQUIRE(fill_group_layout != nullptr);
     auto fill_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {fill_group_layout}});
     REQUIRE(fill_pipeline_layout != nullptr);
-    auto fill_pipe
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout}));
+    auto fill_pipe = co_await ctx.cached.acquire_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout});
     REQUIRE(fill_pipe != nullptr);
 
     auto sample_group_layout = ctx.cached.acquire_binding_group_layout(sample.bindings);
     REQUIRE(sample_group_layout != nullptr);
     auto sample_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {sample_group_layout}});
     REQUIRE(sample_pipeline_layout != nullptr);
-    auto sample_pipe = cc::async_blocking_get(
-        ctx.cached.acquire_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout}));
+    auto sample_pipe = co_await ctx.cached.acquire_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout});
     REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.

@@ -737,7 +737,7 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
     if (auto const* const permutation = m.shaders.find(item.shader_key); permutation != nullptr)
         for (auto const* const node : {&permutation->shader, &permutation->any_hit, &permutation->shadow_any_hit})
             if (*node != nullptr)
-                (void)cc::try_async_blocking_get(*node);
+                co_await cc::async_settled(*node);
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -789,7 +789,7 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
 
         // Resolving started a permutation compile; one left undriven is async work still holding this test's context.
         if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
-            (void)cc::try_async_blocking_get(p->shader);
+            co_await cc::async_settled(p->shader);
 
         ctx.submit_command_list(cc::move(cmd));
     }
@@ -813,7 +813,7 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
 
         if (auto const* const p = m.shaders.find(item.shader_key); p != nullptr)
-            (void)cc::try_async_blocking_get(p->shader);
+            co_await cc::async_settled(p->shader);
 
         ctx.submit_command_list(cc::move(cmd));
     }

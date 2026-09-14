@@ -8,6 +8,8 @@
 
 // The package this test target declares itself (see sc_add_shader_package in shaped-graphics'
 // CMakeLists). Generated into the build dir and private to this binary.
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <sg_test_shaders.hh>
 
 // A *consumer* of shaped-graphics declaring its own shaders.
@@ -28,7 +30,8 @@ TEST("sg - a consumer's shader package registers", exclusive("slib-shader-librar
     CHECK(sg::test::shaders::package().definitions.size() == 2); // double_values + pattern_fill (routine-test)
 }
 
-INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -41,7 +44,7 @@ INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired
     // Pass the context, get back what *it* accepts — the negotiation this whole seam exists for.
     auto const shader = sg::test::shaders::double_values.compute.main->acquire(*ctx);
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get(shader); // no async pool here, so drive it
+    co_await cc::async_settled(shader); // no async pool here, so drive it
 
     if (ctx->accepts_shader_format(sg::shader_format::dxil))
     {

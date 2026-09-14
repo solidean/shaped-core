@@ -66,8 +66,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - compute dispatch writes a structured buffer",
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
@@ -126,8 +126,8 @@ ASYNC_TEST("sg vulkan - transient binding groups and buffers recycle across epoc
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     bool all_ok = true;

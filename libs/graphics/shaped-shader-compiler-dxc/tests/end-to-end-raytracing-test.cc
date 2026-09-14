@@ -153,7 +153,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle vi
     hs.closest_hit = cc::move(closest_hit);
     auto const hit_h = rpd.add_hit_shader(cc::move(hs));
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
+    auto pipeline = co_await ctx.cached.acquire_raytracing_pipeline(rpd);
     REQUIRE(pipeline != nullptr);
 
     // Build the shader table: one record per section, in the order TraceRay addresses them.

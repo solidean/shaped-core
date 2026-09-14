@@ -167,7 +167,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a
     desc.topology = sg::primitive_topology::point_list;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;
@@ -262,7 +262,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a p
     desc.patch_control_points = 3;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;

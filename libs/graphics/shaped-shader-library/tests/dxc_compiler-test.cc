@@ -2,6 +2,8 @@
 
 #if SLIB_HAS_DXC
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -106,7 +108,7 @@ TEST("slib - dxc compiles both entry points of one file", exclusive("slib-shader
     CHECK(ps.bytecode.size() > 0);
 }
 
-TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-shader-library"))
+ASYNC_TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_asset_handle broken;
     slib::shader_definition definitions[] = {
@@ -125,7 +127,7 @@ TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-
     // A shader that does not build must not throw or abort — it is an error a caller handles.
     auto const shader = broken->acquire(k_target_format);
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get(shader);
+    co_await cc::async_settled(shader);
     CHECK(shader->has_error());
 }
 

@@ -115,8 +115,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in
     pld.groups = {group_layout};
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     auto out_buf = ctx.persistent.create_raw_buffer(isize(2 * sizeof(u32)),

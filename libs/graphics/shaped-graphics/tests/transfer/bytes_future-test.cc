@@ -1,4 +1,6 @@
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
@@ -65,7 +67,7 @@ TEST("sg bytes_future - a cancelled completion yields no bytes")
     CHECK(!f.try_get_bytes().has_value());
 }
 
-TEST("sg bytes_future - completion composes into an async graph")
+ASYNC_TEST("sg bytes_future - completion composes into an async graph")
 {
     byte const src[] = {byte(42)};
     auto const data = cc::pinned_data<byte>::create_copy_of(src);
@@ -77,5 +79,6 @@ TEST("sg bytes_future - completion composes into an async graph")
     CHECK(!next->is_ready());
 
     completion->push_value(cc::unit{});
-    CHECK(cc::async_blocking_get(next) == 5);
+    auto const awaited_1 = co_await next;
+    CHECK(awaited_1 == 5);
 }
