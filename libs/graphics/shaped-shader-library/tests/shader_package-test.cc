@@ -1,8 +1,13 @@
 // The scope templates below are members of these, and the generated package header no longer pulls a
 // context in -- it names no context type, now that create/bind live on the scopes rather than on a group.
+// The command-list headers are here for the same reason: `bind<G>` lives on those five scopes, and taking its
+// address needs each of them complete.
 #include "fake_compiler.hh"
 
 #include <nexus/test.hh>
+#include <shaped-graphics/command_list/compute.hh>
+#include <shaped-graphics/command_list/raster.hh>
+#include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -175,10 +180,10 @@ TEST("slib - a `static` sampler reaches the layout rather than the group", exclu
 
 TEST("slib - every scope template a generated group reaches is instantiated", exclusive("slib-shader-library"))
 {
-    // A template nothing calls is a template nothing compiles, and the sampler-taking acquire in particular has
-    // no caller in the tree yet.
-    // Taking the addresses instantiates all four without needing a device, which is what this test is for -- a
-    // context is not required to find out whether they are well-formed.
+    // A template nothing calls is a template nothing compiles, and several of these have no caller in the tree:
+    // the sampler-taking acquire, and `bind<G>` on the two raster scopes that are not `rendering_scope`.
+    // Taking the addresses instantiates every one of them without needing a device, which is what this test is
+    // for -- a context is not required to find out whether they are well-formed.
     using group = slib_test::shaders::frame_bindings;
 
     auto const acquire = static_cast<sg::binding_group_layout_handle (sg::context_cached_scope::*)()>(
@@ -190,10 +195,22 @@ TEST("slib - every scope template a generated group reaches is instantiated", ex
     auto const create_transient = &sg::context_transient_scope::create_binding_group<group>;
     auto const create_persistent = &sg::context_persistent_scope::create_binding_group<group>;
 
+    // All five scopes that can bind one.
+    auto const bind_rendering = &sg::rendering_scope::bind<group>;
+    auto const bind_raster_manual = &sg::command_list_raster_manual_scope::bind<group>;
+    auto const bind_raster = &sg::command_list_raster_scope::bind<group>;
+    auto const bind_compute = &sg::command_list_compute_scope::bind<group>;
+    auto const bind_raytracing = &sg::command_list_raytracing_scope::bind<group>;
+
     CHECK(acquire != nullptr);
     CHECK(acquire_with_samplers != nullptr);
     CHECK(create_transient != nullptr);
     CHECK(create_persistent != nullptr);
+    CHECK(bind_rendering != nullptr);
+    CHECK(bind_raster_manual != nullptr);
+    CHECK(bind_raster != nullptr);
+    CHECK(bind_compute != nullptr);
+    CHECK(bind_raytracing != nullptr);
 }
 
 TEST("slib - the generated table and the runtime pass read one shader the same way", exclusive("slib-shader-library"))

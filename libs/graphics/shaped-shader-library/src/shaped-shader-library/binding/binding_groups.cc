@@ -1343,6 +1343,8 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
                 edits.push_back({.offset = offset, .text = cc::format("[[vk::location({})]] ", next_location++)});
     }
 
-    cc::sort_by(edits, &source_edit::offset);
+    // STABLE: a push-constant matrix member takes two edits at one offset -- its `[[vk::offset(N)]]` and
+    // then `column_major` -- and an unstable sort may emit them in either order.
+    cc::sort_stable_by(edits, &source_edit::offset);
     return apply_edits(hlsl, edits);
 }

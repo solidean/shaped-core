@@ -141,7 +141,8 @@ if(SC_BUILD_TESTS)
             # Back up to the last newline in the candidate chunk, so no boundary lands mid-character.
             string(SUBSTRING "${_slib_corpus_text}" ${_slib_corpus_at} ${_slib_corpus_take} _slib_corpus_chunk)
             string(FIND "${_slib_corpus_chunk}" "\n" _slib_corpus_newline REVERSE)
-            if(_slib_corpus_newline GREATER 0)
+            # GREATER -1, not 0: a chunk whose only newline is its very first byte still splits there.
+            if(_slib_corpus_newline GREATER -1)
                 math(EXPR _slib_corpus_take "${_slib_corpus_newline} + 1")
             endif()
         endif()

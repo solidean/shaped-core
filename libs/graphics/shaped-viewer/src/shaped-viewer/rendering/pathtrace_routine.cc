@@ -303,8 +303,14 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto variant = pipeline_variant{};
     variant.group_layout = ctx.cached.acquire_binding_group_layout(own);
 
-    // The permutation's samplers are static, so this layout contributes root-signature entries and no descriptor
-    // table at all — which is why nothing ever binds a group at this slot.
+    // The permutation's samplers are static, so on DX12 this layout contributes root-signature entries and no
+    // descriptor table at all — which is why nothing ever binds a group at this slot.
+    //
+    // That is a DX12 statement rather than a general one.
+    // Vulkan writes a static sampler into the group's own descriptor set (vulkan_binding_group.cc), so a vulkan
+    // path tracer has to create and bind this group like any other.
+    // See libs/graphics/shaped-viewer/docs/TODO.md's sv-on-vulkan entry.
+    //
     // A scene whose materials sample nothing declares none, and then there is no third group either.
     auto const sampler_layout = sampler_bindings.empty()
                                   ? sg::binding_group_layout_handle()

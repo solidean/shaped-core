@@ -125,10 +125,10 @@ function(sc_add_shader_package)
     # A target of its own over the same outputs, so something other than the package target can be ordered
     # behind the generator.
     # The sibling test includes the generated header but consumes neither generated SOURCE, and an include
-    # directory carries no dependency edge -- so without this the test's TU and the generator are unordered, and
-    # whether the header exists when it compiles is up to the scheduler.
-    # Linux and Windows happened to win that race where the Android NDK build lost it.
-    add_custom_target(${PKG_TARGET}-shader-package DEPENDS "${_gen_hh}" "${_gen_cc}")
+    # directory carries no dependency edge -- so without this the test's TU and the generator are unordered.
+    # Named per PACKAGE, not per target: a target may declare more than one, and two add_custom_target calls
+    # under one name is a configure error.
+    add_custom_target(${PKG_TARGET}-${PKG_NAME}-shader-package DEPENDS "${_gen_hh}" "${_gen_cc}")
 
     # Plain PRIVATE sources, never a FILE_SET: the generated header lives in the binary dir, and a FILE_SET
     # hard-errors on anything outside its BASE_DIRS.
@@ -161,7 +161,7 @@ function(sc_add_shader_package)
 
     # And the generated dir, so finalize can offer it to the sibling test. Recorded rather than acted on here
     # because a library declares its package before its own test target exists.
-    set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_GEN_DIRS "${PKG_TARGET}|${_gen_dir}")
+    set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_GEN_DIRS "${PKG_TARGET}|${PKG_NAME}|${_gen_dir}")
 endfunction()
 
 # Fails configure with an actionable message if a package was declared but slib is missing, and hands each
@@ -192,11 +192,12 @@ function(sc_finalize_shader_packages)
     foreach(_entry IN LISTS _gen_dirs)
         string(REPLACE "|" ";" _parts "${_entry}")
         list(GET _parts 0 _pkg_target)
-        list(GET _parts 1 _pkg_gen_dir)
+        list(GET _parts 1 _pkg_name)
+        list(GET _parts 2 _pkg_gen_dir)
         foreach(_suffix "-test" "-test-web")
             if(TARGET ${_pkg_target}${_suffix})
                 target_include_directories(${_pkg_target}${_suffix} PRIVATE "${_pkg_gen_dir}")
-                add_dependencies(${_pkg_target}${_suffix} ${_pkg_target}-shader-package)
+                add_dependencies(${_pkg_target}${_suffix} ${_pkg_target}-${_pkg_name}-shader-package)
             endif()
         endforeach()
     endforeach()

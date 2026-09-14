@@ -101,6 +101,10 @@ What is left is narrower than it was:
   So `sv::shader_library` registers both compilers and a vulkan context still resolves nothing it can build a pipeline from.
   Emitting them from the generator makes the generated half portable; the `.hlsli` library is the larger half, and a genuinely portable shader language is the larger answer still.
 
+  **And the material sampler group has to be bound there.**
+  On DX12 a static sampler is a root-signature entry, so `pathtrace_routine` builds that group's layout and binds nothing at its slot.
+  Vulkan writes a static sampler into the group's own descriptor set instead, so the same scene needs the group created and bound — a difference the dx12-only path has never had to notice.
+
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.

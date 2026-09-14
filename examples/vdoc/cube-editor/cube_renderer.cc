@@ -162,7 +162,7 @@ cc::shared_async<cc::unit> cube_routine::init(sg::routine_init_scope scope)
     }();
     if (constants == nullptr)
     {
-        CC_LOG_ERROR("cube.hlsl must declare the cube_constants cbuffer");
+        CC_LOG_ERROR("cube.hlsl must declare the cube_constants push_constants block");
         fail_init();
         co_return;
     }

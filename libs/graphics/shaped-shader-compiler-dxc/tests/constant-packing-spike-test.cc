@@ -244,6 +244,12 @@ TEST("portable-hlsl spike - Q14i a 64-bit member aligns, and a 64-bit vector ali
     // Neither obeys the no-straddling rule: a `double3` is 24 bytes and crosses a row boundary outright.
     check_rule("double is eight bytes", "    double a;    float b;    float probe;", 16);
     check_rule("a double aligns to eight", "    float a;    double b;    float probe;", 32);
+
+    // The case above gives 32 under BOTH candidate rules -- 8-byte alignment and whole-row alignment --
+    // so it cannot tell them apart, and the pass's choice of 8 for a scalar rested on nothing.
+    // A third member is what separates them: 8-byte alignment puts `b` at 8 and ends at 32, a row would
+    // put it at 16 and end at 48.
+    check_rule("and eight is not a row", "    float a;    double b;    float3 c;    float probe;", 32);
     check_rule("and to eight, not to a row", "    float3 a;    double b;    float probe;", 32);
     check_rule("a double2 starts a row", "    float a;    double2 b;    float probe;", 48);
     check_rule("a double3 straddles one", "    double3 a;    float b;    float probe;", 32);
