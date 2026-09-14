@@ -91,8 +91,8 @@ cc::shared_async<cc::unit> child_waits(probe_key const& k)
 cc::shared_async<cc::unit> child_releases(probe_key const& k)
 {
     (void)co_await a_moment_later();
+    note(k, "released"); // before the push: the waiter can resume on another thread the moment it lands
     k.p->latch->push_value(7);
-    note(k, "released");
     CHECK(true);
 }
 
