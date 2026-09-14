@@ -21,6 +21,10 @@ upstreams:
     pin_hash_windows: cf658aacf070d3045e31b8f1f8a696c2945f37c1095019481ef7c513368db3b4
     asset_linux: linux_dxc_2026_05_26.x86_64.tar.gz
     pin_hash_linux: 928b3e9986d11dc4279050e02340950c29bcbd1e5efb9d3ded9669dade37639d
+    # The release ships no macOS build, so there is nothing to pin there.
+    # Declared rather than left missing: a per-OS key absent for the host is an un-ported dependency and stays an error,
+    # and without this the whole manifest set failed to load on a Mac — taking `deps list` and `deps licenses` with it.
+    unavailable_on: [macos]
     license: LicenseRef-Microsoft-DXC-Binary
     # The Windows zip ships one license member; the Linux tarball ships the MS terms and the LLVM ones separately.
     license_files: [.install/LICENSE.txt, .install/LICENSE-LLVM.txt]
