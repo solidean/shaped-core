@@ -18,14 +18,24 @@ void metal_texture::on_expired() const
 
 void metal_texture::release_storage() const
 {
-    if (_texture == nullptr)
+    // Finalizers keep this alive past a null texture, the way they do for a buffer — see metal_buffer.cc.
+    if (_texture == nullptr && _finalizers.empty())
         return;
 
     auto* const texture = _texture;
     _texture = nullptr;
 
-    _ctx.residency().remove(texture);
-    _ctx.epochs().defer([texture] { texture->release(); });
+    if (texture != nullptr)
+        _ctx.residency().remove(texture);
+
+    _ctx.epochs().defer(
+        [texture, finalizers = cc::move(_finalizers)]() mutable
+        {
+            if (texture != nullptr)
+                texture->release();
+            for (auto& f : finalizers)
+                f();
+        });
 }
 cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture_description const& desc,
                                                                      sg::allocation_info const& alloc)

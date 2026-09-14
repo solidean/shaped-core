@@ -91,6 +91,10 @@ public:
 
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const;
 
+    /// The submission timeline itself, for a second queue that has to order itself behind the direct one.
+    /// `metal_transfer_system` is the only caller; every other question about it is `is_submission_complete`.
+    [[nodiscard]] MTL::SharedEvent* submission_timeline() const { return _submission_event; }
+
     /// An allocator to record into, recycled from the pool or newly created.
     [[nodiscard]] MTL4::CommandAllocator* lease_allocator();
 

@@ -7,7 +7,9 @@
 namespace sg::backend::metal
 {
 class autorelease_scope; // an NSAutoreleasePool held for a block (see metal_common.hh)
-struct metal_config;     // device creation knobs (see metal_context.hh)
+template <class T>
+struct callback_mutex; // cc::mutex's shape, but real even without SC_THREADS (see metal_common.hh)
+struct metal_config;   // device creation knobs (see metal_context.hh)
 class metal_context;
 /// A backend-typed context handle: an sg::context_handle known to point at a metal_context.
 /// For code already committed to metal, the backend's own tests above all; a caller drives the abstract sg::context_handle.
@@ -15,6 +17,7 @@ using metal_context_handle = std::shared_ptr<metal_context>;
 class metal_command_list;
 class metal_epoch_system;
 class metal_swapchain;
+class metal_transfer_system;
 class metal_staging_ring;  // CPU-visible bytes an inline transfer stages through (see metal_staging_ring.hh)
 class metal_residency_set; // what MTL4 requires instead of useResource (see metal_residency.hh)
 class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)

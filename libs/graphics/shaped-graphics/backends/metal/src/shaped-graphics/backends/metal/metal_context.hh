@@ -21,6 +21,7 @@
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/backends/metal/metal_texture_view_cache.hh>
+#include <shaped-graphics/backends/metal/metal_transfer.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
@@ -82,6 +83,9 @@ public:
     /// Everything this context's GPU work may touch; MTL4 has no useResource, so a resource outside this is not there.
     [[nodiscard]] metal_residency_set& residency() { return _residency; }
 
+    /// The off-frame transfer queue and its ordering timeline.
+    [[nodiscard]] metal_transfer_system& transfers() { return _transfers; }
+
     /// MTLSamplerStates for bound sampler values, shared context-wide.
     [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
 
@@ -138,8 +142,16 @@ public:
     /// Called once by create_metal_context, before the context is handed out.
     void create_staging_rings(isize upload_bytes, isize download_bytes);
 
+    /// The transfer-timeline value `list` must wait for before it may run, or 0 when none of its resources has a
+    /// transfer in flight.
+    [[nodiscard]] u64 highest_pending_transfer(metal_command_list& list) const;
+
     /// Move every resource `list` touched from its per-list state into the state the next list synchronizes against.
     void finalize_touched_buffers(metal_command_list& list);
+
+    /// Record `token` on every resource `list` touched, so a later off-frame transfer defers behind this list.
+    /// The reverse of `highest_pending_transfer`, and the other half of the sync between the two queues.
+    void stamp_touched_buffers(metal_command_list& list, sg::submission_token token);
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
@@ -278,6 +290,7 @@ private:
     sg::command_list_slot_allocator _slots;
     metal_residency_set _residency;
     metal_sampler_cache _samplers;
+    metal_transfer_system _transfers;
     metal_texture_view_cache _texture_views;
     MTL4::Compiler* _compiler = nullptr;
     cc::mutex<metal_staging_ring> _upload_ring;

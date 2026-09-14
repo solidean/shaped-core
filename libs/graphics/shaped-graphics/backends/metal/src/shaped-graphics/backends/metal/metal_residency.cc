@@ -23,6 +23,17 @@ void metal_residency_set::create(MTL::Device* device, MTL4::CommandQueue* queue)
     _set.lock([&](MTL::ResidencySet*& s) { s = set; });
 }
 
+void metal_residency_set::attach_to(MTL4::CommandQueue* queue)
+{
+    CC_ASSERT(queue != nullptr, "cannot attach a residency set to a null queue");
+    _set.lock(
+        [&](MTL::ResidencySet*& s)
+        {
+            if (s != nullptr)
+                queue->addResidencySet(s);
+        });
+}
+
 void metal_residency_set::add(MTL::Allocation const* allocation)
 {
     if (allocation == nullptr)

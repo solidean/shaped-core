@@ -47,6 +47,11 @@ rules:
     reason: setenv, which is the whole of Metal's validation-layer API — the layer is configured through the environment and there is no call to make. See backends/metal/readme.md
     files: [backends/metal/src/shaped-graphics/backends/metal/metal_common.cc, backends/metal/tests/metal-validation-test.cc]
 
+  - kind: allow-include
+    value: <mutex>
+    reason: callback_mutex needs a lock that is real with SC_THREADS off, because Metal's commit handlers run on a dispatch queue that flag does not reach — and cc::mutex compiles its lock away. See backends/metal/readme.md
+    files: backends/metal/src/shaped-graphics/backends/metal/metal_common.hh
+
   # =========================================================================================================
   # Waiting on a migration
   # =========================================================================================================

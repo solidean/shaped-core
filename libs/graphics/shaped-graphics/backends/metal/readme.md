@@ -127,6 +127,23 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That is why there is no readback actor here where the other two backends have one.
 - **Placement works for textures from the start.**
   A Metal placement heap is not told what it will hold, so there is no buffers-only stage to grow out of the way dx12 has one.
+- **Two queues need three waits, not one.**
+  An off-frame transfer runs on a second `MTL4CommandQueue`, and neither queue knows anything about the other's timeline.
+  A command list waits on `metal_transfer_system::pending_value_for` before it runs.
+  A transfer waits on `metal_buffer::last_used_submission` before it copies.
+  And a transfer waits on the same buffer's own previous transfer, which is the one that looks redundant and is not.
+  Two commits on one queue are ordered, but the copies inside them are not — so an async download reads back what the async upload before it has not finished writing.
+  Each direction has a tier-1 test of its own, and each of them passes with the other two waits in place.
+- **A backend runs a resource's finalizers itself.**
+  `raw_buffer::add_finalizer` puts them in a protected member and names the contract — released storage *and* a retired epoch — but nothing in sg core ever calls them.
+  A backend that reclaims the GPU object and forgets the finalizers looks completely correct until a test asserts on one, which is what `sg - async upload to a dropped buffer still releases it` does.
+  They run inside the epoch's deferred callback, after the Metal object is released: a finalizer reclaiming the memory a placed resource sits on must never observe a live handle into it.
+- **A Metal callback is a real thread even in a build with no threads.**
+  `SC_THREADS=OFF` compiles `cc::mutex`'s lock away, which is correct for state only sg's own code touches.
+  Every commit's `MTL4CommitFeedback` handler runs on a dispatch queue Apple owns, and that flag does not reach it.
+  The residency set catches it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
+  `callback_mutex` in `metal_common.hh` is `cc::mutex`'s shape with a lock that is always real.
+  Three pieces of state hold one — the residency set, the transfer system's pending map, the feedback sink's context pointer — and everything else keeps `cc::mutex`.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
 

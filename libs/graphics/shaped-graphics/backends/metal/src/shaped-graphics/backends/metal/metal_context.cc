@@ -35,6 +35,7 @@ void metal_context::create_staging_rings(isize upload_bytes, isize download_byte
 {
     // Before the rings, so their own buffers can declare themselves resident as they are made.
     _residency.create(_device, _queue);
+    _transfers.create(*this);
 
     _upload_ring.lock([&](metal_staging_ring& r) { r.create(_device, upload_bytes, "sg inline upload ring"); });
     _download_ring.lock([&](metal_staging_ring& r) { r.create(_device, download_bytes, "sg inline download ring"); });
@@ -139,9 +140,23 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
     list.end_recording();
 
+    // Order this list after every off-frame transfer of a resource it touches.
+    //
+    // The two queues are otherwise independent: an async upload committed to the transfer queue has no relationship to
+    // a command list committed to the direct one, so a list reading a buffer an upload is still filling would read
+    // whatever was there.
+    // One wait covers the whole list, on the highest value any of its resources claimed.
+    if (auto const wait = highest_pending_transfer(list); wait > 0)
+        _queue->wait(_transfers.timeline(), wait);
+
     // Finalize every buffer this list touched, in submission order — that ordering is what makes each resource's
     // `current` mean "after everything submitted so far".
     finalize_touched_buffers(list);
+
+    // The token is claimed here rather than after the commit so the stamp below lands before submit returns: a caller
+    // that issues an async transfer on the very next line must find this list already named.
+    auto const token = _epochs.claim_submission_token();
+    stamp_touched_buffers(list, token);
 
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
@@ -181,7 +196,6 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     _queue->commit(buffers, 1, options);
     options->release();
 
-    auto const token = _epochs.claim_submission_token();
     _epochs.signal_submission(token);
 
     // The allocator rides the epoch rather than going back to the pool here: resetting it while the buffer just
@@ -227,6 +241,14 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
     _slots.release(list.slot());
 }
 
+u64 metal_context::highest_pending_transfer(metal_command_list& list) const
+{
+    u64 highest = 0;
+    for (auto const& touched : list.touched_buffers())
+        highest = cc::max(highest, _transfers.pending_value_for(*touched));
+    return highest;
+}
+
 void metal_context::finalize_touched_buffers(metal_command_list& list)
 {
     // Every touched buffer's state moves into its `current`, in submission order — that ordering is what makes
@@ -246,6 +268,12 @@ void metal_context::finalize_touched_buffers(metal_command_list& list)
         auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
         (void)mtl_texture.access().lock([&](metal_resource_access& a) { return a.finalize(list.slot()); });
     }
+}
+
+void metal_context::stamp_touched_buffers(metal_command_list& list, sg::submission_token token)
+{
+    for (auto const& touched : list.touched_buffers())
+        static_cast<metal_buffer const&>(*touched).stamp_submission(u64(token));
 }
 
 cc::result<std::unique_ptr<sg::command_list>> metal_context::try_create_command_list()
@@ -294,6 +322,7 @@ void metal_context::shutdown()
     // After the drain above, so nothing in flight still names these bytes.
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    _transfers.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
 
@@ -340,6 +369,10 @@ void metal_context::shutdown_no_throw() noexcept
 
 void metal_context::block_until_transfers_drained()
 {
+    // Both halves: an inline download's copy-out, and everything the off-frame queue still owes.
+    while (_transfers.has_pending())
+        std::this_thread::yield();
+
     // A condition rather than a duration: the handler runs on a dispatch queue we do not own, so there is nothing to
     // join and nothing whose timing is ours to predict.
     while (_pending_downloads.load(std::memory_order_acquire) > 0)
@@ -365,9 +398,11 @@ sg::texture_layout metal_context::current_texture_layout(raw_texture_handle cons
     return sg::texture_layout::general;
 }
 
-void metal_context::async_upload_bytes_to_buffer(raw_buffer_handle, cc::pinned_data<byte const>, isize)
+void metal_context::async_upload_bytes_to_buffer(raw_buffer_handle buffer,
+                                                 cc::pinned_data<byte const> data,
+                                                 isize offset_in_bytes)
 {
-    SG_METAL_UNIMPLEMENTED("async buffer upload");
+    _transfers.upload_to_buffer(cc::move(buffer), data, offset_in_bytes);
 }
 
 void metal_context::async_upload_bytes_to_texture(raw_texture_handle,
@@ -378,9 +413,11 @@ void metal_context::async_upload_bytes_to_texture(raw_texture_handle,
     SG_METAL_UNIMPLEMENTED("async texture upload");
 }
 
-sg::bytes_future metal_context::async_download_bytes_from_buffer(raw_buffer_handle, isize, isize)
+sg::bytes_future metal_context::async_download_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                 isize offset_in_bytes,
+                                                                 isize size_in_bytes)
 {
-    SG_METAL_UNIMPLEMENTED("async buffer download");
+    return _transfers.download_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
 sg::bytes_future metal_context::async_download_bytes_from_texture(raw_texture_handle,

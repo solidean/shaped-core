@@ -258,6 +258,33 @@ Recorded as each is met, because this is what the next backend most wants to kno
   Key the cache on sg's own identity for the value — `sg::impl::sampler_hash`, `hash(raw_texture_view)` — rather than
   on one the backend invents, or the cache answers a different question than the layout identity does.
 
+- **Nothing in sg core ever runs a resource's finalizers — the backend does.**
+  `raw_buffer::add_finalizer` and its texture twin put the callbacks in a protected member and state the contract
+  precisely: they run once the GPU storage is released *and* the owning epoch has retired.
+  Neither the base class nor any scope calls them, so a backend that reclaims its GPU object and forgets them is
+  silently wrong everywhere it matters — a caller reclaiming the memory a placed resource sits on never gets it back.
+  Nothing reports it either: the whole suite passes except the one tier-1 test that asserts a finalizer ran, and that
+  test looks like it is about something else (an async upload to a dropped buffer).
+  Run them inside the same deferred callback that releases the storage, **after** the release, and take care that the
+  early-out for a resource with no GPU object does not skip them.
+
+- **Two queues need a wait in every direction, including the one that looks redundant.**
+  An off-frame transfer queue and the frame's queue share no timeline, so both hazard directions need an explicit
+  stamp: a command list defers behind the resource's in-flight transfers, and a transfer defers behind the last list
+  that named the resource.
+  The third is a transfer waiting on the *same resource's previous transfer*, which the reference backends get for
+  free from a single actor serializing their copy queue and which an API committing each transfer separately does not.
+  Submission order does not order the copies inside two command buffers, so an async download reads back bytes the
+  async upload before it never finished writing.
+
+- **A driver callback is a real thread even in a build with `SC_THREADS=OFF`.**
+  `cc::mutex` compiles its lock away without threads, which is exactly right for state only sg's own code touches.
+  A graphics API's completion callbacks are not that: they run on a thread the driver owns, and no build flag of ours
+  reaches them.
+  So any backend state a callback writes needs a lock that is real unconditionally, and the singlethreaded preset is
+  where the missing one surfaces — as a driver-side abort rather than as a data race you could reason about.
+  Audit by asking which members a completion handler touches, not by where the races look likely.
+
 - **Keep translation logic device-free, and it becomes testable everywhere.**
   Barrier translation and access tracking are pure logic with no device in them, so their tests run on any machine rather than only where a device exists.
   On a platform with no software adapter that is the difference between covered and skipped, and it is worth splitting files along that line deliberately.

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
@@ -22,8 +21,12 @@
 class sg::backend::metal::metal_residency_set
 {
 public:
-    /// Creates the set and attaches it to `queue`. Must be called once, before any resource is added.
+    /// Creates the set and attaches it to `queue`.
+    /// Must be called once, before any resource is added.
     void create(MTL::Device* device, MTL4::CommandQueue* queue);
+
+    /// Also declare this set to `queue` — the transfer queue touches the same resources the frame's does.
+    void attach_to(MTL4::CommandQueue* queue);
 
     /// Declare `allocation` resident.
     /// Null is ignored, which is what an empty buffer hands over.
@@ -37,5 +40,7 @@ public:
     void shutdown();
 
 private:
-    cc::mutex<MTL::ResidencySet*> _set;
+    // A callback mutex rather than cc::mutex: every commit handler removes its staging allocation from here, and
+    // that handler runs on a Metal thread even in a build with SC_THREADS off.
+    callback_mutex<MTL::ResidencySet*> _set;
 };

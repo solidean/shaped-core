@@ -5,11 +5,42 @@
 
 #include <Metal/Metal.hpp>
 #include <QuartzCore/QuartzCore.hpp>
+#include <clean-core/common/utility.hh> // cc::invoke, cc::forward
 #include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/metal/fwd.hh> // where every backend type is declared, autorelease_scope included
 #include <shaped-graphics/fwd.hh>                // also what puts the bare sized aliases in scope inside sg
+
+#include <mutex>
+
+/// `cc::mutex`'s shape, held by a lock that is real whether or not this build has threads.
+///
+/// **Metal's completion handlers run on a dispatch queue Apple owns, and `SC_THREADS=OFF` does not reach it.**
+/// `cc::mutex` compiles its lock away without threads, which is correct for state only sg's own code touches — and
+/// wrong for anything a `MTL4CommitFeedback` handler writes, because the handler is a real thread either way.
+/// A singlethreaded build is where that bites first and hardest: the residency set reports it as
+/// "residency sets do not support concurrent write operations" and aborts, having lost a lock that was never there.
+///
+/// So this is for exactly the state a Metal callback mutates, and `cc::mutex` stays right for everything else.
+/// See libs/graphics/shaped-graphics/backends/metal/readme.md.
+template <class T>
+struct sg::backend::metal::callback_mutex
+{
+    callback_mutex() = default;
+    explicit callback_mutex(T value) : _value(cc::move(value)) {}
+
+    template <class F>
+    auto lock(F&& f)
+    {
+        auto const guard = std::lock_guard(_mutex);
+        return cc::invoke(cc::forward<F>(f), _value);
+    }
+
+private:
+    T _value = {};
+    std::mutex _mutex;
+};
 
 namespace sg::backend::metal
 {

@@ -30,7 +30,8 @@ public:
     void detach();
 
 private:
-    cc::mutex<metal_context*> _context;
+    // A callback mutex: `report` is called from a commit handler, which is a Metal thread either way.
+    callback_mutex<metal_context*> _context;
 };
 
 namespace sg::backend::metal

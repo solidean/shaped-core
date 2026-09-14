@@ -14,9 +14,22 @@ void metal_buffer::on_expired() const
     release_storage();
 }
 
+void metal_buffer::stamp_submission(u64 value) const
+{
+    auto previous = _last_used_submission.load(std::memory_order_relaxed);
+    while (previous < value
+           && !_last_used_submission.compare_exchange_weak(previous, value, std::memory_order_release,
+                                                           std::memory_order_relaxed))
+    {
+        // The CAS refreshes `previous` on every failure, so the loop ends as soon as someone stamped higher.
+    }
+}
+
 void metal_buffer::release_storage() const
 {
-    if (_buffer == nullptr)
+    // An empty buffer owns no MTLBuffer, and a second call owns nothing either — but either may still carry finalizers,
+    // which are the caller's feedback point and must run exactly once.
+    if (_buffer == nullptr && _finalizers.empty())
         return;
 
     // Handed to the epoch rather than released here: a submitted command buffer may still be reading this, and the
@@ -25,7 +38,18 @@ void metal_buffer::release_storage() const
     _buffer = nullptr;
 
     // Out of the residency set first, so the set stops naming an allocation that is on its way out.
-    _ctx.residency().remove(buffer);
-    _ctx.epochs().defer([buffer] { buffer->release(); });
+    if (buffer != nullptr)
+        _ctx.residency().remove(buffer);
+
+    // The release comes before the finalizers inside the deferred callback: a finalizer reclaiming the memory a placed
+    // resource sits on must never observe a live MTLBuffer still pointing into it.
+    _ctx.epochs().defer(
+        [buffer, finalizers = cc::move(_finalizers)]() mutable
+        {
+            if (buffer != nullptr)
+                buffer->release();
+            for (auto& f : finalizers)
+                f();
+        });
 }
 } // namespace sg::backend::metal
