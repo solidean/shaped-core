@@ -244,7 +244,8 @@ public:
     /// Settles when `e`'s GPU work has finished — how a caller learns an epoch is done without waiting for it.
     ///
     /// An epoch already retired hands back a node that is ready, so a caller never has to special-case the past.
-    /// It settles from the backend's own GPU signal, so nobody has to sweep, advance or wait for it to arrive.
+    /// It settles from the backend's own GPU signal, so nobody has to sweep or wait for it to arrive.
+    /// Without threads there is no thread to take that signal, and a sweep of the pumps settles it instead.
     /// Settles as an error once the device is lost, or when the context shuts down first.
     [[nodiscard]] cc::shared_async<cc::unit const> epoch_completion(epoch e);
 
@@ -257,6 +258,7 @@ public:
     ///
     /// **Nobody has to pump, poll or advance for it to settle**: GPU progress arrives through the backend's fence and
     /// timeline signals, and the transfer actors report their own drain.
+    /// Without threads, whatever sweeps the pumps settles it, since no thread is left to wait on the GPU.
     /// It retires epochs in its own segments, so it is awaited under `process_completed_epochs`' rule: never while
     /// another thread advances the epoch.
     /// Cold, like every coroutine; settles as an error once the device is lost, or when the context shuts down first.

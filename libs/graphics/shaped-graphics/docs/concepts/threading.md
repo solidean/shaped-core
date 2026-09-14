@@ -51,6 +51,7 @@ Every blocking wait — `cc::async_blocking_get`, a frame loop, one of the waits
 
 The completion asyncs are the one place sg registers a pump itself, standing in for the waiter thread it cannot start.
 It settles what is due, then sweeps its siblings, and parks on the GPU only when no sibling made progress.
+It parks only on work the GPU already has: the open epoch closes on an advance, and the thread that would advance is the one sweeping.
 A GPU target may wait on a copy only an unthreaded actor signals, which is why the siblings run first.
 
 sg used to carry `sg::context::pump()` and a per-backend `on_pump()` for this, and the reason they are gone is that they could only ever drain what *this context* could name.

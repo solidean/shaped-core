@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/fwd.hh>            // cc::u64: epoch is an enum over u64
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_pump.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -229,6 +230,21 @@ ASYNC_INVOCABLE_TEST("sg - an epoch's completion settles with nobody sweeping", 
     ctx->advance_epoch();
     co_await pending;
     CHECK(pending->has_value());
+}
+
+// A frame loop sweeps the pumps before it advances.
+// Threads off, the completions' pump runs in that sweep, and the epoch it could wait on is not closed until the advance
+// that follows — so a sweep that parked on it would never return.
+INVOCABLE_TEST("sg - a sweep with an open epoch's completion outstanding returns", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const pending = ctx->epoch_completion(ctx->current_epoch());
+    (void)cc::thread_pump_all();
+    CHECK(!pending->is_ready());
+
+    ctx->advance_epoch();
+    ctx->process_completed_epochs();
 }
 
 ASYNC_INVOCABLE_TEST("sg - a submission's completion settles with nobody sweeping", (sg::context_handle ctx))

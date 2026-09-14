@@ -120,6 +120,10 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     _pipeline_cache(std::make_unique<pipeline_cache>())
 {
     CC_ASSERT(!accepted_shader_formats.empty(), "a context must accept at least one shader format");
+
+    // Made here rather than on the first completion: transfer actors read the pointer without the pending lock.
+    _completion_signals = std::make_unique<completion_signals>();
+
     for (auto format : accepted_shader_formats)
         _accepted_shader_formats.push_back(format);
 
@@ -249,8 +253,6 @@ cc::shared_async<cc::unit const> context::completion_for(u64 target, completion_
 void context::ensure_completion_signals(cc::vector<pending_completion> const& pending)
 {
     (void)pending; // proof the caller holds the lock
-    if (_completion_signals == nullptr)
-        _completion_signals = std::make_unique<completion_signals>();
     auto& s = *_completion_signals;
     if (s.is_started)
         return;
@@ -377,13 +379,16 @@ bool context::pump_completion_signals()
     if (!s.has_pending.load(cc::memory_order_acquire))
         return false;
 
+    // Only what the GPU has been handed can signal: the open epoch closes on an advance, and the thread that would
+    // advance is the one sweeping here, so parking on it would never return.
+    auto const open_epoch = u64(current_epoch());
     auto const targets = _pending_completions.lock(
         [&](cc::vector<pending_completion>& pending)
         {
             auto t = completion_targets();
             for (auto const& p : pending)
             {
-                if (p.kind == completion_kind::epoch)
+                if (p.kind == completion_kind::epoch && p.target < open_epoch)
                     t.epoch = t.epoch == 0 ? p.target : cc::min(t.epoch, p.target);
                 else if (p.kind == completion_kind::submission && p.target != u64(submission_token::not_submitted))
                     t.submission = t.submission == 0 ? p.target : cc::min(t.submission, p.target);
@@ -393,7 +398,7 @@ bool context::pump_completion_signals()
 
     settle_due_completions();
     if (targets.submission == 0 && targets.epoch == 0)
-        return false; // only drains outstanding, which the actors' own pumps settle
+        return false; // nothing the GPU could signal: drains settle from their actors, open epochs after an advance
 
     // A GPU target may itself wait on a copy only a sibling actor signals, so every sibling runs before this parks.
     if (cc::thread_pump_all())
