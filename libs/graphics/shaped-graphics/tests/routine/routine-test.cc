@@ -407,8 +407,10 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
     CHECK(racing_routine::inits.load() == 1);
 }
 
+// Holds sg-reload-generation too: a reload another test signals re-runs this routine's init and resets the count.
 INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
-               (sg::context_handle const& ctx))
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
     // Unguarded, the plain-int increment races and the total lands below the expected count.
     REQUIRE(ctx != nullptr);

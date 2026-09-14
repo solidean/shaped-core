@@ -190,7 +190,8 @@ INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on 
 INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
                (sg::context_handle const& ctx),
                exclusive("slib-shader-library"),
-               exclusive("sr-imgui-context"))
+               exclusive("sr-imgui-context"),
+               exclusive("sg-reload-generation"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
