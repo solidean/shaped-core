@@ -252,13 +252,10 @@ INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs i
 //
 // What makes this test mean something is the sampler count below: a change that stopped generating samplers would
 // otherwise leave it green while testing nothing.
-TEST("sv - a path-traced textured material builds its sampler group (headless)", nx::config::main_thread)
+INVOCABLE_TEST("sv - a path-traced textured material builds its sampler group (headless)",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

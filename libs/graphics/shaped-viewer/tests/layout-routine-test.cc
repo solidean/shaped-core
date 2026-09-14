@@ -177,7 +177,8 @@ INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport"
     CHECK(output.width() == 32);
 }
 
-TEST("sv - a group is created against a layout whose static samplers it does not resupply")
+INVOCABLE_TEST("sv - a group is created against a layout whose static samplers it does not resupply",
+               (sg::context_handle const& ctx_h))
 {
     // The pairing the two halves of the API have to make: `acquire_binding_group_layout<G>(runtime_samplers)`
     // bakes a sampler G left dynamic into the layout, and `create_binding_group(layout, G{...})` then gathers
@@ -185,11 +186,7 @@ TEST("sv - a group is created against a layout whose static samplers it does not
     //
     // dx12 refuses a static sampler supplied per group outright, so without the drop this create throws --
     // which is what makes the samplers overload unusable with the create rather than merely redundant.
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     using group = sv::shaders::layout_bindings;
 
