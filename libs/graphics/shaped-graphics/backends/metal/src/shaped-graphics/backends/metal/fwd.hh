@@ -1,0 +1,24 @@
+#pragma once
+
+#include <shaped-graphics/fwd.hh> // sg's door to <memory>, which the context's command-list methods need
+
+/// Forward declarations for the Metal backend.
+
+namespace sg::backend::metal
+{
+class autorelease_scope; // an NSAutoreleasePool held for a block (see metal_common.hh)
+struct metal_config;     // device creation knobs (see metal_context.hh)
+class metal_context;
+/// A backend-typed context handle: an sg::context_handle known to point at a metal_context.
+/// For code already committed to metal, the backend's own tests above all; a caller drives the abstract sg::context_handle.
+using metal_context_handle = std::shared_ptr<metal_context>;
+class metal_command_list;
+class metal_epoch_system;
+
+// The resource types — metal_buffer, metal_texture, metal_memory_heap — are declared by the milestone that adds them.
+// A handle typedef to a class nobody has written is a promise about a shape that has not been designed yet.
+
+/// The domain every recording site in the Metal backend is attributed to.
+/// It shadows sg's, so a backend message is never mistaken for a portable one.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace sg::backend::metal

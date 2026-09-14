@@ -182,6 +182,14 @@ if(WIN32)
     list(APPEND _sg_test_drivers dx12)
 endif()
 
+# APPLE covers macOS and iOS alike. metal-cpp is vendored, so the only thing that can be absent is the platform —
+# but the target is gated in extern/CMakeLists.txt, so check for it rather than re-deriving the condition.
+if(APPLE AND TARGET metal-cpp)
+    add_subdirectory(backends/metal)
+    list(APPEND _sg_backends shaped-graphics-metal)
+    list(APPEND _sg_test_drivers metal)
+endif()
+
 if(NOT EMSCRIPTEN)
     # Optional: the vulkan backend links the loader, so it only builds when the SDK is present.
     find_package(Vulkan)
@@ -262,6 +270,9 @@ if(SC_BUILD_TESTS)
         endif()
         if(Vulkan_FOUND)
             target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
+        endif()
+        if(APPLE AND TARGET metal-cpp)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/metal-entry.cc)
         endif()
     endif()
 

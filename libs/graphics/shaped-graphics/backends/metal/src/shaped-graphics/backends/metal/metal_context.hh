@@ -1,0 +1,187 @@
+#pragma once
+
+#include <clean-core/error/result.hh>
+#include <clean-core/function/unique_function.hh>
+#include <clean-core/string/string_view.hh>
+#include <shaped-graphics/backends/metal/fwd.hh>
+#include <shaped-graphics/backends/metal/metal_command_list.hh>
+#include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/backends/metal/metal_epoch.hh>
+#include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
+#include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/fwd.hh>
+
+/// Per-backend creation config for the Metal context.
+///
+/// Empty so far, and the notable absence is a validation knob.
+/// dx12 and vulkan each take one, and Metal has no equivalent to switch on: its API and shader validation layers are
+/// enabled by the `MTL_DEBUG_LAYER` / `MTL_SHADER_VALIDATION` environment variables, read before any code of ours runs,
+/// and they log and abort rather than calling back.
+/// Settling what a listener here could even be told is the next piece of work on this backend — see
+/// libs/graphics/shaped-graphics/backends/metal/readme.md.
+struct sg::backend::metal::metal_config
+{
+};
+
+/// Metal implementation of sg::context, on Metal 4.
+///
+/// The bodies live in the sibling metal_*.cc files; metal_context.create.cc owns bring-up.
+/// Only the device, the queue and the epoch timelines are real so far — every resource and recording seam asserts.
+/// See libs/graphics/shaped-graphics/docs/writing-a-backend.md for the milestone order.
+class sg::backend::metal::metal_context final : public sg::context
+{
+    // metal consumes compiled Metal libraries only.
+    static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::metal_lib};
+
+public:
+    /// Takes ownership of every argument; `create_metal_context` is what assembles them.
+    ///
+    /// The two events are handed over rather than an assembled epoch system, because that system owns a mutex and is
+    /// therefore neither copyable nor movable — so it is built in place here.
+    metal_context(MTL::Device* device,
+                  MTL4::CommandQueue* queue,
+                  MTL::SharedEvent* epoch_event,
+                  MTL::SharedEvent* submission_event);
+    ~metal_context() override;
+
+    // create_metal_context fills this in once it has picked a device.
+    using sg::context::set_adapter_info;
+
+    [[nodiscard]] MTL::Device* device() const { return _device; }
+    [[nodiscard]] MTL4::CommandQueue* queue() const { return _queue; }
+    [[nodiscard]] metal_epoch_system& epochs() { return _epochs; }
+
+    /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
+    [[nodiscard]] bool supports(sg::feature f) const override;
+
+    // The sg::context surface.
+    // Everything not listed here is still a stub in metal_context.cc.
+    [[nodiscard]] sg::epoch current_epoch() const override { return _epochs.current(); }
+    [[nodiscard]] sg::epoch completed_epoch() const override { return _epochs.completed(); }
+    void advance_epoch() override;
+    [[nodiscard]] int in_flight_epoch_count() override { return _epochs.in_flight_count(); }
+    [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override
+    {
+        return _epochs.is_submission_complete(token);
+    }
+
+    sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override;
+    void drop_command_list(std::unique_ptr<sg::command_list> cmd) override;
+
+    void shutdown() override;
+
+private:
+    // Runs shutdown() before the base dtor asserts it, and swallows what shutdown() throws — a destructor reached while
+    // a device-loss exception is unwinding would otherwise call std::terminate.
+    void shutdown_no_throw() noexcept;
+
+    [[nodiscard]] cc::result<std::unique_ptr<sg::command_list>> try_create_command_list() override;
+
+    void wait_for_epoch(sg::epoch e) override { _epochs.wait_for(e); }
+    void wait_for_next_inflight_epoch() override { _epochs.wait_for_next_inflight(); }
+    void retire_completed_epochs() override { _epochs.retire_completed(); }
+    void block_until_submissions_complete() override { _epochs.block_until_submissions_complete(); }
+    void block_until_transfers_drained() override {}
+
+    [[nodiscard]] cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc) override;
+
+    [[nodiscard]] texture_layout async_ready_layout(async_direction direction) const override;
+    [[nodiscard]] texture_layout current_texture_layout(raw_texture_handle const& texture,
+                                                        subresource_range const& range) const override;
+
+    void async_upload_bytes_to_buffer(raw_buffer_handle buffer,
+                                      cc::pinned_data<byte const> data,
+                                      isize offset_in_bytes) override;
+    void async_upload_bytes_to_texture(raw_texture_handle texture,
+                                       cc::pinned_data<byte const> data,
+                                       subresource_index const& subresource,
+                                       texture_region const& region) override;
+    [[nodiscard]] bytes_future async_download_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                isize offset_in_bytes,
+                                                                isize size_in_bytes) override;
+    [[nodiscard]] bytes_future async_download_bytes_from_texture(raw_texture_handle texture,
+                                                                 subresource_index const& subresource,
+                                                                 texture_region const& region) override;
+
+    [[nodiscard]] stream_upload_handle stream_bytes_to_buffer(raw_buffer_handle buffer,
+                                                              cc::pinned_data<byte const> data,
+                                                              isize offset_in_bytes,
+                                                              stream_scope scope) override;
+    [[nodiscard]] stream_upload_handle stream_bytes_to_texture(raw_texture_handle texture,
+                                                               cc::pinned_data<byte const> data,
+                                                               subresource_index const& subresource,
+                                                               texture_region const& region,
+                                                               stream_scope scope) override;
+    [[nodiscard]] stream_upload_handle stream_source_to_buffer(raw_buffer_handle buffer,
+                                                               std::unique_ptr<stream_source> source,
+                                                               isize offset_in_bytes,
+                                                               stream_scope scope) override;
+    [[nodiscard]] stream_upload_handle stream_source_to_texture(raw_texture_handle texture,
+                                                                std::unique_ptr<stream_source> source,
+                                                                subresource_index const& subresource,
+                                                                texture_region const& region,
+                                                                stream_scope scope) override;
+    [[nodiscard]] stream_download_handle stream_bytes_from_buffer(raw_buffer_handle buffer,
+                                                                  isize offset_in_bytes,
+                                                                  isize size_in_bytes,
+                                                                  stream_scope scope) override;
+    [[nodiscard]] stream_download_handle stream_bytes_from_texture(raw_texture_handle texture,
+                                                                   subresource_index const& subresource,
+                                                                   texture_region const& region,
+                                                                   stream_scope scope) override;
+    [[nodiscard]] stream_download_handle stream_to_sink_from_buffer(raw_buffer_handle buffer,
+                                                                    stream_sink sink,
+                                                                    isize offset_in_bytes,
+                                                                    isize size_in_bytes,
+                                                                    stream_scope scope) override;
+    [[nodiscard]] stream_download_handle stream_to_sink_from_texture(raw_texture_handle texture,
+                                                                     stream_sink sink,
+                                                                     subresource_index const& subresource,
+                                                                     texture_region const& region,
+                                                                     stream_scope scope) override;
+
+    [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes,
+                                                                      buffer_usages usage,
+                                                                      allocation_info const& alloc) override;
+    [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
+                                                                        allocation_info const& alloc) override;
+    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override;
+
+    [[nodiscard]] cc::result<binding_group_layout_handle> try_create_binding_group_layout(
+        cc::span<binding const> bindings,
+        cc::span<named_sampler const> static_samplers,
+        lifetime_scope scope) override;
+    [[nodiscard]] cc::result<pipeline_layout_handle> try_create_pipeline_layout(pipeline_layout_description const& desc,
+                                                                                lifetime_scope scope) override;
+    [[nodiscard]] cc::result<compute_pipeline_handle> try_create_compute_pipeline(compute_pipeline_description const& desc,
+                                                                                  lifetime_scope scope) override;
+    [[nodiscard]] cc::result<raster_pipeline_handle> try_create_raster_pipeline(raster_pipeline_description const& desc,
+                                                                                lifetime_scope scope) override;
+    [[nodiscard]] cc::result<raytracing_pipeline_handle> try_create_raytracing_pipeline(
+        raytracing_pipeline_description const& desc,
+        lifetime_scope scope) override;
+    [[nodiscard]] cc::result<raytracing_shader_table_handle> try_create_raytracing_shader_table(
+        raytracing_shader_table_description const& desc,
+        lifetime_scope scope) override;
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<named_view const> views,
+                                                                            cc::span<named_sampler const> samplers,
+                                                                            lifetime_scope scope) override;
+    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
+        binding_group_layout_handle layout,
+        lifetime_scope scope) override;
+
+    MTL::Device* _device = nullptr;
+    MTL4::CommandQueue* _queue = nullptr;
+    metal_epoch_system _epochs;
+};
+
+namespace sg
+{
+/// Creates a context on the Metal backend.
+///
+/// Fails, naming what is missing, on anything below the backend's floor: macOS / iOS 26 for the Metal 4 API, and a
+/// device in the Metal 4 GPU family — Apple silicon M1 and later, A14 and later.
+/// A host with no Metal device at all fails the same way, which is what lets a test SKIP rather than pass silently.
+[[nodiscard]] cc::result<context_handle> create_metal_context(backend::metal::metal_config const& config = {});
+} // namespace sg
