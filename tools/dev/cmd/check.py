@@ -163,6 +163,17 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             test_name="the binding corpus parses as it says it does",
             timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
         )
+
+        # This gate names ONE test in one binary, and a runner told to filter on a name that matches nothing
+        # exits 0 -- so the step passes having run nothing, and renaming that TEST turns the gate silently green.
+        # Count the cases rather than trust the exit code.
+        ran = sum(r["junit"]["tests"] for r in records if r.get("junit"))
+        if ran == 0:
+            dev.ui.write_line(console.red(
+                "shader-grammar: the corpus test did not run -- this gate selects it by name, so zero cases "
+                "means it was renamed or removed, not that it passed"))
+            return False
+
         return dev.report.summarize_tests(records, presets, ctx.root)
 
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
