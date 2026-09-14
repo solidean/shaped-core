@@ -21,6 +21,12 @@ It drives one test node at a time under a `cc::singlethreaded_scheduler`, in the
 Between drives it pumps the main home and sweeps the thread-pump registry, because a node that hops to main or awaits an unthreaded actor completes only through those.
 That makes it the reproducible-debugging mode: a failure at `-jN` that survives `-j1` with the same `--seed` is a test bug, and one that vanishes is a concurrency bug.
 
+A **hand-built** `test_schedule_config` defaults the other way, to `jobs = 1`.
+Only `create_from_args` starts at 0, so the parallel default belongs to a real run.
+A test that builds its own schedule is usually asserting something about the order it runs in, and nexus' own meta-tests are all of that kind.
+
+Report order never depends on either: results are written into pre-sized slots by index, and the `--verbose` trace is buffered per test and flushed in schedule order.
+
 ## The run seed
 
 **A real run shuffles**: the order tests are handed to their phases, and the order every invocation runs its children in.
@@ -37,12 +43,6 @@ A test that passes only in one order is hiding a dependency, and the printed see
 
 A hand-built `test_schedule_config` does not shuffle, for the same reason it defaults to `jobs = 1`: nexus's own meta-tests assert on order.
 An example prints no seed, since its transcript is its documentation and it runs one body.
-
-A **hand-built** `test_schedule_config` defaults the other way, to `jobs = 1`.
-Only `create_from_args` starts at 0, so the parallel default belongs to a real run.
-A test that builds its own schedule is usually asserting something about the order it runs in, and nexus' own meta-tests are all of that kind.
-
-Report order never depends on either: results are written into pre-sized slots by index, and the `--verbose` trace is buffered per test and flushed in schedule order.
 
 ## A test body runs with no scheduler bound
 

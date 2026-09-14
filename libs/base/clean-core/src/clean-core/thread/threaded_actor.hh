@@ -162,7 +162,6 @@ private:
     // Claimed for one unthreaded cycle, which a hand pump and a sweep may race for.
     cc::atomic<bool> _is_processing = false;
 
-
     template <class... MessageT>
     friend struct threaded_actor;
 };

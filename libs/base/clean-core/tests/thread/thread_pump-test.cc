@@ -271,8 +271,6 @@ TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches 
 }
 
 // Without threads a pool's drive is the only loop there is, so it sweeps the pump its graph waits on.
-// It used to fall out as soon as its own queue and home were dry, reporting a graph no thread could complete while a
-// registered pump held the one delivery it waited on.
 #if !CC_HAS_THREADS
 TEST("cc::thread_pump_all - without threads, a pool's drive sweeps the pump its graph waits on", main_thread, exclusive())
 {

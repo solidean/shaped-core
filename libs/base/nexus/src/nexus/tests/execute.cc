@@ -1013,7 +1013,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
 ///
 /// A single-threaded scheduler alone completes only what it can reach, and two things it cannot reach are exactly what an async test waits on.
 /// A segment homed to main runs only when the main home is pumped, and an unthreaded semantic thread delivers only when the pump registry is swept.
-/// So between drives this services both — the main home only on the main thread, which owns it — and waits briefly when neither had anything.
+/// So between drives this services both — the main home only on the main thread, which owns it — and parks on the node, the pumps and the home when neither had anything.
 void drive_serially(cc::singlethreaded_scheduler& driver, cc::async_node_base& node)
 {
     auto const on_main = cc::current_thread_id() == cc::thread_id::main;

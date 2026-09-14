@@ -517,7 +517,6 @@ TEST("parallel - a main_thread async test runs every segment on main until it ho
 
 TEST("parallel - an async test that hops to main completes under -j1", no_scheduler)
 {
-    // The -j1 driver used to drive nodes on a scheduler that never pumps the main home, and aborted the binary here.
     REQUIRE(cc::current_thread_id() == cc::thread_id::main);
     segment_record r;
     auto const exec = run_one_async({}, r, &hop_to_main_without_the_flag, 1);

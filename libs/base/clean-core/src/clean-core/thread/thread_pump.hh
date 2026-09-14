@@ -10,7 +10,7 @@
 // So a semantic thread with no thread of its own registers a pump here, and every loop that drives such threads — a frame
 // loop, a blocking drive on a scheduler without threads, a shutdown drain — runs the whole registry rather than only the
 // actors it happens to know about.
-// A thread parked in a pool is not such a loop, and never sweeps; see register_thread_pump.
+// With threads, a thread parked in a pool is not such a loop, and never sweeps; see register_thread_pump.
 //
 // That is the point: individual pumping is a deadlock waiting to happen.
 // A wait can only drain what its own library can name, so the next actor added below it, or beside it, deadlocks a build
@@ -70,7 +70,7 @@ namespace cc
 ///
 /// **Who sweeps is the thread that owns the loop driving it** — a frame loop, a test's own pump loop, a blocking drive
 /// on a scheduler without threads, the main thread's loop.
-/// A thread parked in a cc::async_thread_pool never sweeps.
+/// With threads, a thread parked in a cc::async_thread_pool never sweeps.
 /// That is deliberate, and it is what makes an unthreaded component deterministic: were parked pool threads to sweep, every
 /// post to a component would hand its handlers to whichever unrelated thread happened to be parked, racing the loop that
 /// owns it — see "Who drives a pump" in ../../../docs/systems/async.md.

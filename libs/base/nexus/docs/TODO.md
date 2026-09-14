@@ -7,3 +7,6 @@ The shape of what exists is in [parallel-execution](parallel-execution.md) and t
   That is the case homes were built for, and nothing in the tree demonstrates it yet: `sr::window` and sg's present paths still run as they did before homes.
   The console examples in `libs/base/clean-net/examples/` and `libs/data/blob-cache/examples/` are async already.
 
+- **A first `APP` / `COMMAND` consumer.**
+  Nothing outside nexus's own wiring tests declares one yet, and no binary is registered `KINDS tool`.
+  `tools/shaped-linter` is the case the design was built for: a `-core` library, a `main.cc` and a `-test` binary that collapse into one nexus binary with a `COMMAND("lint", default_entry)`.
