@@ -111,17 +111,13 @@ TEST("ssc::dxc shader_cache - a compile persists across cache instances")
     auto store = bcache::blob_cache::create({.path = path, .unthreaded = true});
 
     // Two drivers, both needed: the sweep resolves what the compile is parked on, the drain resumes the compile.
-    // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER,
-    // and bounded, so a compile that can never finish fails the test instead of hanging it.
-    //
-    // Bounded by TIME, not by turns: the registry is process-wide, so a thread blocked in another test may sweep this
-    // store's pump too, and the compile then resumes on that thread's pool while this loop has nothing to do.
+    // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER.
+    // Waits on readiness alone: no pool ever sweeps a pump, so this loop is the only thing that can move the compile.
     auto const settle = [&](auto const& node)
     {
         CC_RECORD_SCOPE("dxc_test.settle");
 
-        auto const deadline = cc::current_time_steady_secs() + 30.0;
-        while (!node->is_ready() && cc::current_time_steady_secs() < deadline)
+        while (!node->is_ready())
         {
             if (!cc::thread_pump_all())
                 cc::this_thread_yield();
