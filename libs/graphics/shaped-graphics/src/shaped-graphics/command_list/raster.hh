@@ -4,6 +4,7 @@
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/index_buffer_view.hh>
 #include <shaped-graphics/resource/vertex_buffer_view.hh>
@@ -133,6 +134,15 @@ public:
     void bind_pipeline(raster_pipeline const& pipeline);
     /// Binds `group` at slot `group_index` of the active pipeline's layout (must match that slot).
     void bind_group(int group_index, binding_group const& group);
+
+    /// Binds `group` at the index the generated group `G` declares, so no call site writes the number.
+    /// The backend still checks that index against the layout the group was built for — this only saves
+    /// spelling it.
+    template <declared_binding_group G>
+    void bind(binding_group const& group)
+    {
+        bind_group(G::group_index, group);
+    }
     /// Binds vertex buffers to consecutive input slots starting at `first_slot` (slot first_slot+i <- views[i]).
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
@@ -185,6 +195,15 @@ public:
 
     void bind_pipeline(raster_pipeline const& pipeline);
     void bind_group(int group_index, binding_group const& group);
+
+    /// Binds `group` at the index the generated group `G` declares, so no call site writes the number.
+    /// The backend still checks that index against the layout the group was built for — this only saves
+    /// spelling it.
+    template <declared_binding_group G>
+    void bind(binding_group const& group)
+    {
+        bind_group(G::group_index, group);
+    }
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
@@ -235,6 +254,15 @@ public:
 
     void bind_pipeline(raster_pipeline const& pipeline);
     void bind_group(int group_index, binding_group const& group);
+
+    /// Binds `group` at the index the generated group `G` declares, so no call site writes the number.
+    /// The backend still checks that index against the layout the group was built for — this only saves
+    /// spelling it.
+    template <declared_binding_group G>
+    void bind(binding_group const& group)
+    {
+        bind_group(G::group_index, group);
+    }
     void bind_vertex_buffers(cc::span<vertex_buffer_view const> views, int first_slot = 0);
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);

@@ -12,6 +12,19 @@ if(NOT (WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12))
     return()
 endif()
 
+# Its own gate passed, so the question left is which backend the build was ASKED for.
+# These path-trace through dx12 + DXR, so a build set to vulkan gets targets that say so.
+sc_resolve_example_backend(_sv_backend _sv_mode SUPPORTS dx12)
+if(_sv_mode STREQUAL "none")
+    return()
+endif()
+if(_sv_mode STREQUAL "stub")
+    foreach(_stem hello-cube load-asset openpbr-spheres)
+        sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
+    endforeach()
+    return()
+endif()
+
 sc_add_single_file_examples(shaped-viewer
     FILES
     hello-cube.cc

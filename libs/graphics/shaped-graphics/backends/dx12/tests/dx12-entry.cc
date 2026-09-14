@@ -28,8 +28,8 @@ TEST("sg dx12 backend - warp")
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
         SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
 
-    auto ctx = dx12::as_test_context(
-        sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp}));
+    auto ctx = dx12::as_test_context(sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp}));
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
@@ -37,13 +37,22 @@ TEST("sg dx12 backend - warp")
         // The driver is the one place that knows which adapter it asked for, so the flag is checked here rather than in a test.
         CHECK(ctx.value()->adapter().is_software);
         nx::invoke_tests("warp", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
     }
 }
 
 TEST("sg dx12 backend - hardware")
 {
-    auto ctx = dx12::as_test_context(
-        sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware}));
+    auto ctx = dx12::as_test_context(sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware}));
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
@@ -53,6 +62,15 @@ TEST("sg dx12 backend - hardware")
     {
         CHECK(!ctx.value()->adapter().is_software);
         nx::invoke_tests("hardware", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
     }
 }
 

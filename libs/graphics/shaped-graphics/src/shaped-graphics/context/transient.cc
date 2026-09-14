@@ -139,6 +139,25 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
 {
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
+
+binding_group_handle context_transient_scope::create_binding_group(binding_group_layout_handle layout,
+                                                                   cc::span<slotted_view const> views,
+                                                                   cc::span<named_sampler const> samplers)
+{
+    auto r = try_create_binding_group(cc::move(layout), views, samplers);
+    if (r.has_value())
+        return cc::move(r.value());
+    if (_ctx.is_device_lost())
+        throw device_lost_exception(_ctx.device_loss_reason());
+    throw binding_group_exception(r.error());
+}
+
+cc::result<binding_group_handle> context_transient_scope::try_create_binding_group(binding_group_layout_handle layout,
+                                                                                   cc::span<slotted_view const> views,
+                                                                                   cc::span<named_sampler const> samplers)
+{
+    return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
+}
 } // namespace sg
 
 namespace sg

@@ -6,14 +6,22 @@
 if(NOT SC_HAS_DXC_COMPILER)
     return()
 endif()
-if(TARGET shaped-graphics-dx12)
-    set(_cube_backend shaped-graphics-dx12)
-    set(_cube_backend_is_dx12 1)
-elseif(TARGET shaped-graphics-vulkan)
-    set(_cube_backend shaped-graphics-vulkan)
-    set(_cube_backend_is_dx12 0)
-else()
+
+# SC_EXAMPLE_BACKEND is declared in the root CMakeLists, with the other SC_* options.
+# This example is the one that supports both, which is what it exists to exercise -- dx12 first under `auto`.
+sc_resolve_example_backend(_cube_backend _cube_mode SUPPORTS dx12 vulkan)
+if(_cube_mode STREQUAL "none")
     return()
+endif()
+if(_cube_mode STREQUAL "stub")
+    sc_add_example_backend_stub(graphics-rotating-cube-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12 vulkan)
+    return()
+endif()
+
+if(_cube_backend STREQUAL "shaped-graphics-dx12")
+    set(_cube_backend_is_dx12 1)
+else()
+    set(_cube_backend_is_dx12 0)
 endif()
 
 sc_add_example(graphics-rotating-cube-example
@@ -39,4 +47,6 @@ sc_add_shader_package(
     SHADERS
         cube.hlsl:vertex:main_vs
         cube.hlsl:fragment:main_ps
+        cube.hlsl:vertex_input:vs_input
+        cube.hlsl:constants:gConstants
 )

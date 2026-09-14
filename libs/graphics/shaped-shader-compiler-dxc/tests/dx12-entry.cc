@@ -30,7 +30,18 @@ TEST("ssc::dxc + dx12 - warp backend")
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
+    {
         nx::invoke_tests("warp", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<sg::backend::dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
+    }
 }
 
 TEST("ssc::dxc + dx12 - hardware backend")
@@ -42,7 +53,18 @@ TEST("ssc::dxc + dx12 - hardware backend")
     else if (ctx.has_error())
         SKIP("no dx12 hardware device");
     else
+    {
         nx::invoke_tests("hardware", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<sg::backend::dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
+    }
 }
 
 // One alias per invocable, so `dev.py test "ssc::dxc + dx12 - <name>"` still selects that one test, on both adapters.

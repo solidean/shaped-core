@@ -78,6 +78,10 @@ void put_binding(cc::vector<byte>& out, binding const& b)
     put_u32(out, u32(b.type));
     put_bool(out, b.block_size.has_value());
     put_i64(out, b.block_size.has_value() ? i64(b.block_size.value()) : 0);
+
+    // A texture's shader-declared dimension is what lets a backend synthesize a dimension-correct null
+    // descriptor for a vacant array element, so a cached shader that dropped it would bind differently
+    // from the one that was compiled.
     put_optional_enum(out, b.texture_dimension);
     put_u32(out, u32(b.visibility.bits));
     put_optional_enum(out, b.storage_format);

@@ -105,6 +105,8 @@ sc_add_shader_package(
     SHADERS
         imgui.hlsl:vertex:main_vs
         imgui.hlsl:fragment:main_ps
+        imgui.hlsl:binding:imgui_bindings
+        imgui.hlsl:constants:gConstants
         blit.hlsl:vertex:main_vs
         blit.hlsl:fragment:main_ps
         box_filter_mipmap.hlsl:compute:main_1d_cs
@@ -132,6 +134,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/gpu-types-test.cc
+        tests/shader-package-test.cc
     )
 
     target_link_libraries(shaped-rendering-test

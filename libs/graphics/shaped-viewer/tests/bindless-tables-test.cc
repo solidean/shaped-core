@@ -30,18 +30,27 @@ TEST("sv - the bindless layout follows the config")
     auto const all = sv::make_bindless_bindings({});
     CHECK(all.size() == isize(sv::bindless_table::count_)); // the defaults declare every table
 
-    // Each table is an array binding at index 0 of its own space, so a category is addressed with no
-    // register-offset math and adding one never renumbers another.
-    auto seen_spaces = cc::vector<u32>();
+    // Every table is an array binding in ONE space — the pass's, from the group these are declared in — laid out
+    // end to end, because an array consumes one index per element.
+    //
+    // That the ranges do not overlap is the property worth checking, and the reason the whole set is declared in
+    // every permutation: a shader declaring a subset would start its first table at t0 and disagree with all of
+    // this.
+    auto next_free = u32(0);
     for (auto const& b : all)
     {
-        CHECK(b.index == 0);
         CHECK(b.count >= 2);
         CHECK(b.is_array());
-        CHECK(b.space.has_value());
-        for (auto const s : seen_spaces)
-            CHECK(s != b.space.value());
-        seen_spaces.push_back(b.space.value());
+
+        REQUIRE(b.space.has_value());
+        CHECK(b.space.value() == u32(sv::bindless_group));
+
+        REQUIRE(b.group_index.has_value());
+        CHECK(b.group_index.value() == u32(sv::bindless_group));
+
+        // Declaration order, so each table begins exactly where the one before it ended.
+        CHECK(b.index == next_free);
+        next_free = b.index + b.count;
     }
 
     // A texture table carries the dimension a backend needs for a dimension-correct null descriptor; the buffer

@@ -6,9 +6,9 @@
 // `Vertices`. Non-indexed: `Vertices` holds 3 positions per triangle and `Indices` is a bound-but-unread
 // stand-in, since a binding group must cover every declared resource.
 // Which one is live rides in the caller's frame constants — the trace binds one mesh per view.
-
-StructuredBuffer<float3> Vertices : register(t2);
-StructuredBuffer<uint> Indices : register(t3);
+//
+// The two buffers are PARAMETERS rather than globals: they belong to the caller's binding group, and this file
+// is the geometry, not the group. DXC inlines this, so passing them costs nothing.
 
 struct Triangle3
 {
@@ -19,18 +19,18 @@ struct Triangle3
 
 // The three object-space corners of triangle `prim`.
 // `[branch]` is load-bearing on the non-indexed path: a flattened select would read `Indices` out of range.
-Triangle3 mesh_triangle(uint prim, bool is_indexed)
+Triangle3 mesh_triangle(StructuredBuffer<float3> vertices, StructuredBuffer<uint> indices, uint prim, bool is_indexed)
 {
     uint base = prim * 3;
     uint3 i;
     [branch] if (is_indexed)
-        i = uint3(Indices[base + 0], Indices[base + 1], Indices[base + 2]);
+        i = uint3(indices[base + 0], indices[base + 1], indices[base + 2]);
     else
         i = uint3(base + 0, base + 1, base + 2);
 
     Triangle3 t;
-    t.v0 = Vertices[i.x];
-    t.v1 = Vertices[i.y];
-    t.v2 = Vertices[i.z];
+    t.v0 = vertices[i.x];
+    t.v1 = vertices[i.y];
+    t.v2 = vertices[i.z];
     return t;
 }

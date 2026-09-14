@@ -208,6 +208,10 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
   The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
+* `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12` or `vulkan`.
+  `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
+  **Every graphical example reads it**: a backend that was not built is a configure error, and one an example does not support gives a stub target that says so and exits non-zero.
+  See [docs/platforms.md](docs/platforms.md#example-backend-sc_example_backend).
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.
   All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.

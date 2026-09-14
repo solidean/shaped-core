@@ -366,7 +366,10 @@ TEST("sv - the rendering context is created once and shared")
         [&builds]
         {
             ++builds;
-            return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+            // The debug layer, because this is usually the binary's FIRST device and the layer is process-wide:
+            // a later context asking for it would be refused, the whole suite running unvalidated behind it.
+            return sg::create_dx12_context(
+                {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
         });
 
     auto const first = sv::acquire_viewer_context();

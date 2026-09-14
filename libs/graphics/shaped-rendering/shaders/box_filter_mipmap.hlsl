@@ -15,10 +15,27 @@
 // second tap keeps it inside the level instead of sampling the border.
 #define HI(base, size) min((base) + 1, (size) - 1)
 
-// -- 1D --------------------------------------------------------------------------------------------------
+#pragma sc group 0
+namespace mipmap_bindings
+{
+    Texture1D<float4> gSource1D;
+    RWTexture1D<float4> gTarget1D;
+    Texture1DArray<float4> gSource1DArray;
+    RWTexture1DArray<float4> gTarget1DArray;
+    Texture2D<float4> gSource2D;
+    RWTexture2D<float4> gTarget2D;
+    Texture2DArray<float4> gSource2DArray;
+    RWTexture2DArray<float4> gTarget2DArray;
+    Texture3D<float4> gSource3D;
+    RWTexture3D<float4> gTarget3D;
+}
 
-Texture1D<float4> gSource1D : register(t0);
-RWTexture1D<float4> gTarget1D : register(u0);
+// Every entry point below reads its own pair unqualified, as it did when each pair wrote `t0`/`u0` by hand.
+// What changed is that the ten now have ten distinct addresses rather than five colliding pairs that only
+// worked because DXC numbers what an entry point references -- which is the collision this pass exists to end.
+using namespace mipmap_bindings;
+
+// -- 1D --------------------------------------------------------------------------------------------------
 
 [numthreads(64, 1, 1)] void main_1d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -35,9 +52,6 @@ RWTexture1D<float4> gTarget1D : register(u0);
 }
 
 // -- 1D array --------------------------------------------------------------------------------------------
-
-Texture1DArray<float4> gSource1DArray : register(t0);
-RWTexture1DArray<float4> gTarget1DArray : register(u0);
 
 [numthreads(64, 1, 1)] void main_1d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -56,9 +70,6 @@ RWTexture1DArray<float4> gTarget1DArray : register(u0);
 }
 
 // -- 2D --------------------------------------------------------------------------------------------------
-
-Texture2D<float4> gSource2D : register(t0);
-RWTexture2D<float4> gTarget2D : register(u0);
 
 [numthreads(8, 8, 1)] void main_2d_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -80,9 +91,6 @@ RWTexture2D<float4> gTarget2D : register(u0);
 }
 
 // -- 2D array (also every cube and cube array, whose UAV is a 2D array of faces) ----------------------------
-
-Texture2DArray<float4> gSource2DArray : register(t0);
-RWTexture2DArray<float4> gTarget2DArray : register(u0);
 
 [numthreads(8, 8, 1)] void main_2d_array_cs(uint3 id : SV_DispatchThreadID)
 {
@@ -106,9 +114,6 @@ RWTexture2DArray<float4> gTarget2DArray : register(u0);
 }
 
 // -- 3D --------------------------------------------------------------------------------------------------
-
-Texture3D<float4> gSource3D : register(t0);
-RWTexture3D<float4> gTarget3D : register(u0);
 
 [numthreads(4, 4, 4)] void main_3d_cs(uint3 id : SV_DispatchThreadID)
 {

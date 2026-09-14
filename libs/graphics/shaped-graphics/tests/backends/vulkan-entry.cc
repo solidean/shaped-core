@@ -47,6 +47,13 @@ TEST("sg vulkan backend", exclusive("slib-shader-library"), exclusive("sg-reload
     {
         fail_on_validation_messages(ctx.value());
         nx::invoke_tests("vulkan", ctx.value());
+
+        // A device loss during our own tests is a defect, not an environment quirk to tolerate.
+        // Vulkan has no equivalent of dx12's poll, so this sees only a loss some operation already noticed --
+        // which every submitting test does.
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
     }
 }
 

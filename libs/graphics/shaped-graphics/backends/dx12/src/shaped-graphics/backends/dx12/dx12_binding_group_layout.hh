@@ -16,8 +16,10 @@
 class sg::backend::dx12::dx12_binding_group_layout final : public sg::binding_group_layout
 {
 public:
-    dx12_binding_group_layout(cc::hash128 structural_hash, cc::vector<sg::binding> bindings)
-      : sg::binding_group_layout(structural_hash, cc::move(bindings))
+    dx12_binding_group_layout(cc::hash128 structural_hash,
+                              cc::vector<sg::binding> bindings,
+                              cc::vector<sg::named_sampler> static_samplers)
+      : sg::binding_group_layout(structural_hash, cc::move(bindings), cc::move(static_samplers))
     {
     }
 
@@ -39,6 +41,13 @@ public:
 
     cc::vector<slot> sampler_slots;   // dynamic sampler bindings, in declaration order
     int sampler_descriptor_count = 0; // descriptors the SAMPLER table holds
+
+    /// For each position in `bindings()`, where that binding sits in `view_slots` or in `sampler_slots`.
+    ///
+    /// A binding_slot is a position in `bindings()`, and this table is split in two, so the two indices part
+    /// company as soon as a sampler interleaves with a view.
+    /// -1 for a static sampler, which is in neither table: it lives in the root signature.
+    cc::vector<int> slot_by_binding;
 
     // Descriptor ranges, in this group's table space, plus static sampler descs — assembled into the root signature by dx12_pipeline_layout.
     // The range vectors must outlive its serialization, which the pipeline layout holding this group layout alive guarantees.
