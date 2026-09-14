@@ -134,7 +134,10 @@ void draw_test_window()
 }
 } // namespace
 
-INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target",
+               (sg::context_handle const& ctx),
+               exclusive("slib-shader-library"),
+               exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
@@ -155,7 +158,9 @@ INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target", (s
 }
 
 INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
-               (sg::context_handle const& ctx))
+               (sg::context_handle const& ctx),
+               exclusive("slib-shader-library"),
+               exclusive("sr-imgui-context"))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
     // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
@@ -182,7 +187,10 @@ INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on 
     CHECK(pixel_at(shifted, 125, 125) == byte(0));
 }
 
-INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
+               (sg::context_handle const& ctx),
+               exclusive("slib-shader-library"),
+               exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
@@ -199,7 +207,10 @@ INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing", (sg::context
     CHECK(any_pixel_drawn(f->read_back()));
 }
 
-INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
+               (sg::context_handle const& ctx),
+               exclusive("slib-shader-library"),
+               exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)

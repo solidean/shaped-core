@@ -15,6 +15,7 @@
 #include <utility>
 
 // The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated into the build dir and private to this binary.
+#include <nexus/async-test.hh>
 #include <sg_test_shaders.hh>
 
 using namespace cc::primitive_defines;
@@ -302,9 +303,9 @@ INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache do
     ctx->drop_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
-               (sg::context_handle const& ctx),
-               exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx != nullptr);
 
@@ -339,7 +340,7 @@ INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
     auto const future = down->download.data_from_buffer<u32>(out.raw(), 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));

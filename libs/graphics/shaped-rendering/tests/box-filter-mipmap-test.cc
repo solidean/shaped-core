@@ -1,3 +1,5 @@
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
@@ -39,7 +41,9 @@ void prewarm_every_variant(sg::context& ctx)
 }
 } // namespace
 
-INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -95,7 +99,7 @@ INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::cont
     ctx.submit_command_list(cc::move(cmd));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 namespace
@@ -144,7 +148,9 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 
 // The shapes rather than the sizes are what this covers: a cube and a 1D array both index their slice on an axis a
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
-INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -191,7 +197,7 @@ INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_1d_array) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Every generated level of every slice, read back in one list.
     auto dl = ctx.create_command_list();
@@ -205,7 +211,7 @@ INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::
                 dl->download.bytes_from_texture(tex_1d_array.raw(), {.mip_level = level, .array_layer = slice}));
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Averaging equal texels reproduces them exactly, so every generated level of a face is that face's own value —
     // and a face the dispatch never covered still holds the sentinel.
@@ -221,7 +227,9 @@ INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::
 
 // An odd extent is where the halving rule stops being obvious: the second tap clamps to the level's edge rather
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
-INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -249,14 +257,14 @@ INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
     auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Level 1 averages each pair of the base level; level 2 has one texel left over three, so its second tap
     // clamps to the level's last texel and the third is dropped.

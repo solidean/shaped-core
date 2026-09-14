@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -54,7 +56,8 @@ INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::co
     CHECK(tick.is_idle());
 }
 
-INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one pass", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one pass",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -127,13 +130,13 @@ INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Reaching here means every pipeline variant built and the whole list recorded and ran.
     CHECK(output.width() == output_size[0]);
 }
 
-INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -171,7 +174,7 @@ INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport"
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     CHECK(output.width() == 32);
 }

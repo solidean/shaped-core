@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
 #include <clean-core/common/utility.hh> // CC_DEFER
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;

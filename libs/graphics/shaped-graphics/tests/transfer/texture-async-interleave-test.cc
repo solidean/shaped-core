@@ -1,6 +1,8 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -82,7 +84,8 @@ cc::optional<cc::pinned_data<byte const>> read_back(sg::context_handle const& ct
 }
 } // namespace
 
-INVOCABLE_TEST("sg - async texture upload composes after a list that wrote the texture", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - async texture upload composes after a list that wrote the texture",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
@@ -99,17 +102,18 @@ INVOCABLE_TEST("sg - async texture upload composes after a list that wrote the t
     ctx->upload.bytes_to_texture(tex, pinned_pattern(59));
 
     auto const bytes_future = ctx->download.bytes_from_texture(tex);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = bytes_future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(matches(bytes.value(), 59)).context("the async upload did not compose after the list's write");
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-ready, and a later list transitions out of it",
-               (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-ready, and a later list transitions out "
+                     "of it",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
@@ -126,7 +130,7 @@ INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-ready, a
     }
 
     auto const first_future = ctx->download.bytes_from_texture(tex);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const first = first_future.try_get_bytes();
     REQUIRE(first.has_value());
     CHECK(matches(first.value(), 13));
@@ -143,10 +147,10 @@ INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-ready, a
     CHECK(matches(second.value(), 29)).context("the texture did not survive an async transfer taken in between");
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg - prepare_for_async settles the layout the transfer needs", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - prepare_for_async settles the layout the transfer needs", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
@@ -163,16 +167,16 @@ INVOCABLE_TEST("sg - prepare_for_async settles the layout the transfer needs", (
     }
 
     auto const bytes_future = ctx->download.bytes_from_texture(tex);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = bytes_future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(matches(bytes.value(), 41));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list finds it", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list finds it", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
@@ -193,11 +197,11 @@ INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list finds it
     CHECK(matches(bytes.value(), 67));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, and the second submit",
-               (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, and the second submit",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
@@ -219,15 +223,15 @@ INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, and the 
 
     ctx->submit_command_list(cc::move(writer));
     auto const settled = ctx->download.bytes_from_texture(tex);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     REQUIRE(settled.try_get_bytes().has_value());
     ctx->submit_command_list(cc::move(reader));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(matches(bytes.value(), 83));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }

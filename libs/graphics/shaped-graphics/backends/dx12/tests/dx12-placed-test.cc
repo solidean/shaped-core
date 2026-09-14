@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -20,7 +22,8 @@ isize align_up(isize value, isize alignment)
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - two placed buffers share one heap without aliasing", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - two placed buffers share one heap without aliasing",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -61,9 +64,9 @@ INVOCABLE_TEST("sg dx12 - two placed buffers share one heap without aliasing", (
     auto future_b = down->download.bytes_from_buffer(buf_b, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes_a = future_a.try_get_bytes();
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
@@ -82,7 +85,7 @@ INVOCABLE_TEST("sg dx12 - two placed buffers share one heap without aliasing", (
     CHECK(ok_b);
 }
 
-INVOCABLE_TEST("sg dx12 - placed buffer keeps its heap alive", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - placed buffer keeps its heap alive", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -112,7 +115,7 @@ INVOCABLE_TEST("sg dx12 - placed buffer keeps its heap alive", (dx12::dx12_conte
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[100] == byte(100));

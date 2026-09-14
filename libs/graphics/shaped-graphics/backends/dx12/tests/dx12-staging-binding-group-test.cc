@@ -7,6 +7,9 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See that file for the dxc command.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // What only a real device can answer about staging_binding_group: that the descriptors a snapshot copies out
@@ -118,7 +121,8 @@ INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx12_con
     CHECK(holds_doubled(ctx, second));
 }
 
-INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it",
+                     (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -143,7 +147,7 @@ INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it",
     // descriptors would have been recycled and the bind would trip its epoch tripwire.
     for (int i = 0; i < 3; ++i)
         ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     dispatch_through(ctx, *pipeline, *group);
     CHECK(holds_doubled(ctx, buf));

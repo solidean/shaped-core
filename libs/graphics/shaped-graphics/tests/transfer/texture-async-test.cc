@@ -2,6 +2,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -68,7 +70,7 @@ bool matches(cc::span<byte const> bytes, int salt)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_transfer_texture(ctx);
@@ -77,7 +79,7 @@ INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg::conte
     ctx->upload.bytes_to_texture(tex, pinned_pattern(k_bytes, 11));
 
     auto const back_future = ctx->download.bytes_from_texture(tex);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const back = back_future.try_get_bytes();
     REQUIRE(back.has_value());
     CHECK(matches(back.value(), 11));
@@ -89,7 +91,7 @@ INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg::conte
 // The drop-before-stage race cannot be forced from the public API, but the release invariant must hold either way.
 // A kept texture's later transfer drives the copy timeline past the dropped one's value, since the actor processes
 // jobs in order.
-INVOCABLE_TEST("sg - async upload to a dropped texture still releases it", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - async upload to a dropped texture still releases it", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -104,14 +106,14 @@ INVOCABLE_TEST("sg - async upload to a dropped texture still releases it", (sg::
 
     ctx->upload.bytes_to_texture(keep, pinned_pattern(k_bytes, 47));
     auto const kept = ctx->download.bytes_from_texture(keep);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     REQUIRE(kept.try_get_bytes().has_value());
 
     // Two advances, so the epoch the dropped texture died in is fully retired and swept.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     ctx->process_completed_epochs();
 
     CHECK(released->load(std::memory_order_acquire));

@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -13,7 +15,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -38,9 +40,9 @@ INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle
 
     c.submit_command_list(cc::move(cmd));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const tick1 = t1.try_get_ticks();
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const tick0 = t0.try_get_ticks();
     REQUIRE(tick0.has_value());
     REQUIRE(tick1.has_value());
@@ -57,7 +59,7 @@ INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_handle
     CHECK(s1.value() - s0.value() >= 0.0);
 }
 
-INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -77,7 +79,7 @@ INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_co
 
     // The last query lives in the second heap; the actor drains heaps in submission order, so waiting on
     // it implies the first heap's readback has landed too.
-    c.block_until_idle();
+    co_await c.idle_completion();
     REQUIRE(ts.back().try_get_ticks().has_value());
 
     // Sample across the heap boundary: last slot of heap 0, first slot of heap 1, and the final slot.
@@ -96,7 +98,7 @@ INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::dx12_co
     }
 }
 
-INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -111,7 +113,7 @@ INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::
     // A dropped list never resolves: the handle stays valid but never becomes ready, and blocking fails
     // instead of hanging (like a cancelled download).
     CHECK(!t.is_ready());
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(!t.try_get_ticks().has_value());
 
     // The heap returned to the pool: a subsequent list records + reads back fine.
@@ -119,6 +121,6 @@ INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (dx12::
     REQUIRE(cmd2 != nullptr);
     auto t2 = cmd2->query.record_gpu_timestamp();
     c.submit_command_list(cc::move(cmd2));
-    c.block_until_idle();
+    co_await c.idle_completion();
     REQUIRE(t2.try_get_ticks().has_value());
 }

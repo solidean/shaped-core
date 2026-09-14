@@ -7,6 +7,9 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See dx12-compute-test.cc.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // Exercises the sg-level built-in cache (ctx.cached) end to end: group-layout and pipeline-layout
@@ -37,8 +40,8 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -89,7 +92,7 @@ INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline la
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));

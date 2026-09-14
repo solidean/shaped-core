@@ -2,6 +2,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
@@ -94,7 +96,7 @@ INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::contex
     CHECK(transient_round_trip(ctx, 0));
 }
 
-INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -123,9 +125,9 @@ INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg::conte
     auto future_b = down->download.bytes_from_buffer(b, 0, 128);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes_a = future_a.try_get_bytes();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes_b = future_b.try_get_bytes();
     REQUIRE(bytes_a.has_value());
     REQUIRE(bytes_b.has_value());
@@ -167,7 +169,7 @@ INVOCABLE_TEST("sg - transient buffers of different usages in one epoch each lan
     CHECK(buffers.size() == 15);
 }
 
-INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -177,8 +179,8 @@ INVOCABLE_TEST("sg - transient buffer expires once its epoch passes", (sg::conte
     CHECK(!buf->is_expired());
 
     ctx->advance_epoch();
-    ctx->block_until_idle();  // its epoch has passed -> auto-expired at advance
-    CHECK(buf->is_expired()); // using it now (transfer / binding) would be a hard error
+    co_await ctx->idle_completion(); // its epoch has passed -> auto-expired at advance
+    CHECK(buf->is_expired());        // using it now (transfer / binding) would be a hard error
     CHECK(!buf->is_valid());
 }
 

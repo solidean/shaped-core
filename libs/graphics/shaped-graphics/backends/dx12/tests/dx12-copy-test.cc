@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -14,7 +16,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -43,7 +45,7 @@ INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle c
     auto future = down->download.bytes_from_buffer(dst, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
@@ -54,7 +56,7 @@ INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_handle c
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -85,7 +87,7 @@ INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle 
     auto future = down->download.bytes_from_buffer(dst, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
@@ -96,7 +98,7 @@ INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_handle 
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -123,7 +125,7 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_ha
     auto future = down->download.data_from_buffer<int>(dst, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
@@ -131,7 +133,8 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_context_ha
     CHECK(data.value()[3] == 8);
 }
 
-INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -159,7 +162,7 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets", (
     auto future = down->download.data_from_buffer<int>(dst, 4, 3);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 3);
@@ -168,7 +171,7 @@ INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets", (
     CHECK(data.value()[2] == 14); // src[4]
 }
 
-INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -197,7 +200,7 @@ INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context
     auto future = down->download.bytes_from_buffer(buf, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);

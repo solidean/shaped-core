@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -41,7 +42,7 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
+ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
 {
     // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
@@ -53,11 +54,11 @@ TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
     }
 }
 
-TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
+ASYNC_TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
 {
     auto ctx
         = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
@@ -69,7 +70,7 @@ TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
     }
 }
 

@@ -3,6 +3,8 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
@@ -33,8 +35,8 @@ namespace dx12 = sg::backend::dx12;
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own timeline",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own timeline",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -79,10 +81,10 @@ INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own timeline
 
     // And the bytes still land, which is the point of all of it.
     auto const back_a_future = c.download.bytes_from_buffer(a, 0, 1024);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const back_a = back_a_future.try_get_bytes();
     auto const back_b_future = c.download.bytes_from_buffer(b, 0, 1024);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const back_b = back_b_future.try_get_bytes();
     REQUIRE(back_a.has_value());
     REQUIRE(back_b.has_value());
@@ -90,8 +92,8 @@ INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own timeline
     CHECK(back_b.value()[1023] == bytes_b[1023]);
 }
 
-INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated upload complete",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated upload complete",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -117,7 +119,7 @@ INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated upload
     // Every byte of it must still arrive: on the shared timeline the readback's wait was satisfied by the stream's
     // signal, so it read a buffer whose later windows had not run yet.
     auto const back_future = c.download.bytes_from_buffer(slow, 0, isize(big.size()));
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const back = back_future.try_get_bytes();
     REQUIRE(back.has_value());
     bool matches = true;

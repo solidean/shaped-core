@@ -1,5 +1,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -23,7 +25,7 @@ sg::raw_buffer_handle make_copy_buffer(sg::context_handle const& ctx, isize size
 }
 } // namespace
 
-INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -41,7 +43,7 @@ INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ct
     auto future = cmd->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 256);
@@ -52,7 +54,7 @@ INVOCABLE_TEST("sg - copies a buffer in one list", (sg::context_handle const& ct
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -77,13 +79,13 @@ INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_handle
     auto future = down->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[200] == pattern(200));
 }
 
-INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 256);
@@ -102,7 +104,7 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const
     auto future = cmd->download.bytes_from_buffer(dst, 128, 64);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
@@ -116,7 +118,7 @@ INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const
 // A same-buffer copy is the one op that reads and writes one resource at once.
 // It must be the FIRST use of the buffer in its list, which is what the fuzz test found: with nothing in flight the tracker used to skip the barrier and let the backend infer the access,
 // and D3D12 can only infer one — it assumed COPY_DEST and rejected the source read.
-INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_copy_buffer(ctx, 256);
@@ -138,7 +140,7 @@ INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::
     auto future = cmd->download.bytes_from_buffer(buf, 128, 64);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == 64);
@@ -149,7 +151,7 @@ INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, isize(8) * sizeof(int));
@@ -165,7 +167,7 @@ INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ct
     auto future = cmd->download.data_from_buffer<int>(dst, 0, 4);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == 4);
@@ -173,7 +175,7 @@ INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ct
     CHECK(data.value()[3] == 6);
 }
 
-INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const src = make_copy_buffer(ctx, 16);
@@ -195,7 +197,7 @@ INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::cont
     auto future = cmd->download.bytes_from_buffer(dst, 0, 16);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     bool untouched = true;

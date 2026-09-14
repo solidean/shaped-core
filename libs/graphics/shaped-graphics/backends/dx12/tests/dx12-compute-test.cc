@@ -7,6 +7,9 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See that file for the dxc command.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // End-to-end compute bind path: build a compiled_shader from the embedded blob plus hand-authored reflection.
@@ -40,7 +43,7 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -81,7 +84,7 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     REQUIRE(data.value().size() == isize(count));

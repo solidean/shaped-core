@@ -50,18 +50,18 @@ INVOCABLE_TEST("sg - accepts at least one shader format", (sg::context_handle co
     }
 }
 
-INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     auto const before = ctx->current_epoch();
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(u64(ctx->current_epoch()) > u64(before));
     CHECK(u64(ctx->completed_epoch()) >= u64(before)); // the epoch we started in is now done
 }
 
-INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -71,21 +71,21 @@ INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::conte
     {
         auto const closing = ctx->current_epoch();
         ctx->advance_epoch();
-        ctx->block_until_idle(); // fully drain the GPU
+        co_await ctx->idle_completion(); // fully drain the GPU
         CHECK(u64(ctx->current_epoch()) > u64(closing));
         CHECK(u64(ctx->completed_epoch()) >= u64(closing));
         CHECK(u64(ctx->completed_epoch()) < u64(ctx->current_epoch()));
     }
 }
 
-INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     // With nothing in flight these are no-ops, but must not fault or move the epoch backwards.
     ctx->process_completed_epochs();
     ctx->block_until_epochs_in_flight(0);
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }
 
@@ -120,7 +120,7 @@ INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle con
 //
 // The point of each is that a caller can learn a thing has finished WITHOUT a thread stopping, which is the whole
 // reason the blocking family is going away: a browser cannot stop a thread at all.
-INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -138,12 +138,12 @@ INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::contex
 
     // Closing it and draining settles that node — nothing waited on the epoch directly.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     ctx->process_completed_epochs();
     CHECK(pending->is_ready());
 }
 
-INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -160,19 +160,19 @@ INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::co
     auto const done = ctx->submission_completion(token);
     REQUIRE(done != nullptr);
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(ctx->is_submission_complete(token));
     CHECK(done->is_ready());
 }
 
 // The non-blocking throttle: the same pipelining bound advance_epoch expresses by waiting, expressed as a decision.
-INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     // Drained, so nothing is in flight and any budget admits an advance.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(ctx->in_flight_epoch_count() == 0);
 
     auto const before = ctx->current_epoch();
@@ -186,12 +186,12 @@ INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::contex
     if (!ctx->try_advance_epoch(0))
         CHECK(ctx->current_epoch() == at_budget);
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
 // block_until_idle is the only blocking spelling left, and it has to mean more than "the GPU is idle": the readback
 // actor delivers a download's bytes on its own thread, after the copy the GPU already finished.
-INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     REQUIRE(ctx->execution() == sg::execution_model::may_block);
@@ -205,8 +205,8 @@ INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg:
     (void)ctx->submit_command_list(cc::move(cmd));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
+    co_await ctx->idle_completion();
 
     // Delivered, without any blocking read on the future — which is the guarantee the download API used to be the only
     // source of.

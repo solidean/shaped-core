@@ -8,6 +8,9 @@
 // binding the shader doesn't touch — enough to drive the texture UAV descriptor + the dispatch barrier.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // End-to-end texture views: a texture's as_*_view() becomes a real D3D12 SRV/UAV inside a binding
@@ -66,8 +69,8 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
     }
 }
 
-INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -125,7 +128,7 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
     bool ok = true;

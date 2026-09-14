@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>          // offsetof
 #include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -54,8 +56,8 @@ struct sg::vertex_layout_of<vertex>
     }
 };
 
-INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -132,7 +134,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleare
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);

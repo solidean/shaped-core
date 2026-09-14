@@ -11,6 +11,9 @@
 #include "triangle.psbuf.spirv.h"
 #include "triangle.vs.spirv.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // End-to-end raster path: two rendering scopes into one texture, then a readback checking every pixel.
@@ -57,7 +60,8 @@ sg::vertex_input_layout make_vertex_layout()
 }
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -124,7 +128,7 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     auto const pixels = future.try_get_bytes();
     REQUIRE(pixels.has_value());
     REQUIRE(pixels.value().size() == isize(k_extent) * isize(k_extent) * 4);
@@ -154,8 +158,8 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
 // and reopen it with LOAD ops.
 // Without that the validation layer reports VUID-vkCmdPipelineBarrier2-None-09553, and with a broken reopen the clear
 // would come back instead of the drawn pixels.
-INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -253,7 +257,7 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     auto const pixels = future.try_get_bytes();
     REQUIRE(pixels.has_value());
 

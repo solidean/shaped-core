@@ -1,3 +1,5 @@
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
@@ -53,7 +55,9 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
 }
 } // namespace
 
-INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -99,14 +103,14 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear spac
     REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex_unorm) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const srgb_future = dl->download.bytes_from_texture(tex_srgb.raw(), {.mip_level = 1});
     auto const unorm_future = dl->download.bytes_from_texture(tex_unorm.raw(), {.mip_level = 1});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto const srgb_value = first_red(ctx, srgb_future);
     auto const unorm_value = first_red(ctx, unorm_future);
@@ -128,7 +132,9 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear spac
 
 // A chain deeper than one level, and one generated from partway down.
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
-INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -168,14 +174,14 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::c
     REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex, 2) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const level_2 = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     auto const level_3 = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 3});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Averaging equal texels reproduces them exactly whatever space the average is taken in, so both generated
     // levels carry the supplied value — a level chained off the one before it, not off the base.

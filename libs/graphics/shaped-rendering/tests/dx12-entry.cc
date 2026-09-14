@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -10,8 +11,8 @@
 //   - hardware: the real GPU, and the default; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
-// A child runs under its driver's config, so the drivers carry the exclusion tags the children need.
-// The children stand up a slib::shader_library, a process-wide singleton, and the imgui ones an sr::imgui_context, which is another.
+// The drivers hold no exclusion tags: the async invocation takes each child's own around its run, and a driver holding them too would be refused.
+// So a child that stands up a slib::shader_library, or an sr::imgui_context, carries that tag itself.
 // Children under one driver run one after another on the same context, so each must leave it as it found it.
 
 namespace
@@ -38,7 +39,7 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sr dx12 - warp", exclusive("slib-shader-library"), exclusive("sr-imgui-context"))
+ASYNC_TEST("sr dx12 - warp")
 {
     // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
     if (!nx::is_thorough() && dx12::has_hardware_adapter())
@@ -50,11 +51,11 @@ TEST("sr dx12 - warp", exclusive("slib-shader-library"), exclusive("sr-imgui-con
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
     }
 }
 
-TEST("sr dx12 - hardware", exclusive("slib-shader-library"), exclusive("sr-imgui-context"))
+ASYNC_TEST("sr dx12 - hardware")
 {
     auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
@@ -65,7 +66,7 @@ TEST("sr dx12 - hardware", exclusive("slib-shader-library"), exclusive("sr-imgui
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
     }
 }
 

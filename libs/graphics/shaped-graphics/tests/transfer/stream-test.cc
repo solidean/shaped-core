@@ -4,6 +4,8 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -37,7 +39,7 @@ namespace
 }
 } // namespace
 
-INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -59,7 +61,7 @@ INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles", (sg:
 
     // Only NOW may a list that reads the streamed extent be submitted.
     auto const back = c.download.bytes_from_buffer(buf, 0, 4096);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
@@ -154,8 +156,8 @@ INVOCABLE_TEST("sg stream - dropping the handle cancels the transfer", (sg::cont
     CHECK(completion->is_ready());
 }
 
-INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it without being asked",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it without being asked",
+                     (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -178,7 +180,7 @@ INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it witho
     auto back = cmd->download.bytes_from_buffer(buf, 0, 8192);
     c.submit_command_list(cc::move(cmd));
 
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
@@ -186,7 +188,8 @@ INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it witho
     CHECK(stream.is_settled());
 }
 
-INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the transfer", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the transfer",
+                     (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -204,7 +207,7 @@ INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the tran
     stream.promote_to_async();
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 8192);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
@@ -213,8 +216,8 @@ INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the tran
     CHECK(stream.is_settled()); // still reporting, exactly as before the promotion
 }
 
-INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates the queue",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates the queue",
+                     (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -238,7 +241,7 @@ INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates 
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_buffer(target, 0, 64 * 1024);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[65535] == payload[65535]);
@@ -317,7 +320,7 @@ public:
 };
 } // namespace
 
-INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -333,7 +336,7 @@ INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (
     CHECK(stream.progress().bytes_done == 9000);
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 9000);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == src[0]);
@@ -342,7 +345,7 @@ INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it says", (
     CHECK(bytes.value()[8999] == src[8999]); // the short tail
 }
 
-INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -370,14 +373,14 @@ INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (s
     CHECK(blocked.is_complete());
 
     auto const back = c.download.bytes_from_buffer(gated_buf, 0, 2048);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[2047] == gated_bytes[2047]);
 }
 
-INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only delayed, not a fault",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only delayed, not a fault",
+                     (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -413,7 +416,7 @@ INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only de
 
     // The family order is what makes the outcome well-defined: the later upload wins.
     auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     CHECK(bytes.value()[0] == overwrite[0]);
@@ -438,7 +441,7 @@ INVOCABLE_TEST("sg stream - a failing source settles the transfer on its error c
     CHECK(!stream.is_complete());
 }
 
-INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -463,7 +466,7 @@ INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg::conte
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_texture(tex);
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto const bytes = back.try_get_bytes();
     REQUIRE(bytes.has_value());
     REQUIRE(bytes.value().size() == src.size());

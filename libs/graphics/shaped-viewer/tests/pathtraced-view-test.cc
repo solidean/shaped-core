@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -139,8 +141,8 @@ INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle co
     CHECK(records[0].is_indexed == 0u);
 }
 
-INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
     {
@@ -233,7 +235,7 @@ INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs i
         CHECK(trace(*cmd, nullptr) == sg::routine_outcome::declined);
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
     }
 
     // With the neutral hit group it dispatches: the mesh is placed and shaded grey rather than the view going dark.

@@ -1,4 +1,6 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -22,7 +24,7 @@ constexpr int k_buffers = 3;
 constexpr int k_frames = 7;
 } // namespace
 
-INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!ctx->supports_headless_present())
@@ -62,7 +64,7 @@ INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_han
         auto future = cmd->download.bytes_from_texture(rt.texture());
         ctx->submit_command_list_and_present(*swapchain, cc::move(cmd));
 
-        ctx->block_until_idle();
+        co_await ctx->idle_completion();
         auto const pixels = future.try_get_bytes();
         REQUIRE(pixels.has_value());
         auto const* const p = reinterpret_cast<u8 const*>(pixels.value().data());
@@ -87,5 +89,5 @@ INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::context_han
     CHECK(distinct.size() == k_buffers).context("the chain must rotate through every back buffer");
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }

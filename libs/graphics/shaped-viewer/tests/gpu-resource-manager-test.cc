@@ -3,6 +3,8 @@
 #include <babel-serializer/geometry/obj.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
@@ -48,7 +50,7 @@ namespace
 }
 } // namespace
 
-INVOCABLE_TEST("sv - the resource manager's epoch tick is idempotent", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the resource manager's epoch tick is idempotent", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -63,15 +65,15 @@ INVOCABLE_TEST("sv - the resource manager's epoch tick is idempotent", (sg::cont
     CHECK(m.current_epoch() == e);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     m.advance_to(ctx.current_epoch());
     CHECK(m.current_epoch() != e);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - the resource manager declares only its configured tables", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the resource manager declares only its configured tables", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -84,10 +86,10 @@ INVOCABLE_TEST("sv - the resource manager declares only its configured tables", 
     CHECK_ASSERTS((void)m.acquire_texture(sv::bindless_table::textures_cube, make_texture(ctx).as_readonly_view()));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -118,10 +120,10 @@ INVOCABLE_TEST("sv - the resource manager refuses acquires while frozen", (sg::c
     CHECK(!m.is_locked());
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -157,7 +159,7 @@ INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (sg::co
 
     // The epoch tick clears the declaration lists, so the next epoch declares what that epoch acquired.
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     m.advance_to(ctx.current_epoch());
     {
         auto const bound = m.freeze();
@@ -165,10 +167,10 @@ INVOCABLE_TEST("sv - two freezes in one epoch keep the first's indices", (sg::co
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -194,14 +196,14 @@ INVOCABLE_TEST("sv - a pinned texture is declared and outlives its epoch", (sg::
     for (auto i = 0; i < 3; ++i)
     {
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
         m.advance_to(ctx.current_epoch());
         (void)m.acquire_texture(sv::bindless_table::textures_2d, make_texture(ctx).as_readonly_view());
         CHECK(pin->index() == index);
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 namespace
@@ -221,7 +223,8 @@ namespace
 }
 } // namespace
 
-INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its element", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its element",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -263,10 +266,11 @@ INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its element
     CHECK(element_of(m, other_id) != element_of(m, id));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - the same pixels at a different shape are a different texture", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the same pixels at a different shape are a different texture",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -282,10 +286,10 @@ INVOCABLE_TEST("sv - the same pixels at a different shape are a different textur
     CHECK(m.textures.count() == 2);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -304,11 +308,11 @@ INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_handle
     CHECK(record->uploaded_mips == record->total_mips);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a texture's element is declared for the epoch that acquired it, and only that one",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -329,7 +333,7 @@ INVOCABLE_TEST("sv - a texture's element is declared for the epoch that acquired
     // The declaration is the epoch's, so the next one starts empty — and re-acquiring the same view lands on the same index,
     // which is what keeps an unchanged working set from churning descriptors.
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     m.advance_to(ctx.current_epoch());
     {
         auto const bound = m.freeze();
@@ -338,10 +342,10 @@ INVOCABLE_TEST("sv - a texture's element is declared for the epoch that acquired
     CHECK(element_of(m, id) == index);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -384,7 +388,7 @@ INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::context_ha
     CHECK(m.textures.get_ptr(id)->state == sv::residency::complete);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg::context_handle const& ctx_h))
@@ -440,7 +444,7 @@ INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg:
     ctx.block_until_idle();
 }
 
-INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -456,7 +460,7 @@ INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::c
     CHECK(m.textures.get_ptr(id)->state == sv::residency::base_resident);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 // --- the material chain's GPU half: attribute upload and the per-instance parameter block ---------------------
@@ -486,7 +490,7 @@ namespace
 }
 } // namespace
 
-INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -514,16 +518,16 @@ INVOCABLE_TEST("sv - an attribute is uploaded once and content-keyed", (sg::cont
     auto const index = u32(m.acquire_buffer(record.data.as_readonly_buffer()));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     m.advance_to(ctx.current_epoch());
     CHECK(u32(m.acquire_buffer(m.attributes.get(id).data.as_readonly_buffer())) == index);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a parameter block is filled at the offsets the generated shader reads",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a parameter block is filled at the offsets the generated shader reads",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -599,10 +603,10 @@ INVOCABLE_TEST("sv - a parameter block is filled at the offsets the generated sh
     CHECK(cc::memcmp(m.build_instance_parameters(m.get_instance(instance)).data(), bytes.data(), bytes.size()) == 0);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - an instance record names its own geometry and parameters", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and parameters", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -662,10 +666,10 @@ INVOCABLE_TEST("sv - an instance record names its own geometry and parameters", 
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - an imported asset uploads and resolves like any other mesh", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - an imported asset uploads and resolves like any other mesh", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -730,11 +734,11 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
                 (void)cc::try_async_blocking_get(*node);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a placeholder box",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -809,11 +813,11 @@ INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a placehol
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seeded from the material's own factor",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -900,11 +904,11 @@ INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seeded from
     CHECK(once_resident == element_of(m, texture));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -952,10 +956,11 @@ INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and whethe
     CHECK(m.create_mesh(copy).geometry == first.geometry);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than named dead", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than named dead",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -991,5 +996,5 @@ INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than named d
     CHECK(mesh.is_ready());
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }

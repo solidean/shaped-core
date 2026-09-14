@@ -1,5 +1,6 @@
 #include "vulkan-test-common.hh"
 
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -20,13 +21,13 @@ namespace vulkan = sg::backend::vulkan;
 constexpr char const* driver = "sg vulkan backend - device";
 } // namespace
 
-TEST("sg vulkan backend - device", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan backend - device", exclusive("vulkan-device"))
 {
     auto ctx = vulkan::test::make_context();
     if (ctx == nullptr)
         SKIP("no vulkan device");
     else
-        nx::invoke_tests("device", ctx);
+        co_await nx::async_invoke_tests_in_sequence("device", ctx);
 }
 
 // One alias per invocable, so `dev.py test "sg vulkan - <name>"` still selects that one test.
