@@ -12,6 +12,7 @@ enum class sg::window_platform : sg::u8
     xlib,    ///< `display` is a Display*, `window_id` an X11 Window
     xcb,     ///< `display` is an xcb_connection_t*, `window_id` an xcb_window_t
     wayland, ///< `display` is a wl_display*, `handle` a wl_surface*
+    cocoa,   ///< `handle` is a CAMetalLayer*, and there is no separate connection
 };
 
 namespace sg
@@ -19,7 +20,7 @@ namespace sg
 /// How many `window_platform` values there are.
 /// A backend indexing a per-platform table sizes it from this rather than from a literal, so adding an arm is a
 /// compile-time fact everywhere rather than a silent out-of-bounds write.
-inline constexpr int window_platform_count = int(window_platform::wayland) + 1;
+inline constexpr int window_platform_count = int(window_platform::cocoa) + 1;
 } // namespace sg
 
 /// An OS window, named in the terms its windowing system uses.
@@ -43,8 +44,12 @@ struct sg::native_window
     /// Null on win32, which has none.
     void* display = nullptr;
 
-    /// The window itself where it is a pointer: `HWND` (win32), `wl_surface*` (wayland).
+    /// The window itself where it is a pointer: `HWND` (win32), `wl_surface*` (wayland), `CAMetalLayer*` (cocoa).
     /// Null on xlib and xcb, whose windows are integers rather than pointers — see `window_id`.
+    ///
+    /// **Cocoa names a layer rather than a window**, and that is deliberate on both sides: Metal presents into a
+    /// `CAMetalLayer`, and `SDL_Metal_GetLayer` hands one out through plain C — so sg reaches Metal's presentation
+    /// surface without an NSView or a line of Objective-C anywhere.
     void* handle = nullptr;
 
     /// The window itself where it is an integer: `Window` (xlib), `xcb_window_t` (xcb).
@@ -74,6 +79,8 @@ struct sg::native_window
             return display != nullptr && window_id != 0;
         case window_platform::wayland:
             return display != nullptr && handle != nullptr;
+        case window_platform::cocoa:
+            return handle != nullptr;
         }
         return false;
     }
@@ -82,5 +89,11 @@ struct sg::native_window
     [[nodiscard]] static native_window from_win32(void* hwnd)
     {
         return {.platform = window_platform::win32, .handle = hwnd};
+    }
+
+    /// A cocoa surface from its CAMetalLayer — likewise a single pointer, and likewise the whole of it.
+    [[nodiscard]] static native_window from_cocoa(void* metal_layer)
+    {
+        return {.platform = window_platform::cocoa, .handle = metal_layer};
     }
 };

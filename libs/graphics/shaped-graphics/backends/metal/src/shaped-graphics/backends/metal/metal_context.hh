@@ -118,6 +118,7 @@ public:
     [[nodiscard]] cc::result<metal_pipeline_layout_handle> create_metal_pipeline_layout(
         sg::pipeline_layout_description const& desc,
         sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<swapchain_handle> create_metal_swapchain(sg::swapchain_description const& desc);
     [[nodiscard]] cc::result<metal_raster_pipeline_handle> create_metal_raster_pipeline(
         sg::raster_pipeline_description const& desc,
         sg::lifetime_scope scope);

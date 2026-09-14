@@ -30,6 +30,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
     src/shaped-graphics/backends/metal/metal_staging_ring.cc
+    src/shaped-graphics/backends/metal/metal_swapchain.cc
 )
 
 target_sources(shaped-graphics-metal
@@ -60,6 +61,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_residency.hh
     src/shaped-graphics/backends/metal/metal_staging_binding_group.hh
     src/shaped-graphics/backends/metal/metal_staging_ring.hh
+    src/shaped-graphics/backends/metal/metal_swapchain.hh
 )
 
 target_compile_features(shaped-graphics-metal PUBLIC cxx_std_23)
@@ -85,6 +87,7 @@ if(SC_BUILD_TESTS)
         tests/metal-barrier-test.cc
         tests/metal-binding-test.cc
         tests/metal-compute-test.cc
+        tests/metal-present-test.cc
         tests/metal-raster-test.cc
         tests/metal-test.cc
         tests/metal-texture-test.cc

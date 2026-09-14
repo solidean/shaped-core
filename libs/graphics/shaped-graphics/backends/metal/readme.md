@@ -5,8 +5,8 @@
 Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
-Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, and raster draws.
-Presentation, async transfer and streaming still assert.
+Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, raster draws, and a swapchain presents.
+Async transfer and streaming still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 

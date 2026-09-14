@@ -64,8 +64,10 @@ bool metal_context::supports(sg::feature f) const
         // The device has it; the backend does not yet, and reporting the device's answer would turn a clean skip into
         // a crash at the first build call.
         return false;
-    case sg::feature::timestamp_query:
     case sg::feature::headless_present:
+        // Always: the chain is emulated with ordinary render targets, so there is no surface extension to be missing.
+        return true;
+    case sg::feature::timestamp_query:
         return false;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
@@ -344,9 +346,9 @@ void metal_context::block_until_transfers_drained()
         std::this_thread::yield();
 }
 
-cc::result<sg::swapchain_handle> metal_context::try_create_swapchain(swapchain_description const&)
+cc::result<sg::swapchain_handle> metal_context::try_create_swapchain(swapchain_description const& desc)
 {
-    return cc::error("the metal backend cannot present yet");
+    return create_metal_swapchain(desc);
 }
 
 sg::texture_layout metal_context::async_ready_layout(async_direction) const
