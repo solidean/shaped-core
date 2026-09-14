@@ -74,8 +74,6 @@ rules:
 
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: a helper returning a value, or a restore on every exit path, that its sync callers still rely on
+    reason: a helper returning a finished pipeline, which its synchronous callers read at once
     files:
-      - tests/transient/transient-test.cc
       - backends/dx12/tests/dx12-cached-pso-test.cc
-      - backends/dx12/tests/dx12-transient-test.cc
