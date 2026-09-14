@@ -1,6 +1,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
@@ -263,11 +264,6 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w, bool authorita
 // and the rest properly asleep -- which is a design change, not a constant.
 static constexpr int async_pool_spin_rounds = 64;
 
-// How long a parked participant sleeps before sweeping the thread-pump registry again, while any pump is registered.
-// Matches the interval a blocked driver waits for an external push: latency on a path that already crosses into a
-// semantic thread, bought back as a thread that costs nothing while it waits.
-static constexpr double async_pump_poll_secs = 0.001;
-
 void cc::async_thread_pool::worker_main(worker& w)
 {
     cc::set_current_thread_name("async-pool");
@@ -415,50 +411,15 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         // Deaf to injected work, but harmlessly so — with no slot there is nothing this thread could have run anyway.
         root.schedule_on(*this);
 
-        // Except a thread that owns a home: the root may need a step only that home runs, so it must never park deaf to it.
-        if (home != nullptr)
+        // Parked on the root, and on the thread's home when it has one: the root may need a step only that home runs.
+        // Not on the pumps — a pool participant never drives one (see thread_pump.hh).
+        auto parker = cc::impl::async_parker(root, home, false);
+        while (!parker.is_root_done())
         {
-            while (!root.is_ready())
-                if (!home->pump_cycle() && !cc::impl::thread_pump_registry())
-                    home->wait_for_work(1.0);
-            return;
+            if (home != nullptr && home->pump_cycle())
+                continue;
+            parker.park();
         }
-
-        struct sync
-        {
-            std::mutex m;
-            std::condition_variable cv;
-            bool done = false;
-        };
-        sync s;
-
-        // notify UNDER the lock so this hook (running on a worker) fully returns before this frame — and thus `s` —
-        // is destroyed.
-        bool const already = root.install_completion_hook_or_ready(
-            [](void* p)
-            {
-                auto* sp = static_cast<sync*>(p);
-                std::lock_guard<std::mutex> lk(sp->m);
-                sp->done = true;
-                sp->cv.notify_one();
-            },
-            &s);
-
-        if (already)
-            return; // completed before we installed the hook: no wait, no notify pending
-
-        // A registered pump delivers only when some blocked thread sweeps it, and nothing wakes us for its work.
-        // So with any registered, wait in short slices and sweep between them.
-        std::unique_lock<std::mutex> lk(s.m);
-        while (!s.done && cc::registered_thread_pump_count() > 0)
-        {
-            lk.unlock();
-            auto const progressed = cc::impl::thread_pump_registry();
-            lk.lock();
-            if (!progressed && !s.done)
-                cc::impl::condition_wait_secs(s.cv, lk, async_pump_poll_secs);
-        }
-        s.cv.wait(lk, [&] { return s.done; });
         return;
     }
 
@@ -547,11 +508,6 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             if (home != nullptr && home->pump_cycle())
                 continue;
 
-            // A semantic thread with no thread of its own delivers only when swept, and a blocked thread is where sweeps happen.
-            // Checked before parking, since the root may be waiting on exactly that delivery.
-            if (cc::impl::thread_pump_registry())
-                continue;
-
             // Dry, so spin like a worker before giving up.
             // The rest of the graph is in flight on the pool and work may come back to us within nanoseconds, whereas parking costs microseconds.
             bool found = false;
@@ -614,15 +570,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
                         || (home != nullptr && _home_epoch.load(cc::memory_order_relaxed) != home_epoch);
                 };
                 std::unique_lock<std::mutex> lk(_wait_m);
-
-                // A registered pump's next delivery wakes nobody, so a participant that may be its only sweeper sleeps in a short slice and comes back to sweep.
-                if (cc::registered_thread_pump_count() > 0)
-                {
-                    if (!released())
-                        cc::impl::condition_wait_secs(_wait_cv, lk, async_pump_poll_secs);
-                }
-                else
-                    _wait_cv.wait(lk, released);
+                _wait_cv.wait(lk, released);
             }
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
             if (home != nullptr)

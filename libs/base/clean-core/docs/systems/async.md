@@ -723,8 +723,26 @@ A main thread blocked in `cc::async_blocking_get` on a graph with a main-homed s
 Pool participation, the no-slot fallback, `async_drive_until_ready` and `cc::thread_pump_all()` all do it; a push to a home whose owner is parked wakes it wherever it parks.
 `thread_pump_all` reaches the home through one TLS read rather than a registry entry, so a threaded sweep with nothing registered stays one atomic load.
 
-**The same waits sweep the thread-pump registry**, since a semantic thread with no thread of its own delivers only when some blocked thread sweeps it.
-A participant parked in a pool therefore sleeps in 1 ms slices while any pump is registered, and sweeps between them; with none registered it sleeps until woken, as before.
+### Who drives a pump
+
+**An unthreaded component is driven by the loop that owns it, and a thread parked in a pool never sweeps.**
+The loops that sweep the registry are a frame loop or a test calling `cc::thread_pump_all()`, and `cc::pump_main_thread()` with nexus's main loop.
+So is a blocking drive on a scheduler with no threads of its own.
+**Nothing sweeps on a clock.**
+A pump that gains work says so with `cc::thread_pump_notify()` — a post to an unthreaded actor does it for you, and so does registration — and a loop parked on that signal wakes and sweeps once.
+`cc::impl::async_parker` is that park: it ends on the awaited node resolving, a pump signalling when the park drives pumps, or the thread's home getting work.
+
+**Why parked pool threads stay out of it — this has been tried.**
+Letting them sweep makes awaiting an unthreaded component from any pool thread work, first by sweeping in short timed slices and then by waking every parked thread on each notify.
+Both hand a component's handlers to whichever unrelated thread happened to be parked.
+A test pumping its own io_system then races that thread over the state its handlers write.
+And a hand-driven cycle finds the component busy elsewhere, so it returns before the work it asked for has run.
+The slices were a timer besides, and the prompt wakes made the race common rather than rare.
+In a threaded build every unthreaded component is test-only or loop-owned by intent, so the rule costs nothing real.
+
+**So a coroutine awaiting an unthreaded component runs where its loop is**: homed to the main thread (`main_thread` on an `ASYNC_TEST`), or in a program whose frame loop pumps.
+Awaited from a plain pool thread, it waits until some loop happens to sweep — possibly forever, since no pool thread will.
+Without threads none of this applies: the one thread is every loop, and a pool's drive sweeps the registry before it gives up.
 
 **A home is never re-entered from inside one of its own bodies.**
 A blocking wait inside a main-homed body does not run other main-homed bodies, which would see half-finished main-thread state.

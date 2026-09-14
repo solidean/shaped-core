@@ -192,6 +192,9 @@ Two limits, both deliberate:
 
 **Scheduling asks apply as they do to a `TEST`.**
 `main_thread` is above; exclusion holds across every suspend; `own_pool(n)` runs the body and what it schedules on that pool.
+**An async test awaiting an unthreaded component — an unthreaded actor, cache or io_system — asks for `main_thread`.**
+Only a loop that owns its thread drives such a component, and the run's main loop is that loop; a pool thread parked under a plain async test never sweeps it, so the test would wait forever.
+clean-core's [Who drives a pump](../../clean-core/docs/systems/async.md#who-drives-a-pump) says why pool threads stay out of it.
 `singlethreaded` drives the body to completion in the directly driven phase, inline on the run thread and in order, with the same main-home and pump servicing `-j1` has.
 `no_scheduler` is refused: nothing would drive the body.
 

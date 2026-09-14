@@ -7,8 +7,10 @@
 //
 // Anything that would block has to let the rest of the program progress, and without threads there is no rest of the
 // program unless somebody runs it.
-// So a semantic thread with no thread of its own registers a pump here, and every blocking wait — cc::async_blocking_get,
-// a frame loop, a shutdown drain — runs the whole registry rather than only the actors it happens to know about.
+// So a semantic thread with no thread of its own registers a pump here, and every loop that drives such threads — a frame
+// loop, a blocking drive on a scheduler without threads, a shutdown drain — runs the whole registry rather than only the
+// actors it happens to know about.
+// A thread parked in a pool is not such a loop, and never sweeps; see register_thread_pump.
 //
 // That is the point: individual pumping is a deadlock waiting to happen.
 // A wait can only drain what its own library can name, so the next actor added below it, or beside it, deadlocks a build
@@ -63,8 +65,19 @@ namespace cc
 /// A sweep runs on every blocking wait in the process, which is orders of magnitude more often than any one caller's
 /// cadence, so work a real thread would have slept between belongs behind the same interval here.
 ///
-/// It runs on whichever thread is blocking, not on one of its own, and it is never re-entered: a sweep that finds it
-/// already running skips it, exactly as a busy thread takes no new work.
+/// It runs on whichever thread sweeps, not on one of its own, and it is never re-entered: a sweep that finds it already
+/// running on another thread asks that thread to run it once more, rather than taking the work itself.
+///
+/// **Who sweeps is the thread that owns the loop driving it** — a frame loop, a test's own pump loop, a blocking drive
+/// on a scheduler without threads, the main thread's loop.
+/// A thread parked in a cc::async_thread_pool never sweeps.
+/// That is deliberate, and it is what makes an unthreaded component deterministic: were parked pool threads to sweep, every
+/// post to a component would hand its handlers to whichever unrelated thread happened to be parked, racing the loop that
+/// owns it — see "Who drives a pump" in docs/systems/async.md.
+/// So a coroutine awaiting an unthreaded component must run where such a loop is: homed to the main thread, or on a
+/// thread that pumps.
+///
+/// **A pump that gains work while nobody runs it must raise cc::thread_pump_notify**, so a loop parked on that signal wakes.
 ///
 /// A pump MUST NOT block on progress another registration has to make.
 /// It holds the only thread there is, so the pump it is waiting for never runs — the wait that looks like a stall is a
@@ -74,6 +87,14 @@ namespace cc
 /// Blocking on something OUTSIDE the registry — a GPU fence, an OS handle — stays fine, because nothing here has to run
 /// for it to be signalled.
 /// (declared above cc::thread_pump_registration, which befriends it)
+
+/// Says a registered pump has work it did not have when it last returned — a post landed in its mailbox.
+///
+/// **This is what lets a loop that drives pumps sleep instead of polling.** Every such loop parked on the signal wakes
+/// and sweeps once, so a delivery is never waiting for a clock.
+/// Raised after the work is visible to the pump, from any thread; costs a lock over the parked loops, of which there are few.
+/// Registration raises it too, since a new pump may already hold work.
+void thread_pump_notify();
 
 /// Runs one cycle of the calling thread's home, if it owns one, and of every registered pump; true if any reported progress or more work.
 /// Safe to call unconditionally: with nothing registered and no home it is a TLS read and one atomic load, which is the normal threaded build.
@@ -91,6 +112,24 @@ bool thread_pump_all_for(double max_ms);
 namespace cc::impl
 {
 /// thread_pump_all without the calling thread's home: one sweep of the registry.
-/// For cc::pump_main_thread, which pumps the main home itself under its own budget.
+/// For cc::pump_main_thread, which pumps the main home itself under its own budget, and for a loop about to park.
 bool thread_pump_registry();
+
+/// Calls `wake(ctx)` on every cc::thread_pump_notify for as long as it lives.
+///
+/// For a loop that drives pumps and is about to park.
+/// The wait has to sweep AFTER the listener exists and park only if that sweep found nothing, which is what makes a
+/// notify racing the park impossible to lose: the work was either visible to the sweep, or its notify reaches the listener.
+/// `wake` runs on the notifying thread with the listener list locked, so it may take its own lock and notify, and nothing more.
+struct thread_pump_listener
+{
+    thread_pump_listener(void (*wake)(void*), void* ctx);
+    ~thread_pump_listener();
+
+    thread_pump_listener(thread_pump_listener const&) = delete;
+    thread_pump_listener& operator=(thread_pump_listener const&) = delete;
+
+    void (*wake)(void*) = nullptr;
+    void* ctx = nullptr;
+};
 } // namespace cc::impl

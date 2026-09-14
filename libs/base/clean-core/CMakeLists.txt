@@ -89,6 +89,7 @@ add_library(clean-core
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/thread_pump.cc
+    src/clean-core/thread/async_parker.cc
     src/clean-core/thread/async.cc
     src/clean-core/thread/async_ambient.cc
     src/clean-core/thread/async_thread_pool.cc

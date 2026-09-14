@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_tls.hh>
@@ -26,6 +27,11 @@ struct thread_pump_entry
     /// ordering argument in reset().
     cc::atomic<bool> alive = true;
 
+    /// Set by a sweep that found the pump busy.
+    /// The thread inside the pump runs it again before leaving, since the work that sweep came for may have landed after
+    /// its own last look — and the sweeper, finding it busy, may be about to park.
+    cc::atomic<bool> rerun = false;
+
     /// The registration holds one; each in-flight sweep holds one more.
     /// Whoever drops the last frees the entry.
     cc::atomic<int> refs = 1;
@@ -50,6 +56,44 @@ cc::mutex<registry_state>& pump_registry()
 /// Live registrations, readable without the lock.
 /// This is the fast path in full: a threaded build registers nothing, so a sweep is this load and nothing else.
 cc::atomic<int> g_registration_count = 0;
+
+/// The threads that may be parked waiting for a pump to have work.
+/// Immortal for the registry's reason.
+cc::mutex<cc::vector<cc::impl::thread_pump_listener*>>& pump_listeners()
+{
+    static auto* const listeners = new cc::mutex<cc::vector<cc::impl::thread_pump_listener*>>();
+    return *listeners;
+}
+
+/// The pumps this thread is inside, innermost last.
+/// A sweep from inside a pump finds that pump busy on its own stack, which is no reason to run it again.
+thread_local cc::vector<cc::impl::thread_pump_entry*> t_running_here;
+
+/// Runs the pump, again for as long as a concurrent sweep asked for a rerun while it ran.
+/// The caller has claimed `running`; this releases it.
+bool run_claimed(cc::impl::thread_pump_entry& entry)
+{
+    auto more = false;
+    while (true)
+    {
+        entry.rerun.store(false);
+        if (entry.alive.load())
+        {
+            t_running_here.push_back(&entry);
+            CC_DEFER
+            {
+                t_running_here.remove_back();
+            };
+            more |= entry.pump();
+        }
+
+        entry.running.store(false);
+
+        // A sweep that found us busy set the flag before trying to claim, so either it claims now or we see the flag.
+        if (!entry.rerun.load() || entry.running.exchange(true))
+            return more;
+    }
+}
 
 void release_entry(cc::impl::thread_pump_entry* entry)
 {
@@ -111,18 +155,34 @@ cc::thread_pump_registration cc::register_thread_pump(cc::unique_function<bool()
     pump_registry().lock([&](registry_state& state) { state.entries.push_back(entry); });
     g_registration_count.fetch_add(1);
 
+    // The new pump may hold work already, and a thread parked before it existed would never sweep it.
+    thread_pump_notify();
+
     return thread_pump_registration(entry);
 }
 
-bool cc::thread_pump_all()
+void cc::thread_pump_notify()
 {
-    // The calling thread's own home first: every blocking wait that sweeps here then also runs the homed steps only this
-    // thread may run, without the home ever sitting in the registry where every other thread's sweep would pay for it.
-    auto more = false;
-    if (auto* const home = cc::impl::async_tls().home)
-        more = home->pump_cycle();
-    more |= cc::impl::thread_pump_registry();
-    return more;
+    // Every listener, under the list's lock: a listener's destructor takes the same lock, so none is called after it died.
+    pump_listeners().lock(
+        [](cc::vector<impl::thread_pump_listener*>& listeners)
+        {
+            for (auto* const l : listeners)
+                l->wake(l->ctx);
+        });
+}
+
+cc::impl::thread_pump_listener::thread_pump_listener(void (*wake_fn)(void*), void* wake_ctx)
+  : wake(wake_fn), ctx(wake_ctx)
+{
+    CC_ASSERT(wake != nullptr, "a pump listener needs a wake function");
+    pump_listeners().lock([&](cc::vector<thread_pump_listener*>& listeners) { listeners.push_back(this); });
+}
+
+cc::impl::thread_pump_listener::~thread_pump_listener()
+{
+    pump_listeners().lock([&](cc::vector<thread_pump_listener*>& listeners)
+                          { (void)listeners.remove_first_value(this); });
 }
 
 bool cc::impl::thread_pump_registry()
@@ -134,7 +194,7 @@ bool cc::impl::thread_pump_registry()
 
     // Snapshot under the lock, call outside it: a pump is free to register or deregister — an actor handler creating
     // another actor does exactly that — and holding the lock across the call would deadlock on it.
-    auto snapshot = cc::vector<impl::thread_pump_entry*>();
+    auto snapshot = cc::vector<cc::impl::thread_pump_entry*>();
     pump_registry().lock(
         [&](registry_state& state)
         {
@@ -148,18 +208,34 @@ bool cc::impl::thread_pump_registry()
 
     for (auto* const entry : snapshot)
     {
+        // Busy: this same thread further up the stack, or another one.
+        // Asked to run again rather than skipped, because whatever this sweep came for may have landed after the
+        // running thread's last look — and a sweeper that finds nothing parks.
+        auto running_here = false;
+        for (auto const* const here : t_running_here)
+            running_here |= here == entry;
+        if (running_here)
+            continue;
+        entry->rerun.store(true);
         if (entry->running.exchange(true))
-            continue; // busy: either this same thread further up the stack, or another one
-
-        if (entry->alive.load())
-            more |= entry->pump();
-
-        entry->running.store(false);
+            continue;
+        more |= run_claimed(*entry);
     }
 
     for (auto* const entry : snapshot)
         release_entry(entry);
 
+    return more;
+}
+
+bool cc::thread_pump_all()
+{
+    // The calling thread's own home first: every blocking wait that sweeps here then also runs the homed steps only this
+    // thread may run, without the home ever sitting in the registry where every other thread's sweep would pay for it.
+    auto more = false;
+    if (auto* const home = cc::impl::async_tls().home)
+        more = home->pump_cycle();
+    more |= cc::impl::thread_pump_registry();
     return more;
 }
 

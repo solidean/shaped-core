@@ -27,7 +27,9 @@ rules:
   - kind: allow-include
     value: [<mutex>, <condition_variable>]
     reason: a thread home's owner parks with a deadline and is woken by a submit under the same mutex, and cc::mutex::wait has no deadline
-    files: src/clean-core/thread/thread_bound_scheduler.hh
+    files:
+      - src/clean-core/thread/thread_bound_scheduler.hh
+      - src/clean-core/thread/async_parker.cc
 
   - kind: allow-include
     value: <ctime>

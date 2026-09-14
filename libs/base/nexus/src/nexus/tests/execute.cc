@@ -22,6 +22,8 @@
 #include <clean-core/thread/async_mutex.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/impl/async_parker.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
@@ -1015,6 +1017,14 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
 void drive_serially(cc::singlethreaded_scheduler& driver, cc::async_node_base& node)
 {
     auto const on_main = cc::current_thread_id() == cc::thread_id::main;
+    if (node.is_ready())
+        return;
+
+    // Built once, since its latch on the node outlives any one park.
+    auto* const home = cc::impl::async_tls().home;
+    // It drives pumps: a serial drive is the only loop running here, so a component the test pumps cannot be raced.
+    auto parker = cc::impl::async_parker(node, home != nullptr && home->is_inside_own_body() ? nullptr : home, true);
+
     while (!node.is_ready())
     {
         driver.participate_until_ready(node);
@@ -1030,10 +1040,8 @@ void drive_serially(cc::singlethreaded_scheduler& driver, cc::async_node_base& n
         CC_ASSERT(false, "a serially driven test cannot progress: it waits on something no scheduler or pump here will "
                          "run");
 #endif
-        if (on_main)
-            cc::main_thread_scheduler().wait_for_work(1.0);
-        else
-            cc::this_thread_sleep_secs(0.001);
+        // Until the node resolves, a pump signals, or the home gets work: never on a clock.
+        parker.park();
     }
 }
 
@@ -2248,6 +2256,9 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         // A main_thread body therefore runs at loop level, where its own waits still service the main home.
         join->schedule_on(pool);
         auto& main_home = cc::main_thread_scheduler();
+        // The main thread's loop drives pumps, which is what a main_thread async test awaiting an unthreaded component
+        // relies on; a handed-over body wakes the main home too.
+        auto parker = cc::impl::async_parker(*join, &main_home, true);
         while (!join->is_ready())
         {
             if (main_bodies.run_one(config))
@@ -2259,7 +2270,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             CC_ASSERT(false, "a main_thread phase cannot progress: every test still pending waits on something no pump "
                              "will run");
 #endif
-            main_home.wait_for_work(1.0);
+            parker.park();
         }
 
         // The wake-ups submit() posted may still be queued, and each carries the context of the test that posted it.

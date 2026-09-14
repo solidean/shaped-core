@@ -53,6 +53,7 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; ne
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
 }                                        // must be a coroutine: nothing to await? end with `co_return;`
 // Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
+// Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
 // SKIP / REQUIRE work as in a TEST, at any depth below the body.
 
 // Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, benchmark, or example. A sweep selects

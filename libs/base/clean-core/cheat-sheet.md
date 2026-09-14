@@ -831,6 +831,11 @@ auto reg = cc::register_thread_pump([&] { return step_once(); }); // -> RAII; tr
 cc::thread_pump_all();                    // -> bool; one cycle of every registration. One atomic load when empty
 cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == stopped on the budget
 cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
+cc::thread_pump_notify();                 // a pump GAINED work from another thread: wakes a loop parked on it (no clock).
+                                          //   An unthreaded actor's post and a registration raise it for you
+// GOTCHA: a thread parked in a POOL never sweeps pumps (threads on). An unthreaded component is driven by the loop that
+//   owns it; a coroutine awaiting one runs homed to main (ASYNC_TEST main_thread) or where a frame loop pumps.
+//   Pool sweeping was tried and races tests' handlers — docs/systems/async.md "Who drives a pump".
 // thread_pump_all also runs the CALLING thread's own home (thread_bound_scheduler), so every wait loop services it.
 cc::pump_main_thread(4.0);                // the event loop's call (thread_bound_scheduler.hh): main home + registry +
                                           //   (threads off) compute/io; false == nothing progressed and the main home is empty
