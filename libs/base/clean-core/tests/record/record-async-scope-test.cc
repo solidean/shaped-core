@@ -258,7 +258,8 @@ REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the su
     // 300 local repeats or a sweep of waker delays from "already settled" to 20 ms.
     // Every step of the machinery measures CORRECT on ARM: the park stores the chain the body suspended under, the
     // node keeps it, the resuming poll reads it back and installs it, and the thread ambient is still that chain as
-    // the frame is entered. The scope guard is never destroyed.
+    // the frame is entered.
+    // The scope guard is never destroyed.
     // The body then wakes under a DIFFERENT chain — constant across runs, and the one naming the enclosing test —
     // which places the corruption inside the coroutine resume itself rather than anywhere in cc::async's ambient
     // handling.
