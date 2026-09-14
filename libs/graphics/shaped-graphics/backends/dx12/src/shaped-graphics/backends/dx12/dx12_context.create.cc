@@ -187,12 +187,21 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
         log_debug_layer_message(level, description);
 }
 
-// Whether EnableDebugLayer has actually run in this process.
-// Distinct from "a caller asked for it": the request can be refused, and the difference is what makes the refusal below correct.
-cc::atomic<bool>& debug_layer_armed()
+// Whether the one-shot below has RUN, whatever it found.
+// Deliberately not the same question as whether the layer is on: a host without the Graphics Tools feature has nothing
+// to activate, and must not look like a process that could still activate one -- otherwise the best-effort miss turns
+// into a hard refusal for every later context.
+cc::atomic<bool>& debug_layer_activation_attempted()
 {
-    static cc::atomic<bool> armed = false;
-    return armed;
+    static cc::atomic<bool> attempted = false;
+    return attempted;
+}
+
+// Whether the layer is actually validating this process, which is the question the message callback asks.
+cc::atomic<bool>& debug_layer_active()
+{
+    static cc::atomic<bool> active = false;
+    return active;
 }
 
 // Whether this process has brought up a D3D12 device yet.
@@ -211,23 +220,27 @@ cc::atomic<bool>& process_has_device()
 // It must also precede this process's FIRST DEVICE, which is the constraint with teeth.
 // Arming the layer once a device exists does not merely fail to validate it: on an NVIDIA driver it RESETS the adapter,
 // and every D3D12CreateDevice probe on that adapter then returns DXGI_ERROR_DEVICE_RESET while the GPU itself is fine.
-// A process that wants validation therefore has to ask for it on the first context it creates, which is what debug_layer_armed guards below.
+// A process that wants validation therefore has to ask for it on the first context it creates, which is what debug_layer_activation_attempted guards below.
 //
 // One-way by construction, and deliberately so: a context created earlier may still be relying on the layer, so nothing here ever turns it back off.
 //
 // Best-effort: the layer needs the "Graphics Tools" feature, and a host without it runs unvalidated rather than failing to create a context.
 bool activate_global_debug_layer_once()
 {
-    static bool const enabled = []
+    static bool const active = []
     {
+        // Marked before anything can fail, and before any device exists: this records that the process has had its
+        // one chance to activate, which is what the late-activation guard tests.
+        debug_layer_activation_attempted() = true;
+
         ComPtr<ID3D12Debug> debug;
         if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
             return false;
         debug->EnableDebugLayer();
-        debug_layer_armed() = true;
+        debug_layer_active() = true;
         return true;
     }();
-    return enabled;
+    return active;
 }
 
 // Routes D3D12 validation messages to dx12_message_callback, with `ctx` as the listener to consult.
@@ -294,9 +307,17 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     UINT const factory_flags = 0;
     // Refused rather than done anyway: activating the layer now would reset the adapter, and that would surface
     // later as a GPU looking broken to every context this process creates afterwards.
-    if (config.activate_global_debug_layer && !debug_layer_armed() && process_has_device())
-        return dx12_error(E_INVALIDARG, "the dx12 debug layer must be activated before this process creates its "
-                                        "first device; ask for it on the first context instead");
+    if (config.activate_global_debug_layer && !debug_layer_activation_attempted() && process_has_device())
+    {
+        // Only refused when there is something to refuse.
+        // Asking whether the layer exists activates nothing, and a host without the Graphics Tools feature has no late
+        // activation to perform -- so the request is the documented best-effort miss rather than the hazard, and it
+        // must not fail a context that would simply have run unvalidated.
+        ComPtr<ID3D12Debug> debug;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+            return dx12_error(E_INVALIDARG, "the dx12 debug layer must be activated before this process creates its "
+                                            "first device; ask for it on the first context instead");
+    }
 
     if (config.activate_global_debug_layer)
         activate_global_debug_layer_once();
@@ -385,7 +406,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     //
     // Keyed on the layer actually being active, NOT on this context having asked for it: a context created after
     // something else activated it is validated all the same, and its messages belong on a listener rather than stderr.
-    if (debug_layer_armed())
+    if (debug_layer_active())
         ctx->_message_callback_cookie = register_debug_callback(ctx->_device.Get(), ctx.get());
 
     // Completion timelines first: every copyable resource takes its groups from this pool at construction, so it
