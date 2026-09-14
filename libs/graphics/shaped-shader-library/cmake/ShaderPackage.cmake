@@ -37,7 +37,7 @@
 # the same struct again.
 #
 # A group struct is data rather than an API: it satisfies sg::declared_binding_group, and the verbs are the
-# scopes' -- ctx.cached.acquire_binding_group_layout<G>(), ctx.transient.create_binding_group(G{...}) and
+# scopes' -- ctx.cached.acquire_binding_group_layout<G>(), ctx.transient.create_binding_group(layout, G{...}) and
 # scope.bind<G>(group).
 #
 # A shader in a subdirectory folds the directory into the identifier: post/vignette.hlsl reaches C++ as

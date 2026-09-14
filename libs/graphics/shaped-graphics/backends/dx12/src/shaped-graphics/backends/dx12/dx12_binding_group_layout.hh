@@ -16,8 +16,10 @@
 class sg::backend::dx12::dx12_binding_group_layout final : public sg::binding_group_layout
 {
 public:
-    dx12_binding_group_layout(cc::hash128 structural_hash, cc::vector<sg::binding> bindings)
-      : sg::binding_group_layout(structural_hash, cc::move(bindings))
+    dx12_binding_group_layout(cc::hash128 structural_hash,
+                              cc::vector<sg::binding> bindings,
+                              cc::vector<sg::named_sampler> static_samplers)
+      : sg::binding_group_layout(structural_hash, cc::move(bindings), cc::move(static_samplers))
     {
     }
 

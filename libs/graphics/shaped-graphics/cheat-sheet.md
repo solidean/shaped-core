@@ -613,8 +613,10 @@ ctx.transient.create_binding_group(group_layout, span<named_view const>, span<na
 sg::declared_binding_group   // concept in binding/binding_group.hh — { group_index; declared_bindings(); declared_samplers(); gather() }
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
-ctx.transient.create_binding_group(G{...})                      // -> binding_group_handle; `try_` twin returns the failure as a value
-ctx.persistent.create_binding_group(G{...})                     // which scope you call IS the lifetime
+ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+ctx.persistent.create_binding_group(layout, G{...})             // which scope you call IS the lifetime
+                                    // a sampler G gathers that `layout` declares static is dropped, so the
+                                    // samplers overload above pairs with this
 scope.bind<G>(group)                                            // binds at G::group_index; on raster / compute / raytracing scopes
 layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its binding_slot
 

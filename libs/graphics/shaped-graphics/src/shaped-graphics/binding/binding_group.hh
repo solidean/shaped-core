@@ -78,15 +78,16 @@ struct sg::slotted_view
     bound_view view;
 };
 
-/// A binding name paired with a sampler state.
-/// As a `create_binding_group_layout` argument it declares a *static* sampler, baked into the pipeline layout's root signature.
-/// As a `create_binding_group` argument it supplies a *dynamic* sampler for a sampler binding of that name.
-/// Same value type either way.
-struct sg::named_sampler
+namespace sg::impl
 {
-    cc::string name;
-    sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
-};
+/// Removes from `samplers` every one `layout` already declares static, by name.
+///
+/// A generated group gathers every sampler it declares, and a layout acquired from the same group declares
+/// those same ones static — so without this every create would supply one dx12 refuses outright
+/// (dx12_binding_group.cc, "a static sampler may not be supplied per group").
+/// Defined out of line so this header stays free of <shaped-graphics/binding/binding_group_layout.hh>.
+void drop_static_samplers(binding_group_layout const& layout, cc::vector<named_sampler>& samplers);
+} // namespace sg::impl
 
 namespace sg
 {

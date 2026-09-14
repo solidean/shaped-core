@@ -671,8 +671,8 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("///\n")
     out.append("/// Acquired, created and bound through the scopes that take an sg::declared_binding_group:\n")
     out.append("///\n")
-    out.append(f"///     ctx.cached.acquire_binding_group_layout<{manifest.namespace}::{group.name}>();\n")
-    out.append(f"///     auto const g = ctx.transient.create_binding_group({manifest.namespace}::{group.name}{{...}});\n")
+    out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{manifest.namespace}::{group.name}>();\n")
+    out.append(f"///     auto const g = ctx.transient.create_binding_group(layout, {manifest.namespace}::{group.name}{{...}});\n")
     out.append(f"///     scope.bind<{manifest.namespace}::{group.name}>(*g);\n")
     out.append(f"struct {group.name}\n{{\n")
 

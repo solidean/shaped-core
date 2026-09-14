@@ -4,6 +4,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
+#include <sv_shaders.hh> // sv::shaders::layout_bindings, for the group-creation test at the bottom
 
 // Headless: the layout routine records a whole target's draw list — border bands, placed views and a wipe — in one pass.
 //
@@ -185,4 +186,46 @@ TEST("sv - a degenerate rect draws nothing rather than a bad viewport")
     ctx.block_until_idle();
 
     CHECK(output.width() == 32);
+}
+
+TEST("sv - a group is created against a layout whose static samplers it does not resupply")
+{
+    // The pairing the two halves of the API have to make: `acquire_binding_group_layout<G>(runtime_samplers)`
+    // bakes a sampler G left dynamic into the layout, and `create_binding_group(layout, G{...})` then gathers
+    // that same sampler from G's own field.
+    //
+    // dx12 refuses a static sampler supplied per group outright, so without the drop this create throws --
+    // which is what makes the samplers overload unusable with the create rather than merely redundant.
+    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
+    if (ctx_r.has_error())
+        SKIP("no Direct3D 12 device (hardware or WARP)");
+    sg::context_handle const ctx_h = ctx_r.value();
+    sg::context& ctx = *ctx_h;
+
+    using group = sv::shaders::layout_bindings;
+
+    sg::named_sampler const runtime[]
+        = {{.name = "source_sampler", .sampler = {.min_filter = sg::sampler_filter::nearest}}};
+    auto const layout = ctx.cached.acquire_binding_group_layout<group>(runtime);
+    REQUIRE(layout != nullptr);
+
+    // The layout owns it now, which is the precondition the create has to respect.
+    REQUIRE(layout->static_samplers().size() == 1);
+    CHECK(layout->static_samplers()[0].name == "source_sampler");
+
+    auto const source = make_source(ctx, 8, 8);
+    auto const g = ctx.transient.create_binding_group(
+        layout,
+        group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+    CHECK(g != nullptr);
+
+    // And the layout a bare acquire gives has none, so the same create passes the gathered sampler through.
+    auto const plain = ctx.cached.acquire_binding_group_layout<group>();
+    REQUIRE(plain != nullptr);
+    CHECK(plain->static_samplers().empty());
+    CHECK(plain != layout); // the samplers are part of the identity, so these are different layouts
+
+    auto const g2 = ctx.transient.create_binding_group(
+        plain, group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+    CHECK(g2 != nullptr);
 }

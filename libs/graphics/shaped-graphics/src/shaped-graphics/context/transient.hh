@@ -122,13 +122,13 @@ public:
     /// What can actually fail is the descriptor allocation and the device — never a mismatched layout, since
     /// the layout is built from `G`'s own constant table rather than passed in.
     template <declared_binding_group G>
-    [[nodiscard]] binding_group_handle create_binding_group(G const& group)
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
     {
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
         group.gather(views, samplers);
-        return create_binding_group(acquire_declared_layout(G::declared_bindings(), G::declared_samplers()), views,
-                                    samplers);
+        impl::drop_static_samplers(*layout, samplers);
+        return create_binding_group(layout, views, samplers);
     }
 
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
@@ -163,11 +163,6 @@ private:
 
     friend class context;
     explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
-
-    // ctx.cached.acquire_binding_group_layout, reached through a hop because context.hh includes this header:
-    // `context` is incomplete where the templates above are parsed, and `_ctx` is not a dependent name.
-    [[nodiscard]] binding_group_layout_handle acquire_declared_layout(cc::span<binding const> bindings,
-                                                                      cc::span<named_sampler const> static_samplers);
 
     // Applies a pending set_budget() at an epoch boundary, draining all in-flight epochs first so nothing still references the current transient heap.
     // It then drops the heap and adopts the new budget; the heap is lazily recreated at the new size on the next transient allocation.

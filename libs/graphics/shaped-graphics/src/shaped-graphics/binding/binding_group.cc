@@ -1,9 +1,30 @@
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
 
 namespace sg
 {
 binding_group::~binding_group() = default;
+
+void impl::drop_static_samplers(binding_group_layout const& layout, cc::vector<named_sampler>& samplers)
+{
+    auto const declared_static = layout.static_samplers();
+    if (declared_static.empty())
+        return;
+
+    auto kept = cc::vector<named_sampler>();
+    kept.reserve(samplers.size());
+    for (auto& s : samplers)
+    {
+        auto is_static = false;
+        for (auto const& d : declared_static)
+            if (d.name == s.name)
+                is_static = true;
+        if (!is_static)
+            kept.push_back(cc::move(s));
+    }
+    samplers = cc::move(kept);
+}
 
 cc::vector<named_sampler> impl::merge_declared_samplers(cc::span<named_sampler const> declared,
                                                         cc::span<named_sampler const> supplied)

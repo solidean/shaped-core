@@ -253,7 +253,8 @@ Four more entry kinds generate C++ from what the binding pass reads, rather than
 | `path:payload:struct` | an annotated struct | a mirror plus its `max_payload_size` |
 | `path:constants:name` | a `push_constants` block | a mirror carrying HLSL's own padding |
 
-A group struct is data rather than an API — `ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
+A group struct is data rather than an API.
+`ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(layout, G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
 
 ## More
 

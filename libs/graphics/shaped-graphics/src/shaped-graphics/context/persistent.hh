@@ -145,22 +145,30 @@ public:
                                                             cc::span<slotted_view const> views,
                                                             cc::span<named_sampler const> samplers = {});
 
-    /// Builds a group from the generated group struct `G`, against the layout `G` itself declares.
+    /// Builds a group from the generated group struct `G`, against a layout the caller already holds.
     ///
     /// Which scope you call is the lifetime: a group rebuilt every frame belongs on `ctx.transient`, one that
     /// outlives an epoch on `ctx.persistent`.
     ///
-    /// Throws sg::binding_group_exception, or sg::device_lost_exception on a lost device.
-    /// What can actually fail is the descriptor allocation and the device — never a mismatched layout, since
-    /// the layout is built from `G`'s own constant table rather than passed in.
+    /// **The layout is passed in rather than acquired here**, because a group is created on the frame path —
+    /// once per texture switch in an imgui pass — and acquiring hashes the declared table and takes the
+    /// pipeline cache's lock to look it up.
+    /// Acquire it once, in init, with `ctx.cached.acquire_binding_group_layout<G>()`.
+    ///
+    /// A sampler `G` gathered that `layout` already declares static is dropped rather than passed on: dx12
+    /// refuses a static sampler supplied per group, so sending it would be an error rather than a duplicate.
+    /// That is what lets the runtime-samplers overload of `acquire_binding_group_layout<G>` pair with this.
+    ///
+    /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
+    /// on a lost device.
     template <declared_binding_group G>
-    [[nodiscard]] binding_group_handle create_binding_group(G const& group)
+    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
     {
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
         group.gather(views, samplers);
-        return create_binding_group(acquire_declared_layout(G::declared_bindings(), G::declared_samplers()), views,
-                                    samplers);
+        impl::drop_static_samplers(*layout, samplers);
+        return create_binding_group(layout, views, samplers);
     }
 
     /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
@@ -203,11 +211,6 @@ private:
     // Only a context constructs its own scope; the scope in turn reaches the context's protected backend virtuals (mutual friendship).
     friend class context;
     explicit context_persistent_scope(context& ctx) : _ctx(ctx) {}
-
-    // ctx.cached.acquire_binding_group_layout, reached through a hop because context.hh includes this header:
-    // `context` is incomplete where the group templates above are parsed, and `_ctx` is not a dependent name.
-    [[nodiscard]] binding_group_layout_handle acquire_declared_layout(cc::span<binding const> bindings,
-                                                                      cc::span<named_sampler const> static_samplers);
 
     context& _ctx;
 };

@@ -244,8 +244,10 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindi
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>(runtime_samplers);
                                     // + static samplers for the ones the shader left undeclared;
                                     //   supplying one it DID declare asserts -- it is a mistake, not an override
-auto const g = ctx.transient.create_binding_group(shaders::frame_bindings{.albedo = tex.as_readonly_view()});
-auto const g = ctx.persistent.try_create_binding_group(shaders::frame_bindings{...});  // failure as a value
+auto const g = ctx.transient.create_binding_group(layout, shaders::frame_bindings{.albedo = tex.as_readonly_view()});
+                                    // the LAYOUT is passed in: a group is created on the frame path, and
+                                    //   acquiring hashes the table and takes the pipeline cache's lock
+                                    // a sampler the group gathers that `layout` declares static is dropped
 scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
 ```
 

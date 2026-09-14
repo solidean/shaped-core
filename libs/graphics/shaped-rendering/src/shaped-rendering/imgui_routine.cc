@@ -311,8 +311,11 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
 
                 // Transient: one descriptor allocation per texture switch, recycled with the epoch.
                 // With a single font atlas that is one group for the whole frame.
+                //
+                // The layout comes from init rather than from the create: this is the frame path, and
+                // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                    self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
                 scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }
