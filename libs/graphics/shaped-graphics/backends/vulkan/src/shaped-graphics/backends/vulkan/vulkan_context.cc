@@ -216,6 +216,13 @@ void vulkan_context::shutdown()
                 p.in_epoch = {};
             });
 
+        // The waiter may be parked on the timelines, so it is joined before they go.
+        stop_completion_signals();
+        if (_completion_wake_timeline != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(_device, _completion_wake_timeline, nullptr);
+            _completion_wake_timeline = VK_NULL_HANDLE;
+        }
         if (_submission_timeline != VK_NULL_HANDLE)
         {
             vkDestroySemaphore(_device, _submission_timeline, nullptr);

@@ -214,9 +214,12 @@ ctx.in_flight_epoch_count()             // int — epochs advanced past but not 
 ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
 
 // Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
-// and asking twice for the same target hands back the SAME node. They settle on a retire sweep.
+// and asking twice for the same target hands back the SAME node. They settle on the backend's own GPU signal —
+// nobody sweeps, advances or waits for them — and as an error once the device is lost or the context shuts down.
 ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
+co_await ctx.idle_completion();         // block_until_idle, awaited: submissions, actors, epochs. COLD; retires as it goes,
+                                        //   so never await it while another thread advances the epoch
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 
 ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob

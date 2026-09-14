@@ -111,6 +111,7 @@ public:
     /// What ctx.block_until_idle() waits on, and distinct from the private wait_until_idle: this counts a job only from
     /// its submission, so a download recorded into a list the caller has not submitted yet cannot turn a wait into a hang.
     void wait_until_submitted_drained() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_submitted_drained() const { return _drain.is_idle(); }
 
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // --- test-only escape hatches --------------------------------------------------------------------

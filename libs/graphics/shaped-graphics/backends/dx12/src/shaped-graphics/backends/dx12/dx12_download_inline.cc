@@ -65,6 +65,7 @@ private:
 cc::result<cc::unit> dx12_download_inline_system::initialize(isize capacity)
 {
     CC_ASSERT(capacity > 0, "download ring capacity must be positive");
+    _drain.notify_on_drained(&_ctx);
 
     // READBACK heap, COPY_DEST: the GPU writes readback bytes here via CopyBufferRegion, the actor reads them back out on the CPU.
     auto ring = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST,

@@ -95,6 +95,7 @@ cc::result<cc::unit> vulkan_download_inline_system::initialize(vulkan_context& c
 {
     CC_ASSERT(capacity_in_bytes > 0, "the inline readback ring needs a non-zero capacity");
     _ctx = &ctx;
+    _drain.notify_on_drained(&ctx);
 
     auto built = create_ring(capacity_in_bytes);
     if (!built.has_value())

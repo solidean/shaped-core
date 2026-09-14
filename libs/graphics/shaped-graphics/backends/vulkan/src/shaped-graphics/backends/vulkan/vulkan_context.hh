@@ -582,6 +582,10 @@ public:
     void block_until_transfers_drained() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
+    [[nodiscard]] bool are_transfers_drained() const override;
+    [[nodiscard]] sg::submission_token last_issued_submission() override;
+    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
+    void wake_completion_signal(u64 generation) override;
 
     // The inline ring budgets.
     // Recorded here and applied at the next advance_epoch, never synchronously.
@@ -715,6 +719,10 @@ public:
     // Both are VK_SEMAPHORE_TYPE_TIMELINE, so completion is a counter read rather than a host event.
     VkSemaphore _epoch_timeline = VK_NULL_HANDLE;
     VkSemaphore _submission_timeline = VK_NULL_HANDLE;
+
+    // Raised from the host to wake the completion signal waiter, which parks on it beside the two above.
+    // Vulkan has no host event for a timeline, so a third timeline is how a wait on one gets interrupted.
+    VkSemaphore _completion_wake_timeline = VK_NULL_HANDLE;
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

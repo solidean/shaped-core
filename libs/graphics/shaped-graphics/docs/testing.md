@@ -23,7 +23,7 @@ uv run dev.py test                                                        # the 
 
 These rules bind every GPU test in the repo — sg's two tiers, and the libraries above sg (sr, sv, the shader compiler) alike.
 
-- **A test binary shares its devices.** One context per adapter, brought up by an entry driver that `nx::invoke_tests`es every test against it, which is the tier-1 shape below.
+- **A test binary shares its devices.** One context per adapter, brought up by an entry driver that invokes every test against it, which is the tier-1 shape below.
   A device is expensive to create and to tear down, and several alive at once contend in the driver.
   A test builds a context of its own only when the context itself is its subject — creation, teardown, a config knob, pristine epoch or pool state.
 - **The hardware adapter is the default.** It is what the code ships on, and it is fast.
@@ -58,10 +58,11 @@ INVOCABLE_TEST("sg - transient buffer round-trips within its epoch", (sg::contex
 
 It becomes runnable against each backend by two pieces working together:
 
-- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `nx::invoke_tests("<backend>", ctx)` every invocable against it.
+- **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `co_await nx::async_invoke_tests_in_sequence("<backend>", ctx)` over every invocable.
   The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
-  A driver holds every exclusion tag its children need (`slib-shader-library`, `sg-reload-generation`), because a child runs inside its driver's body and its own tags schedule nothing.
+  A driver holds no exclusion tags: the async invocation takes each child's own (`slib-shader-library`, `sg-reload-generation`) around its run.
+  So a test that stands up a `slib::shader_library` or counts routine init runs carries the tag itself, and a driver that also held it would be refused.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.

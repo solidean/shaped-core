@@ -58,6 +58,7 @@ cc::result<cc::unit> vulkan_upload_async_system::initialize(vulkan_context& ctx,
 {
     CC_ASSERT(window_bytes > 0, "the async upload window must be positive");
     _ctx = &ctx;
+    _drain.notify_on_drained(&ctx);
     _desired_window_bytes.store(window_bytes, cc::memory_order_relaxed);
 
     auto const type_info = VkSemaphoreTypeCreateInfo{
@@ -611,9 +612,10 @@ bool vulkan_upload_async_system::run_one_window()
 
     if (transfer_done)
     {
-        if (streaming)
-            _awaiting.push_back(
-                {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
+        // Every transfer waits for its copy to land, not only a stream: the drain token rides the entry, and dropping it
+        // here would report the upload delivered while the transfer queue has not run it yet.
+        _awaiting.push_back(
+            {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
         _pending.remove_at(index);
     }
     else if (payload_done && job.source != nullptr)

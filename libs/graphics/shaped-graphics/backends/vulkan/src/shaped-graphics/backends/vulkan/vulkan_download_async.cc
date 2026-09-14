@@ -40,6 +40,7 @@ cc::result<cc::unit> vulkan_download_async_system::initialize(vulkan_context& ct
 {
     CC_ASSERT(window_bytes > 0, "the async download window must be positive");
     _ctx = &ctx;
+    _drain.notify_on_drained(&ctx);
     _window_bytes = window_bytes;
 
     auto const type_info = VkSemaphoreTypeCreateInfo{

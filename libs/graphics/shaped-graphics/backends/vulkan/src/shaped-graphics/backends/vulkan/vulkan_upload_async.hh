@@ -211,6 +211,7 @@ public:
 
     /// Blocks until every upload handed to the actor has run on the GPU, been cancelled or been dropped.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 

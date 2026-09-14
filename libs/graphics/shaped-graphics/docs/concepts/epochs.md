@@ -64,7 +64,7 @@ So `future.is_ready()` can lag the fence.
 **Retire** (`process_completed_epochs`) reclaims what the GPU has finished.
 Read the fence once, drain every in-flight epoch whose value is `<= completed` (oldest first), and for each reclaim its payload — allocators back to the pool, expiring resources freed.
 Retire is safe to call at any time.
-It also settles the completion asyncs that have come due, which is why it is where the non-blocking half below is published.
+It also settles any completion async that has come due, though none of them waits for it to.
 `wait_for_epoch` and `wait_for_next_inflight_epoch` block on the fence and then retire, the latter being the standard back-pressure primitive when a pool is exhausted.
 Neither `wait_for_*` advances the epoch — advancing is a deliberate, rationed operation kept distinct from waiting.
 
@@ -79,9 +79,16 @@ Every question the `wait_for_*` family answers by stopping a thread has a form t
 | a download's blocking read | `future.completion()` |
 | a timestamp's blocking read | `timestamp.completion()` |
 | `block_until_epochs_in_flight(N)` | `try_advance_epoch(N)`, which declines instead |
+| `block_until_idle()` | `idle_completion()` — the same three steps, awaited |
 
 A completion node for something already finished comes back ready, so a caller never special-cases the past, and asking twice for the same target hands back the same node rather than two.
-They settle on a retire sweep — which every advance and every wait already runs — so a frame loop publishes them without doing anything extra.
+**They settle on their own: nobody has to sweep, advance or wait for one to arrive.**
+The first outstanding one starts a waiter that parks on the backend's GPU signals — a fence event on dx12, a timeline wait on vulkan — beside a wake the next lower target raises.
+A transfer drain reaching zero settles the drain half from whichever actor dropped it.
+Nothing polls and nothing times out, so a wait that looks like a stall is a signal that has not fired.
+A lost device settles every outstanding node as an error, since its fences jump to their maximum and would otherwise read as success, and so does a shutdown that comes first.
+
+`idle_completion()` retires epochs in its own segments, so it is awaited under retire's rule: never while another thread advances the epoch.
 
 `in_flight_epoch_count()` is the depth those decisions are made against: 0 means the GPU has caught up with everything closed so far.
 

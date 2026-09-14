@@ -209,11 +209,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
-- **Migrate the suites to `ASYNC_TEST`.**
-  nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
-  The blocker was that `cc::async` could not resume on the main thread; a coroutine now can, with `co_await cc::async_resume_on_main()`.
-  `ASYNC_TEST` still asserts against nexus's `main_thread` flag, so the window and present suites hop inside the test body rather than asking for the flag.
-  Closing that in nexus is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
+- **Migrate the invocables to `ASYNC_INVOCABLE_TEST`.**
+  The entry drivers are `ASYNC_TEST`s awaiting `nx::async_invoke_tests_in_sequence`, and `ctx.idle_completion()` settles on GPU signals alone.
+  So an invocable can `co_await` instead of `block_until_idle()`, which is then left to the tools and loading screens it was named for.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
   The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.

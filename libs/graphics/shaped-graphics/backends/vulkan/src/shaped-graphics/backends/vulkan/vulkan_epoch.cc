@@ -305,6 +305,73 @@ void vulkan_context::wait_for_next_inflight_epoch()
         wait_for_epoch(oldest.value());
 }
 
+bool vulkan_context::are_transfers_drained() const
+{
+    return _download_inline.is_idle() && _download_async.is_idle() && _upload_async.is_idle();
+}
+
+sg::submission_token vulkan_context::last_issued_submission()
+{
+    if (_submission_timeline == VK_NULL_HANDLE)
+        return sg::submission_token::not_submitted;
+    u64 const issued = _next_submission.lock([](sg::submission_token& next) { return u64(next); });
+    return issued <= u64(sg::submission_token::first) ? sg::submission_token::not_submitted
+                                                      : sg::submission_token(issued - 1);
+}
+
+void vulkan_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
+{
+    if (_completion_wake_timeline == VK_NULL_HANDLE)
+        return;
+
+    VkSemaphore semaphores[3] = {};
+    u64 values[3] = {};
+    u32 count = 0;
+    if (submission != 0 && _submission_timeline != VK_NULL_HANDLE)
+    {
+        semaphores[count] = _submission_timeline;
+        values[count++] = submission;
+    }
+    if (epoch != 0 && _epoch_timeline != VK_NULL_HANDLE)
+    {
+        semaphores[count] = _epoch_timeline;
+        values[count++] = epoch;
+    }
+    semaphores[count] = _completion_wake_timeline;
+    values[count++] = wake_generation + 1;
+
+    auto const wait = VkSemaphoreWaitInfo{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+        .flags = VK_SEMAPHORE_WAIT_ANY_BIT,
+        .semaphoreCount = count,
+        .pSemaphores = semaphores,
+        .pValues = values,
+    };
+    VkResult const r = vkWaitSemaphores(_device, &wait, UINT64_MAX);
+    note_device_lost_if_lost(r, "completion signal wait");
+}
+
+void vulkan_context::wake_completion_signal(u64 generation)
+{
+    if (_completion_wake_timeline == VK_NULL_HANDLE)
+        return;
+    // An empty submit raises it rather than vkSignalSemaphore: synchronization validation re-checks every pending
+    // command buffer on a host signal and reports hazards between copies one queue already runs in order.
+    auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
+        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+        .signalSemaphoreValueCount = 1,
+        .pSignalSemaphoreValues = &generation,
+    };
+    auto const submit = VkSubmitInfo{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = &timeline_info,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &_completion_wake_timeline,
+    };
+    VkResult const r = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });
+    note_device_lost_if_lost(r, "completion signal wake");
+}
+
 bool vulkan_context::is_submission_complete(sg::submission_token token) const
 {
     if (token == sg::submission_token::not_submitted)

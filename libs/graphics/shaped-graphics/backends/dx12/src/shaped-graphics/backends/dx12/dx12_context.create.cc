@@ -299,6 +299,15 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 
+    // The completion signal waiter's three events; see the members.
+    for (HANDLE* const event :
+         {&ctx->_completion_submission_event, &ctx->_completion_epoch_event, &ctx->_completion_wake_event})
+    {
+        *event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (*event == nullptr)
+            return cc::error("CreateEventW failed for a completion signal event");
+    }
+
     // With the debug layer live, route validation messages through the context, so a listener can be set on it later.
     // Registered here rather than right after device creation: the callback needs the context to consult.
     if (config.enable_debug_layer)

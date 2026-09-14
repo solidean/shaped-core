@@ -26,7 +26,8 @@ A backend picks this when its underlying API or its own bookkeeping is not safe 
 - **Concurrency-safe**, callable from several threads at once:
   - resource and command-list operations — `create_command_list`, `create_raw_buffer`, `submit_command_list`, `drop_command_list`, and a resource's refcount reaching zero;
   - retire — `process_completed_epochs`, internally synchronized because the backends' own ring back-pressure invokes it from within concurrent recording;
-  - the completion queries — `epoch_completion`, `submission_completion`, `is_submission_complete` — which read a fence and a guarded list.
+  - the completion queries — `epoch_completion`, `submission_completion`, `is_submission_complete` — which read a fence and a guarded list;
+  - awaiting `idle_completion`, which retires as it goes and so shares retire's one exclusion: it must not overlap advancing.
 - **Externally synchronized:** advancing (`advance_epoch`, `try_advance_epoch`), the two `block_until_*` waits, and **`shutdown`**.
   The caller must guarantee none of these overlaps any other context operation.
   Advancing closes an epoch and rewrites the shared in-flight state, including the current-epoch counter every other op reads, so fencing it off is the caller's job.
@@ -47,6 +48,10 @@ The actor simply runs on whoever sweeps it instead of on a thread of its own.
 An unthreaded actor registers itself with clean-core's [pump registry](../../../../base/clean-core/src/clean-core/thread/thread_pump.hh).
 Every blocking wait — `cc::async_blocking_get`, a frame loop, one of the waits below — sweeps that registry rather than draining the actors it happens to know about.
 `cc::thread_pump_all()` is the whole entry point, and it costs one atomic load where every actor has a thread of its own.
+
+The completion asyncs are the one place sg registers a pump itself, standing in for the waiter thread it cannot start.
+It settles what is due, then sweeps its siblings, and parks on the GPU only when no sibling made progress.
+A GPU target may wait on a copy only an unthreaded actor signals, which is why the siblings run first.
 
 sg used to carry `sg::context::pump()` and a per-backend `on_pump()` for this, and the reason they are gone is that they could only ever drain what *this context* could name.
 A wait below sg, or beside it, saw none of them: the deadlock that produced the registry was `cc::async_blocking_get` sleeping on a store it had no way to reach.

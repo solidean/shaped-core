@@ -155,6 +155,7 @@ public:
 
     /// Blocks until every job handed to the actor has been delivered, cancelled or dropped.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     /// Takes one job onto the pending list, giving it its ordering keys.
     void admit(vulkan_async_download_job job);
