@@ -10,9 +10,10 @@
 
 using namespace cc::primitive_defines;
 
-// Most tests run the actor unthreaded and drive it by hand: deterministic, race-free, and valid on
-// every platform (including single-threaded WebAssembly). A small threaded smoke section, gated on
-// CC_HAS_THREADS, exercises the real background thread.
+// Most tests run the actor unthreaded and drive it by hand, which is valid on every platform (including single-threaded WebAssembly).
+// A hand pump is never the only driver: any blocking wait elsewhere in the run sweeps the actor too.
+// So a test asserts on what shutdown leaves behind, never on which call happened to run a cycle.
+// A small threaded smoke section, gated on CC_HAS_THREADS, exercises the real background thread.
 
 // ============================================================================
 // Test actors
@@ -110,6 +111,20 @@ protected:
         local_queue.clear();
         return true;
     }
+};
+
+// Logs ints, and asks to run again until the test releases it.
+class busy_until_released_actor : public cc::threaded_actor_impl<int>
+{
+public:
+    cc::vector<int> log;
+    std::shared_ptr<cc::atomic<bool>> busy;
+
+    explicit busy_until_released_actor(std::shared_ptr<cc::atomic<bool>> b) : busy(std::move(b)) {}
+
+protected:
+    void on_message(int msg) override { log.push_back(msg); }
+    bool on_process() override { return busy->load(); }
 };
 
 // Forwards ints to a downstream int actor.
@@ -372,16 +387,24 @@ TEST("threaded_actor - unthreaded lifecycle state queries")
 
 TEST("threaded_actor - process_messages_if_unthreaded reports more-to-do then goes idle")
 {
-    auto actor = cc::make_threaded_actor<int_log_actor>();
+    auto const busy = std::make_shared<cc::atomic<bool>>(true);
+    auto actor = cc::make_threaded_actor<busy_until_released_actor>(busy);
     actor->start(unthreaded);
 
     REQUIRE(actor->enqueue_message(1));
     REQUIRE(actor->enqueue_message(2));
-    CHECK(actor->process_messages_if_unthreaded());  // dispatched something
-    CHECK(!actor->process_messages_if_unthreaded()); // nothing left
+
+    // Any cycle that runs reports more to do, so this ends at the first one that ran here rather than in a sweep.
+    while (!actor->process_messages_if_unthreaded())
+    {
+    }
+
+    busy->store(false);
+    pump_until_idle(*actor);
+    CHECK(!actor->process_messages_if_unthreaded()); // idle, or a sweep holds the cycle: false either way
 
     actor->shutdown();
-    auto impl = actor->take_impl<int_log_actor>();
+    auto impl = actor->take_impl<busy_until_released_actor>();
     REQUIRE(impl->log.size() == 2);
 }
 
@@ -510,6 +533,36 @@ TEST("threaded_actor - process_messages_if_unthreaded is a no-op in threaded mod
     auto impl = actor->take_impl<int_log_actor>();
     REQUIRE(impl->log.size() == 1);
     CHECK(impl->log[0] == 1);
+}
+
+TEST("threaded_actor - a hand pump and a sweep on another thread never run the same actor at once")
+{
+    auto actor = cc::make_threaded_actor<int_log_actor>();
+    actor->start(unthreaded);
+
+    cc::atomic<bool> stop = {false};
+    auto sweeper = std::thread(
+        [&]
+        {
+            while (!stop.load())
+                (void)cc::thread_pump_all();
+        });
+
+    constexpr int n = 2000;
+    for (int i = 0; i < n; ++i)
+    {
+        REQUIRE(actor->enqueue_message(i));
+        (void)actor->process_messages_if_unthreaded();
+    }
+
+    stop.store(true);
+    sweeper.join();
+    actor->shutdown();
+
+    auto impl = actor->take_impl<int_log_actor>();
+    REQUIRE(impl->log.size() == n);
+    for (int i = 0; i < n; ++i)
+        CHECK(impl->log[i] == i);
 }
 
 #endif // CC_HAS_THREADS
