@@ -111,8 +111,11 @@ void cc::thread_bound_scheduler::push(item it)
         // named here cannot be destroyed while we wake it.
         if (auto* const parked_in = _parked_in.load(cc::memory_order_acquire))
             parked_in->wake_home_participants();
+
+        // Under the mutex as well: the owner may take this item, finish, and destroy the scheduler before an unlocked notify
+        // lands, and its destructor's last look at the queue takes this mutex.
+        _work_cv.notify_one();
     }
-    _work_cv.notify_one();
 #else
     _local.push_back(it);
 #endif
