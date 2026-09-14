@@ -9,10 +9,10 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/metal/fwd.hh> // where every backend type is declared, autorelease_scope included
 #include <shaped-graphics/fwd.hh>                // also what puts the bare sized aliases in scope inside sg
 
-#include <atomic>
 #include <mutex>
 
 /// `cc::mutex`'s shape, held by a lock that is real whether or not this build has threads.
@@ -40,7 +40,7 @@ struct sg::backend::metal::callback_mutex
 
 private:
     T _value = {};
-    std::mutex _mutex;
+    std::mutex _mutex; // the one deliberate std:: lock in the backend — a cc::mutex here would be the bug, see above
 };
 
 /// The newest direct-queue submission that named a resource, or 0 when none has.
@@ -53,22 +53,22 @@ private:
 /// Held by `metal_buffer` and `metal_texture` alike, since the hazard is the resource's, not the kind's.
 struct sg::backend::metal::submission_stamp
 {
-    [[nodiscard]] u64 get() const { return _value.load(std::memory_order_acquire); }
+    [[nodiscard]] u64 get() const { return _value.load(cc::memory_order_acquire); }
 
     /// Raises the stamp to `value`, never lowering it.
     /// Lists on different threads may stamp out of order, and the wait has to cover the newest of them.
     void raise(u64 value)
     {
-        auto previous = _value.load(std::memory_order_relaxed);
+        auto previous = _value.load(cc::memory_order_relaxed);
         while (previous < value
-               && !_value.compare_exchange_weak(previous, value, std::memory_order_release, std::memory_order_relaxed))
+               && !_value.compare_exchange_weak(previous, value, cc::memory_order_release, cc::memory_order_relaxed))
         {
             // The CAS refreshes `previous` on every failure, so the loop ends as soon as someone stamped higher.
         }
     }
 
 private:
-    std::atomic<u64> _value = {0};
+    cc::atomic<u64> _value = {0};
 };
 
 namespace sg::backend::metal

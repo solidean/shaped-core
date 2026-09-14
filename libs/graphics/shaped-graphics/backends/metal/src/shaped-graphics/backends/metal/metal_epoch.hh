@@ -3,12 +3,12 @@
 #include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <atomic>
 
 namespace sg::backend::metal
 {
@@ -115,8 +115,8 @@ private:
     MTL::SharedEvent* _submission_event = nullptr;
 
     /// The epoch new work records into, and the value the next commit signals.
-    std::atomic<u64> _current = {u64(sg::epoch::first)};
-    std::atomic<u64> _next_submission = {u64(sg::submission_token::first)};
+    cc::atomic<u64> _current = {u64(sg::epoch::first)};
+    cc::atomic<u64> _next_submission = {u64(sg::submission_token::first)};
 
     /// Guards the in-flight FIFO, the open epoch's payload and the allocator pool.
     cc::mutex<int> _mutex;

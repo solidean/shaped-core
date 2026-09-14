@@ -124,5 +124,10 @@ private:
 
     // A callback mutex, because `forget_value` runs inside a commit handler — see metal_common.hh.
     mutable callback_mutex<state> _state;
+
+    /// Transfers committed but not yet finished.
+    ///
+    /// `std::atomic` rather than `cc::atomic`, for the reason `callback_mutex` exists: a commit handler decrements
+    /// this from a dispatch queue Apple owns, and `cc::atomic` is a plain value once `SC_THREADS` is off.
     std::atomic<int> _pending = 0;
 };

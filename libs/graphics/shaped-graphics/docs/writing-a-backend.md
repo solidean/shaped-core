@@ -283,6 +283,8 @@ Recorded as each is met, because this is what the next backend most wants to kno
   reaches them.
   So any backend state a callback writes needs a lock that is real unconditionally, and the singlethreaded preset is
   where the missing one surfaces — as a driver-side abort rather than as a data race you could reason about.
+  `cc::atomic` has the same hole for the same reason: it is a plain value without threads, so a counter a callback
+  decrements has to be a `std::atomic` with a comment saying why, or the next reader converts it back.
   Audit by asking which members a completion handler touches, not by where the races look likely.
 
 - **Keep translation logic device-free, and it becomes testable everywhere.**

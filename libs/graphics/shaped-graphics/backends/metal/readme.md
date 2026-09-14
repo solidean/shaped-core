@@ -144,6 +144,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   The residency set catches it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
   `callback_mutex` in `metal_common.hh` is `cc::mutex`'s shape with a lock that is always real.
   Three pieces of state hold one — the residency set, the transfer system's pending map, the feedback sink's context pointer — and everything else keeps `cc::mutex`.
+  `cc::atomic` has the same shape and the same hole, being a plain value with threads off, so the two counters a commit handler decrements are `std::atomic` and say why.
 - **An async texture transfer needs no layout settling, where dx12 needs a whole command list for it.**
   A D3D12 copy queue cannot run layout barriers, so dx12 submits a direct-queue fixup before it stamps the job.
   Metal textures have no layout at all, so the off-frame path is the buffer path with a footprint: same queue, same two waits, `staging_layout_of` in place of a byte count.

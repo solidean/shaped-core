@@ -31,7 +31,7 @@ metal_epoch_system::metal_epoch_system(MTL::Device* device,
     CC_ASSERT(_queue != nullptr, "epoch system needs a queue");
     CC_ASSERT(_epoch_event != nullptr && _submission_event != nullptr, "epoch system needs both timelines");
 
-    _open.epoch_value = _current.load(std::memory_order_relaxed);
+    _open.epoch_value = _current.load(cc::memory_order_relaxed);
 }
 
 metal_epoch_system::~metal_epoch_system()
@@ -44,7 +44,7 @@ sg::epoch metal_epoch_system::completed() const
     // After shutdown the timelines are released and everything they tracked has drained, so the open epoch's
     // predecessor is the true answer and reading a freed event is not.
     if (_is_shut_down)
-        return sg::epoch(_current.load(std::memory_order_acquire) - 1);
+        return sg::epoch(_current.load(cc::memory_order_acquire) - 1);
 
     auto const value = _epoch_event->signaledValue();
     auto const first_minus_one = u64(sg::epoch::first) - 1;
@@ -53,7 +53,7 @@ sg::epoch metal_epoch_system::completed() const
 
 void metal_epoch_system::advance()
 {
-    auto const closing = _current.load(std::memory_order_relaxed);
+    auto const closing = _current.load(cc::memory_order_relaxed);
 
     // The signal happens under the same lock that parks the payload, and after it.
     //
@@ -73,7 +73,7 @@ void metal_epoch_system::advance()
             _queue->signalEvent(_epoch_event, closing);
         });
 
-    _current.store(closing + 1, std::memory_order_release);
+    _current.store(closing + 1, cc::memory_order_release);
 }
 
 void metal_epoch_system::retire_completed()
@@ -130,7 +130,7 @@ void metal_epoch_system::block_until_submissions_complete()
 {
     // The submission timeline's newest issued value, not the epoch one: a list committed in the open epoch has no epoch
     // value to wait on yet, and this has to cover it.
-    auto const issued = _next_submission.load(std::memory_order_acquire);
+    auto const issued = _next_submission.load(cc::memory_order_acquire);
     if (issued > u64(sg::submission_token::first))
         wait_for_value(_submission_event, issued - 1);
 
@@ -139,7 +139,7 @@ void metal_epoch_system::block_until_submissions_complete()
 
 sg::submission_token metal_epoch_system::claim_submission_token()
 {
-    return sg::submission_token(_next_submission.fetch_add(1, std::memory_order_acq_rel));
+    return sg::submission_token(_next_submission.fetch_add(1, cc::memory_order_acq_rel));
 }
 
 void metal_epoch_system::signal_submission(sg::submission_token token)

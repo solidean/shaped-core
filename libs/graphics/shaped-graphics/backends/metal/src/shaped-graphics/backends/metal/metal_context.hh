@@ -297,6 +297,9 @@ private:
     cc::mutex<metal_staging_ring> _download_ring;
 
     /// Download copy-outs committed but not yet run, so block_until_transfers_drained knows when it is done.
+    ///
+    /// `std::atomic` rather than `cc::atomic`, for the reason `callback_mutex` exists: a commit handler decrements
+    /// this from a dispatch queue Apple owns, and `cc::atomic` is a plain value once `SC_THREADS` is off.
     std::atomic<int> _pending_downloads = 0;
 
     /// Transient resources created in the open epoch, expired when it closes.
