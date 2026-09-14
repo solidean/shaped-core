@@ -15,6 +15,7 @@ using metal_context_handle = std::shared_ptr<metal_context>;
 class metal_command_list;
 class metal_epoch_system;
 class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)
+struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder takes (see metal_barrier.hh)
 class metal_buffer;
 class metal_memory_heap;
 
