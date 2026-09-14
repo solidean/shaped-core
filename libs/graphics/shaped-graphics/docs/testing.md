@@ -63,6 +63,8 @@ It becomes runnable against each backend by two pieces working together:
   A backend that cannot come up `SKIP`s.
   A driver holds no exclusion tags: the async invocation takes each child's own (`slib-shader-library`, `sg-reload-generation`) around its run.
   So a test that stands up a `slib::shader_library` or counts routine init runs carries the tag itself, and a driver that also held it would be refused.
+  **A test awaits the GPU rather than blocking on it**: `co_await ctx->idle_completion()` where it used to call `block_until_idle()`.
+  A blocking wait in a library's tests is a `blocking-wait` lint finding, allowed by file in that library's `.shaped-lint.yml` where the wait is the point.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.

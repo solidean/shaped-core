@@ -259,6 +259,7 @@ A node awaiting a push that never comes therefore hangs rather than reporting no
 
 **This is a bridge between synchronous and asynchronous code, and nothing more.**
 Reaching for it often is the signal to step back: make the surrounding code async, write an `ASYNC_TEST`, hand the async to a caller that can await it.
+In a library's tests it is a `blocking-wait` lint finding, allowed by file only where the wait, or a scheduler the test owns, is the subject.
 Calling it from inside a frame is legal and participates rather than idling, but every blocked thread is one that cannot help — overused, that is how a graph starves or deadlocks.
 
 `cc::async_blocking_get_on(scheduler, root)` names a scheduler instead of taking the ambient one, for code that owns one and means *that* one: a benchmark measuring a pool, a test standing one up.

@@ -88,7 +88,7 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
     // is what registers one — so a caller meeting a format for the first time declines that frame.
     // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
-    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
     (void)ctx.routines.tick_until_idle();
@@ -160,7 +160,7 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
     // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
     // is what registers one — so a caller meeting a format for the first time declines that frame.
     // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
-    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
     (void)ctx.routines.tick_until_idle();

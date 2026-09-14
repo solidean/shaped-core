@@ -209,9 +209,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
-- **Migrate the invocables to `ASYNC_INVOCABLE_TEST`.**
-  The entry drivers are `ASYNC_TEST`s awaiting `nx::async_invoke_tests_in_sequence`, and `ctx.idle_completion()` settles on GPU signals alone.
-  So an invocable can `co_await` instead of `block_until_idle()`, which is then left to the tools and loading screens it was named for.
+- **Readiness as an async, so the GPU tests stop working around it.**
+  The suites are async: the entry drivers await `nx::async_invoke_tests_in_sequence`, and the tests await `ctx.idle_completion()`.
+  Two workarounds remain, both waiting on a readiness signal rather than on the migration.
+  A tick drives only routines already registered, so a test prewarms each variant by name before asserting on its first frame; a routine's readiness as an async would let it await instead.
+  sv's `frames_until_executed` and the furnace loop re-record frames until a path-traced state object lands; the same signal for that would turn both into one await.
+  What still blocks otherwise — manual window loops, fuzz steps, a few synchronous compile helpers — is allowed by file in each library's `.shaped-lint.yml`.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
   The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.

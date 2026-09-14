@@ -54,8 +54,8 @@ struct imgui_fixture
         // frame.
         // Naming it up front is what lets a test assert on its first call, and it couples the test to a choice the
         // code under test makes.
-        // It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness — see
-        // libs/graphics/shaped-graphics/docs/TODO.md.
+        // It goes away once a routine's readiness is an async, where this becomes a co_await on it — see
+        // libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
         sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
         (void)ctx->routines.tick_until_idle();
 

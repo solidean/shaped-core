@@ -31,8 +31,8 @@ constexpr auto mip_usage
 /// a shape for the first time declines that frame and draws on the next.
 /// An app absorbs that; a test asserting on the first call cannot, so it names the variants up front — which couples
 /// this test to a choice the code under test makes.
-/// It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness; see
-/// libs/graphics/shaped-graphics/docs/TODO.md.
+/// It goes away once a routine's readiness is an async, where this becomes a co_await on it;
+/// see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
 void prewarm_every_variant(sg::context& ctx)
 {
     for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)

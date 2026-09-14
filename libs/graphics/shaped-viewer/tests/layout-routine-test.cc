@@ -118,7 +118,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe 
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)ctx.routines.tick_until_idle();
 
@@ -161,7 +161,7 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)ctx.routines.tick_until_idle();
 

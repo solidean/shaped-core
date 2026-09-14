@@ -54,6 +54,8 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; ne
 }                                        // must be a coroutine: nothing to await? end with `co_return;`
 // Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
 // Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
+// A blocking get (cc::async_blocking_get, ctx.block_until_idle) in a library's tests is a `blocking-wait` lint finding:
+//   await instead, or allow the file by name in that library's .shaped-lint.yml where the wait is the subject.
 // SKIP / REQUIRE work as in a TEST, at any depth below the body.
 
 // Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, benchmark, or example. A sweep selects
