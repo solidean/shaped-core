@@ -193,12 +193,8 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
 // An exclusive ASYNC_TEST holds the phase lock across its suspends, and still has a scheduler to drive the root it hands back.
 ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusive())
 {
-    return cc::make_async_lazy<cc::unit>(
-        [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-        {
-            CHECK(true);
-            return actx.resolve_to_value(cc::unit{});
-        });
+    CHECK(true);
+    co_return;
 }
 
 // nx::main_thread — a flag rather than a fourth scheduler mode, so it composes with the modes instead of excluding them.
@@ -444,3 +440,113 @@ TEST("parallel - tests under -jN really do overlap", no_scheduler)
     CHECK(peak.load(cc::memory_order_acquire) >= 2);
 }
 #endif
+
+// ---- async tests under every scheduling ask ----
+// Each body is a coroutine taking a pointer by value, so what it records lives in the frame rather than in a capture.
+
+namespace
+{
+struct segment_record
+{
+    cc::atomic<u64> first = {0};  // thread of the first segment
+    cc::atomic<u64> after = {0};  // thread after an await completed off this thread
+    cc::atomic<u64> hopped = {0}; // thread after hopping to compute
+    cc::atomic<cc::async_scheduler*> first_scheduler = {nullptr};
+    cc::atomic<cc::async_scheduler*> after_scheduler = {nullptr};
+};
+
+u64 thread_now()
+{
+    return u64(cc::current_thread_id());
+}
+
+cc::shared_async<cc::unit> record_main_segments(segment_record* r)
+{
+    r->first.store(thread_now());
+    auto const elsewhere = cc::make_async_scheduled_on(cc::compute_scheduler(), [] { return 1; });
+    CHECK(co_await elsewhere == 1);
+    r->after.store(thread_now());
+    co_await cc::async_resume_on_compute();
+    r->hopped.store(thread_now());
+}
+
+cc::shared_async<cc::unit> hop_to_main_without_the_flag(segment_record* r)
+{
+    co_await cc::async_resume_on_main();
+    r->first.store(thread_now());
+    CHECK(true);
+}
+
+cc::shared_async<cc::unit> record_schedulers(segment_record* r)
+{
+    r->first_scheduler.store(cc::async_scheduler::current_or_null());
+    r->first.store(thread_now());
+    auto const dep = cc::make_async_lazy([] { return 2; });
+    CHECK(co_await dep == 2);
+    r->after_scheduler.store(cc::async_scheduler::current_or_null());
+    r->after.store(thread_now());
+}
+
+nx::test_schedule_execution run_one_async(nx::config::cfg cfg,
+                                          segment_record& r,
+                                          cc::shared_async<cc::unit> (*body)(segment_record*),
+                                          int jobs)
+{
+    nx::test_registry reg;
+    reg.add_declaration("busy", {}, [] { CHECK(true); });
+    reg.add_async_declaration(
+        "subject", cfg, [&r, body](nx::impl::async_test_sink& sink) { nx::impl::submit_test_async(sink, body(&r)); });
+    auto const schedule = nx::test_schedule::create({}, reg);
+    return nx::execute_tests(schedule, with_jobs(jobs));
+}
+} // namespace
+
+TEST("parallel - a main_thread async test runs every segment on main until it hops away", no_scheduler)
+{
+    REQUIRE(cc::current_thread_id() == cc::thread_id::main);
+    for (auto const jobs : {1, 4})
+    {
+        segment_record r;
+        auto const exec = run_one_async(nx::impl::merge_config(nx::config::main_thread), r, &record_main_segments, jobs);
+        CHECK(exec.count_failed_tests() == 0);
+        CHECK(r.first.load() == u64(cc::thread_id::main));
+        CHECK(r.after.load() == u64(cc::thread_id::main)); // resumed at home, whichever thread finished the dependency
+        CHECK(r.hopped.load() != 0);
+    }
+}
+
+TEST("parallel - an async test that hops to main completes under -j1", no_scheduler)
+{
+    // The -j1 driver used to drive nodes on a scheduler that never pumps the main home, and aborted the binary here.
+    REQUIRE(cc::current_thread_id() == cc::thread_id::main);
+    segment_record r;
+    auto const exec = run_one_async({}, r, &hop_to_main_without_the_flag, 1);
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(r.first.load() == u64(cc::thread_id::main));
+}
+
+TEST("parallel - a singlethreaded async test runs inline on the run thread", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        segment_record r;
+        auto const exec = run_one_async(nx::impl::merge_config(nx::config::singlethreaded), r, &record_schedulers, jobs);
+        CHECK(exec.count_failed_tests() == 0);
+        CHECK(r.first.load() == thread_now());
+        CHECK(r.after.load() == thread_now()); // every segment, and the dependency it awaited, on this one thread
+        CHECK(r.first_scheduler.load() != nullptr);
+        CHECK(r.first_scheduler.load() == r.after_scheduler.load());
+    }
+}
+
+TEST("parallel - an own_pool async test keeps every segment on its private pool", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        segment_record r;
+        auto const exec = run_one_async(nx::impl::merge_config(nx::config::own_pool(2)), r, &record_schedulers, jobs);
+        CHECK(exec.count_failed_tests() == 0);
+        CHECK(r.first_scheduler.load() != nullptr);
+        CHECK(r.first_scheduler.load() == r.after_scheduler.load());
+    }
+}

@@ -242,7 +242,8 @@ constexpr struct
 // For a test whose subject asserts on it: sr::window_system does, because SDL does.
 // Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound, and not that nothing else runs.
 // It promises no exclusion, not even among main_thread tests: add exclusive() to run alone, or exclusive(tag) to exclude a group.
-// own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
+// own_pool cannot be combined with it and asserts, because a private pool's worker is never the main thread.
+// On an async test it homes the body to main, so every segment runs there until the body hops away itself.
 constexpr struct
 {
     void apply(cfg& result) const { result.main_thread = true; }

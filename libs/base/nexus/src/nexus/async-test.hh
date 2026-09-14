@@ -17,17 +17,18 @@
 // than blocking a worker, and every check it reports still finds this test from whichever thread ran it.
 // That holds at any depth: a check inside a coroutine the body awaited, which nexus never saw, is billed here too.
 //
-// C++ needs at least one co_ keyword to make a body a coroutine.
-// A body that awaits nothing therefore ends in a bare `co_return;`, or stays a plain body that RETURNS the graph to
-// await — the pre-coroutine spelling, still supported:
+// **The body must be a coroutine**, and one that is not fails the test by name.
+// C++ needs at least one co_ keyword to make it one, so a body that awaits nothing ends in a bare `co_return;`.
+// Nexus places the body before its first line runs — on main for `main_thread`, on the phase's scheduler otherwise —
+// and only a coroutine can be placed that way.
 //
-//   ASYNC_TEST("...") { return cc::make_async_lazy<cc::unit>(/* ... */); }
+// Every scheduling ask a TEST takes applies: `main_thread` homes the body to main until it hops away itself,
+// `singlethreaded` drives it inline on the run thread, `own_pool(n)` runs it on that pool, and exclusion holds across every suspend.
+// `no_scheduler` is refused, since nothing would drive the body.
 //
-// **A returned graph must be COLD** — a `make_async_lazy` root, not one already scheduled or resolved — since nexus
-// stamps this test's context onto it as it schedules it, and that stamp only happens on a cold node.
-// A coroutine body is cold by construction, so the rule binds only the returning form.
+// SKIP and REQUIRE behave as in a TEST, at any depth: the node error their throw becomes is the abort, not a second failure.
 //
-// Two further limits, both deliberate for now:
+// Two limits, both deliberate:
 //
 // * SECTION is not available in an async body, and asserts.
 //   The section machinery replays the body once per section path, which is single-threaded state, and an async body runs once.
@@ -50,9 +51,8 @@ void submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root);
 template <class F>
 cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
 {
-    static_assert(std::is_same_v<decltype((*fn)()), cc::shared_async<cc::unit>>,
-                  "an ASYNC_TEST body must co_return nothing, or return cc::shared_async<cc::unit>; wrap a graph of "
-                  "another type in a make_async_lazy<cc::unit> that requires it");
+    static_assert(std::is_same_v<decltype((*fn)()), cc::shared_async<cc::unit>>, "an ASYNC_TEST body must be a "
+                                                                                 "coroutine that co_returns nothing");
     return [fn](async_test_sink& sink) { submit_test_async(sink, (*fn)()); };
 }
 } // namespace nx::impl

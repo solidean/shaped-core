@@ -18,6 +18,7 @@ In a phase with a `main_thread` test the caller runs the bodies handed to it ins
 
 `-j1` stays first-class, and is not merely "a pool of one".
 It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order.
+Between drives it pumps the main home and sweeps the thread-pump registry, because a node that hops to main or awaits an unthreaded actor completes only through those.
 That makes it the reproducible-debugging mode: a failure at `-jN` that survives `-j1` is a test bug, and one that vanishes is a concurrency bug.
 
 A **hand-built** `test_schedule_config` defaults the other way, to `jobs = 1`.
@@ -101,11 +102,11 @@ That is fair rather than a defect: a test that cannot tolerate it awaits instead
 Under `-j1` the run thread drives the nodes one at a time, and a `main_thread` body runs in place.
 In a `-jN` phase with no `main_thread` test, the run thread participates in the pool as before.
 
-Two combinations are asserts rather than quiet demotions:
+**On an `ASYNC_TEST` the flag homes the body to main**, with exactly the meaning `cc::make_async_lazy_on_main` has.
+Every segment runs on main — the first line, and every resume after a wake from another thread — until the body hops away with a `co_await` of its own.
+The run thread's loop is what runs those segments, at `-j1` as at `-jN`.
 
-* **`own_pool(n)`**, because a private pool's worker is never the main thread.
-* **`ASYNC_TEST`**, because the graph it returns is driven by the phase's scheduler and not by the thread the body started on.
-  Allowing it is recorded in [TODO](TODO.md); hopping to main from inside an `ASYNC_TEST` is not the workaround, since the `-j1` driver never pumps the main home and aborts.
+**`own_pool(n)` is an assert** rather than a quiet demotion, because a private pool's worker is never the main thread.
 
 ## Exclusion is locks
 
@@ -154,21 +155,16 @@ ASYNC_TEST("cache - resolves a miss")
 
 The body *is* the graph: nexus schedules it and makes the test wait on it, so a park inside parks the test instead of blocking a worker.
 
-C++ needs at least one `co_` keyword to make a body a coroutine.
-A body that awaits nothing therefore ends in a bare `co_return;`, or stays a plain body that **returns** the graph to await — the pre-coroutine spelling, still supported:
-
-```cpp
-ASYNC_TEST("...") { return cc::make_async_lazy<cc::unit>(/* ... */); }
-```
+**The body must be a coroutine**, and a body handing back anything else fails its test by name.
+C++ needs at least one `co_` keyword to make a body a coroutine, so one that awaits nothing ends in a bare `co_return;`.
+Nexus places the body before its first line runs, and only a coroutine reserves the home word that placement writes.
 
 **Attribution across the suspension rests on one mechanism.**
 Scheduling a **cold** node stamps the scheduling thread's ambient context onto it as a resume token.
 Nexus installs this test's link and schedules the body's root under it, so `poll()` re-installs that link on whichever worker picks it up.
 The cold nodes that root drives inline inherit it in turn, because a node without a token of its own inherits its driver's.
 
-That is why **the root must be cold**: one already scheduled or already resolved cannot take the stamp, and its checks would be billed to whatever happened to be driving.
-An already-scheduled root is an assert, not a silent misattribution.
-A coroutine body is cold by construction — [`cc::async`'s coroutines are lazy](../../clean-core/docs/systems/async.md#co_await--co_return) — so the rule binds only the returning form.
+A coroutine body is cold by construction — [`cc::async`'s coroutines are lazy](../../clean-core/docs/systems/async.md#co_await--co_return) — so the stamp always lands.
 
 Two limits, both deliberate:
 
@@ -177,7 +173,13 @@ Two limits, both deliberate:
 * **A graph resolving to an error fails the test, naming the error**, and is never propagated onward.
   An awaited dependency that fails is exactly that: it short-circuits the rest of the body, then fails the test.
 
-`no_scheduler` and `ASYNC_TEST` are mutually exclusive: nothing would drive the graph.
+**Scheduling asks apply as they do to a `TEST`.**
+`main_thread` is above; exclusion holds across every suspend; `own_pool(n)` runs the body and what it schedules on that pool.
+`singlethreaded` drives the body to completion in the directly driven phase, inline on the run thread and in order, with the same main-home and pump servicing `-j1` has.
+`no_scheduler` is refused: nothing would drive the body.
+
+**`SKIP` and `REQUIRE` behave as in a `TEST`**, at any depth below the body.
+Their throw ends the poll it happens in, and cc::async turns it into that node's error; nexus marks the test before throwing, so that error is the abort rather than a second failure.
 
 ## A failing `CC_ASSERT` reports as a check, from any thread
 

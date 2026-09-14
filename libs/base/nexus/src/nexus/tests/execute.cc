@@ -173,6 +173,11 @@ struct test_context
     // False for an ASYNC_TEST: the section tree is replay state, and the body of an async test runs exactly once.
     bool allows_sections = true;
 
+    // Set by a SKIP or a failed REQUIRE that ended a poll by throwing.
+    // The async system turns that throw into the node's error, and it propagates up the graph an ASYNC_TEST body awaited.
+    // That error is the abort the check asked for, already recorded, so finish_async_test must not report it again.
+    cc::atomic<bool> aborted_by_check_throw = {false};
+
     // Where --verbose trace lines go: the top-level execution's buffer, shared with every context nested under it.
     // Never null while a body runs.
     cc::string* verbose_sink = nullptr;
@@ -618,10 +623,15 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     if (!cc::async_is_polling())
         return; // nothing would catch the throw
 
+    auto const aborts = is_skip || (!result.passed && result.kind == impl::check_kind::require);
+    if (!aborts)
+        return;
+
+    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_test reads this to tell it apart from a real failure.
+    ctx.aborted_by_check_throw.store(true, cc::memory_order_release);
     if (is_skip)
         throw test_skipped{};
-    if (!result.passed && result.kind == impl::check_kind::require)
-        throw test_require_failed{};
+    throw test_require_failed{};
 }
 
 /// Record a check that belongs to no test, and say so on stderr right away.
@@ -792,7 +802,8 @@ void finish_async_test(async_test_state& state)
     auto const& decl = *state.execution->instance.declaration;
 
     // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
-    if (state.root != nullptr)
+    // A SKIP or REQUIRE that ended the graph by throwing has already said what happened, and its error is that abort rather than a second failure.
+    if (state.root != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
     {
         if (auto const* const err = state.root->try_error(); err != nullptr)
         {
@@ -865,9 +876,31 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
         // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
         // and it also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
+        // Only a coroutine can be placed on a home before it starts, which is what main_thread and the scheduler modes need.
+        // A raw frame is a hot-path tool with no place in a test body, so it is refused outright rather than accepted wherever placement happens not to matter.
+        if (state.root != nullptr && !state.root->reserves_home_word())
+        {
+            state.ctx->errors.push_back(test_error{
+                .expr = "an async test body must be a coroutine",
+                .location = decl.location,
+                .extra_lines = {"write the body with co_await / co_return rather than returning a graph built another "
+                                "way",
+                                "e.g.  ASYNC_TEST(\"...\") { auto const v = co_await work(); CHECK(v == 42); }"},
+                .expanded = "the body handed back a graph that is not a coroutine",
+            });
+            state.root = {};
+        }
+
         if (state.root != nullptr)
         {
-            CC_ASSERT(state.root->is_cold(), "an ASYNC_TEST must return a cold graph — see nexus/async-test.hh");
+            CC_ASSERT(state.root->is_cold(), "an async test body must hand back its coroutine unstarted");
+
+            // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
+            if (decl.test_config.main_thread)
+            {
+                auto const homed = state.root->try_home_cold(cc::main_thread_scheduler());
+                CC_ASSERT(homed, "a cold coroutine always takes a home");
+            }
             state.root->schedule();
         }
     }
@@ -877,6 +910,36 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
 
     finish_async_test(state);
     return actx.resolve_to_value(cc::unit{}); // terminal: nothing may follow it
+}
+
+/// Drive `node` to completion on `driver` from the run thread, one node at a time.
+///
+/// A single-threaded scheduler alone completes only what it can reach, and two things it cannot reach are exactly what an async test waits on.
+/// A segment homed to main runs only when the main home is pumped, and an unthreaded semantic thread delivers only when the pump registry is swept.
+/// So between drives this services both — the main home only on the main thread, which owns it — and waits briefly when neither had anything.
+void drive_serially(cc::singlethreaded_scheduler& driver, cc::async_node_base& node)
+{
+    auto const on_main = cc::current_thread_id() == cc::thread_id::main;
+    while (!node.is_ready())
+    {
+        driver.participate_until_ready(node);
+        if (node.is_ready())
+            break;
+
+        auto const progressed = on_main ? cc::pump_main_thread() : cc::thread_pump_all();
+        if (progressed)
+            continue;
+
+#if !CC_HAS_THREADS
+        // Nothing else exists to deliver what the node waits on.
+        CC_ASSERT(false, "a serially driven test cannot progress: it waits on something no scheduler or pump here will "
+                         "run");
+#endif
+        if (on_main)
+            cc::main_thread_scheduler().wait_for_work(1.0);
+        else
+            cc::this_thread_sleep_secs(0.001);
+    }
 }
 
 /// Take everything the sink holds, leaving it empty for whatever runs next.
@@ -1707,12 +1770,6 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   "nx::main_thread cannot be combined with own_pool: a private pool's worker is never the main "
                   "thread. BENCHMARK bakes main_thread in, so a benchmark of thread scaling has to be a plain TEST "
                   "with nx::config::benchmark instead");
-        CC_ASSERT(!instance.declaration->is_async(), "an ASYNC_TEST cannot use nx::main_thread: the graph it returns "
-                                                     "is driven by the phase's scheduler, not by the thread the body "
-                                                     "started on (allowing it is in libs/base/nexus/docs/TODO.md). "
-                                                     "BENCHMARK bakes "
-                                                     "main_thread in, so an async benchmark has to be a plain "
-                                                     "ASYNC_TEST with nx::config::benchmark instead");
     }
     CC_ASSERT(!any_main_thread || cc::current_thread_id() == cc::thread_id::main,
               "a test asked for nx::main_thread, but execute_tests is not running on the main thread; a binary running "
@@ -1745,8 +1802,8 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         CC_ASSERT(instance.declaration->function.is_valid() || instance.declaration->is_async(),
                   "ordinary instances must have a nullary or an async body");
         CC_ASSERT(!instance.declaration->is_async()
-                      || instance.declaration->test_config.scheduler != nx::config::scheduler_mode::none,
-                  "an ASYNC_TEST cannot use no_scheduler: nothing would drive the graph it returns");
+                      || instance.declaration->test_config.ambient != nx::config::ambient_mode::none,
+                  "an async test cannot use no_scheduler: nothing would drive its body");
         auto& execution = result.executions[i];
         execution.instance = instance;
 
@@ -1799,7 +1856,24 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             auto const run_bodies = [&]
             {
                 for (auto const i : phase.indices)
-                    run_scheduled_instance(result.executions[i], config);
+                {
+                    auto& execution = result.executions[i];
+                    if (!execution.instance.declaration->is_async())
+                    {
+                        run_scheduled_instance(execution, config);
+                        continue;
+                    }
+
+                    // Only singlethreaded reaches here: the scheduler bound below is the one that drives the body, inline and in order.
+                    auto* const bound = cc::async_scheduler::current_or_null();
+                    CC_ASSERT(bound != nullptr, "an async test in a directly driven phase needs the phase's bound "
+                                                "scheduler");
+                    auto state = async_test_state{.execution = &execution, .config = &config};
+                    auto const wrapper = cc::make_async_lazy<cc::unit>(
+                        [&state](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+                        { return step_async_test(state, actx); });
+                    drive_serially(static_cast<cc::singlethreaded_scheduler&>(*bound), *wrapper);
+                }
             };
 
             switch (phase.ambient)
@@ -1967,7 +2041,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             cc::singlethreaded_scheduler driver;
             cc::async_worker_scope const scope(driver);
             for (auto const& node : test_nodes)
-                (void)cc::async_blocking_get_on(driver, node);
+                drive_serially(driver, *node);
             continue;
         }
 

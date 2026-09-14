@@ -868,6 +868,10 @@ public:
     /// Call before scheduling; racing it against a schedule() of the same node is a caller bug.
     bool try_home_cold(async_scheduler& home, async_home_options options = {});
 
+    /// Whether this node's frame slot opens with a home word, so try_home_cold can place it while it is cold.
+    /// True for every coroutine and every `_on` factory, which is how a host tells a coroutine from a plain frame.
+    [[nodiscard]] bool reserves_home_word() const { return ops()->frame_has_home_word; }
+
     /// Drive this node as a dependency of a node homed to `required_home` whose policy is same_home_only:
     /// it runs only if it is homed there too, and is otherwise left for the driver to schedule.
     void poll_as_dep(async_scheduler& required_home);

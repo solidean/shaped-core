@@ -40,17 +40,20 @@ TEST("order matters", singlethreaded) { }//   singlethreaded  — ambient cc::si
                                          //     runs inline on the body's thread, in order
 TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
                                          //     a flag, not a mode, so it composes; runs BESIDE the shared phase (add
-                                         //     exclusive() to run alone); own_pool / ASYNC_TEST assert
+                                         //     exclusive() to run alone); own_pool asserts. On ASYNC_TEST: homed to
+                                         //     main until the body hops away
 TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
 // Exclusion is LOCKS (cc::async_mutex per tag + a phase-wide shared lock): holders PARK, and run in arrival order
 // under -jN — only -j1 keeps schedule order. Tags are taken in name order, so multi-tag tests cannot deadlock.
 
 #include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
-ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexus awaits the body
+ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; nexus awaits the body
 {                                        //   a CHECK at any depth below it still lands on THIS test
     auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
-}                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
+}                                        // must be a coroutine: nothing to await? end with `co_return;`
+// Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
+// SKIP / REQUIRE work as in a TEST, at any depth below the body.
 
 // Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, benchmark, or example. A sweep selects
 // one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
