@@ -14,9 +14,12 @@ class metal_context;
 using metal_context_handle = std::shared_ptr<metal_context>;
 class metal_command_list;
 class metal_epoch_system;
+class metal_staging_ring;  // CPU-visible bytes an inline transfer stages through (see metal_staging_ring.hh)
+class metal_residency_set; // what MTL4 requires instead of useResource (see metal_residency.hh)
 class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)
 struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder takes (see metal_barrier.hh)
 class metal_buffer;
+struct metal_buffer_access; // cross-list access tracking for one buffer (see metal_buffer_access.hh)
 class metal_memory_heap;
 
 /// Backend-typed resource handles.

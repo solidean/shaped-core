@@ -17,6 +17,8 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_epoch.cc
     src/shaped-graphics/backends/metal/metal_feedback.cc
     src/shaped-graphics/backends/metal/metal_memory_heap.cc
+    src/shaped-graphics/backends/metal/metal_residency.cc
+    src/shaped-graphics/backends/metal/metal_staging_ring.cc
 )
 
 target_sources(shaped-graphics-metal
@@ -28,12 +30,15 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/fwd.hh
     src/shaped-graphics/backends/metal/metal_barrier.hh
     src/shaped-graphics/backends/metal/metal_buffer.hh
+    src/shaped-graphics/backends/metal/metal_buffer_access.hh
     src/shaped-graphics/backends/metal/metal_common.hh
     src/shaped-graphics/backends/metal/metal_command_list.hh
     src/shaped-graphics/backends/metal/metal_context.hh
     src/shaped-graphics/backends/metal/metal_epoch.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
     src/shaped-graphics/backends/metal/metal_memory_heap.hh
+    src/shaped-graphics/backends/metal/metal_residency.hh
+    src/shaped-graphics/backends/metal/metal_staging_ring.hh
 )
 
 target_compile_features(shaped-graphics-metal PUBLIC cxx_std_23)
@@ -58,6 +63,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/metal-barrier-test.cc
         tests/metal-test.cc
+        tests/metal-transfer-test.cc
         tests/metal-validation-test.cc
     )
 

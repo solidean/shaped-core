@@ -12,9 +12,14 @@
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/backends/metal/metal_memory_heap.hh>
+#include <shaped-graphics/backends/metal/metal_residency.hh>
+#include <shaped-graphics/backends/metal/metal_staging_ring.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
+
+#include <atomic>
 
 /// Per-backend creation config for the Metal context.
 ///
@@ -26,6 +31,13 @@
 /// libs/graphics/shaped-graphics/backends/metal/readme.md.
 struct sg::backend::metal::metal_config
 {
+    /// Capacity of the staging ring behind cmd.upload, in bytes.
+    /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
+    /// Matches the other two backends' default.
+    isize upload_ring_bytes = 16 * 1024 * 1024;
+
+    /// Capacity of the readback ring behind cmd.download, in bytes.
+    isize download_ring_bytes = 16 * 1024 * 1024;
 };
 
 /// Metal implementation of sg::context, on Metal 4.
@@ -56,6 +68,16 @@ public:
     [[nodiscard]] MTL4::CommandQueue* queue() const { return _queue; }
     [[nodiscard]] metal_epoch_system& epochs() { return _epochs; }
 
+    /// Hands each open command list its index into every resource's concurrent access tracking.
+    [[nodiscard]] sg::command_list_slot_allocator& slots() { return _slots; }
+
+    /// Everything this context's GPU work may touch; MTL4 has no useResource, so a resource outside this is not there.
+    [[nodiscard]] metal_residency_set& residency() { return _residency; }
+
+    /// The rings inline transfers stage through, guarded because a list may record on any thread.
+    [[nodiscard]] cc::mutex<metal_staging_ring>& upload_ring() { return _upload_ring; }
+    [[nodiscard]] cc::mutex<metal_staging_ring>& download_ring() { return _download_ring; }
+
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
 
@@ -66,6 +88,13 @@ public:
 
     /// The backend-typed heap create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
+
+    /// Allocates the residency set and the two staging rings.
+    /// Called once by create_metal_context, before the context is handed out.
+    void create_staging_rings(isize upload_bytes, isize download_bytes);
+
+    /// Move every resource `list` touched from its per-list state into the state the next list synchronizes against.
+    void finalize_touched_buffers(metal_command_list& list);
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
@@ -100,7 +129,11 @@ private:
     void wait_for_next_inflight_epoch() override { _epochs.wait_for_next_inflight(); }
     void retire_completed_epochs() override { _epochs.retire_completed(); }
     void block_until_submissions_complete() override { _epochs.block_until_submissions_complete(); }
-    void block_until_transfers_drained() override {}
+    /// Wait until every download's copy-out has run.
+    ///
+    /// Draining the GPU is not enough on its own: a commit's feedback handler runs on a dispatch queue after the GPU
+    /// finished, so a caller that only waited on the epoch fence could observe an unsettled future.
+    void block_until_transfers_drained() override;
 
     [[nodiscard]] cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc) override;
 
@@ -196,6 +229,14 @@ private:
 
     /// Shared with every commit-feedback handler still in flight; detached at shutdown.
     std::shared_ptr<metal_feedback_sink> _feedback;
+
+    sg::command_list_slot_allocator _slots;
+    metal_residency_set _residency;
+    cc::mutex<metal_staging_ring> _upload_ring;
+    cc::mutex<metal_staging_ring> _download_ring;
+
+    /// Download copy-outs committed but not yet run, so block_until_transfers_drained knows when it is done.
+    std::atomic<int> _pending_downloads = 0;
 
     /// Transient resources created in the open epoch, expired when it closes.
     ///

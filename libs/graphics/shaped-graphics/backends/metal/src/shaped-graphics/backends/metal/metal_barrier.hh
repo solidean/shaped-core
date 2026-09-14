@@ -49,6 +49,21 @@ namespace sg::backend::metal
 /// the barrier is ordering a read against a read or against a layout change Metal does not have.
 [[nodiscard]] MTL4::VisibilityOptions visibility_for(sg::access_flags src_access, sg::access_flags dst_access);
 
+/// The only stages an encoder-scoped barrier on a compute encoder may name.
+///
+/// `barrierAfterEncoderStages` rejects anything else outright — with validation armed it aborts — because an encoder
+/// can only order the stages it is able to encode work for.
+/// The queue-scoped form has no such restriction, which is what an entry barrier uses.
+inline constexpr MTL::Stages k_compute_encoder_stages
+    = MTL::StageDispatch | MTL::StageBlit | MTL::StageAccelerationStructure;
+
+/// `stages` narrowed to what a compute encoder accepts.
+///
+/// A mask that clamps to nothing becomes the encoder's whole set rather than an empty one: an empty mask orders
+/// nothing, and the stages being dropped are ones this encoder cannot name anyway.
+/// That is conservative and legal, where the alternative is a barrier the API refuses.
+[[nodiscard]] MTL::Stages clamp_to_compute_encoder(MTL::Stages stages);
+
 /// Translate one sg access barrier into the MTL4 form.
 ///
 /// The layouts are dropped rather than mapped, and that is not a gap: a Metal texture has no layout, so

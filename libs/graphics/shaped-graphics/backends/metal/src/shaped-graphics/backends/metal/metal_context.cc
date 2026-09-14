@@ -3,7 +3,10 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/exceptions.hh>
+
+#include <thread>
 
 // Seams the milestone order has not reached; see libs/graphics/shaped-graphics/docs/writing-a-backend.md.
 #define SG_METAL_UNIMPLEMENTED(what) CC_UNREACHABLE(what " is not implemented in the metal backend yet")
@@ -23,6 +26,18 @@ metal_context::metal_context(MTL::Device* device,
 {
     CC_ASSERT(_device != nullptr && _queue != nullptr, "a metal context needs a device and a queue");
     _feedback = std::make_shared<metal_feedback_sink>(*this);
+}
+
+void metal_context::create_staging_rings(isize upload_bytes, isize download_bytes)
+{
+    // Before the rings, so their own buffers can declare themselves resident as they are made.
+    _residency.create(_device, _queue);
+
+    _upload_ring.lock([&](metal_staging_ring& r) { r.create(_device, upload_bytes, "sg inline upload ring"); });
+    _download_ring.lock([&](metal_staging_ring& r) { r.create(_device, download_bytes, "sg inline download ring"); });
+
+    _upload_ring.lock([&](metal_staging_ring& r) { _residency.add(r.buffer()); });
+    _download_ring.lock([&](metal_staging_ring& r) { _residency.add(r.buffer()); });
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
@@ -78,6 +93,21 @@ void metal_context::advance_epoch()
         if (auto const buffer = weak.lock())
             buffer->expire();
 
+    // The rings' bytes were read (or written) by copies recorded in the closing epoch, so they are only reclaimable
+    // once that epoch retires.
+    //
+    // Where the head stands NOW is what that epoch owns; anything staged after this advance belongs to the next one
+    // and must survive.
+    // Rewinding to zero instead would hand those bytes out twice.
+    auto const upload_mark = _upload_ring.lock([](metal_staging_ring& r) { return r.mark(); });
+    auto const download_mark = _download_ring.lock([](metal_staging_ring& r) { return r.mark(); });
+    _epochs.defer(
+        [this, upload_mark, download_mark]
+        {
+            _upload_ring.lock([&](metal_staging_ring& r) { r.release_to(upload_mark); });
+            _download_ring.lock([&](metal_staging_ring& r) { r.release_to(download_mark); });
+        });
+
     _epochs.advance();
     apply_pending_transient_budget();
 }
@@ -93,6 +123,10 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
     list.end_recording();
 
+    // Finalize every buffer this list touched, in submission order — that ordering is what makes each resource's
+    // `current` mean "after everything submitted so far".
+    finalize_touched_buffers(list);
+
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
     list.release_ownership();
@@ -103,14 +137,28 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     // controls, which can be after shutdown.
     // See metal_feedback.hh.
     auto sink = _feedback;
+
+    // The list's downloads: their bytes are in the staging ring and become readable when this commit completes, which
+    // is precisely when the feedback handler runs.
+    auto downloads = std::make_shared<cc::vector<cc::unique_function<void()>>>(list.take_pending_downloads());
+    auto const has_downloads = !downloads->empty();
+    auto* const pending_counter = &_pending_downloads;
+    if (has_downloads)
+        pending_counter->fetch_add(1, std::memory_order_acq_rel);
+
     auto* const options = MTL4::CommitOptions::alloc()->init();
     options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
       auto* const error = feedback->error();
-      if (error == nullptr)
-          return;
+      if (error != nullptr)
+          sink->report(device_error_kind_of(NS::UInteger(error->code())), describe_error(error, "a metal command "
+                                                                                                "buffer failed"));
 
-      sink->report(device_error_kind_of(NS::UInteger(error->code())), describe_error(error, "a metal command buffer "
-                                                                                            "failed"));
+      for (auto& copy_out : *downloads)
+          copy_out();
+      downloads->clear();
+
+      if (has_downloads)
+          pending_counter->fetch_sub(1, std::memory_order_acq_rel);
     });
 
     MTL4::CommandBuffer const* const buffers[] = {buffer};
@@ -124,6 +172,8 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     // committed is still executing is exactly what MTL4 forbids.
     _epochs.retire_allocator_with_epoch(allocator);
     _epochs.defer([buffer] { buffer->release(); });
+
+    _slots.release(list.slot());
 
     return token;
 }
@@ -141,10 +191,35 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
     auto* const allocator = list.allocator();
     list.release_ownership();
 
+    // The list's work never runs, so every resource it declared against is left exactly as it was.
+    for (auto const& touched : list.touched_buffers())
+    {
+        auto const& mtl_buffer = static_cast<metal_buffer const&>(*touched);
+        mtl_buffer.access().lock([&](metal_buffer_access& a) { a.discard(list.slot()); });
+    }
+
     // Nothing was committed, so the GPU never saw either object and both go back immediately.
     buffer->release();
     allocator->reset();
     _epochs.retire_allocator_with_epoch(allocator);
+
+    _slots.release(list.slot());
+}
+
+void metal_context::finalize_touched_buffers(metal_command_list& list)
+{
+    // Every touched buffer's state moves into its `current`, in submission order — that ordering is what makes
+    // `current` mean "after everything submitted so far".
+    //
+    // The entry barrier each finalize computes is discarded rather than emitted: the list has already ordered its own
+    // encoder against the queue (see metal_command_list::flush_barriers), and there is no way to prepend a barrier to
+    // a command buffer that is already recorded.
+    // Keeping the finalize is still what carries a write across lists, which is the half Metal genuinely needs.
+    for (auto const& touched : list.touched_buffers())
+    {
+        auto const& mtl_buffer = static_cast<metal_buffer const&>(*touched);
+        (void)mtl_buffer.access().lock([&](metal_buffer_access& a) { return a.finalize(list.slot()); });
+    }
 }
 
 cc::result<std::unique_ptr<sg::command_list>> metal_context::try_create_command_list()
@@ -190,6 +265,11 @@ void metal_context::shutdown()
 
     _epochs.shutdown();
 
+    // After the drain above, so nothing in flight still names these bytes.
+    _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    _residency.shutdown();
+
     _queue->release();
     _queue = nullptr;
 
@@ -221,6 +301,14 @@ void metal_context::shutdown_no_throw() noexcept
     {
         CC_LOG_ERROR("context shutdown failed with an unknown exception");
     }
+}
+
+void metal_context::block_until_transfers_drained()
+{
+    // A condition rather than a duration: the handler runs on a dispatch queue we do not own, so there is nothing to
+    // join and nothing whose timing is ours to predict.
+    while (_pending_downloads.load(std::memory_order_acquire) > 0)
+        std::this_thread::yield();
 }
 
 cc::result<sg::swapchain_handle> metal_context::try_create_swapchain(swapchain_description const&)
@@ -365,6 +453,10 @@ cc::result<metal_buffer_handle> metal_context::create_metal_buffer(isize size_in
         }
     }
 
+    // MTL4 names no resources at record time, so a buffer outside the residency set is simply absent when the GPU
+    // runs — a copy from it reads zeroes, with nothing reported anywhere.
+    _residency.add(buffer);
+
     auto handle = std::make_shared<metal_buffer const>(*this, size_in_bytes, usage, buffer, alloc.heap);
 
     if (alloc.scope == sg::lifetime_scope::transient)
@@ -397,6 +489,9 @@ cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isi
 
     if (heap == nullptr)
         return cc::error("the metal device refused a heap allocation");
+
+    // A placement heap is the allocation; the buffers placed into it are not separately resident.
+    _residency.add(heap);
 
     return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, heap);
 }

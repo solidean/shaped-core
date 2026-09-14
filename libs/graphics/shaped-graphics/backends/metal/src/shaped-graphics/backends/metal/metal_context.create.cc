@@ -46,7 +46,7 @@ namespace
 } // namespace
 } // namespace sg::backend::metal
 
-cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_config const&)
+cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_config const& config)
 {
     using namespace sg::backend::metal;
 
@@ -103,6 +103,7 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     // That is why the guard-style unwinds stop here rather than continuing past construction.
     auto ctx = std::make_shared<metal_context>(device, queue, epoch_event, submission_event);
     ctx->set_adapter_info(describe(device));
+    ctx->create_staging_rings(config.upload_ring_bytes, config.download_ring_bytes);
 
     CC_LOG_INFO("metal context on '{}'", ctx->adapter().name);
 

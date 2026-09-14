@@ -3,8 +3,8 @@
 `sg::backend::metal` — shaped-graphics on Metal 4, for macOS and iOS.
 
 Early stage.
-The device, the queue, the epoch timelines, the command-list lifecycle, buffers and memory heaps are real.
-Recording, textures, bindings and both transfer paths still assert.
+The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers and inline transfer are real.
+Textures, bindings, raster, presentation and async transfer still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -41,6 +41,20 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **Textures have no layouts.**
   `sg::texture_layout` has a D3D12 spelling and a Vulkan one and no Metal one, so a transition carries no layout half and `current_texture_layout` answers `general` always.
   What survives of a barrier is the stage and cache half, which MTL4 spells `barrierAfterEncoderStages:beforeEncoderStages:visibilityOptions:`.
+- **There is no blit encoder.**
+  MTL4's compute encoder carries `copyFromBuffer`, `copyFromTexture` and `fillBuffer` alongside dispatch, where dx12 and vulkan each have a distinct copy path.
+  So one encoder serves both, and a barrier on it may name `MTLStageBlit` and `MTLStageDispatch` alike — but *only* those, plus `MTLStageAccelerationStructure`.
+  `barrierAfterEncoderStages` refuses any other stage outright, which is why the translation clamps.
+- **Residency is declared, and nothing reports its absence.**
+  MTL4 removed `useResource`: a resource outside every `MTLResidencySet` the queue knows about is simply not there when the GPU runs, so a copy from it reads zeroes and a copy to it writes nowhere.
+  It is not an API misuse, so the validation layer says nothing either.
+  One context-wide set today; a per-list set built from the touched-resource tracking is the optimization, not a correctness gap.
+- **Queue barriers come in pairs, and one half alone synchronizes nothing.**
+  `barrierAfterQueueStages` at the head of an encoder waits on queue work; `barrierAfterStages` at its end publishes this encoder's work to what follows.
+  Emitting only the consumer leaves the wait with no producer to find, and a write in one command buffer stays invisible to a read in the next.
+  Both are unconditional per encoder.
+  Emitting the consumer only where an *intra-list* barrier was needed is the subtler mistake: a list whose first op has no local hazard then never waits for the list that wrote what it reads.
+  That passes in isolation, because the queue usually drains between two submits, and fails under load.
 - **A barrier names stages, not resources.**
   `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
   The resource list an sg barrier carries has nowhere to go.
@@ -54,6 +68,14 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `sg::context_transient_scope`'s bump allocator advances its head by the reported size and never re-aligns, so the backend rounds before reporting.
   Without that, every placement after the first lands unaligned.
   `sg metal - a heap's buffer requirements keep a bump allocator aligned` pins it.
+- **A staging ring needs a tail, not a reset.**
+  Rewinding the head when an epoch retires is the obvious shape and is wrong.
+  Reservations made after that epoch closed already sit past the rewind point, so the bytes get handed out twice and the older transfer's data is overwritten before its copy runs.
+  The ring records where the head stood at each advance and moves a tail there instead.
+- **A download's copy-out runs on the commit, not on the epoch.**
+  `block_until_idle()` drains the GPU without advancing, so an open epoch's payload never runs — a download deferred onto the epoch would stay unsettled forever in an unadvanced frame.
+  `MTL4CommitFeedback` fires at exactly the right moment, and `block_until_transfers_drained` is sg's hook for waiting on the outstanding ones.
+  That is why there is no readback actor here where the other two backends have one.
 - **Placement works for textures from the start.**
   A Metal placement heap is not told what it will hold, so there is no buffers-only stage to grow out of the way dx12 has one.
 - **There is no software device.**

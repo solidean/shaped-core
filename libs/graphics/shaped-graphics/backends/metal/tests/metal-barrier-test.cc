@@ -88,3 +88,18 @@ TEST("sg metal - a write-to-read barrier carries both stage masks")
     CHECK(translated.before_stages == MTL::StageDispatch);
     CHECK(translated.visibility == MTL4::VisibilityOptionDevice);
 }
+
+TEST("sg metal - an encoder barrier is clamped to what a compute encoder accepts")
+{
+    // `barrierAfterEncoderStages` refuses any stage the encoder cannot encode work for, and with validation armed it
+    // aborts rather than warning — which is how this was found.
+    CHECK(mtl::clamp_to_compute_encoder(MTL::StageBlit) == MTL::StageBlit);
+    CHECK(mtl::clamp_to_compute_encoder(MTL::StageDispatch | MTL::StageBlit) == (MTL::StageDispatch | MTL::StageBlit));
+
+    // A stage this encoder cannot name is dropped rather than passed through.
+    CHECK(mtl::clamp_to_compute_encoder(MTL::StageBlit | MTL::StageVertex) == MTL::StageBlit);
+
+    // Clamping to nothing yields the whole set rather than an empty mask, which would order nothing at all.
+    CHECK(mtl::clamp_to_compute_encoder(MTL::StageVertex) == mtl::k_compute_encoder_stages);
+    CHECK(mtl::clamp_to_compute_encoder(MTL::StageAll) == mtl::k_compute_encoder_stages);
+}

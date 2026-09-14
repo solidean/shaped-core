@@ -81,6 +81,12 @@ MTL4::VisibilityOptions visibility_for(sg::access_flags src_access, sg::access_f
     return MTL4::VisibilityOptionDevice;
 }
 
+MTL::Stages clamp_to_compute_encoder(MTL::Stages stages)
+{
+    auto const clamped = stages & k_compute_encoder_stages;
+    return clamped != 0 ? clamped : k_compute_encoder_stages;
+}
+
 metal_barrier translate_barrier(sg::access_barrier const& barrier)
 {
     if (!barrier.needed)

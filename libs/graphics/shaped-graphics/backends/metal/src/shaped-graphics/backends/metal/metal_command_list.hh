@@ -1,7 +1,11 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
+#include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
+#include <shaped-graphics/backends/metal/metal_barrier.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -28,6 +32,19 @@ public:
     /// Closes recording, so the buffer may be committed.
     /// Idempotent.
     void end_recording();
+
+    /// This list's slot in every resource's concurrent access tracking.
+    [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
+
+    /// The buffers this list declared against, each needing a finalize at submit or a discard at drop.
+    [[nodiscard]] cc::span<sg::raw_buffer_handle const> touched_buffers() const { return _touched_buffers; }
+
+    /// The copy-outs this list's downloads are waiting on, handed to the submit that will run them.
+    /// Moved out, so the list keeps none afterwards.
+    [[nodiscard]] cc::vector<cc::unique_function<void()>> take_pending_downloads()
+    {
+        return cc::move(_pending_downloads);
+    }
 
     /// Hands the allocator and the buffer over; the list owns neither afterwards.
     /// Called by the context once it has taken responsibility for them, whether the list is submitted or dropped.
@@ -96,8 +113,46 @@ private:
     [[nodiscard]] bool query_timestamps_supported() const override;
     [[nodiscard]] gpu_timestamp query_record_gpu_timestamp() override;
 
+    /// The encoder every copy and dispatch records into, opened on first use.
+    ///
+    /// **Metal 4 has no blit encoder.** Its compute encoder carries `copyFromBuffer`, `copyFromTexture` and
+    /// `fillBuffer` alongside dispatch, where dx12 and vulkan each have a distinct copy path — so one encoder serves
+    /// both, and a barrier on it may name `MTLStageBlit` and `MTLStageDispatch` alike.
+    [[nodiscard]] MTL4::ComputeCommandEncoder* compute_encoder();
+
+    /// Closes the open encoder, if any.
+    /// A render pass needs the compute one closed first.
+    void end_encoder();
+
+    /// Declare `access` on `buffer` for the op about to be recorded, and remember it for the finalize at submit.
+    void declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access);
+
+    /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
+    /// Called immediately before the op those declares were for.
+    void flush_barriers();
+
     metal_context& _metal_context;
     MTL4::CommandAllocator* _allocator = nullptr;
     MTL4::CommandBuffer* _buffer = nullptr;
+    MTL4::ComputeCommandEncoder* _encoder = nullptr;
+    sg::command_list_slot _slot = sg::command_list_slot::invalid;
     bool _is_recording = true;
+
+    /// Whether this list recorded anything the next list may have to wait for.
+    /// Decides whether the producer half of the queue barrier pair is worth emitting at all.
+    bool _produced_queue_work = false;
+
+    /// Every buffer this list declared against, held so the resource outlives the recording that names it.
+    cc::vector<sg::raw_buffer_handle> _touched_buffers;
+
+    /// The buffers with a declare awaiting the next flush.
+    /// A subset of `_touched_buffers`, cleared per op.
+    cc::vector<sg::raw_buffer_handle> _pending_buffers;
+
+    /// One per download recorded: copies the bytes out of the staging ring and settles the future.
+    ///
+    /// **Run when the commit completes, not when the epoch retires.**
+    /// `ctx.block_until_idle()` drains the GPU without advancing, and an open epoch's payload never runs — so a
+    /// deferral onto the epoch would leave every download in an unadvanced frame unsettled forever.
+    cc::vector<cc::unique_function<void()>> _pending_downloads;
 };
