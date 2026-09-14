@@ -115,9 +115,8 @@ ASYNC_EXAMPLE("clean-net/dev-server")
 
     auto client = cnet::make_http_client(*io).value();
 
-    auto home = cnet::http_get(*client, cc::format("{}/", base));
-    co_await cc::async_settled(home);
-    cc::println("GET  {:<21} -> {} {}", "/", home->value().status(), home->value().body_text());
+    auto const home = co_await cnet::http_get(*client, cc::format("{}/", base));
+    cc::println("GET  {:<21} -> {} {}", "/", home.status(), home.body_text());
 
     auto posted = cnet::http_request{.method = cnet::http_method::post,
                                      .target = cnet::http_target::parse(cc::format("{}/echo", base)).value()};
@@ -125,23 +124,20 @@ ASYNC_EXAMPLE("clean-net/dev-server")
     // `make_pinned_data` moves the string in rather than copying it.
     posted.body = cc::make_pinned_data(cc::string("ping")).reinterpret_as<byte const>();
 
-    auto echoed = cnet::http_send(*client, cc::move(posted));
-    co_await cc::async_settled(echoed);
-    cc::println("POST {:<21} -> {} {}", "/echo", echoed->value().status(), echoed->value().body_text());
+    auto const echoed = co_await cnet::http_send(*client, cc::move(posted));
+    cc::println("POST {:<21} -> {} {}", "/echo", echoed.status(), echoed.body_text());
 
     if (files.written)
     {
-        auto served = cnet::http_get(*client, cc::format("{}/files/{}", base, files.name));
-        co_await cc::async_settled(served);
-        cc::println("GET  {:<21} -> {} {}", "/files/<file>", served->value().status(), served->value().body_text());
+        auto const served = co_await cnet::http_get(*client, cc::format("{}/files/{}", base, files.name));
+        cc::println("GET  {:<21} -> {} {}", "/files/<file>", served.status(), served.body_text());
     }
 
     // Every way out of the root is a 404, whether it is spelled plainly or hidden behind a percent-escape.
     for (auto const escape : {"/files/../secret", "/files/%2e%2e/secret"})
     {
-        auto refused = cnet::http_get(*client, cc::format("{}{}", base, escape));
-        co_await cc::async_settled(refused);
-        cc::println("GET  {:<21} -> {}", escape, refused->value().status());
+        auto const refused = co_await cnet::http_get(*client, cc::format("{}{}", base, escape));
+        cc::println("GET  {:<21} -> {}", escape, refused.status());
     }
 
     // ---- the streamed body, from both ends ---------------------------------------------------------
@@ -154,39 +150,37 @@ ASYNC_EXAMPLE("clean-net/dev-server")
     for (auto i = 0; i < 3; ++i)
     {
         auto const written = body->write_text(cc::format("data: tick {}\n\n", i));
-        co_await cc::async_settled(written);
+        (void)co_await written;
     }
 
     // Dropping the last reference would end it just as well; this says so out loud.
     body->finish();
 
-    co_await cc::async_settled(events);
-    cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", events->value().status(),
-                events->value().body.size(), 3);
+    auto const& streamed = co_await events;
+    cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", streamed.status(),
+                streamed.body.size(), 3);
 
     // ---- the websocket, from both ends -------------------------------------------------------------
 
     cc::println("");
     auto resolver = cnet::resolver::try_create(*io).value();
     auto connecting = cnet::websocket_connect(*io, *resolver, cc::format("ws://127.0.0.1:{}/feed", server->local().port));
-    co_await cc::async_settled(connecting);
-
-    auto const browser_side = connecting->value();
+    auto const browser_side = co_await connecting;
     auto const server_side = co_await socket_accepted;
 
     // Ping, pong and close are answered by the layer itself; a message is what a caller sees.
     auto const sent = browser_side->send_text("hello from the page");
-    co_await cc::async_settled(sent);
+    (void)co_await sent;
 
-    auto heard = server_side->receive();
-    co_await cc::async_settled(heard);
-    cc::println("ws  page -> server    : {}", heard->value().text());
+    auto const receiving = server_side->receive();
+    auto const& heard = co_await receiving;
+    cc::println("ws  page -> server    : {}", heard.text());
 
     auto const replied = server_side->send_text("and back again");
-    co_await cc::async_settled(replied);
-    auto answer = browser_side->receive();
-    co_await cc::async_settled(answer);
-    cc::println("ws  server -> page    : {}", answer->value().text());
+    (void)co_await replied;
+    auto const answering = browser_side->receive();
+    auto const& answer = co_await answering;
+    cc::println("ws  server -> page    : {}", answer.text());
 
     browser_side->close();
 

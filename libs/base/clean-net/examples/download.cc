@@ -19,7 +19,8 @@ using namespace cc::primitive_defines;
 // ASYNC_EXAMPLE is homed to.
 // An unthreaded one belongs to a loop that drives it instead — a frame loop calling `cc::thread_pump_all()` — and
 // nothing in the API changes either way.
-// `cc::async_settled` waits without short-circuiting, since a refused connection is a value this example prints.
+// A plain `co_await` short-circuits on a failed request; the refused connection below is the one place a failure is the
+// demonstration, so it waits with `cc::async_settled` and reads the error itself.
 
 namespace
 {
@@ -64,11 +65,10 @@ ASYNC_EXAMPLE("clean-net/download")
 
     // ---- the whole body, buffered ------------------------------------------------------------------
 
-    auto response = cnet::http_get(*client, cc::format("{}/hello", base));
-    co_await cc::async_settled(response);
+    auto const response = co_await cnet::http_get(*client, cc::format("{}/hello", base));
 
-    cc::println("GET /hello -> {} {}", response->value().status(), response->value().body_text());
-    cc::println("  content-type: {}", response->value().head.headers.get("Content-Type").value());
+    cc::println("GET /hello -> {} {}", response.status(), response.body_text());
+    cc::println("  content-type: {}", response.head.headers.get("Content-Type").value());
 
     // ---- a body that never lands in memory ---------------------------------------------------------
 
@@ -82,33 +82,30 @@ ASYNC_EXAMPLE("clean-net/download")
     auto request = cnet::http_request{.method = cnet::http_method::get,
                                       .target = cnet::http_target::parse(cc::format("{}/big", base)).value()};
 
-    auto streamed = client->send_streaming(cc::move(request),
-                                           [&](cc::span<byte const> chunk, cnet::resume_body const&)
-                                           {
-                                               received += chunk.size();
-                                               ++chunks;
-                                               return chunk.size();
-                                           },
-                                           {}, {});
-    co_await cc::async_settled(streamed);
+    auto const streamed = co_await client->send_streaming(cc::move(request),
+                                                          [&](cc::span<byte const> chunk, cnet::resume_body const&)
+                                                          {
+                                                              received += chunk.size();
+                                                              ++chunks;
+                                                              return chunk.size();
+                                                          },
+                                                          {}, {});
 
     cc::println("");
-    cc::println("GET /big  -> {} in {} chunks, {} bytes, none of them kept", streamed->value().status, chunks, received);
+    cc::println("GET /big  -> {} in {} chunks, {} bytes, none of them kept", streamed.status, chunks, received);
 
     // ---- a redirect, followed ----------------------------------------------------------------------
 
-    auto redirected = cnet::http_get(*client, cc::format("{}/moved", base));
-    co_await cc::async_settled(redirected);
+    auto const redirected = co_await cnet::http_get(*client, cc::format("{}/moved", base));
 
     // The status is the one the request ended on, not the 302 on the way.
     cc::println("");
-    cc::println("GET /moved -> {} {}", redirected->value().status(), redirected->value().body_text());
+    cc::println("GET /moved -> {} {}", redirected.status(), redirected.body_text());
 
     // ---- a failure, which is a value ---------------------------------------------------------------
 
-    auto missing = cnet::http_get(*client, cc::format("{}/nope", base));
-    co_await cc::async_settled(missing);
-    cc::println("GET /nope  -> {}", missing->value().status());
+    auto const missing = co_await cnet::http_get(*client, cc::format("{}/nope", base));
+    cc::println("GET /nope  -> {}", missing.status());
 
     // A connection nobody is listening for fails the async rather than the status: there is no response to have one.
     auto refused = cnet::http_get(*client, "http://127.0.0.1:1/never", {.timeout = cnet::deadline::after_secs(2)});
@@ -127,7 +124,7 @@ ASYNC_EXAMPLE("clean-net/download")
         batch.push_back(cnet::http_get(polite, cc::format("{}/hello", base)));
 
     for (auto const& one : batch)
-        co_await cc::async_settled(one);
+        (void)co_await one;
 
     cc::println("");
     cc::println("5 polite requests, 2 at a time, all {}", batch[0]->value().status());
