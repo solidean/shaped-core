@@ -340,13 +340,11 @@ ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to 
     auto const future = down->download.data_from_buffer<u32>(out.raw(), 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 3u + 7u)
+        if (data[i] != u32(i) * 3u + 7u)
             ok = false;
     CHECK(ok);
 }

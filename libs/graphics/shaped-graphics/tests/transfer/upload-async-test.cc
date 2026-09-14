@@ -56,13 +56,11 @@ ASYNC_INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }
@@ -85,12 +83,10 @@ ASYNC_INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle 
     auto future = down->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 INVOCABLE_TEST("sg - async upload of empty data is a no-op", (sg::context_handle const& ctx))
@@ -127,12 +123,10 @@ ASYNC_INVOCABLE_TEST("sg - async upload composes after a list that wrote the buf
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool async_won = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i)) // the async bytes, not 0xAA
+        if (bytes[i] != pattern(i)) // the async bytes, not 0xAA
             async_won = false;
     CHECK(async_won);
 }
@@ -151,12 +145,10 @@ ASYNC_INVOCABLE_TEST("sg - two async uploads to one buffer, last wins", (sg::con
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool second_won = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             second_won = false;
     CHECK(second_won);
 }
@@ -200,12 +192,10 @@ ASYNC_INVOCABLE_TEST("sg - async upload interleaved with inline writes does not 
     REQUIRE(down != nullptr);
     auto future = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool last_inline_won = true;
     for (int i = 0; i < n; ++i)
-        if (bytes.value()[i] != byte((i + (n - 1)) & 0xFF))
+        if (bytes[i] != byte((i + (n - 1)) & 0xFF))
             last_inline_won = false;
     CHECK(last_inline_won);
 }
@@ -229,12 +219,10 @@ ASYNC_INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::conte
     auto future = down->download.bytes_from_buffer(dst, 0, 128);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool matches = true;
     for (int i = 0; i < 128; ++i)
-        if (bytes.value()[i] != pattern(0x40 + (i & 0xF)))
+        if (bytes[i] != pattern(0x40 + (i & 0xF)))
             matches = false;
     CHECK(matches);
 }

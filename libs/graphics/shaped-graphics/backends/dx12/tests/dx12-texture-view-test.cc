@@ -128,12 +128,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture tr
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }

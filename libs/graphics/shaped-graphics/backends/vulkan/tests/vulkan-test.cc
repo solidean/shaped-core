@@ -366,14 +366,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a texture round-trips through the staging ring
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    co_await base.idle_completion();
-    auto const read = future.try_get_bytes();
-    REQUIRE(read.has_value());
-    REQUIRE(read.value().size() == 256);
+    auto const read = co_await future.bytes();
+    REQUIRE(read.size() == 256);
 
     bool matched = true;
     for (int i = 0; i < 256; ++i)
-        if (read.value()[i] != byte(i))
+        if (read[i] != byte(i))
             matched = false;
     CHECK(matched);
 }
@@ -404,10 +402,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    co_await base.idle_completion();
-    auto const read = future.try_get_bytes();
-    REQUIRE(read.has_value());
-    CHECK(read.value().size() == 32);
+    auto const read = co_await future.bytes();
+    CHECK(read.size() == 32);
 }
 
 INVOCABLE_TEST("sg vulkan - the device reports descriptor buffer properties",

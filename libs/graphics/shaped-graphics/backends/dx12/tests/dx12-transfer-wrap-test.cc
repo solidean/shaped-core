@@ -68,12 +68,10 @@ ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
     auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == xfer_bytes);
+    auto const bytes = co_await fut.bytes();
+    REQUIRE(bytes.size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)
-        CHECK(bytes.value()[i] == byte((i * 7 + 3) & 0xFF));
+        CHECK(bytes[i] == byte((i * 7 + 3) & 0xFF));
 }
 
 ASYNC_TEST("sg dx12 - inline download splits across the ring seam")
@@ -114,10 +112,8 @@ ASYNC_TEST("sg dx12 - inline download splits across the ring seam")
 
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == xfer_bytes);
+    auto const bytes = co_await fut.bytes();
+    REQUIRE(bytes.size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)
-        CHECK(bytes.value()[i] == byte((i * 5 + 1) & 0xFF));
+        CHECK(bytes[i] == byte((i * 5 + 1) & 0xFF));
 }

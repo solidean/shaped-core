@@ -132,10 +132,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-
         auto future = down->download.data_from_buffer<u32>(out_buf, 0, count);
         ctx.submit_command_list(cc::move(down));
 
-        co_await ctx.idle_completion();
-        auto const data = future.try_get_data();
+        auto const data = co_await future.data();
         cc::vector<u32> result;
-        for (auto const v : data.value())
+        for (auto const v : data)
             result.push_back(v);
         co_return result;
     };

@@ -73,15 +73,13 @@ sg::raw_texture_handle make_texture(sg::context_handle const& ctx)
 }
 
 // Read the texture back through a command list, which is the consumer that has to compose with the transfer.
-cc::shared_async<cc::optional<cc::pinned_data<byte const>>> read_back(sg::context_handle const& ctx,
-                                                                      sg::raw_texture_handle const& tex)
+cc::shared_async<cc::pinned_data<byte const>> read_back(sg::context_handle const& ctx, sg::raw_texture_handle const& tex)
 {
     auto cmd = ctx->create_command_list();
     CC_ASSERT(cmd != nullptr, "command list creation failed");
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
-    co_await ctx->idle_completion();
-    co_return future.try_get_bytes();
+    co_return co_await future.bytes();
 }
 } // namespace
 
@@ -103,10 +101,8 @@ ASYNC_INVOCABLE_TEST("sg - async texture upload composes after a list that wrote
     ctx->upload.bytes_to_texture(tex, pinned_pattern(59));
 
     auto const bytes_future = ctx->download.bytes_from_texture(tex);
-    co_await ctx->idle_completion();
-    auto const bytes = bytes_future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(matches(bytes.value(), 59)).context("the async upload did not compose after the list's write");
+    auto const bytes = co_await bytes_future.bytes();
+    CHECK(matches(bytes, 59)).context("the async upload did not compose after the list's write");
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -131,10 +127,8 @@ ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-re
     }
 
     auto const first_future = ctx->download.bytes_from_texture(tex);
-    co_await ctx->idle_completion();
-    auto const first = first_future.try_get_bytes();
-    REQUIRE(first.has_value());
-    CHECK(matches(first.value(), 13));
+    auto const first = co_await first_future.bytes();
+    CHECK(matches(first, 13));
 
     {
         auto cmd = ctx->create_command_list();
@@ -144,8 +138,7 @@ ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-re
     }
 
     auto const second = co_await read_back(ctx, tex);
-    REQUIRE(second.has_value());
-    CHECK(matches(second.value(), 29)).context("the texture did not survive an async transfer taken in between");
+    CHECK(matches(second, 29)).context("the texture did not survive an async transfer taken in between");
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -168,10 +161,8 @@ ASYNC_INVOCABLE_TEST("sg - prepare_for_async settles the layout the transfer nee
     }
 
     auto const bytes_future = ctx->download.bytes_from_texture(tex);
-    co_await ctx->idle_completion();
-    auto const bytes = bytes_future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(matches(bytes.value(), 41));
+    auto const bytes = co_await bytes_future.bytes();
+    CHECK(matches(bytes, 41));
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -194,8 +185,7 @@ ASYNC_INVOCABLE_TEST("sg - ensure_layout leaves a texture where the next list fi
     }
 
     auto const bytes = co_await read_back(ctx, tex);
-    REQUIRE(bytes.has_value());
-    CHECK(matches(bytes.value(), 67));
+    CHECK(matches(bytes, 67));
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -224,14 +214,11 @@ ASYNC_INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, an
 
     ctx->submit_command_list(cc::move(writer));
     auto const settled = ctx->download.bytes_from_texture(tex);
-    co_await ctx->idle_completion();
-    REQUIRE(settled.try_get_bytes().has_value());
+    (void)co_await settled.bytes();
     ctx->submit_command_list(cc::move(reader));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(matches(bytes.value(), 83));
+    auto const bytes = co_await future.bytes();
+    CHECK(matches(bytes, 83));
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();

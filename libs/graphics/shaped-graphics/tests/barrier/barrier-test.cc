@@ -57,16 +57,12 @@ ASYNC_INVOCABLE_TEST("sg - two concurrent command lists record and submit indepe
     ctx->submit_command_list(cc::move(c1));
     ctx->submit_command_list(cc::move(c2));
 
-    co_await ctx->idle_completion();
-    auto const da = fa.try_get_data();
-    co_await ctx->idle_completion();
-    auto const db = fb.try_get_data();
-    REQUIRE(da.has_value());
-    REQUIRE(db.has_value());
-    CHECK(da.value()[0] == 0);
-    CHECK(da.value()[15] == 15);
-    CHECK(db.value()[0] == 1000);
-    CHECK(db.value()[15] == 1015);
+    auto const da = co_await fa.data();
+    auto const db = co_await fb.data();
+    CHECK(da[0] == 0);
+    CHECK(da[15] == 15);
+    CHECK(db[0] == 1000);
+    CHECK(db[15] == 1015);
 }
 
 ASYNC_INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list", (sg::context_handle const& ctx))
@@ -88,13 +84,11 @@ ASYNC_INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one 
     auto future = cmd->download.bytes_from_buffer(buf, 128, 128);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 128);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 128);
     bool matches = true;
     for (int i = 0; i < 128; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }

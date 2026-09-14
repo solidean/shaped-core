@@ -209,6 +209,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
+- **Directly awaitable futures, if `co_await future.data()` ever reads as noise.**
+  `bytes_future`, `data_future<T>` and `gpu_timestamp` hand out their result through `bytes()`, `data()` and `ticks()`, each a `cc::shared_async` built from `completion()`.
+  An `operator co_await` on the future types would let a caller write `co_await future` instead.
+  It was left out so sg's value types carry no coroutine machinery, and it is additive whenever it is wanted.
+
 - **Readiness as an async, so the GPU tests stop working around it.**
   The suites are async: the entry drivers await `nx::async_invoke_tests_in_sequence`, and the tests await `ctx.idle_completion()`.
   Two workarounds remain, both waiting on a readiness signal rather than on the migration.
@@ -223,3 +228,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is allowed under the amortization rule, and it still asserts on a `never_block` context.
   So the per-frame back-pressure call is the one thing a WebGPU target will hit on its first frame, and `try_advance_epoch` is the spelling that already exists for it.
   What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).
+  **The completion-signal contract is blocking, and WebGPU in a browser cannot block.**
+  `sg::context` owns a waiter thread that calls the backend's `wait_for_completion_signal` until a GPU counter reaches a target, then settles what is due.
+  WebGPU offers only a callback, `onSubmittedWorkDone`, so the contract flips there.
+  The backend calls `settle_due_completions()` when it learns of progress, and dx12 and vulkan run the waiter themselves.
+  Reshape the seam that way before writing the backend, rather than emulating a blocking wait over the callback.

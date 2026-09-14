@@ -35,13 +35,9 @@ ASYNC_INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::conte
 
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const tick0 = t0.try_get_ticks();
-    co_await ctx->idle_completion();
-    auto const tick1 = t1.try_get_ticks();
-    REQUIRE(tick0.has_value());
-    REQUIRE(tick1.has_value());
-    CHECK(tick1.value() >= tick0.value()); // non-decreasing on a single queue
+    auto const tick0 = co_await t0.ticks();
+    auto const tick1 = co_await t1.ticks();
+    CHECK(tick1 >= tick0); // non-decreasing on a single queue
 
     REQUIRE(t1.is_ready());
     CHECK(t1.try_get_seconds().has_value());

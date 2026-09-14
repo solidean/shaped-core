@@ -44,14 +44,13 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
     return out;
 }
 
-/// The red channel of the first texel of a tightly-packed rgba8 readback, or -1 when nothing landed.
-[[nodiscard]] cc::shared_async<int> first_red(sg::context& ctx, sg::bytes_future const& future)
+/// The red channel of the first texel of a tightly-packed rgba8 readback, or -1 when the readback is empty.
+[[nodiscard]] cc::shared_async<int> first_red(sg::bytes_future const& future)
 {
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_bytes();
-    if (!data.has_value() || data.value().span().empty())
+    auto const data = co_await future.bytes();
+    if (data.span().empty())
         co_return -1;
-    co_return int(u8(data.value().span()[0]));
+    co_return int(u8(data.span()[0]));
 }
 } // namespace
 
@@ -110,10 +109,9 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     auto const unorm_future = dl->download.bytes_from_texture(tex_unorm.raw(), {.mip_level = 1});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    co_await ctx.idle_completion();
 
-    auto const srgb_value = co_await first_red(ctx, srgb_future);
-    auto const unorm_value = co_await first_red(ctx, unorm_future);
+    auto const srgb_value = co_await first_red(srgb_future);
+    auto const unorm_value = co_await first_red(unorm_future);
 
     // The two answers to "average 0 and 255", and the whole reason the sRGB one goes through a render target.
     //
@@ -181,12 +179,11 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
     auto const level_3 = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 3});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    co_await ctx.idle_completion();
 
     // Averaging equal texels reproduces them exactly whatever space the average is taken in, so both generated
     // levels carry the supplied value — a level chained off the one before it, not off the base.
-    auto const level_2_red = co_await first_red(ctx, level_2);
-    auto const level_3_red = co_await first_red(ctx, level_3);
+    auto const level_2_red = co_await first_red(level_2);
+    auto const level_3_red = co_await first_red(level_3);
     CHECK(level_2_red == int(supplied));
     CHECK(level_3_red == int(supplied));
 }

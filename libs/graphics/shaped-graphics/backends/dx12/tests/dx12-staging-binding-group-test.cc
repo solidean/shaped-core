@@ -70,12 +70,10 @@ cc::shared_async<bool> holds_doubled(sg::context_handle const& ctx, sg::raw_buff
     auto future = down->download.data_from_buffer<u32>(buf, 0, k_count);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(k_count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(k_count));
     for (int i = 0; i < k_count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             co_return false;
     co_return true;
 }
@@ -110,8 +108,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx
     auto const to_first = staging->snapshot();
     REQUIRE(to_first != nullptr);
     dispatch_through(ctx, *pipeline, *to_first);
-    auto const holds_doubled_ok_1 = co_await holds_doubled(ctx, first);
-    CHECK(holds_doubled_ok_1);
+    CHECK(co_await holds_doubled(ctx, first));
 
     // Re-point the one binding: the next snapshot is a different group, and it writes the other buffer.
     staging->set_binding(out, sg::buffer<u32>::from_raw(second).as_readwrite_buffer());
@@ -119,8 +116,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot drives a dispatch", (dx12::dx
     REQUIRE(to_second != nullptr);
     CHECK(to_second != to_first);
     dispatch_through(ctx, *pipeline, *to_second);
-    auto const holds_doubled_ok_2 = co_await holds_doubled(ctx, second);
-    CHECK(holds_doubled_ok_2);
+    CHECK(co_await holds_doubled(ctx, second));
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minted it",
@@ -152,8 +148,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
     co_await ctx->idle_completion();
 
     dispatch_through(ctx, *pipeline, *group);
-    auto const holds_doubled_ok_3 = co_await holds_doubled(ctx, buf);
-    CHECK(holds_doubled_ok_3);
+    CHECK(co_await holds_doubled(ctx, buf));
 
     // Still clean across all of that — nothing was set, so the cached snapshot is still the answer.
     CHECK(!staging->is_dirty());

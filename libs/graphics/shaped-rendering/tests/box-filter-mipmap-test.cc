@@ -123,13 +123,10 @@ namespace
 ///
 /// Inline (`cmd.download`) rather than async: an async readback runs on the copy queue, and the mip levels this
 /// reads are left in the layouts the generating dispatch put them in rather than in the common one that queue expects.
-[[nodiscard]] cc::shared_async<cc::vector<u8>> read_back(sg::context& ctx, sg::bytes_future const& future)
+[[nodiscard]] cc::shared_async<cc::vector<u8>> read_back(sg::bytes_future const& future)
 {
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_bytes();
-    if (!data.has_value())
-        co_return {};
-    co_return red_channel(data.value().span());
+    auto const data = co_await future.bytes();
+    co_return red_channel(data.span());
 }
 
 /// Whether every entry of `values` is `expected`, and there is at least one.
@@ -211,7 +208,6 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
                 dl->download.bytes_from_texture(tex_1d_array.raw(), {.mip_level = level, .array_layer = slice}));
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    co_await ctx.idle_completion();
 
     // Averaging equal texels reproduces them exactly, so every generated level of a face is that face's own value —
     // and a face the dispatch never covered still holds the sentinel.
@@ -219,14 +215,14 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
     for (auto face = 0; face < 6; ++face)
         for (auto level = 1; level < 3; ++level)
         {
-            auto const face_texels = co_await read_back(ctx, futures[next++]);
+            auto const face_texels = co_await read_back(futures[next++]);
             CHECK(all_equal(face_texels, face_value(face)));
         }
 
     for (auto slice = 0; slice < 3; ++slice)
         for (auto level = 1; level < 3; ++level)
         {
-            auto const slice_texels = co_await read_back(ctx, futures[next++]);
+            auto const slice_texels = co_await read_back(futures[next++]);
             CHECK(all_equal(slice_texels, face_value(slice)));
         }
 }
@@ -270,17 +266,16 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging p
     auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    co_await ctx.idle_completion();
 
     // Level 1 averages each pair of the base level; level 2 has one texel left over three, so its second tap
     // clamps to the level's last texel and the third is dropped.
-    auto const level_1 = co_await read_back(ctx, level_1_future);
+    auto const level_1 = co_await read_back(level_1_future);
     REQUIRE(level_1.size() == 3);
     CHECK(level_1[0] == 4);  // (0 + 8) / 2
     CHECK(level_1[1] == 20); // (16 + 24) / 2
     CHECK(level_1[2] == 36); // (32 + 40) / 2
 
-    auto const level_2 = co_await read_back(ctx, level_2_future);
+    auto const level_2 = co_await read_back(level_2_future);
     REQUIRE(level_2.size() == 1);
     CHECK(level_2[0] == 12); // (4 + 20) / 2
 }

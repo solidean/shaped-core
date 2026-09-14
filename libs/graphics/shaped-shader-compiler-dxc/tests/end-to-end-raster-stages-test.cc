@@ -203,11 +203,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    co_await ctx.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);
@@ -302,11 +300,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a p
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    co_await ctx.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);

@@ -55,13 +55,11 @@ ASYNC_INVOCABLE_TEST("sg - async download round-trips", (sg::context_handle cons
     // Fire-and-return-future: the read auto-waits on the seed list (forward sync), no manual barrier.
     auto future = ctx->download.bytes_from_buffer(buf, 0, 256);
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }
@@ -83,13 +81,12 @@ ASYNC_INVOCABLE_TEST("sg - dropping the source resource does not cancel a downlo
         return ctx->download.bytes_from_buffer(buf, 0, 256);
     }(); // buf's last handle dies here, while the readback is still in flight
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value()).context("the download was cancelled by the source handle going away");
-    REQUIRE(bytes.value().size() == 256);
+    // A cancelled download fails this await, and with it the test.
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }
@@ -112,12 +109,10 @@ ASYNC_INVOCABLE_TEST("sg - async typed download round-trips", (sg::context_handl
     }
 
     auto future = ctx->download.data_from_buffer<int>(buf, 0, 4);
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 ASYNC_INVOCABLE_TEST("sg - async download of zero bytes is a ready empty future", (sg::context_handle const& ctx))
@@ -127,10 +122,8 @@ ASYNC_INVOCABLE_TEST("sg - async download of zero bytes is a ready empty future"
 
     auto future = ctx->download.bytes_from_buffer(buf, 0, 0);
     CHECK(future.is_ready()); // ready on construction, no GPU work
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value().size() == 0);
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == 0);
 }
 
 // A later command list that reads (via a device copy) a buffer the async readback also read still works —
@@ -150,12 +143,10 @@ ASYNC_INVOCABLE_TEST("sg - async download shares a buffer with a later reader", 
     copy->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 128});
     ctx->submit_command_list(cc::move(copy));
 
-    co_await ctx->idle_completion();
-    auto const bytes = down.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await down.bytes();
     bool matches = true;
     for (int i = 0; i < 128; ++i)
-        if (bytes.value()[i] != pattern(0x40 + (i & 0xF)))
+        if (bytes[i] != pattern(0x40 + (i & 0xF)))
             matches = false;
     CHECK(matches);
 }
@@ -197,12 +188,10 @@ ASYNC_INVOCABLE_TEST("sg - a later write waits on an in-flight async download", 
     REQUIRE(again != nullptr);
     auto after = again->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(again));
-    co_await ctx->idle_completion();
-    auto const after_bytes = after.try_get_bytes();
-    REQUIRE(after_bytes.has_value());
+    auto const after_bytes = co_await after.bytes();
     bool write_landed = true;
     for (int i = 0; i < n; ++i)
-        if (after_bytes.value()[i] != byte(0xBB))
+        if (after_bytes[i] != byte(0xBB))
             write_landed = false;
     CHECK(write_landed);
 }
@@ -217,15 +206,11 @@ ASYNC_INVOCABLE_TEST("sg - two async downloads of one buffer", (sg::context_hand
     auto a = ctx->download.bytes_from_buffer(buf, 0, 256);
     auto b = ctx->download.bytes_from_buffer(buf, 0, 256);
 
-    co_await ctx->idle_completion();
-    auto const ba = a.try_get_bytes();
-    co_await ctx->idle_completion();
-    auto const bb = b.try_get_bytes();
-    REQUIRE(ba.has_value());
-    REQUIRE(bb.has_value());
+    auto const ba = co_await a.bytes();
+    auto const bb = co_await b.bytes();
     bool both = true;
     for (int i = 0; i < 256; ++i)
-        if (ba.value()[i] != pattern(i) || bb.value()[i] != pattern(i))
+        if (ba[i] != pattern(i) || bb[i] != pattern(i))
             both = false;
     CHECK(both);
 }
@@ -266,12 +251,10 @@ ASYNC_INVOCABLE_TEST("sg - dropping an async download future never hangs a later
     REQUIRE(down != nullptr);
     auto future = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool write_landed = true;
     for (int i = 0; i < n; ++i)
-        if (bytes.value()[i] != fill)
+        if (bytes[i] != fill)
             write_landed = false;
     CHECK(write_landed);
 }
@@ -291,12 +274,10 @@ ASYNC_INVOCABLE_TEST("sg - async download after an async upload of the same buff
     ctx->upload.bytes_to_buffer(buf, cc::make_pinned_data(cc::move(up)));
 
     auto future = ctx->download.bytes_from_buffer(buf, 0, n); // blocks on the pending upload, then reads it
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool matches = true;
     for (int i = 0; i < n; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }

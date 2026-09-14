@@ -203,14 +203,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
     auto future = down->download.data_from_buffer<u32>(output, 0, k_rays);
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(k_rays));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(k_rays));
 
     bool alternating = true;
     for (int i = 0; i < k_rays; ++i)
-        if (data.value()[i] != u32(i % 2 == 0 ? 1 : 0))
+        if (data[i] != u32(i % 2 == 0 ? 1 : 0))
             alternating = false;
     CHECK(alternating);
 }

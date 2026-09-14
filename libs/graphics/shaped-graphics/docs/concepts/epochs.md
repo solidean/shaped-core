@@ -76,8 +76,8 @@ Every question the `wait_for_*` family answers by stopping a thread has a form t
 |---|---|
 | an epoch fence wait | `epoch_completion(e)` — a `cc::shared_async` that settles when `e`'s GPU work is done |
 | `is_submission_complete(token)` polled | `submission_completion(token)` |
-| a download's blocking read | `future.completion()` |
-| a timestamp's blocking read | `timestamp.completion()` |
+| a download's blocking read | `future.completion()`, or `future.bytes()` / `future.data()` resolving to the result |
+| a timestamp's blocking read | `timestamp.completion()`, or `timestamp.ticks()` |
 | `block_until_epochs_in_flight(N)` | `try_advance_epoch(N)`, which declines instead |
 | `block_until_idle()` | `idle_completion()` — the same three steps, awaited |
 
@@ -86,6 +86,7 @@ A completion node for something already finished comes back ready, so a caller n
 The first outstanding one starts a waiter that parks on the backend's GPU signals — a fence event on dx12, a timeline wait on vulkan — beside a wake the next lower target raises.
 A transfer drain reaching zero settles the drain half from whichever actor dropped it.
 Nothing polls and nothing times out, so a wait that looks like a stall is a signal that has not fired.
+Without threads there is no waiter: a pump stands in, and a sweep settles what is due and parks only on work the GPU already has — never on the open epoch, which only that same thread can close.
 A lost device settles every outstanding node as an error, since its fences jump to their maximum and would otherwise read as success, and so does a shutdown that comes first.
 
 `idle_completion()` retires epochs in its own segments, so it is awaited under retire's rule: never while another thread advances the epoch.

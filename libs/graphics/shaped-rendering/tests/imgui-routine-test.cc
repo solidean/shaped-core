@@ -79,10 +79,8 @@ struct imgui_fixture
         auto const future = cmd->download.bytes_from_texture(target.raw());
         ctx->submit_command_list(cc::move(cmd));
 
-        co_await ctx->idle_completion();
-        auto bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
-        co_return cc::move(bytes).value();
+        auto const bytes = co_await future.bytes();
+        co_return bytes;
     }
 };
 

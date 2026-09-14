@@ -49,11 +49,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(N) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(N) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 255 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -80,11 +78,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(N) * isize(sizeof(float)));
-    auto const* depth = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(N) * isize(sizeof(float)));
+    auto const* depth = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (depth[i] != 0.5f)
@@ -114,10 +110,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scop
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 255 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -145,9 +139,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - discard render target records and executes", (dx
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    CHECK(bytes.has_value());
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == isize(W) * isize(H) * 4);
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (dx12::dx12_context_handle const& ctx))
@@ -175,10 +168,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (d
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 255 || px[i * 4 + 3] != 255)

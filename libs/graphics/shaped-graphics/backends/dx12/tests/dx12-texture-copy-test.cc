@@ -112,11 +112,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - texture upload/download round-trip pads + un-pad
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(sizeof(src)));
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(sizeof(src)));
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -149,10 +147,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - texture upload into a sub-region leaves the rest
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x)
@@ -184,11 +180,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - async texture upload/download round-trip on the 
     handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
     auto future = handle->download.bytes_from_texture(tex);
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(sizeof(src)));
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(sizeof(src)));
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -219,10 +213,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an inline readback waits on a pending async text
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -320,10 +312,8 @@ ASYNC_TEST("sg dx12 - inline texture upload splits across the ring seam")
     auto down = ctx->create_command_list();
     auto fut = down->download.bytes_from_texture(tex.value());
     ctx->submit_command_list(cc::move(down));
-    co_await ctx->idle_completion();
-    auto const bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await fut.bytes();
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -362,10 +352,8 @@ ASYNC_TEST("sg dx12 - inline texture download splits across the ring seam")
     auto fut = down->download.bytes_from_texture(tex.value()); // the seam-straddling readback splits here
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await fut.bytes();
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -392,11 +380,9 @@ ASYNC_TEST("sg dx12 - async texture copy splits across staging windows")
     ctx->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
     auto fut = ctx->download.bytes_from_texture(tex);
 
-    co_await ctx->idle_completion();
-    auto const bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(sizeof(src)));
-    auto const* got = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await fut.bytes();
+    REQUIRE(bytes.size() == isize(sizeof(src)));
+    auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -430,15 +416,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an empty texture region is a no-op", (dx12::dx12
     auto full_fut = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const empty_bytes = empty_fut.try_get_bytes();
-    REQUIRE(empty_bytes.has_value());
-    CHECK(empty_bytes.value().size() == 0);
+    auto const empty_bytes = co_await empty_fut.bytes();
+    CHECK(empty_bytes.size() == 0);
 
-    co_await c.idle_completion();
-    auto const full = full_fut.try_get_bytes();
-    REQUIRE(full.has_value());
-    auto const* got = reinterpret_cast<float const*>(full.value().data());
+    auto const full = co_await full_fut.bytes();
+    auto const* got = reinterpret_cast<float const*>(full.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (got[i] != src[i])
@@ -466,13 +448,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - block-compressed texture round-trips whole block
     auto future = cmd->download.bytes_from_texture(tex);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 32);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 32);
     bool ok = true;
     for (int i = 0; i < 32; ++i)
-        if (bytes.value()[i] != src[i])
+        if (bytes[i] != src[i])
             ok = false;
     CHECK(ok);
 }

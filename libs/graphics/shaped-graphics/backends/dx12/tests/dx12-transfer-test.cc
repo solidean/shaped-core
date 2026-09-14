@@ -39,13 +39,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12:
     c.submit_command_list(cc::move(down));
 
     // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != byte(i))
+        if (bytes[i] != byte(i))
             matches = false;
     CHECK(matches);
 }
@@ -70,12 +68,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_
     auto future = down->download.data_from_buffer<int>(buf, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 INVOCABLE_TEST("sg dx12 - empty transfers", (dx12::dx12_context_handle const& handle))
@@ -120,13 +116,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_conte
     auto future = down->download.bytes_from_buffer(buf, 64, 64);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 64);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != byte(64 + i))
+        if (bytes[i] != byte(64 + i))
             matches = false;
     CHECK(matches);
 }
@@ -159,12 +153,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins",
     auto future = down->download.bytes_from_buffer(buf, 0, 16);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
-        if (bytes.value()[i] != byte(0xBB))
+        if (bytes[i] != byte(0xBB))
             all_second = false;
     CHECK(all_second);
 }
@@ -203,11 +195,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims 
     auto future = down2->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down2));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value().size() == 256);
-    CHECK(bytes.value()[100] == byte(100));
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == 256);
+    CHECK(bytes[100] == byte(100));
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_context_handle const& handle))
@@ -234,12 +224,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx
         auto future = down->download.bytes_from_buffer(buf, 0, 1024);
         c.submit_command_list(cc::move(down));
 
-        co_await c.idle_completion();
-        auto const bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
+        auto const bytes = co_await future.bytes();
         bool matches = true;
         for (int i = 0; i < 1024; ++i)
-            if (bytes.value()[i] != byte((i + e) & 0xFF))
+            if (bytes[i] != byte((i + e) & 0xFF))
                 matches = false;
         CHECK(matches);
 
@@ -289,19 +277,15 @@ ASYNC_INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocatio
     c.submit_command_list(cc::move(list_b));
     c.submit_command_list(cc::move(list_a));
 
-    co_await c.idle_completion();
-    auto const bytes_a = future_a.try_get_bytes();
-    co_await c.idle_completion();
-    auto const bytes_b = future_b.try_get_bytes();
-    REQUIRE(bytes_a.has_value());
-    REQUIRE(bytes_b.has_value());
+    auto const bytes_a = co_await future_a.bytes();
+    auto const bytes_b = co_await future_b.bytes();
     bool ok_a = true;
     bool ok_b = true;
     for (int i = 0; i < 128; ++i)
     {
-        if (bytes_a.value()[i] != byte(0xA0 + (i & 0xF)))
+        if (bytes_a[i] != byte(0xA0 + (i & 0xF)))
             ok_a = false;
-        if (bytes_b.value()[i] != byte(0xB0 + (i & 0xF)))
+        if (bytes_b[i] != byte(0xB0 + (i & 0xF)))
             ok_b = false;
     }
     CHECK(ok_a);
@@ -351,8 +335,6 @@ ASYNC_INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads"
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[100] == byte(100));
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes[100] == byte(100));
 }

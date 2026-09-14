@@ -138,11 +138,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
     cc::vector<u32> result;
-    for (auto const v : data.value())
+    for (auto const v : data)
         result.push_back(v);
     REQUIRE(result.size() == 2);
 

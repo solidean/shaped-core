@@ -71,13 +71,11 @@ cc::shared_async<cc::unit> check_doubles(sg::context& ctx,
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
     co_return;

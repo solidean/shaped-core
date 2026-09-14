@@ -164,11 +164,10 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.value().size() == 2);
-    CHECK(data.value()[0] == b0_value + b3_value);
-    CHECK(data.value()[1] == u32(texel_value));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 2);
+    CHECK(data[0] == b0_value + b3_value);
+    CHECK(data[1] == u32(texel_value));
 }
 
 ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::context_handle const& handle))

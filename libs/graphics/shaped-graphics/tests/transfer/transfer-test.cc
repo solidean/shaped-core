@@ -46,13 +46,11 @@ ASYNC_INVOCABLE_TEST("sg - upload then download the same buffer in one list", (s
     auto future = cmd->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }
@@ -76,11 +74,9 @@ ASYNC_INVOCABLE_TEST("sg - upload and download across separate lists", (sg::cont
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value().size() == 256);
-    CHECK(bytes.value()[100] == pattern(100));
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == 256);
+    CHECK(bytes[100] == pattern(100));
 }
 
 ASYNC_INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_handle const& ctx))
@@ -95,12 +91,10 @@ ASYNC_INVOCABLE_TEST("sg - typed upload/download round-trips", (sg::context_hand
     auto future = cmd->download.data_from_buffer<int>(buf, 0, 4);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 // The buffer<T> overloads of upload/download: `T` comes from the buffer alone, so nothing is spelled out twice and the span / pod / offset all agree on it.
@@ -119,13 +113,11 @@ ASYNC_INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::
     auto future = cmd->download.data_from_buffer(buf); // whole buffer; T deduced, no <int>
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[1] == 42); // pod_to_buffer overwrote element 1
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[1] == 42); // pod_to_buffer overwrote element 1
+    CHECK(data[3] == 8);
 
     // The other span sources, and the ranged download overload.
     int const raw_array[2] = {100, 200};
@@ -136,13 +128,11 @@ ASYNC_INVOCABLE_TEST("sg - typed buffer<T> upload/download need no raw()", (sg::
     auto future2 = cmd2->download.data_from_buffer(buf, 1, 3);
     ctx->submit_command_list(cc::move(cmd2));
 
-    co_await ctx->idle_completion();
-    auto const data2 = future2.try_get_data();
-    REQUIRE(data2.has_value());
-    REQUIRE(data2.value().size() == 3);
-    CHECK(data2.value()[0] == 22);  // element 1 <- braced list
-    CHECK(data2.value()[1] == 100); // element 2 <- C array
-    CHECK(data2.value()[2] == 200);
+    auto const data2 = co_await future2.data();
+    REQUIRE(data2.size() == 3);
+    CHECK(data2[0] == 22);  // element 1 <- braced list
+    CHECK(data2[1] == 100); // element 2 <- C array
+    CHECK(data2[2] == 200);
 }
 
 ASYNC_INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::context_handle const& ctx))
@@ -165,13 +155,11 @@ ASYNC_INVOCABLE_TEST("sg - upload at an offset, download a partial range", (sg::
     auto future = down->download.bytes_from_buffer(buf, 64, 128);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 128);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 128);
     bool matches = true;
     for (int i = 0; i < 128; ++i)
-        if (bytes.value()[i] != pattern(0x40 + i))
+        if (bytes[i] != pattern(0x40 + i))
             matches = false;
     CHECK(matches);
 }
@@ -196,12 +184,10 @@ ASYNC_INVOCABLE_TEST("sg - multiple uploads in one list, last writer wins", (sg:
     auto future = cmd->download.bytes_from_buffer(buf, 0, 16);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
-        if (bytes.value()[i] != byte(0xBB))
+        if (bytes[i] != byte(0xBB))
             all_second = false;
     CHECK(all_second);
 }
@@ -225,12 +211,8 @@ INVOCABLE_TEST("sg - empty transfers are no-ops", (sg::context_handle const& ctx
 }
 
 // A submitted readback is deliverable without advancing the epoch.
-// ctx.block_until_idle() drains the download actor as well as the GPU, so the bytes are back with no advance needed.
-// This replaces an earlier is_ready()-after-idle assumption that flaked under transfer-fuzz seed 1: draining the GPU
-// alone never said anything about the actor.
-// Idle drains the GPU but not the actor, so is_ready() can lag it; wait_for is the actual completion guarantee.
-ASYNC_INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epoch advance",
-                     (sg::context_handle const& ctx))
+// Awaiting the bytes is the completion guarantee, and once they are back is_ready() must agree.
+ASYNC_INVOCABLE_TEST("sg - an awaited readback is delivered without an epoch advance", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_transfer_buffer(ctx, 256);
@@ -249,15 +231,13 @@ ASYNC_INVOCABLE_TEST("sg - wait_for delivers a submitted readback without an epo
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    // No advance_epoch: the future is waitable as soon as its list is submitted.
-    co_await ctx->idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
-    CHECK(future.is_ready()); // wait_for delivered -> the non-blocking poll now agrees
+    // No advance_epoch: the future is awaitable as soon as its list is submitted.
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
+    CHECK(future.is_ready()); // the await delivered -> the non-blocking poll now agrees
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }
@@ -284,12 +264,10 @@ ASYNC_INVOCABLE_TEST("sg - readback survives an epoch advance", (sg::context_han
     ctx->advance_epoch();
     co_await ctx->idle_completion(); // close the epoch and fully drain before reading back
 
-    co_await ctx->idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 8);
-    CHECK(data.value()[0] == 10);
-    CHECK(data.value()[7] == 80);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 8);
+    CHECK(data[0] == 10);
+    CHECK(data[7] == 80);
 }
 
 // The inline rings fall back instead of asserting, in both directions.

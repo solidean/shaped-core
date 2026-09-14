@@ -76,16 +76,12 @@ ASYNC_INVOCABLE_TEST("sg - two readbacks recorded concurrently each get their ow
     ctx->submit_command_list(cc::move(b));
     ctx->submit_command_list(cc::move(a));
 
-    co_await ctx->idle_completion();
-    auto const bytes_a = future_a.try_get_bytes();
-    co_await ctx->idle_completion();
-    auto const bytes_b = future_b.try_get_bytes();
-    REQUIRE(bytes_a.has_value());
-    REQUIRE(bytes_b.has_value());
+    auto const bytes_a = co_await future_a.bytes();
+    auto const bytes_b = co_await future_b.bytes();
 
     // Each future must carry the buffer its own list read, whatever order the ring or the actor saw them in.
-    CHECK(matches(bytes_a.value(), first_data)).context("the first list's readback did not return the first buffer");
-    CHECK(matches(bytes_b.value(), second_data)).context("the second list's readback did not return the second buffer");
+    CHECK(matches(bytes_a, first_data)).context("the first list's readback did not return the first buffer");
+    CHECK(matches(bytes_b, second_data)).context("the second list's readback did not return the second buffer");
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();

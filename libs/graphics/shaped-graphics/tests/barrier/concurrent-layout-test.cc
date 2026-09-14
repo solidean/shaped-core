@@ -71,17 +71,15 @@ ASYNC_INVOCABLE_TEST("sg - a texture written while another list is open keeps it
     auto future = reader->download.bytes_from_texture(target.raw());
     ctx->submit_command_list(cc::move(reader));
 
-    co_await ctx->idle_completion();
-    auto const pixels = future.try_get_bytes();
-    REQUIRE(pixels.has_value());
-    REQUIRE(pixels.value().size() == isize(k_pixels) * 4);
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(k_pixels) * 4);
 
     // The whole point: whatever layout the concurrent lists leave the texture in, it must still hold what the writer
     // put in it.
     // If any of those transitions targets `undefined`, every byte here is zero.
     int written = 0;
     int zeroed = 0;
-    auto const* const p = reinterpret_cast<u8 const*>(pixels.value().data());
+    auto const* const p = reinterpret_cast<u8 const*>(pixels.data());
     for (int i = 0; i < k_pixels; ++i)
     {
         bool const all_zero = p[i * 4 + 0] == 0 && p[i * 4 + 1] == 0 && p[i * 4 + 2] == 0 && p[i * 4 + 3] == 0;

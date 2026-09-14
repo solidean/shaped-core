@@ -45,13 +45,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - buffer copy round-trips", (dx12::dx12_context_ha
     auto future = down->download.bytes_from_buffer(dst, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != byte(i))
+        if (bytes[i] != byte(i))
             matches = false;
     CHECK(matches);
 }
@@ -87,13 +85,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - buffer copy with offsets", (dx12::dx12_context_h
     auto future = down->download.bytes_from_buffer(dst, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 64);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != byte(64 + i))
+        if (bytes[i] != byte(64 + i))
             matches = false;
     CHECK(matches);
 }
@@ -125,12 +121,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy", (dx12::dx12_cont
     auto future = down->download.data_from_buffer<int>(dst, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offsets",
@@ -162,13 +156,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - typed buffer_data_region copy with element offse
     auto future = down->download.data_from_buffer<int>(dst, 4, 3);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 3);
-    CHECK(data.value()[0] == 12); // src[2]
-    CHECK(data.value()[1] == 13); // src[3]
-    CHECK(data.value()[2] == 14); // src[4]
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 3);
+    CHECK(data[0] == 12); // src[2]
+    CHECK(data[1] == 13); // src[3]
+    CHECK(data[2] == 14); // src[4]
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_context_handle const& handle))
@@ -200,13 +192,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - same-buffer non-overlapping copy", (dx12::dx12_c
     auto future = down->download.bytes_from_buffer(buf, 128, 64);
     c.submit_command_list(cc::move(down));
 
-    co_await c.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 64);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != byte(i))
+        if (bytes[i] != byte(i))
             matches = false;
     CHECK(matches);
 }

@@ -54,9 +54,12 @@ f.is_valid()                        // bool — backed by a real download (vs de
 f.is_ready()                        // bool — NON-BLOCKING poll; true once SETTLED, by delivery OR by cancellation
 f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt unless delivered)
 f.completion()                      // -> cc::shared_async<cc::unit const> — depend on it to chain WITHOUT blocking
+co_await f.bytes()                  // -> the bytes once they land; the node FAILS on cancel. Await AFTER submitting the list
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
+                                    //   co_await df.data() -> cc::pinned_data<T const>; fails on a ragged byte count too
 sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
+// to WAIT for one download, co_await f.bytes() / df.data() — not idle_completion(), which waits for everything else too
 // to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
 // sg REQUIRES an installed ambient async scheduler (cc::install_compute_async_scheduler, or a nexus run's)
@@ -221,6 +224,7 @@ ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves
 // Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
 // and asking twice for the same target hands back the SAME node. They settle on the backend's own GPU signal —
 // nobody sweeps, advances or waits for them — and as an error once the device is lost or the context shuts down.
+// Threads off: no waiter exists, so a pump sweep settles them, parking only on work the GPU already has.
 ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
 co_await ctx.idle_completion();         // block_until_idle, awaited: submissions, actors, epochs. COLD; retires as it goes,
@@ -268,7 +272,7 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
 // no advance_epoch is needed for that, and advancing does not force it either: the readback actor is what delivers.
-//   future.completion() is the non-blocking answer, ctx.block_until_idle() the blocking one.
+//   co_await future.data() is the async answer, ctx.block_until_idle() the blocking one.
 //   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
@@ -312,6 +316,7 @@ t.is_ready()                    // bool — NON-BLOCKING poll; true once the tic
 t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
 t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
 t.completion()                  // -> cc::shared_async<cc::unit const> — settles when the tick lands
+co_await t.ticks()              // -> cc::u64 once it lands; fails if the readback is cancelled
 // to block: ctx.block_until_idle(), then t.try_get_ticks() / t.try_get_seconds()
 // normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```

@@ -134,11 +134,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a 
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    co_await ctx.idle_completion();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
 
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 

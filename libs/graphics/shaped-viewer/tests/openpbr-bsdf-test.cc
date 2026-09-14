@@ -189,12 +189,8 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
-    co_await ctx.idle_completion();
-    auto const delivered = readback.try_get_data();
-    REQUIRE(delivered.has_value());
 
-    auto const items = delivered.value();
+    auto const items = co_await readback.data();
     REQUIRE(items.size() == item_count);
 
     auto out = cc::vector<probe_result>();

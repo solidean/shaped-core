@@ -53,8 +53,7 @@ ASYNC_INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles"
 
     // The contract's whole point: nothing may touch the extent until the handle says so, and blocking on the
     // completion node is the way to learn that without polling.
-    auto const awaited_2 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_2.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
     CHECK(stream.progress().bytes_done == 4096);
     REQUIRE(stream.progress().total_hint.has_value());
@@ -62,12 +61,10 @@ ASYNC_INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles"
 
     // Only NOW may a list that reads the streamed extent be submitted.
     auto const back = c.download.bytes_from_buffer(buf, 0, 4096);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[0] == src[0]);
-    CHECK(bytes.value()[1234] == src[1234]);
-    CHECK(bytes.value()[4095] == src[4095]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[1234] == src[1234]);
+    CHECK(bytes[4095] == src[4095]);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a download round-trips through its future", (sg::context_handle const& handle))
@@ -86,8 +83,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a download round-trips through its future", (s
 
     auto stream = c.stream.bytes_from_buffer(buf, 0, 2048);
     REQUIRE(stream.is_valid());
-    auto const awaited_3 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_3.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
 
     auto const got = stream.future().try_get_bytes();
@@ -182,11 +178,9 @@ ASYNC_INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it
     auto back = cmd->download.bytes_from_buffer(buf, 0, 8192);
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[0] == src[0]);
-    CHECK(bytes.value()[8191] == src[8191]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[8191] == src[8191]);
     CHECK(stream.is_settled());
 }
 
@@ -209,11 +203,9 @@ ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on th
     stream.promote_to_async();
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 8192);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[0] == src[0]);
-    CHECK(bytes.value()[8191] == src[8191]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[8191] == src[8191]);
 
     CHECK(stream.is_settled()); // still reporting, exactly as before the promotion
 }
@@ -239,15 +231,12 @@ ASYNC_INVOCABLE_TEST("sg stream - streaming makes progress while async work satu
     for (int i = 0; i < 32; ++i)
         c.upload.bytes_to_buffer(flood, cc::make_pinned_data(payload));
 
-    auto const awaited_4 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_4.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_buffer(target, 0, 64 * 1024);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[65535] == payload[65535]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[65535] == payload[65535]);
 }
 
 namespace
@@ -334,19 +323,16 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source lands every chunk where it sa
 
     // 700 is deliberately not a divisor of 9000, so the last chunk is short.
     auto stream = c.stream.from_source_to_buffer(buf, std::make_unique<chunked_source>(cc::span<byte const>(src), 700));
-    auto const awaited_5 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_5.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
     CHECK(stream.progress().bytes_done == 9000);
 
     auto const back = c.download.bytes_from_buffer(buf, 0, 9000);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[0] == src[0]);
-    CHECK(bytes.value()[699] == src[699]);   // end of the first chunk
-    CHECK(bytes.value()[700] == src[700]);   // start of the second
-    CHECK(bytes.value()[8999] == src[8999]); // the short tail
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[699] == src[699]);   // end of the first chunk
+    CHECK(bytes[700] == src[700]);   // start of the second
+    CHECK(bytes[8999] == src[8999]); // the short tail
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a stalled source does not block other transfers", (sg::context_handle const& handle))
@@ -369,20 +355,16 @@ ASYNC_INVOCABLE_TEST("sg stream - a stalled source does not block other transfer
     // The stalled transfer must be passed over rather than queueing everything behind it.
     // That is the whole reason not_yet is a distinct answer instead of a blocking read.
     auto ready = c.stream.bytes_to_buffer(ready_buf, cc::make_pinned_data(ready_bytes));
-    auto const awaited_6 = co_await cc::async_as_result(ready.completion());
-    REQUIRE(awaited_6.has_value());
+    REQUIRE((co_await cc::async_as_result(ready.completion())).has_value());
     CHECK(!blocked.is_settled());
 
     source_ptr->release(); // the waker is what turns this into progress rather than an indefinite wait
-    auto const awaited_7 = co_await cc::async_as_result(blocked.completion());
-    REQUIRE(awaited_7.has_value());
+    REQUIRE((co_await cc::async_as_result(blocked.completion())).has_value());
     CHECK(blocked.is_complete());
 
     auto const back = c.download.bytes_from_buffer(gated_buf, 0, 2048);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[2047] == gated_bytes[2047]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[2047] == gated_bytes[2047]);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is only delayed, not a fault",
@@ -411,24 +393,20 @@ ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is o
     auto other = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_dst);
     REQUIRE(other != nullptr);
     auto unrelated = c.stream.bytes_to_buffer(other, cc::make_pinned_data(pattern(2048, 55)));
-    auto const awaited_8 = co_await cc::async_as_result(unrelated.completion());
-    REQUIRE(awaited_8.has_value());
+    REQUIRE((co_await cc::async_as_result(unrelated.completion())).has_value());
 
     // Nothing may be observable yet: the stream has no bytes, and the upload is behind it.
     CHECK(!blocked.is_settled());
 
     source_ptr->release();
-    auto const awaited_9 = co_await cc::async_as_result(blocked.completion());
-    REQUIRE(awaited_9.has_value());
+    REQUIRE((co_await cc::async_as_result(blocked.completion())).has_value());
     CHECK(blocked.is_complete());
 
     // The family order is what makes the outcome well-defined: the later upload wins.
     auto const back = c.download.bytes_from_buffer(buf, 0, 2048);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[0] == overwrite[0]);
-    CHECK(bytes.value()[2047] == overwrite[2047]);
+    auto const bytes = co_await back.bytes();
+    CHECK(bytes[0] == overwrite[0]);
+    CHECK(bytes[2047] == overwrite[2047]);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a failing source settles the transfer on its error channel",
@@ -444,8 +422,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a failing source settles the transfer on its e
 
     // Without a failed answer, a source that cannot deliver would sit in the queue forever, and anything chained
     // onto its completion with it.
-    auto const awaited_10 = co_await cc::async_as_result(stream.completion());
-    CHECK(!awaited_10.has_value());
+    CHECK(!(co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_settled());
     CHECK(!stream.is_complete());
 }
@@ -471,18 +448,15 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     // place.
     auto stream = c.stream.from_source_to_texture(
         tex, std::make_unique<chunked_source>(cc::span<byte const>(src), row_bytes * 8));
-    auto const awaited_11 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_11.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
 
     auto const back = c.download.bytes_from_texture(tex);
-    co_await c.idle_completion();
-    auto const bytes = back.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == src.size());
-    CHECK(bytes.value()[0] == src[0]);
-    CHECK(bytes.value()[row_bytes * 8] == src[row_bytes * 8]); // the second chunk's first row
-    CHECK(bytes.value()[src.size() - 1] == src[src.size() - 1]);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[row_bytes * 8] == src[row_bytes * 8]); // the second chunk's first row
+    CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))
@@ -515,8 +489,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order"
         },
         0, 6000);
 
-    auto const awaited_12 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_12.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
     CHECK(in_order);
     REQUIRE(got.size() == 6000);
@@ -548,8 +521,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a sink that refuses fails the transfer", (sg::
 
     // A refusing sink settles the transfer on its error channel rather than leaving it pending, and is not called
     // again to be told the same thing twice.
-    auto const awaited_13 = co_await cc::async_as_result(stream.completion());
-    CHECK(!awaited_13.has_value());
+    CHECK(!(co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_settled());
     CHECK(!stream.is_complete());
     CHECK(calls == 1);
@@ -601,8 +573,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed r
                                                     return true;
                                                 });
 
-    auto const awaited_14 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_14.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     CHECK(stream.is_complete());
     CHECK(whole_rows);
     CHECK(rows_seen == 32);
@@ -640,8 +611,7 @@ ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later writer wait on 
     over->upload.bytes_to_buffer(buf, cc::span<byte const>(overwrite));
     c.submit_command_list(cc::move(over));
 
-    auto const awaited_15 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_15.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
     auto const got = stream.future().try_get_bytes();
     REQUIRE(got.has_value());
 

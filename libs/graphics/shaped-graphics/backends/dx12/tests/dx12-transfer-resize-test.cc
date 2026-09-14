@@ -66,12 +66,11 @@ cc::shared_async<bool> async_round_trip(sg::context_handle const& ctx, isize n, 
     auto fut = down->download.bytes_from_buffer(buf, 0, n);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
-    auto bytes = fut.try_get_bytes();
-    if (!bytes.has_value() || bytes.value().size() != n)
+    auto const bytes = co_await fut.bytes();
+    if (bytes.size() != n)
         co_return false;
     for (isize i = 0; i < n; ++i)
-        if (bytes.value()[i] != byte((i + seed) & 0xFF))
+        if (bytes[i] != byte((i + seed) & 0xFF))
             co_return false;
     co_return true;
 }
@@ -83,16 +82,13 @@ ASYNC_TEST("sg dx12 - async upload window resize preserves uploads")
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
 
-    auto const async_round_trip_ok_1 = co_await async_round_trip(ctx.value(), 4096, 1);
-    CHECK(async_round_trip_ok_1); // spans several 1 KiB windows
+    CHECK(co_await async_round_trip(ctx.value(), 4096, 1)); // spans several 1 KiB windows
 
-    ctx.value()->upload.set_async_window_size(isize(64) * 1024); // grow; actor adopts it before next upload
-    auto const async_round_trip_ok_2 = co_await async_round_trip(ctx.value(), isize(32) * 1024, 2);
-    CHECK(async_round_trip_ok_2); // now fits one window
+    ctx.value()->upload.set_async_window_size(isize(64) * 1024);        // grow; actor adopts it before next upload
+    CHECK(co_await async_round_trip(ctx.value(), isize(32) * 1024, 2)); // now fits one window
 
-    ctx.value()->upload.set_async_window_size(2048); // shrink again
-    auto const async_round_trip_ok_3 = co_await async_round_trip(ctx.value(), 8192, 3);
-    CHECK(async_round_trip_ok_3); // packs across the smaller windows
+    ctx.value()->upload.set_async_window_size(2048);        // shrink again
+    CHECK(co_await async_round_trip(ctx.value(), 8192, 3)); // packs across the smaller windows
 }
 
 ASYNC_TEST("sg dx12 - inline upload ring grows to fit a larger upload")
@@ -101,14 +97,12 @@ ASYNC_TEST("sg dx12 - inline upload ring grows to fit a larger upload")
     auto ctx = dx12::make_test_context({.upload_ring_bytes = 4096});
     REQUIRE(ctx.has_value());
 
-    auto const inline_round_trip_ok_1 = co_await inline_round_trip(ctx.value(), 2048, 1);
-    CHECK(inline_round_trip_ok_1); // fits the small ring
+    CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 
     ctx.value()->upload.set_inline_budget(isize(128) * 1024); // grow the ring
     ctx.value()->advance_epoch();                             // applies the pending budget
 
-    auto const inline_round_trip_ok_2 = co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2);
-    CHECK(inline_round_trip_ok_2); // would not fit the original 4 KiB ring
+    CHECK(co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
 }
 
 ASYNC_TEST("sg dx12 - inline download ring grows to fit a larger readback")
@@ -117,12 +111,10 @@ ASYNC_TEST("sg dx12 - inline download ring grows to fit a larger readback")
     auto ctx = dx12::make_test_context({.download_ring_bytes = 4096});
     REQUIRE(ctx.has_value());
 
-    auto const inline_round_trip_ok_3 = co_await inline_round_trip(ctx.value(), 2048, 1);
-    CHECK(inline_round_trip_ok_3); // fits the small ring
+    CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 
     ctx.value()->download.set_budget(isize(128) * 1024); // grow the readback ring
     ctx.value()->advance_epoch();                        // applies the pending budget (drains the actor)
 
-    auto const inline_round_trip_ok_4 = co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2);
-    CHECK(inline_round_trip_ok_4); // would not fit the original 4 KiB ring
+    CHECK(co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
 }

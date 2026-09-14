@@ -40,17 +40,13 @@ ASYNC_INVOCABLE_TEST("sg dx12 - gpu timestamp round-trips", (dx12::dx12_context_
 
     c.submit_command_list(cc::move(cmd));
 
-    co_await c.idle_completion();
-    auto const tick1 = t1.try_get_ticks();
-    co_await c.idle_completion();
-    auto const tick0 = t0.try_get_ticks();
-    REQUIRE(tick0.has_value());
-    REQUIRE(tick1.has_value());
-    CHECK(tick1.value() >= tick0.value()); // non-decreasing on a single queue
+    auto const tick1 = co_await t1.ticks();
+    auto const tick0 = co_await t0.ticks();
+    CHECK(tick1 >= tick0); // non-decreasing on a single queue
 
     REQUIRE(t0.is_ready());
     REQUIRE(t1.is_ready());
-    CHECK(t0.try_get_ticks().value() == tick0.value());
+    CHECK(t0.try_get_ticks().value() == tick0);
 
     auto const s0 = t0.try_get_seconds();
     auto const s1 = t1.try_get_seconds();
@@ -77,23 +73,17 @@ ASYNC_INVOCABLE_TEST("sg dx12 - timestamp heap rollover across leases", (dx12::d
 
     c.submit_command_list(cc::move(cmd));
 
-    // The last query lives in the second heap; the actor drains heaps in submission order, so waiting on
-    // it implies the first heap's readback has landed too.
-    co_await c.idle_completion();
-    REQUIRE(ts.back().try_get_ticks().has_value());
-
     // Sample across the heap boundary: last slot of heap 0, first slot of heap 1, and the final slot.
     int const sample[] = {0, per_heap - 1, per_heap, n - 1};
     u64 prev = 0;
     bool first = true;
     for (int const idx : sample)
     {
-        REQUIRE(ts[idx].is_ready());
-        auto const tk = ts[idx].try_get_ticks();
-        REQUIRE(tk.has_value());
+        auto const tk = co_await ts[idx].ticks();
+        CHECK(ts[idx].is_ready());
         if (!first)
-            CHECK(tk.value() >= prev); // non-decreasing across the lease boundary
-        prev = tk.value();
+            CHECK(tk >= prev); // non-decreasing across the lease boundary
+        prev = tk;
         first = false;
     }
 }
@@ -121,6 +111,5 @@ ASYNC_INVOCABLE_TEST("sg dx12 - dropped list leaves its timestamps not ready", (
     REQUIRE(cmd2 != nullptr);
     auto t2 = cmd2->query.record_gpu_timestamp();
     c.submit_command_list(cc::move(cmd2));
-    co_await c.idle_completion();
-    REQUIRE(t2.try_get_ticks().has_value());
+    (void)co_await t2.ticks();
 }

@@ -151,14 +151,12 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     auto future = down->download.data_from_buffer<float>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
 
     // Point-sampling texel centers reproduces exactly what pass 1 wrote: Out[i] == i.
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != float(i))
+        if (data[i] != float(i))
             ok = false;
     CHECK(ok);
 }

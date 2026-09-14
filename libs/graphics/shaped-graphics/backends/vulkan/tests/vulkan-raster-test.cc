@@ -128,10 +128,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const pixels = future.try_get_bytes();
-    REQUIRE(pixels.has_value());
-    REQUIRE(pixels.value().size() == isize(k_extent) * isize(k_extent) * 4);
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(k_extent) * isize(k_extent) * 4);
 
     // Every pixel is either the triangle's red or the scope's blue, and a half-covering triangle produces
     // meaningfully many of each.
@@ -139,7 +137,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
     int blues = 0;
     for (int i = 0; i < k_extent * k_extent; ++i)
     {
-        auto const* p = reinterpret_cast<u8 const*>(pixels.value().data()) + isize(i) * 4;
+        auto const* p = reinterpret_cast<u8 const*>(pixels.data()) + isize(i) * 4;
         if (p[0] == 255 && p[1] == 0 && p[2] == 0 && p[3] == 255)
             ++reds;
         else if (p[0] == 0 && p[1] == 0 && p[2] == 255 && p[3] == 255)
@@ -257,16 +255,14 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    co_await ctx.idle_completion();
-    auto const pixels = future.try_get_bytes();
-    REQUIRE(pixels.has_value());
+    auto const pixels = co_await future.bytes();
 
     // The triangle covers every pixel, and each carries Values[3] == 6 in its red channel.
     // A green pixel would mean the clear survived, so the reopen lost the draw.
     bool all_six = true;
     for (int i = 0; i < k_extent * k_extent; ++i)
     {
-        auto const* p = reinterpret_cast<u8 const*>(pixels.value().data()) + isize(i) * 4;
+        auto const* p = reinterpret_cast<u8 const*>(pixels.data()) + isize(i) * 4;
         if (p[0] != 6 || p[1] != 0 || p[2] != 0 || p[3] != 255)
             all_six = false;
     }

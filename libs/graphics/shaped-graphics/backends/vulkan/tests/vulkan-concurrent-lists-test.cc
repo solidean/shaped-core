@@ -71,10 +71,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a buffer written by one concurrently recorded 
     ctx->submit_command_list(cc::move(writer));
     ctx->submit_command_list(cc::move(reader));
 
-    co_await ctx->idle_completion();
-    auto const read_back = future.try_get_bytes();
-    REQUIRE(read_back.has_value());
-    CHECK(matches(read_back.value(), k_buffer_bytes, 41));
+    auto const read_back = co_await future.bytes();
+    CHECK(matches(read_back, k_buffer_bytes, 41));
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -105,10 +103,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded
     ctx->submit_command_list(cc::move(writer));
     ctx->submit_command_list(cc::move(reader));
 
-    co_await ctx->idle_completion();
-    auto const read_back = future.try_get_bytes();
-    REQUIRE(read_back.has_value());
-    CHECK(matches(read_back.value(), k_texture_bytes, 17));
+    auto const read_back = co_await future.bytes();
+    CHECK(matches(read_back, k_texture_bytes, 17));
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();

@@ -80,16 +80,10 @@ ASYNC_INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own ti
     CHECK(da->_pending_async_upload_value.load() == a1 + 1); // one step, not two
 
     // And the bytes still land, which is the point of all of it.
-    auto const back_a_future = c.download.bytes_from_buffer(a, 0, 1024);
-    co_await c.idle_completion();
-    auto const back_a = back_a_future.try_get_bytes();
-    auto const back_b_future = c.download.bytes_from_buffer(b, 0, 1024);
-    co_await c.idle_completion();
-    auto const back_b = back_b_future.try_get_bytes();
-    REQUIRE(back_a.has_value());
-    REQUIRE(back_b.has_value());
-    CHECK(back_a.value()[1023] == bytes_a[1023]);
-    CHECK(back_b.value()[1023] == bytes_b[1023]);
+    auto const back_a = co_await c.download.bytes_from_buffer(a, 0, 1024).bytes();
+    auto const back_b = co_await c.download.bytes_from_buffer(b, 0, 1024).bytes();
+    CHECK(back_a[1023] == bytes_a[1023]);
+    CHECK(back_b[1023] == bytes_b[1023]);
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated upload complete",
@@ -113,19 +107,16 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a stream finishing does not report an unrelated 
     c.upload.bytes_to_buffer(slow, cc::make_pinned_data(big));
     auto stream = c.stream.bytes_to_buffer(quick, cc::make_pinned_data(tiny));
 
-    auto const awaited_16 = co_await cc::async_as_result(stream.completion());
-    REQUIRE(awaited_16.has_value());
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
 
     // The stream is done, which says nothing about `slow`.
     // Every byte of it must still arrive: on the shared timeline the readback's wait was satisfied by the stream's
     // signal, so it read a buffer whose later windows had not run yet.
-    auto const back_future = c.download.bytes_from_buffer(slow, 0, isize(big.size()));
-    co_await c.idle_completion();
-    auto const back = back_future.try_get_bytes();
-    REQUIRE(back.has_value());
+    auto const back = co_await c.download.bytes_from_buffer(slow, 0, isize(big.size())).bytes();
+    REQUIRE(back.size() == isize(big.size()));
     bool matches = true;
     for (isize i = 0; i < isize(big.size()); ++i)
-        if (back.value()[i] != big[i])
+        if (back[i] != big[i])
         {
             matches = false;
             break;

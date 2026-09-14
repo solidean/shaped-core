@@ -79,10 +79,8 @@ ASYNC_INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg:
     ctx->upload.bytes_to_texture(tex, pinned_pattern(k_bytes, 11));
 
     auto const back_future = ctx->download.bytes_from_texture(tex);
-    co_await ctx->idle_completion();
-    auto const back = back_future.try_get_bytes();
-    REQUIRE(back.has_value());
-    CHECK(matches(back.value(), 11));
+    auto const back = co_await back_future.bytes();
+    CHECK(matches(back, 11));
 }
 
 // The lifetime gate, mirroring "async upload to a dropped buffer still releases it".
