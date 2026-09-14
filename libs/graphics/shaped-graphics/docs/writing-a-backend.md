@@ -241,6 +241,15 @@ Recorded as each is met, because this is what the next backend most wants to kno
   cache it was built with and serializes on request.
   It is not the idiomatic Vulkan shape, and it is the honest one for the contract sg states.
 
+- **And a third API has no per-pipeline blob at all.**
+  Metal 4's equivalent is `MTL4Archive`, which a *compiler* is configured with and which accumulates every pipeline it
+  builds — one store per compiler, where sg's surface is one blob per pipeline.
+  So the mapping vulkan found is not available: there is nothing to serialize out of a single pipeline, and
+  `cached_pipeline_data()` returns empty rather than a fabricated blob.
+  **That is a design question about where the archive lives, not a missing call**, and the honest interim is an empty
+  blob plus a `used_cached_pipeline()` of false, pinned by a test so the gap reads as deliberate.
+  See [TODO](TODO.md).
+
 - **Objects a descriptor merely names want a per-context cache, not per-group ownership.**
   A dx12 sampler descriptor leaves no object behind, and D3D12 creates a view straight into a heap.
   Vulkan needs a VkSampler and a VkImageView that outlive every group holding them, and giving each group its own

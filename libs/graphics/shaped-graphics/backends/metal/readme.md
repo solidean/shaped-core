@@ -66,6 +66,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
   They cannot collide, because sg already requires that index to be unique within its group.
+- **There is no per-pipeline cached blob.**
+  `cached_pipeline_data()` returns empty and `used_cached_pipeline()` is always false, so every pipeline build is cold.
+  Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
+  vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
+  Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
 - **A pipeline is built through an explicit compiler object.**
   MTL4 makes compilation an `MTL4Compiler` the context owns, where Metal 3 hid it behind the device.
   A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.

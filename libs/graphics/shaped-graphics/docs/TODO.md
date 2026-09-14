@@ -3,6 +3,18 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **The metal backend serializes no pipeline blob.**
+  `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
+  caller persisting a blob across runs gets nothing to persist and every build is a cold one.
+  It is not a missing call: sg's surface is **one blob per pipeline**, and Metal 4's `MTL4Archive` is **one store per
+  compiler** that accumulates every pipeline built through it.
+  dx12 hands back a `ID3D12PipelineState` blob and vulkan gives each pipeline a `VkPipelineCache` of its own; neither
+  shape exists here.
+  The options are an archive per context serialized as a whole (which sg's per-pipeline key cannot address), an
+  archive per pipeline (one compiler each, which is heavy), or a surface change so a backend may own the store.
+  Pinned as deliberate by `sg metal - a compute pipeline builds from a metal library`, so closing it is a failing test
+  rather than something nobody notices.
+
 - **Transfer.** Still open:
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
