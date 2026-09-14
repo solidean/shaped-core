@@ -740,7 +740,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     if (root.is_cold())
         root.schedule_on(*this); // a homed root was refused here: send it home
 
-    // Then pump whatever it queued, and this thread's home, which is every home there is without threads.
+    // Then pump whatever it queued, this thread's home, which is every home there is without threads, and every registered
+    // pump, which is every semantic thread there is.
     // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver.
     auto* const home = cc::impl::async_tls().home;
     while (!root.is_ready())
@@ -752,7 +753,9 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             impl::async_poll_work_item(*n);
             continue;
         }
-        if (home == nullptr || !home->pump_cycle())
+        if (home != nullptr && home->pump_cycle())
+            continue;
+        if (!cc::impl::thread_pump_registry())
             break;
     }
 
