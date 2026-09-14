@@ -745,6 +745,12 @@ In a threaded build every unthreaded component is test-only or loop-owned by int
 Awaited from a plain pool thread, it waits until some loop happens to sweep — possibly forever, since no pool thread will.
 Without threads none of this applies: the one thread is every loop, and a pool's drive sweeps the registry before it gives up.
 
+**The registry has no owners, so a loop that sweeps runs every registered component, not only its own.**
+nexus's run loop on the main thread is such a loop, and it wakes on every `cc::thread_pump_notify`.
+So a test that pumps an unthreaded component itself, from a pool thread, races that loop exactly as it would race a sweeping pool thread.
+The loop can take the component's reply, and the woken graph then resumes on the scheduler bound on the loop's thread rather than on the test's.
+A test that uses an unthreaded component therefore awaits it from `main_thread` instead of pumping it; blob-cache's tests are the worked case.
+
 **A home is never re-entered from inside one of its own bodies.**
 A blocking wait inside a main-homed body does not run other main-homed bodies, which would see half-finished main-thread state.
 A `co_await` is unaffected — it returns to the pump — and so is driving a same-home dependency inline, which is the body asking for exactly that node.

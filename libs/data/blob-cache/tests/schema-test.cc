@@ -1,6 +1,8 @@
 #include "cache_fixture.hh"
 
 #include <babel-serializer/data/sqlite.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -23,46 +25,55 @@ void with_raw_database(cc::string_view path, cc::function_ref<void(babel::sqlite
 }
 } // namespace
 
-TEST("bcache discards a file written by a newer format version")
+ASYNC_TEST("bcache discards a file written by a newer format version", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("schema", "before"), make_blob("old world")));
+
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("schema", "before"), make_blob("old world"));
     f.cache().close();
 
     with_raw_database(f.path(), [](babel::sqlite::database& db) { CHECK(db.set_user_version(99).has_value()); });
 
     f.reopen();
-    CHECK(!f.settle(f.cache().get(key_of("schema", "before"))).has_value());
+
+    (void)co_await f.opened();
+    CHECK(!(co_await f.cache().get(key_of("schema", "before"))).has_value());
     CHECK(f.cache().get_stats().is_backed_by_storage);
-    CHECK(f.settle(f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
+    CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-TEST("bcache discards a file written by an older format version")
+ASYNC_TEST("bcache discards a file written by an older format version", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     // Both directions, and deliberately so: keeping an old file would mean carrying migration code for data that is by definition reconstructible.
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("schema", "before"), make_blob("old world")));
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("schema", "before"), make_blob("old world"));
     f.cache().close();
 
     with_raw_database(f.path(), [](babel::sqlite::database& db) { CHECK(db.set_user_version(0).has_value()); });
 
     f.reopen();
-    CHECK(!f.settle(f.cache().get(key_of("schema", "before"))).has_value());
-    CHECK(f.settle(f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
+
+    (void)co_await f.opened();
+    CHECK(!(co_await f.cache().get(key_of("schema", "before"))).has_value());
+    CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-TEST("bcache discards a database that belongs to some other application")
+ASYNC_TEST("bcache discards a database that belongs to some other application", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     f.cache().close();
 
     with_raw_database(f.path(),
@@ -74,36 +85,43 @@ TEST("bcache discards a database that belongs to some other application")
 
     f.reopen();
 
+    (void)co_await f.opened();
+
     CHECK(f.cache().get_stats().is_backed_by_storage);
-    CHECK(f.settle(f.cache().put(key_of("schema", "ours"), make_blob("claimed"))).status == put_status::stored);
-    CHECK(blob_text(f.settle(f.cache().get(key_of("schema", "ours"))).value().data) == "claimed");
+    CHECK((co_await f.cache().put(key_of("schema", "ours"), make_blob("claimed"))).status == put_status::stored);
+    CHECK(blob_text((co_await f.cache().get(key_of("schema", "ours"))).value().data) == "claimed");
 }
 
-TEST("bcache discards a file whose tables no longer have the columns it addresses")
+ASYNC_TEST("bcache discards a file whose tables no longer have the columns it addresses", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     // The version alone cannot catch this: a build that renamed a column without bumping it would otherwise fail obscurely on the first statement instead of starting clean.
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("schema", "before"), make_blob("old world")));
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("schema", "before"), make_blob("old world"));
     f.cache().close();
 
     with_raw_database(f.path(), [](babel::sqlite::database& db)
                       { CHECK(db.exec("ALTER TABLE entries DROP COLUMN compute_secs").has_value()); });
 
     f.reopen();
-    CHECK(!f.settle(f.cache().get(key_of("schema", "before"))).has_value());
-    CHECK(f.settle(f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
+
+    (void)co_await f.opened();
+    CHECK(!(co_await f.cache().get(key_of("schema", "before"))).has_value());
+    CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-TEST("bcache stamps a fresh file as its own")
+ASYNC_TEST("bcache stamps a fresh file as its own", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("schema", "entry"), make_blob("payload")));
+
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("schema", "entry"), make_blob("payload"));
     f.cache().close();
 
     with_raw_database(f.path(),
@@ -123,7 +141,7 @@ TEST("bcache stamps a fresh file as its own")
                       });
 }
 
-TEST("bcache keeps a file a newer build added a column to")
+ASYNC_TEST("bcache keeps a file a newer build added a column to", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -131,12 +149,15 @@ TEST("bcache keeps a file a newer build added a column to")
     // An EXTRA column is a newer build's, and survives because no statement here ever addresses it.
     // Discarding on one would make two builds sharing a machine wipe the cache from each other on every alternate run.
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("schema", "kept"), make_blob("still here")));
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("schema", "kept"), make_blob("still here"));
     f.cache().close();
 
     with_raw_database(f.path(), [](babel::sqlite::database& db)
                       { CHECK(db.exec("ALTER TABLE entries ADD COLUMN future_field TEXT").has_value()); });
 
     f.reopen();
-    CHECK(blob_text(f.settle(f.cache().get(key_of("schema", "kept"))).value().data) == "still here");
+
+    (void)co_await f.opened();
+    CHECK(blob_text((co_await f.cache().get(key_of("schema", "kept"))).value().data) == "still here");
 }

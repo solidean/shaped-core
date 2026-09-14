@@ -96,13 +96,14 @@ ASYNC_TEST("bcache opens degraded when its directory does not exist", main_threa
     CHECK(!got->try_value()->has_value());
 }
 
-TEST("bcache acquire keeps a computed value a failing put could not store")
+ASYNC_TEST("bcache acquire keeps a computed value a failing put could not store", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     // The invariant that matters most: a successful computation never becomes a failure because caching it failed.
     auto f = cache_fixture([](cache_config& c) { c.limits.max_object_bytes = 4; });
+    (void)co_await f.opened();
     auto const key = key_of("degraded", "too-big");
 
     auto calls = 0;
@@ -112,23 +113,25 @@ TEST("bcache acquire keeps a computed value a failing put could not store")
         return make_blob("far larger than four bytes");
     };
 
-    CHECK(blob_text(f.settle(f.cache().acquire(key, compute))) == "far larger than four bytes");
+    CHECK(blob_text((co_await f.cache().acquire(key, compute))) == "far larger than four bytes");
     CHECK(calls == 1);
 
-    f.idle();
-    CHECK(!f.settle(f.cache().get(key)).has_value()); // nothing was stored, as the limit demanded
+    (void)co_await f.idle();
+    CHECK(!(co_await f.cache().get(key)).has_value()); // nothing was stored, as the limit demanded
 
     // And it stays that way rather than becoming an error on the next attempt.
-    CHECK(blob_text(f.settle(f.cache().acquire(key, compute))) == "far larger than four bytes");
+    CHECK(blob_text((co_await f.cache().acquire(key, compute))) == "far larger than four bytes");
     CHECK(calls == 2);
 }
 
-TEST("bcache reports a compute failure and nothing else through acquire")
+ASYNC_TEST("bcache reports a compute failure and nothing else through acquire", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("degraded", "failing");
 
     auto const a = f.cache().acquire(key,
@@ -138,22 +141,24 @@ TEST("bcache reports a compute failure and nothing else through acquire")
                                              cc::any_error(cc::string("the computation itself failed"))));
                                      });
 
-    f.drive_until([&] { return a->is_ready(); });
+    co_await cc::async_settled(a);
     CHECK(a->has_error());
 
     // Nothing was stored, so the key is untouched and a later caller starts clean.
-    f.idle();
-    CHECK(!f.settle(f.cache().get(key)).has_value());
+    (void)co_await f.idle();
+    CHECK(!(co_await f.cache().get(key)).has_value());
 }
 
-TEST("bcache answers after close without hanging or crashing")
+ASYNC_TEST("bcache answers after close without hanging or crashing", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("closed", "entry");
-    f.settle_only(f.cache().put(key, make_blob("before close")));
+    (void)co_await f.cache().put(key, make_blob("before close"));
 
     f.cache().close();
     CHECK(f.cache().is_closed());
