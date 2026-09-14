@@ -43,6 +43,10 @@ A maintainer who disagrees with the recommendation should still be able to trust
 **Offer the option you do not want**, spelled fairly.
 An entry whose alternatives are obviously bad is not asking a question, and the answer it gets back means nothing.
 
+Two candidates are worth checking for in every entry, because the maintainer wants to weigh them per case.
+They are the strict rule whose relaxation is additive, and deleting the legacy spelling that forces a rule.
+[Two alternatives the maintainer wants on the table](../../../../docs/guides/reviewing-prs.md#two-alternatives-the-maintainer-wants-on-the-table) has both, with their worked cases.
+
 ## Show the shape in code
 
 A design review has no hunks, so a `code` block is the only way the reader sees what is actually proposed.

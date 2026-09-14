@@ -83,6 +83,21 @@ Rewriting at build time only is refuted by hot reload, and by a location counter
 Generating from reflection is refuted by the same DXC behaviour that motivates the whole branch.
 Neither was written down, and the recommendation was to write them into the design doc rather than to change any code.
 
+### Two alternatives the maintainer wants on the table
+
+These are not preferences that decide a case.
+They are options the maintainer likes to **see beside the recommendation**, and then weighs per case — so a critique or a design entry that could offer one and does not has left out a candidate.
+
+- **The strict rule that is obviously correct, beside the clever permissive one.**
+  A rule narrow enough to be trivially right, whose later relaxation is purely additive, is a real alternative to a cleverer rule that accepts more today.
+  The async-tests design review is the worked case: letting an async invocable take a lock its driver did not hold was going to need a name-ordering constraint to stay deadlock-free.
+  The maintainer's counter-proposal was "the driver may hold tags, or the child may, never both".
+  It is deadlock-free by the same argument top-level exclusion is, and relaxable later without breaking anything it accepted.
+- **Deleting a legacy spelling, beside accommodating it.**
+  When a new design has to grow a rule only to keep an old spelling working, removing the spelling is an alternative in its own right.
+  The same review spent a round designing how `main_thread` should treat an `ASYNC_TEST` body that returns a raw graph instead of being a coroutine.
+  The maintainer asked whether the spelling was needed at all; it was not, and removing it deleted the question along with the rule.
+
 ## A PR arrives red, and fixing it is the review's job
 
 **The normal flow here is: one contributor writes the branch on the one platform they have, opens the PR while CI is failing, and the review happens next.**
