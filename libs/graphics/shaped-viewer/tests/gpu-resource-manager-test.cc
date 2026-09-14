@@ -3,6 +3,7 @@
 #include <babel-serializer/geometry/obj.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -391,7 +392,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     co_await ctx.idle_completion();
 }
 
-INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -419,29 +420,34 @@ INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs", (sg:
     sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
     (void)ctx.routines.tick_until_idle();
 
-    auto const drain = [&]
+    // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
+    auto const drain = [&]() -> cc::shared_async<isize>
     {
-        CC_RECORD_SCOPE("sv_test.drain_pending_work");
+        CC_RECORD_ASYNC_SCOPE("sv_test.drain_pending_work");
 
         auto cmd = ctx.create_command_list();
         auto const spent = m.record_pending_work(*cmd);
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
         m.advance_to(ctx.current_epoch());
-        return spent;
+        co_return isize(spent);
     };
 
-    CHECK(drain() == 4);
+    auto const first = co_await drain();
+    CHECK(first == 4);
     CHECK(m.pending_work_count() == 2);
-    CHECK(drain() == 4);
+    auto const second = co_await drain();
+    CHECK(second == 4);
     CHECK(m.pending_work_count() == 1);
-    CHECK(drain() == 4);
+    auto const third = co_await drain();
+    CHECK(third == 4);
     CHECK(m.pending_work_count() == 0);
-    CHECK(drain() == 0);
+    auto const fourth = co_await drain();
+    CHECK(fourth == 0);
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::context_handle const& ctx_h))
