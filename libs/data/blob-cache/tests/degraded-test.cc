@@ -66,7 +66,8 @@ ASYNC_TEST("bcache acquire returns the computed value with no storage at all", s
     CHECK(calls == 2);
 }
 
-TEST("bcache opens degraded when its directory does not exist")
+// main_thread for the reason default-cache-test.cc gives: the store is unthreaded, and the main loop is what drives it.
+ASYNC_TEST("bcache opens degraded when its directory does not exist", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -79,8 +80,7 @@ TEST("bcache opens degraded when its directory does not exist")
     config.on_storage_error = [&](cc::string_view m) { reported.push_back(cc::string(m)); };
 
     auto cache = blob_cache::create(cc::move(config));
-    while (!cache->opened()->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(cache->opened());
 
     CHECK(cache->opened()->has_error()); // the one place the reason is available, for a log line
     CHECK(!cache->get_stats().is_backed_by_storage);
@@ -88,13 +88,11 @@ TEST("bcache opens degraded when its directory does not exist")
 
     auto const key = key_of("degraded", "entry");
     auto const put = cache->put(key, make_blob("dropped"));
-    while (!put->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(put);
     CHECK(put->try_value()->status == put_status::unavailable);
 
     auto const got = cache->get(key);
-    while (!got->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(got);
     CHECK(!got->try_value()->has_value());
 }
 

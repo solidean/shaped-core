@@ -66,6 +66,11 @@ void cache_fixture::reopen(cc::function_ref<void(cache_config&)> configure)
     config.steady_clock = [clock = _clock] { return clock->now(); };
     config.on_storage_error
         = [reported = _reported](cc::string_view message) { reported->push_back(cc::string(message)); };
+
+    // No automatic GC pass unless a test asks for one.
+    // The store is swept by whichever thread is waiting, so a pass the clock makes due can run between a test's advance
+    // and its own collect_garbage, and take the expiries that call was meant to count.
+    config.gc_interval_secs = 1e9;
     configure(config);
 
     _cache = blob_cache::create(cc::move(config));
