@@ -18,6 +18,10 @@ class metal_staging_ring;  // CPU-visible bytes an inline transfer stages throug
 class metal_residency_set; // what MTL4 requires instead of useResource (see metal_residency.hh)
 class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)
 struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder takes (see metal_barrier.hh)
+class metal_binding_group;
+class metal_binding_group_layout;
+class metal_pipeline_layout;
+class metal_sampler_cache; // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
 class metal_buffer;
 struct metal_buffer_access; // cross-list access tracking for one buffer (see metal_buffer_access.hh)
 class metal_memory_heap;
@@ -26,6 +30,9 @@ class metal_memory_heap;
 /// No command-list handle: a list is move-only, held by std::unique_ptr<metal_command_list>.
 using metal_buffer_handle = std::shared_ptr<metal_buffer const>;
 using metal_memory_heap_handle = std::shared_ptr<metal_memory_heap const>;
+using metal_binding_group_handle = std::shared_ptr<metal_binding_group const>;
+using metal_binding_group_layout_handle = std::shared_ptr<metal_binding_group_layout const>;
+using metal_pipeline_layout_handle = std::shared_ptr<metal_pipeline_layout const>;
 
 // metal_texture is declared by the milestone that adds it.
 

@@ -3,8 +3,8 @@
 `sg::backend::metal` — shaped-graphics on Metal 4, for macOS and iOS.
 
 Early stage.
-The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers and inline transfer are real.
-Textures, bindings, raster, presentation and async transfer still assert.
+The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
+Staging groups, bindless arrays, pipelines, textures, raster, presentation and async transfer still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -55,6 +55,12 @@ Each of these is a fact about Metal rather than a gap in the backend.
   Both are unconditional per encoder.
   Emitting the consumer only where an *intra-list* barrier was needed is the subtler mistake: a list whose first op has no local hazard then never waits for the list that wrote what it reads.
   That passes in isolation, because the queue usually drains between two submits, and fails under load.
+- **A binding group is one argument buffer, and the layout is `binding.index` directly.**
+  Metal has no descriptor-set layout object and no root signature, so both layout types here are schema and make no device call at all.
+  A group becomes one argument buffer whose 8-byte slot `n` is what `[[id(n)]]` addresses in MSL.
+  A buffer holds a GPU address, a texture or sampler an `MTLResourceID`, and an array binding takes `count` consecutive slots.
+  That is what SPIRV-Cross emits for a descriptor set, which is the whole reason the layout was chosen.
+  A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
 - **A barrier names stages, not resources.**
   `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
   The resource list an sg barrier carries has nowhere to go.

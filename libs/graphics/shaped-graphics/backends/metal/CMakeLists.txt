@@ -9,6 +9,10 @@ project(shaped-graphics-metal LANGUAGES CXX)
 # tooling — all of which speak only ('.cc', '.hh') — working unchanged. See extern/metal-cpp/dependency.yml.
 add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_barrier.cc
+    src/shaped-graphics/backends/metal/metal_binding_create.cc
+    src/shaped-graphics/backends/metal/metal_binding_group.cc
+    src/shaped-graphics/backends/metal/metal_binding_layout.cc
+    src/shaped-graphics/backends/metal/metal_sampler_cache.cc
     src/shaped-graphics/backends/metal/metal_buffer.cc
     src/shaped-graphics/backends/metal/metal_common.cc
     src/shaped-graphics/backends/metal/metal_command_list.cc
@@ -29,6 +33,9 @@ target_sources(shaped-graphics-metal
     FILES
     src/shaped-graphics/backends/metal/fwd.hh
     src/shaped-graphics/backends/metal/metal_barrier.hh
+    src/shaped-graphics/backends/metal/metal_binding_group.hh
+    src/shaped-graphics/backends/metal/metal_binding_layout.hh
+    src/shaped-graphics/backends/metal/metal_sampler_cache.hh
     src/shaped-graphics/backends/metal/metal_buffer.hh
     src/shaped-graphics/backends/metal/metal_buffer_access.hh
     src/shaped-graphics/backends/metal/metal_common.hh
@@ -62,6 +69,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-metal-test
         tests/main.cc
         tests/metal-barrier-test.cc
+        tests/metal-binding-test.cc
         tests/metal-test.cc
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc

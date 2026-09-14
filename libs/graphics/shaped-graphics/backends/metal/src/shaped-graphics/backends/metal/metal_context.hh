@@ -6,6 +6,8 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
+#include <shaped-graphics/backends/metal/metal_binding_group.hh>
+#include <shaped-graphics/backends/metal/metal_binding_layout.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_command_list.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
@@ -13,6 +15,7 @@
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/backends/metal/metal_memory_heap.hh>
 #include <shaped-graphics/backends/metal/metal_residency.hh>
+#include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
@@ -88,6 +91,20 @@ public:
 
     /// The backend-typed heap create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
+
+    // The bind path's backend-typed creates; the sg::context virtuals forward to these.
+    [[nodiscard]] cc::result<metal_binding_group_layout_handle> create_metal_binding_group_layout(
+        cc::span<sg::binding const> bindings,
+        cc::span<sg::named_sampler const> static_samplers,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<metal_pipeline_layout_handle> create_metal_pipeline_layout(
+        sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<metal_binding_group_handle> create_metal_binding_group(
+        sg::binding_group_layout_handle const& layout,
+        cc::span<sg::named_view const> views,
+        cc::span<sg::named_sampler const> samplers,
+        sg::lifetime_scope scope);
 
     /// Allocates the residency set and the two staging rings.
     /// Called once by create_metal_context, before the context is handed out.
@@ -232,6 +249,7 @@ private:
 
     sg::command_list_slot_allocator _slots;
     metal_residency_set _residency;
+    metal_sampler_cache _samplers;
     cc::mutex<metal_staging_ring> _upload_ring;
     cc::mutex<metal_staging_ring> _download_ring;
 

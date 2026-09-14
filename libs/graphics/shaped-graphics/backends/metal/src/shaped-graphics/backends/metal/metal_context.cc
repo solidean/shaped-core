@@ -268,6 +268,7 @@ void metal_context::shutdown()
     // After the drain above, so nothing in flight still names these bytes.
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    _samplers.shutdown();
     _residency.shutdown();
 
     _queue->release();
@@ -507,17 +508,19 @@ cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize s
     return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
 }
 
-cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_group_layout(cc::span<binding const>,
-                                                                                           cc::span<named_sampler const>,
-                                                                                           lifetime_scope)
+cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_group_layout(
+    cc::span<binding const> bindings,
+    cc::span<named_sampler const> static_samplers,
+    lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create binding group layouts yet");
+    return cc::result<sg::binding_group_layout_handle>(
+        create_metal_binding_group_layout(bindings, static_samplers, scope));
 }
 
-cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const&,
-                                                                                 lifetime_scope)
+cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const& desc,
+                                                                                 lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create pipeline layouts yet");
+    return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 
 cc::result<sg::compute_pipeline_handle> metal_context::try_create_compute_pipeline(compute_pipeline_description const&,
@@ -546,12 +549,12 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::try_create_raytrac
     return cc::error("the metal backend cannot create ray-tracing shader tables yet");
 }
 
-cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(binding_group_layout_handle,
-                                                                             cc::span<named_view const>,
-                                                                             cc::span<named_sampler const>,
-                                                                             lifetime_scope)
+cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(binding_group_layout_handle layout,
+                                                                             cc::span<named_view const> views,
+                                                                             cc::span<named_sampler const> samplers,
+                                                                             lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create binding groups yet");
+    return cc::result<sg::binding_group_handle>(create_metal_binding_group(layout, views, samplers, scope));
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle,
