@@ -108,14 +108,53 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
     return models
 
 
+def load_nexus_kinds(build_dir: Path) -> dict[str, tuple[str, ...]] | None:
+    """What each nexus binary carries, from the manifest configure writes; None when there is none.
+
+    The CMake File API reports no custom target property, so the kinds live in a file of their own —
+    libs/base/nexus/cmake/NexusBinaries.cmake is the writer.
+    """
+    path = build_dir / "nexus-binaries.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return {name: tuple(kinds) for name, kinds in data.get("binaries", {}).items()}
+
+
+def carries_tests(target: Target) -> bool:
+    """A nexus binary with tests in it; by the `*-test` name only when the build predates the manifest."""
+    if target.kind != "EXECUTABLE":
+        return False
+    if target.nexus_kinds is None:
+        return target.name.endswith("-test")
+    return "tests" in target.nexus_kinds
+
+
+def carries_examples(target: Target) -> bool:
+    """A nexus binary with examples in it; by the `*-example` name only when the build predates the manifest."""
+    if target.kind != "EXECUTABLE":
+        return False
+    if target.nexus_kinds is None:
+        return target.name.endswith("-example")
+    return "examples" in target.nexus_kinds
+
+
+def is_tool(target: Target) -> bool:
+    """A nexus binary that is also a program — apps or commands a user runs — whatever else it carries."""
+    return target.nexus_kinds is not None and "tool" in target.nexus_kinds
+
+
 def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
-    """Enumerate all CMake targets for the given build, with artifact paths."""
+    """Enumerate all CMake targets for the given build, with artifact paths and what each nexus binary carries."""
     with profile.span(build_dir.name, type="discover"):
+        kinds = load_nexus_kinds(build_dir)
         targets = [
             Target(
                 name=name,
                 kind=data.get("type", "UNKNOWN"),
                 artifact=_primary_artifact(data, build_dir),
+                nexus_kinds=None if kinds is None else kinds.get(name, ()),
             )
             for name, data in load_target_models(build_dir, build_type).items()
         ]

@@ -104,6 +104,7 @@ if(SC_BUILD_TESTS)
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc
     )
+    sc_nexus_binary(shaped-shader-library-test KINDS tests)
 
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
 

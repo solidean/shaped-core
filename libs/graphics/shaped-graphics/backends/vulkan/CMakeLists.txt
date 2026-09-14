@@ -162,6 +162,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-transient-attachment-test.cc
         tests/vulkan-test.cc
     )
+    sc_nexus_binary(shaped-graphics-vulkan-test KINDS tests)
 
     target_link_libraries(shaped-graphics-vulkan-test PRIVATE shaped-graphics-vulkan nexus)
 endif()

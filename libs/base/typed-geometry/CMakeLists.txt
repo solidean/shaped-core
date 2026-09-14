@@ -125,6 +125,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/plane-test.cc
         tests/geometry/object-traits-test.cc
     )
+    sc_nexus_binary(typed-geometry-test KINDS tests)
 
     target_link_libraries(typed-geometry-test
         PRIVATE

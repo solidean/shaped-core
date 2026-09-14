@@ -103,6 +103,16 @@ Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the f
 A rate is a different question from a cause, and this answers the cause.
 When you do want the rate, loop it in the shell and count — but expect to lose the logs of all but the last failure.
 
+## What a nexus binary does on its own
+
+**It does not run its tests unless the line selects them.**
+`dev.py test` passes `--tests`, so nothing changes through dev.py.
+A binary run with nothing selected runs its `default_entry` app or command, or prints an overview of what it holds — its commands, apps, examples and benchmarks by name, its tests by count.
+A substring filter given without `--tests` is an error that names `--tests` as the fix.
+
+dev.py tells nexus binaries apart by the `nexus-binaries.json` manifest configure writes beside the build, not by a `-test` or `-example` suffix.
+`dev.py run` refuses a binary that holds only tests or examples, and runs one registered as a `tool` even when it carries tests too.
+
 ## Reproducing an order: `--seed N`
 
 Every nexus run shuffles its tests and each invocation's children, and prints the seed it drew as its first line: `nexus: run seed N (reproduce with --seed N)`.

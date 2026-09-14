@@ -17,6 +17,7 @@
 #include <nexus/bench/report.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
+#include <nexus/tests/entry.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/bench_json.hh>
 #include <nexus/tests/export/catch2.hh>
@@ -150,8 +151,52 @@ int nx::run(int argc, char** argv)
     cc::install_crash_handler();
     cc::add_crash_context_hook(&nx::impl::report_running_test);
 
-    // Create schedule config from command line arguments
-    auto config = test_schedule_config::create_from_args(argc, argv);
+    // Get the static test registry
+    auto& registry = get_static_test_registry();
+
+    // Run NX_TEST_SETUP callbacks: they define aliases (with full registry access) and must run before any
+    // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
+    nx::run_setup_callbacks(registry);
+
+    // A binary whose defaults are ambiguous is broken whatever it was asked, so a test run fails on it too — which is
+    // the run CI makes, where a bare run that only a user would notice is not.
+    if (auto const problems = impl::check_default_entries(registry); !problems.empty())
+    {
+        cc::eprint("{}", problems);
+        return 1;
+    }
+
+    // Name first: an app or command named by the first token, a nexus selector, a test named exactly, the default, or
+    // the overview.
+    auto tokens = cc::vector<cc::string_view>();
+    for (auto i = 1; i < argc; ++i)
+        tokens.push_back(cc::string_view(argv[i]));
+    auto const route = impl::route_command_line(registry, tokens);
+
+    if (route.kind == impl::entry_route_kind::overview)
+    {
+        cc::print("{}", impl::render_overview(registry, suite_name()));
+        return 0;
+    }
+    if (route.kind == impl::entry_route_kind::error)
+    {
+        cc::eprintln("{}\n", route.message);
+        cc::eprint("{}", impl::render_overview(registry, suite_name()));
+        return 1;
+    }
+
+    auto const is_entry_run = route.kind == impl::entry_route_kind::entry;
+
+    // An app or command gets the defaults of a real run and its own command line; nexus parses none of that line.
+    auto config = is_entry_run ? test_schedule_config::create_from_args(1, argv)
+                               : test_schedule_config::create_from_args(argc, argv);
+    if (is_entry_run)
+    {
+        config.selected_bucket = route.entry->test_config.bucket;
+        config.allow_cross_bucket_naming = false;
+        config.filters = {route.entry->name};
+        config.test_args = route.entry_args;
+    }
 
     // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,
     // and the PARSE is what says it was asked for.
@@ -168,13 +213,6 @@ int nx::run(int argc, char** argv)
     // the subset it managed to understand is the one outcome a mistyped flag must never produce.
     if (config.parse_failed)
         return 1;
-
-    // Get the static test registry
-    auto& registry = get_static_test_registry();
-
-    // Run NX_TEST_SETUP callbacks: they define aliases (with full registry access) and must run before any
-    // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
-    nx::run_setup_callbacks(registry);
 
     // Settle name-vs-file matching once, before anything queries a filter: the listing below and the schedule must agree.
     // Aliases are registered by then, so a filter naming one counts as a name match and suppresses the file fallback.
@@ -206,6 +244,10 @@ int nx::run(int argc, char** argv)
 
     // Create schedule from config and registry
     auto schedule = test_schedule::create(config, registry);
+
+    // The entry's name is a substring filter like any other, so a sibling whose name contains it is dropped here.
+    if (is_entry_run)
+        schedule.instances.remove_all_where([&](test_instance const& i) { return i.declaration != route.entry; });
 
     // Check if any tests were scheduled
     if (schedule.instances.empty())
@@ -241,7 +283,8 @@ int nx::run(int argc, char** argv)
     // First, so it is there whatever the run does next, and a failure anywhere below can be reproduced from the log.
     // Not under the Catch2 XML reporter, whose stdout is the report, and not for an example, which is one program run
     // whose transcript is its documentation.
-    if (config.shuffle && !config.report_catch2_xml_results && config.selected_bucket != nx::config::test_bucket::example)
+    if (config.shuffle && !config.report_catch2_xml_results && !is_entry_run
+        && config.selected_bucket != nx::config::test_bucket::example)
         cc::println("nexus: run seed {} (reproduce with --seed {})", config.seed, config.seed);
 
     if (config.verbose)
@@ -310,7 +353,7 @@ int nx::run(int argc, char** argv)
         resources.peak_resident_bytes = usage.value().peak_resident_bytes;
 
     // An example is a program someone is watching rather than a suite being measured, so only tests say what they cost.
-    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example;
+    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example && !is_entry_run;
 
     // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
     // file's directory rather than inventing a location of its own.
@@ -498,8 +541,17 @@ int nx::run(int argc, char** argv)
         }
         if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
             cc::eprintln("{}", described);
+
+        // A failed command keeps the status it chose, unless that status was success.
+        if (is_entry_run && !execution.executions.empty())
+            if (auto const code = execution.executions[0].exit_code.value_or(0); code != 0)
+                return code;
         return 1;
     }
+
+    // An app or a command is a program, not a suite: its status is its own, and it prints no test summary.
+    if (is_entry_run)
+        return execution.executions.empty() ? 0 : execution.executions[0].exit_code.value_or(0);
 
     // All tests passed
     cc::println("All {} tests passed ({} checks)", total_tests, total_checks);

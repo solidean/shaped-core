@@ -103,6 +103,9 @@ def _resolve_one(ctx: Context, targets: list[dev.Target], spec: str) -> str:
         ctx.die(f"{spec!r} matches several targets: {', '.join(sorted(t.name for t in matches))}")
 
     target = matches[0]
+    # A tool that carries its own tests is still a program to run; only a binary that is nothing but tests or examples is refused.
+    if ctx.is_tool_target(target):
+        return target.name
     if ctx.is_test_target(target):
         ctx.die(f"{target.name!r} is a test binary — run it with `dev.py test`, which discovers, "
                 f"filters and records results. `run` is for non-test executables.")

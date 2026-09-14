@@ -133,6 +133,7 @@ if(SC_BUILD_TESTS)
         tests/imgui-style-test.cc
         tests/gpu-types-test.cc
     )
+    sc_nexus_binary(shaped-rendering-test KINDS tests)
 
     target_link_libraries(shaped-rendering-test
         PRIVATE

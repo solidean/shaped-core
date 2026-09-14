@@ -111,6 +111,7 @@ if(SC_BUILD_TESTS)
 
         tests/trace/chrome_trace-test.cc
     )
+    sc_nexus_binary(babel-serializer-test KINDS tests)
 
     target_link_libraries(babel-serializer-test
         PRIVATE

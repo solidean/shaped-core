@@ -115,6 +115,7 @@ if(SC_BUILD_TESTS)
         tests/value-test.cc
         tests/value-fuzz-test.cc
     )
+    sc_nexus_binary(versioned-document-test KINDS tests)
 
     target_link_libraries(versioned-document-test
         PRIVATE

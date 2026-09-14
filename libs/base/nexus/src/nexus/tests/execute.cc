@@ -31,7 +31,9 @@
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/check.hh>
+#include <nexus/tests/entry.hh>
 #include <nexus/tests/impl/test_ambient.hh>
+#include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/section.hh>
 #include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
@@ -47,6 +49,7 @@ using namespace cc::primitive_defines;
 struct nx::impl::async_test_sink
 {
     cc::shared_async<cc::unit> root;
+    cc::shared_async<int> command_root; // an ASYNC_COMMAND's body, whose value is the exit status
 };
 
 namespace
@@ -775,6 +778,7 @@ struct async_test_state
     cc::async_ambient_handle ambient;
 
     cc::shared_async<cc::unit> root;
+    cc::shared_async<int> command_root; // set instead of `root` for an ASYNC_COMMAND
     bool started = false;
 
     // The trace this test's recording is bucketed under, minted alongside the ambient link above.
@@ -789,9 +793,9 @@ struct async_test_state
 
 /// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
 /// Null if the body threw before producing one.
-cc::shared_async<cc::unit> run_async_prologue(test_context& ctx,
-                                              nx::test_declaration const& decl,
-                                              cc::span<nx::typed_value*> values)
+nx::impl::async_test_sink run_async_prologue(test_context& ctx,
+                                             nx::test_declaration const& decl,
+                                             cc::span<nx::typed_value*> values)
 {
     auto* const crash_slot = running_test_slot_for_this_thread();
     scoped_running_test const published(crash_slot);
@@ -840,7 +844,7 @@ cc::shared_async<cc::unit> run_async_prologue(test_context& ctx,
             .expanded = "uncaught unknown exception",
         });
     }
-    return cc::move(sink.root);
+    return sink;
 }
 
 /// Fold an async test's outcome into its execution and drop its context.
@@ -851,6 +855,22 @@ void finish_async_test(async_test_state& state)
 
     // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
     // A SKIP or REQUIRE that ended the graph by throwing has already said what happened, and its error is that abort rather than a second failure.
+    if (state.command_root != nullptr)
+    {
+        if (auto const* const code = state.command_root->try_value(); code != nullptr)
+            state.execution->exit_code = *code;
+        else if (auto const* const err = state.command_root->try_error();
+                 err != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
+            ctx.errors.push_back(test_error{
+                .expr = cc::format("the command's async graph failed: {}",
+                                   err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string()),
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = "the command resolved to an error instead of an exit status",
+            });
+        state.command_root = {};
+    }
+
     if (state.root != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
     {
         if (auto const* const err = state.root->try_error(); err != nullptr)
@@ -931,14 +951,25 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
 
-        state.root = run_async_prologue(*state.ctx, decl, state.values);
+        {
+            auto sink = run_async_prologue(*state.ctx, decl, state.values);
+            state.root = cc::move(sink.root);
+            state.command_root = cc::move(sink.command_root);
+        }
+
+        // Whichever the body handed back, placed and scheduled the same way.
+        auto* body = static_cast<cc::async_node_base*>(nullptr);
+        if (state.root != nullptr)
+            body = state.root.get();
+        else if (state.command_root != nullptr)
+            body = state.command_root.get();
 
         // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
         // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
         // and it also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
         // Only a coroutine can be placed on a home before it starts, which is what main_thread and the scheduler modes need.
         // A raw frame is a hot-path tool with no place in a test body, so it is refused outright rather than accepted wherever placement happens not to matter.
-        if (state.root != nullptr && !state.root->reserves_home_word())
+        if (body != nullptr && !body->reserves_home_word())
         {
             state.ctx->errors.push_back(test_error{
                 .expr = "an async test body must be a coroutine",
@@ -949,23 +980,27 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
                 .expanded = "the body handed back a graph that is not a coroutine",
             });
             state.root = {};
+            state.command_root = {};
+            body = nullptr;
         }
 
-        if (state.root != nullptr)
+        if (body != nullptr)
         {
-            CC_ASSERT(state.root->is_cold(), "an async test body must hand back its coroutine unstarted");
+            CC_ASSERT(body->is_cold(), "an async test body must hand back its coroutine unstarted");
 
             // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
             if (decl.test_config.main_thread)
             {
-                auto const homed = state.root->try_home_cold(cc::main_thread_scheduler());
+                auto const homed = body->try_home_cold(cc::main_thread_scheduler());
                 CC_ASSERT(homed, "a cold coroutine always takes a home");
             }
-            state.root->schedule();
+            body->schedule();
         }
     }
 
     if (state.root != nullptr && !actx.require(state.root))
+        return actx.wait_for_dependencies();
+    if (state.command_root != nullptr && !actx.require(state.command_root))
         return actx.wait_for_dependencies();
 
     finish_async_test(state);
@@ -1137,8 +1172,68 @@ nx::impl::scoped_check_capture::~scoped_check_capture()
 void nx::impl::submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root)
 {
     CC_ASSERT(root != nullptr, "an ASYNC_TEST body must return a valid async");
-    CC_ASSERT(sink.root == nullptr, "an ASYNC_TEST body must hand back exactly one graph");
+    CC_ASSERT(sink.root == nullptr && sink.command_root == nullptr, "an ASYNC_TEST body must hand back exactly one "
+                                                                    "graph");
     sink.root = cc::move(root);
+}
+
+void nx::impl::submit_command_async(async_test_sink& sink, cc::shared_async<int> root)
+{
+    CC_ASSERT(root != nullptr, "an ASYNC_COMMAND body must return a valid async");
+    CC_ASSERT(sink.root == nullptr && sink.command_root == nullptr, "an ASYNC_COMMAND body must hand back exactly one "
+                                                                    "graph");
+    sink.command_root = cc::move(root);
+}
+
+void nx::impl::report_exit_code(int code)
+{
+    auto* const execution = current_execution();
+    CC_ASSERT(execution != nullptr, "a command's exit status is reported from inside its running body");
+    execution->exit_code = code;
+}
+
+int nx::run_command(cc::string_view name, cc::vector<cc::string> args)
+{
+    auto* const parent = impl::current_execution();
+    auto const* const config = impl::current_config();
+    CC_ASSERT(parent != nullptr && config != nullptr, "nx::run_command must be called from within a running test");
+
+    auto const* registry = impl::active_registry();
+    if (registry == nullptr)
+        registry = &get_static_test_registry();
+
+    auto const* command = static_cast<test_declaration const*>(nullptr);
+    for (auto const& decl : registry->declarations)
+        if (decl.test_config.bucket == config::test_bucket::command && cc::string_view(decl.name) == name)
+            command = &decl;
+    CC_ASSERTS(command != nullptr, cc::format("nx::run_command: this binary holds no COMMAND named \"{}\"", name));
+    CC_ASSERTS(!command->is_async(),
+               cc::format("nx::run_command: \"{}\" is an ASYNC_COMMAND, which a synchronous call cannot run", name));
+
+    if (auto const* const slot = impl::current_slot_declaration(); slot != nullptr)
+    {
+        auto const unhonoured = impl::find_unhonoured_dispatch_config(command->test_config, slot->test_config);
+        CC_ASSERTS(unhonoured.empty(), cc::format("nx::run_command: \"{}\" declares {}, but \"{}\" does not hold it — "
+                                                  "a command runs in "
+                                                  "the schedule slot of the test that runs it, so add {} there",
+                                                  name, unhonoured, slot->name, unhonoured));
+    }
+
+    test_execution child;
+    child.instance.declaration = command;
+    child.instance.registry = registry;
+    child.instance.args = cc::move(args);
+    child.instance.rebuild_arg_views();
+    child.invocation_group = "run_command";
+
+    impl::run_test_body(child, *config, [&] { command->function(); }, {}, impl::current_filter_consumed() + 2);
+
+    auto code = child.exit_code.value_or(0);
+    if (child.is_considered_failing() && code == 0)
+        code = 1;
+
+    parent->nested.push_back(cc::move(child));
+    return code;
 }
 
 nx::test_registry const* nx::impl::active_registry()

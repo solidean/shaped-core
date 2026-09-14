@@ -10,7 +10,9 @@ enum class ambient_mode;
 } // namespace nx::config
 
 // Which selection bucket a test belongs to; a test lives in exactly one.
-// An automatic sweep selects a single bucket — normal by default, manual via --manual, pgo_benchmark via --pgo-benchmarks, benchmark via --benchmarks, example via --examples.
+// A sweep selects a single bucket: normal via --tests, manual via --manual, pgo_benchmark via --pgo-benchmarks, benchmark via --benchmarks.
+// The last three are example via --examples, app via --apps and command via --commands.
+// An app or a command is also run by its name, or as the binary's default entry.
 // An exact (non-substring) filter naming a test can also pull it in from another bucket, but only when no bucket flag was given.
 // The set is intentionally extensible.
 enum class nx::config::test_bucket
@@ -20,6 +22,8 @@ enum class nx::config::test_bucket
     pgo_benchmark,
     benchmark,
     example,
+    app,     // a program that runs until it is closed: a viewer, a dev server
+    command, // a program that does one job and exits with a status: a linter, a converter
 };
 
 // WHERE a test's body runs.
@@ -56,6 +60,7 @@ struct nx::config::cfg
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
     bool thorough_only = false; // skipped unless the run is --thorough; orthogonal to `bucket` and `enabled`
+    bool default_entry = false; // the app or command a run with nothing selected runs; at most one per binary
     int seed = 0;
 
     scheduler_mode scheduler = scheduler_mode::shared;
@@ -187,6 +192,29 @@ constexpr struct
 {
     void apply(cfg& result) const { result.bucket = test_bucket::example; }
 } example;
+
+// An app: a program in this binary that runs until it is closed, in the app bucket.
+// Never swept by a test run; it runs by name, under --apps, or as the binary's default_entry.
+// APP in test.hh is the macro.
+constexpr struct
+{
+    void apply(cfg& result) const { result.bucket = test_bucket::app; }
+} app;
+
+// A command: a program in this binary that does one job and exits with the status its body returns, in the command bucket.
+// COMMAND in test.hh is the macro, and nx::run_command runs one from a test.
+constexpr struct
+{
+    void apply(cfg& result) const { result.bucket = test_bucket::command; }
+} command;
+
+// The app or command a run with nothing selected runs — what makes a binary a tool that also carries its tests.
+// At most one per binary, and only on an app or a command; nexus refuses to run a binary that breaks either rule,
+// whatever it was asked to do.
+constexpr struct
+{
+    void apply(cfg& result) const { result.default_entry = true; }
+} default_entry;
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
 // Expressed as locks the test node takes before its body: one async mutex per tag, and a phase-wide shared lock that this holds exclusively.

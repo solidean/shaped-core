@@ -136,6 +136,7 @@ include(libs/base/nexus/cmake/NexusWebRunner.cmake)
 
 # Example helper (sc_add_example / sc_add_single_file_examples). Included before the libs so each can add
 # its own examples/ subdirectory; a no-op when SC_BUILD_EXAMPLES is off.
+include(libs/base/nexus/cmake/NexusBinaries.cmake)
 include(libs/base/nexus/cmake/Examples.cmake)
 
 # Shader-package helper (sc_add_shader_package). Included before the libs so any of them — including a
@@ -211,6 +212,9 @@ endif()
 # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
 # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
 sc_finalize_web_runners()
+
+# Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
+sc_write_nexus_binary_manifest()
 
 # Check that every declared shader package found the shaped-shader-library target. See
 # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.

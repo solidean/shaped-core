@@ -61,6 +61,7 @@ if(SC_BUILD_TESTS)
         tests/preprocess-test.cc
         tests/compile-test.cc
     )
+    sc_nexus_binary(shaped-shader-compiler-dxc-test KINDS tests)
 
     # Both of these compile to DXIL and assert what comes back from its reflection container, which needs the Windows
     # SDK's d3d12shader.h — a header the Linux DXC release does not ship.

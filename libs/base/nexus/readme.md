@@ -20,6 +20,10 @@ Headers are included by their full path from `src/`, e.g. `#include <nexus/tests
 `<nexus/test.hh>` is the only header a test file normally needs — it pulls in the check, section, config and invocable machinery.
 
 **Never run the `nexus-test` binary directly** — go through `uv run dev.py test`, which configures, builds, discovers and records results.
+
+**A nexus binary does not run its tests unless asked**: `--tests` selects them, as `--examples` and `--benchmarks` select theirs.
+Run with nothing selected, it runs its `default_entry` app or command, or prints what it holds.
+That is what lets a tool carry its own tests in one binary — the program is the default, and `--tests` is the suite.
 [building-and-testing](../../../docs/guides/building-and-testing.md) is the full workflow.
 
 ## Beyond TEST and CHECK
@@ -33,6 +37,7 @@ Several capabilities are easy to miss from the macros alone:
 | measuring whether one implementation beats another | `BENCHMARK` + `nx::bench::run` | [docs/guides/benchmarking.md](../../../docs/guides/benchmarking.md) |
 | recorded perf metrics, consumed by `dev.py pgo` | `PGO_BENCHMARK` + `nx::pgo` | [docs/guides/perf-results.md](../../../docs/guides/perf-results.md) |
 | runnable demonstrations of an API in practice | `EXAMPLE` + `dev.py example` | [docs/guides/examples.md](../../../docs/guides/examples.md) |
+| a program in the same binary as its tests | `APP`, `COMMAND` + `nx::run_command` | [cheat-sheet.md](cheat-sheet.md#apps-and-commands-app-command) |
 | a command line, with help, validation and completion | `nx::args` | [docs/args.md](docs/args.md) |
 | hardware performance counters around a workload | `nx::bench::measure_hw_counters` | [docs/guides/profiling.md](../../../docs/guides/profiling.md) |
 | asserting on what a test logged, recorded or measured | `nx::test_recording()` | [docs/recording.md](docs/recording.md) |

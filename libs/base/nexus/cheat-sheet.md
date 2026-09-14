@@ -110,6 +110,36 @@ ASYNC_EXAMPLE("clean-net/download")      // nexus/async-test.hh: the same bucket
 }
 ```
 
+## Apps and commands (`APP`, `COMMAND`)
+
+A program living in a nexus binary beside its tests, so a tool needs no separate `-core` library to be testable.
+
+```cpp
+COMMAND("lint", default_entry)            // exits with what it returns; a failed CHECK turns a 0 into 1
+{
+    auto const findings = lint(nx::test_args());
+    return findings.empty() ? 0 : 2;
+}
+APP("viewer") { run_viewer(nx::test_args()); }   // runs until closed; ASYNC_APP / ASYNC_COMMAND (co_return the status) too
+// Both bake in main_thread and exclusive(), like EXAMPLE. Never swept by a test run.
+
+TEST("lint - a clean file exits 0", main_thread, exclusive())   // run_command runs in THIS test's slot
+{ CHECK(nx::run_command("lint", {"fixtures/clean.cc"}) == 0); }
+```
+
+**What a command line selects**, name first:
+
+```bash
+tool lint a.cc          # an app or command named first runs with the rest of the line
+tool --tests "lint -"   # --tests (or --examples, --benchmarks, --manual, --apps, --commands, --list-tests-json,
+                        #   --reporter) hands the line to nexus; an exact test name does too
+tool a.cc --fix         # otherwise the default_entry takes the WHOLE line — nexus parses none of it
+tool                    # no default: an overview of what the binary holds, exit 0
+```
+
+- **At most one `default_entry`, and only on an app or command** — checked on every run, `--tests` included.
+- dev.py passes `--tests`; a substring filter without it is an error naming the fix.
+
 ## Benchmarks (`BENCHMARK` + `nx::bench`)
 
 Measures whether one implementation beats another, with statistics rather than a stopwatch.

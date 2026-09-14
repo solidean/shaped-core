@@ -31,6 +31,7 @@ add_library(nexus
     src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
+    src/nexus/tests/entry.cc
     src/nexus/tests/invoke_tests.cc
     src/nexus/tests/execute.cc
     src/nexus/tests/registry.cc
@@ -97,6 +98,7 @@ target_sources(nexus
     src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
+    src/nexus/tests/entry.hh
     src/nexus/tests/invoke_tests.hh
     src/nexus/tests/execute.hh
     src/nexus/tests/registry.hh
@@ -206,6 +208,7 @@ if(SC_BUILD_TESTS)
         tests/test-async-test.cc
         tests/test-async-invocable-test.cc
         tests/test-seed-test.cc
+        tests/test-entry-test.cc
         tests/test-export-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc
@@ -224,6 +227,7 @@ if(SC_BUILD_TESTS)
         tests/fuzz-minimize-test.cc
         tests/fuzz-regression-test.cc
     )
+    sc_nexus_binary(nexus-test KINDS tests)
 
     target_link_libraries(nexus-test
         PRIVATE

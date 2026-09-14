@@ -152,6 +152,7 @@ if(SC_BUILD_TESTS)
         tests/virtual-transport-test.cc
         tests/simulated-transport-test.cc
     )
+    sc_nexus_binary(clean-net-test KINDS tests)
 
     target_link_libraries(clean-net-test PRIVATE clean-net nexus)
 

@@ -219,6 +219,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
     )
+    sc_nexus_binary(shaped-graphics-test KINDS tests)
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes

@@ -68,6 +68,9 @@ class Target:
     name: str
     kind: str  # "EXECUTABLE", "STATIC_LIBRARY", ...
     artifact: Path | None  # absolute path to the primary built artifact, if any
+    # What a nexus binary carries — "tests", "examples", "tool" — from the build's nexus-binaries.json.
+    # None when the build has no manifest, which is a build configured before it existed; empty for a non-nexus target.
+    nexus_kinds: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

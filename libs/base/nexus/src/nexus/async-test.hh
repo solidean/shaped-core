@@ -60,6 +60,9 @@ namespace nx::impl
 // Hand nexus the graph an ASYNC_TEST body produced.
 void submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root);
 
+// Hand nexus the graph an ASYNC_COMMAND body produced; the value it resolves to is the exit status.
+void submit_command_async(async_test_sink& sink, cc::shared_async<int> root);
+
 // The engine behind both async invocations; the boxed arguments live in its frame until every child has resolved.
 cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
                                                             cc::vector<std::type_index> signature,
@@ -131,6 +134,30 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
 // A test whose body may co_await; nexus awaits it.
 // Config items compose exactly as with TEST.
 #define ASYNC_TEST(name, ...) NX_IMPL_ASYNC_TEST(name, __COUNTER__, __VA_ARGS__)
+
+// APP with a coroutine body, homed to main until it hops away.
+#define ASYNC_APP(name, ...) \
+    NX_IMPL_ASYNC_TEST(name, __COUNTER__, app, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
+
+#define NX_IMPL_ASYNC_COMMAND(name, unique_id, ...)                                                            \
+    static ::cc::shared_async<int> CC_MACRO_JOIN(_nx_async_command_fn_, unique_id)();                          \
+    static const bool CC_MACRO_JOIN(_nx_async_command_reg_, unique_id)                                         \
+        = (::nx::impl::register_async_command(                                                                 \
+               name,                                                                                           \
+               []()                                                                                            \
+               {                                                                                               \
+                   using namespace nx::config;                                                                 \
+                   return ::nx::impl::merge_config(__VA_ARGS__);                                               \
+               }(),                                                                                            \
+               [](::nx::impl::async_test_sink& sink)                                                           \
+               { ::nx::impl::submit_command_async(sink, CC_MACRO_JOIN(_nx_async_command_fn_, unique_id)()); }, \
+               cc::source_location::current()),                                                                \
+           true);                                                                                              \
+    static ::cc::shared_async<int> CC_MACRO_JOIN(_nx_async_command_fn_, unique_id)()
+
+// COMMAND with a coroutine body: `co_return` the exit status.
+#define ASYNC_COMMAND(name, ...) \
+    NX_IMPL_ASYNC_COMMAND(name, __COUNTER__, command, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
 
 #define NX_IMPL_ASYNC_INVOCABLE_TEST(name, unique_id, params, ...)                                                     \
     static ::cc::shared_async<::cc::unit> CC_MACRO_JOIN(_nx_async_invocable_fn_, unique_id) params;                    \

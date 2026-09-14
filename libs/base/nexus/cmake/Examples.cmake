@@ -35,7 +35,7 @@ function(sc_add_example target)
         message(FATAL_ERROR "sc_add_example(${target}): unexpected arguments: ${EX_UNPARSED_ARGUMENTS}")
     endif()
     if(NOT target MATCHES "-example$")
-        message(FATAL_ERROR "sc_add_example(${target}): an example target must be named '*-example' — that suffix is how dev.py tells examples from tests")
+        message(FATAL_ERROR "sc_add_example(${target}): an example target must be named '*-example', the convention for a binary that holds only examples")
     endif()
 
     # file(CONFIGURE), not file(WRITE): copy-if-different, so a configure that changes nothing leaves the
@@ -51,6 +51,7 @@ function(sc_add_example target)
 
     add_executable(${target} "${_main}" ${EX_SOURCES})
     target_link_libraries(${target} PRIVATE nexus ${EX_LINK})
+    sc_nexus_binary(${target} KINDS examples)
 
     if(EX_PCH)
         sc_target_pch(${target} ${EX_PCH})

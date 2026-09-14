@@ -187,6 +187,26 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
 
     args.group("selection");
     args.action(
+        {"tests"}, [] {},
+        "run tests: without a selector like this one, a binary runs its default app or command, or lists what "
+        "it holds");
+    args.action(
+        {"apps"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::app;
+            state.explicit_bucket = true;
+        },
+        "sweep the app bucket");
+    args.action(
+        {"commands"},
+        [&]
+        {
+            config.selected_bucket = config_ns::test_bucket::command;
+            state.explicit_bucket = true;
+        },
+        "sweep the command bucket");
+    args.action(
         {"manual"},
         [&]
         {
