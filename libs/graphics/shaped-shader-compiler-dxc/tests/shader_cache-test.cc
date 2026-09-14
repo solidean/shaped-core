@@ -1,9 +1,11 @@
 #include <blob-cache/blob_cache.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
@@ -109,13 +111,18 @@ TEST("ssc::dxc shader_cache - a compile persists across cache instances")
     // Two drivers, both needed: the sweep resolves what the compile is parked on, the drain resumes the compile.
     // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER,
     // and bounded, so a compile that can never finish fails the test instead of hanging it.
+    //
+    // Bounded by TIME, not by turns: the registry is process-wide, so a thread blocked in another test may sweep this
+    // store's pump too, and the compile then resumes on that thread's pool while this loop has nothing to do.
     auto const settle = [&](auto const& node)
     {
         CC_RECORD_SCOPE("dxc_test.settle");
 
-        for (auto i = 0; i < 100000 && !node->is_ready(); ++i)
+        auto const deadline = cc::current_time_steady_secs() + 30.0;
+        while (!node->is_ready() && cc::current_time_steady_secs() < deadline)
         {
-            (void)cc::thread_pump_all();
+            if (!cc::thread_pump_all())
+                cc::this_thread_yield();
             scheduler.drain();
         }
         CHECK(node->is_ready());
