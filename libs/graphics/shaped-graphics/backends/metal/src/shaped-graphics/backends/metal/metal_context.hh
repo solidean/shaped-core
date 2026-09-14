@@ -18,6 +18,8 @@
 #include <shaped-graphics/backends/metal/metal_residency.hh>
 #include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
+#include <shaped-graphics/backends/metal/metal_texture.hh>
+#include <shaped-graphics/backends/metal/metal_texture_view_cache.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
@@ -82,6 +84,9 @@ public:
     /// MTLSamplerStates for bound sampler values, shared context-wide.
     [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
 
+    /// MTLTextures for bound texture views, shared context-wide and keyed on sg view identity.
+    [[nodiscard]] metal_texture_view_cache& texture_views() { return _texture_views; }
+
     /// The MTL4 compiler every pipeline is built through.
     /// One per context: MTL4 makes compilation an explicit object where Metal 3 hid it behind the device.
     [[nodiscard]] MTL4::Compiler* compiler() const { return _compiler; }
@@ -97,6 +102,9 @@ public:
     [[nodiscard]] cc::result<metal_buffer_handle> create_metal_buffer(isize size_in_bytes,
                                                                       sg::buffer_usages usage,
                                                                       sg::allocation_info const& alloc);
+
+    [[nodiscard]] cc::result<metal_texture_handle> create_metal_texture(sg::texture_description const& desc,
+                                                                        sg::allocation_info const& alloc);
 
     /// The backend-typed heap create, which the sg::context virtual forwards to.
     [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
@@ -265,6 +273,7 @@ private:
     sg::command_list_slot_allocator _slots;
     metal_residency_set _residency;
     metal_sampler_cache _samplers;
+    metal_texture_view_cache _texture_views;
     MTL4::Compiler* _compiler = nullptr;
     cc::mutex<metal_staging_ring> _upload_ring;
     cc::mutex<metal_staging_ring> _download_ring;
@@ -278,6 +287,7 @@ private:
     /// alive — the point is only to reach the ones still held, so a handle kept past its epoch reports itself expired
     /// rather than naming storage the bump heap has already handed to somebody else.
     cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
+    cc::mutex<cc::vector<std::weak_ptr<sg::raw_texture const>>> _transient_expiring_textures;
 };
 
 namespace sg

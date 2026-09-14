@@ -6,9 +6,15 @@
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
 
-/// Per-command-list access tracking for one buffer, plus the state carried between lists.
+/// Per-command-list access tracking for one resource, plus the state carried between lists.
 ///
-/// **Metal needs both halves, the way vulkan does and dx12 does not.**
+/// **One type for buffers and textures alike**, where dx12 and vulkan each need two.
+/// Both of those track a texture's layout and partition it by subresource; a Metal texture has no layout at all, so a
+/// texture has no state here a buffer does not also have.
+/// The subresource partition is an optimization this does not take: a texture is one undivided state, so two mips
+/// written and read in turn get a barrier they would not strictly need.
+///
+/// **Metal needs both halves of the cross-list model, the way vulkan does and dx12 does not.**
 /// D3D12 decays a buffer to COMMON at ExecuteCommandLists, so cross-list ordering rides on that decay and only
 /// intra-list hazards ever produce a barrier.
 /// Metal has no decay rule, and with `HazardTrackingModeUntracked` resources it has no driver-inferred synchronization
@@ -25,7 +31,7 @@
 ///
 /// Everything here is pure logic — no device, no encoder — so its tests run anywhere.
 /// The owning buffer wraps it in a mutex.
-struct sg::backend::metal::metal_buffer_access
+struct sg::backend::metal::metal_resource_access
 {
     struct slot_state
     {

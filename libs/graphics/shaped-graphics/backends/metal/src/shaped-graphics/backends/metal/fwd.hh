@@ -23,21 +23,23 @@ class metal_binding_group_layout;
 class metal_pipeline_layout;
 class metal_compute_pipeline;
 class metal_staging_binding_group;
-class metal_sampler_cache; // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
+class metal_texture_view_cache; // MTLTextures for bound texture views (see metal_texture_view_cache.hh)
+class metal_sampler_cache;      // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
 class metal_buffer;
-struct metal_buffer_access; // cross-list access tracking for one buffer (see metal_buffer_access.hh)
+class metal_texture;
+struct metal_resource_access; // cross-list access tracking for one buffer (see metal_resource_access.hh)
 class metal_memory_heap;
 
 /// Backend-typed resource handles.
 /// No command-list handle: a list is move-only, held by std::unique_ptr<metal_command_list>.
 using metal_buffer_handle = std::shared_ptr<metal_buffer const>;
+using metal_texture_handle = std::shared_ptr<metal_texture const>;
 using metal_memory_heap_handle = std::shared_ptr<metal_memory_heap const>;
 using metal_binding_group_handle = std::shared_ptr<metal_binding_group const>;
 using metal_binding_group_layout_handle = std::shared_ptr<metal_binding_group_layout const>;
 using metal_pipeline_layout_handle = std::shared_ptr<metal_pipeline_layout const>;
 using metal_compute_pipeline_handle = std::shared_ptr<metal_compute_pipeline>;
 
-// metal_texture is declared by the milestone that adds it.
 
 /// The domain every recording site in the Metal backend is attributed to.
 /// It shadows sg's, so a backend message is never mistaken for a portable one.

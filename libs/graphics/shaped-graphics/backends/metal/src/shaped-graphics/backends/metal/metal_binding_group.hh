@@ -22,7 +22,8 @@ public:
     metal_binding_group(metal_context& ctx,
                         metal_binding_group_layout_handle layout,
                         MTL::Buffer* arguments,
-                        cc::vector<sg::raw_buffer_handle> bound_buffers);
+                        cc::vector<sg::raw_buffer_handle> bound_buffers,
+                        cc::vector<sg::raw_texture_handle> bound_textures = {});
     ~metal_binding_group() override;
 
     /// The address an argument table binds this group at.
@@ -33,9 +34,13 @@ public:
     /// The buffers this group names, for the command list to declare access on before a dispatch.
     [[nodiscard]] cc::span<sg::raw_buffer_handle const> bound_buffers() const { return _bound_buffers; }
 
+    /// The textures this group names, held for the same reason the buffers are.
+    [[nodiscard]] cc::span<sg::raw_texture_handle const> bound_textures() const { return _bound_textures; }
+
 private:
     metal_context& _ctx;
     metal_binding_group_layout_handle _layout;
     MTL::Buffer* _arguments = nullptr;
     cc::vector<sg::raw_buffer_handle> _bound_buffers;
+    cc::vector<sg::raw_texture_handle> _bound_textures;
 };

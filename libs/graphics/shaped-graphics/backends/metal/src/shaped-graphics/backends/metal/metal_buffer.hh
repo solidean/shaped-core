@@ -3,8 +3,8 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
-#include <shaped-graphics/backends/metal/metal_buffer_access.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/backends/metal/metal_resource_access.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 
@@ -36,7 +36,7 @@ public:
 
     /// Access tracking, shared by every command list recording against this buffer.
     /// Mutable because a command list declares against a `raw_buffer_handle`, which is a handle to const.
-    [[nodiscard]] cc::mutex<metal_buffer_access>& access() const { return _access; }
+    [[nodiscard]] cc::mutex<metal_resource_access>& access() const { return _access; }
 
 private:
     // Deferred deletion: hands the MTLBuffer to the context, released once the owning epoch retires.
@@ -49,5 +49,5 @@ private:
     metal_context& _ctx;
     mutable MTL::Buffer* _buffer = nullptr; // mutable: release_storage runs from the const lifetime hooks
     sg::memory_heap_handle _heap;           // keeps a placed buffer's heap alive; null when dedicated
-    mutable cc::mutex<metal_buffer_access> _access;
+    mutable cc::mutex<metal_resource_access> _access;
 };

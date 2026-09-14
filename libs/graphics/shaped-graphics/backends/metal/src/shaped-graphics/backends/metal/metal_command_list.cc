@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
+#include <shaped-graphics/backends/metal/metal_texture.hh>
 
 // Everything below the constructor is a seam the milestone order has not reached; see
 // libs/graphics/shaped-graphics/docs/writing-a-backend.md.
@@ -20,6 +21,37 @@
 
 namespace sg::backend::metal
 {
+namespace
+{
+/// How the bytes of one texture region are laid out in staging memory.
+///
+/// Tightly packed, which is what sg hands over and expects back: rows follow each other with no padding, and a
+/// block-compressed format counts whole blocks, since a partial block at an edge still costs a full one.
+struct texture_staging_layout
+{
+    isize bytes_per_row = 0;
+    isize bytes_per_image = 0;
+    isize size_in_bytes = 0;
+};
+
+[[nodiscard]] texture_staging_layout staging_layout_of(sg::pixel_format format, sg::texture_region const& region)
+{
+    auto const block_extent = isize(sg::format_block_extent(format));
+    auto const block_size = isize(sg::format_block_size(format));
+
+    auto const blocks_x = (isize(region.size[0]) + block_extent - 1) / block_extent;
+    auto const blocks_y = (isize(region.size[1]) + block_extent - 1) / block_extent;
+
+    auto const bytes_per_row = blocks_x * block_size;
+    auto const bytes_per_image = bytes_per_row * blocks_y;
+    return {
+        .bytes_per_row = bytes_per_row,
+        .bytes_per_image = bytes_per_image,
+        .size_in_bytes = bytes_per_image * isize(region.size[2]),
+    };
+}
+} // namespace
+
 metal_command_list::metal_command_list(metal_context& ctx,
                                        sg::epoch created_in,
                                        MTL4::CommandAllocator* allocator,
@@ -107,7 +139,7 @@ void metal_command_list::declare_buffer(raw_buffer_handle const& buffer, pipelin
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
 
     auto const [newly_pending, newly_recorded] = mtl_buffer.access().lock(
-        [&](metal_buffer_access& a)
+        [&](metal_resource_access& a)
         {
             a.declare(_slot, stages, access);
             return cc::pair{a.mark_pending_barrier(_slot), a.mark_recorded(_slot)};
@@ -126,9 +158,49 @@ void metal_command_list::declare_buffer(raw_buffer_handle const& buffer, pipelin
     _produced_queue_work = true;
 }
 
+void metal_command_list::declare_texture(raw_texture_handle const& texture, pipeline_stage_flags stages, access_flags access)
+{
+    CC_ASSERT(texture != nullptr, "cannot declare access on a null texture");
+    CC_ASSERT(!texture->is_expired(), "a transient resource was used past its epoch");
+
+    auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
+
+    auto const [newly_pending, newly_recorded] = mtl_texture.access().lock(
+        [&](metal_resource_access& a)
+        {
+            a.declare(_slot, stages, access);
+            return cc::pair{a.mark_pending_barrier(_slot), a.mark_recorded(_slot)};
+        });
+
+    if (newly_recorded)
+        _touched_textures.push_back(texture);
+    if (newly_pending)
+        _pending_textures.push_back(texture);
+
+    _produced_queue_work = true;
+}
+
+void metal_command_list::adopt_overflow_staging(metal_staging_ring::reservation const& staging)
+{
+    if (staging.owned == nullptr)
+        return;
+
+    // An overflow reservation brought its own buffer, which has to be resident like any other and freed with the epoch.
+    _metal_context.residency().add(staging.owned);
+
+    auto* const owned = staging.owned;
+    auto& ctx = _metal_context;
+    _metal_context.epochs().defer(
+        [&ctx, owned]
+        {
+            ctx.residency().remove(owned);
+            owned->release();
+        });
+}
+
 void metal_command_list::flush_barriers()
 {
-    if (_pending_buffers.empty())
+    if (_pending_buffers.empty() && _pending_textures.empty())
         return;
 
     // One MTL4 barrier names stages rather than resources, so every resource's requirement for this op folds into a
@@ -141,7 +213,22 @@ void metal_command_list::flush_barriers()
     for (auto const& buffer : _pending_buffers)
     {
         auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-        auto const barrier = mtl_buffer.access().lock([&](metal_buffer_access& a) { return a.flush(_slot); });
+        auto const barrier = mtl_buffer.access().lock([&](metal_resource_access& a) { return a.flush(_slot); });
+
+        auto const translated = translate_barrier(barrier);
+        if (!translated.needed)
+            continue;
+
+        any = true;
+        after |= translated.after_stages;
+        before |= translated.before_stages;
+        visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
+    }
+
+    for (auto const& texture : _pending_textures)
+    {
+        auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
+        auto const barrier = mtl_texture.access().lock([&](metal_resource_access& a) { return a.flush(_slot); });
 
         auto const translated = translate_barrier(barrier);
         if (!translated.needed)
@@ -154,6 +241,7 @@ void metal_command_list::flush_barriers()
     }
 
     _pending_buffers.clear();
+    _pending_textures.clear();
 
     if (!any)
         return;
@@ -198,7 +286,11 @@ void metal_command_list::transition_texture_layout(raw_texture_handle,
                                                    texture_layout,
                                                    cc::optional<subresource_range> const&)
 {
-    SG_METAL_UNIMPLEMENTED("a texture layout transition");
+    // Nothing to do, and that is the whole of it: a Metal texture has no layout to be in.
+    //
+    // dx12 and vulkan both emit a real barrier here, and the caller's `cmd.ensure_layout` exists for them.
+    // Honouring it as a no-op rather than asserting is what lets portable code call it unconditionally, which is what
+    // it is for.
 }
 
 void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::span<byte const> data, isize offset_in_bytes)
@@ -217,19 +309,7 @@ void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::sp
     auto const staging
         = _metal_context.upload_ring().lock([&](metal_staging_ring& r) { return r.reserve(isize(data.size())); });
 
-    // An overflow reservation brought its own buffer, which has to be resident like any other and freed with the epoch.
-    if (staging.owned != nullptr)
-    {
-        _metal_context.residency().add(staging.owned);
-        auto* const owned = staging.owned;
-        auto& ctx = _metal_context;
-        _metal_context.epochs().defer(
-            [&ctx, owned]
-            {
-                ctx.residency().remove(owned);
-                owned->release();
-            });
-    }
+    adopt_overflow_staging(staging);
 
     // The CPU write happens now, at record time, into memory the GPU reads when the copy runs.
     cc::memcpy(staging.bytes().data(), data.data(), size_t(data.size()));
@@ -242,12 +322,36 @@ void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::sp
                                       NS::UInteger(offset_in_bytes), NS::UInteger(data.size()));
 }
 
-void metal_command_list::upload_bytes_to_texture(raw_texture_handle,
-                                                 cc::span<byte const>,
-                                                 subresource_index const&,
-                                                 texture_region const&)
+void metal_command_list::upload_bytes_to_texture(raw_texture_handle texture,
+                                                 cc::span<byte const> pixels,
+                                                 subresource_index const& subresource,
+                                                 texture_region const& region)
 {
-    SG_METAL_UNIMPLEMENTED("inline texture upload");
+    CC_ASSERT(texture != nullptr, "upload target texture is null");
+    CC_ASSERT(!texture->is_expired(), "upload target is a transient texture used past its epoch");
+    CC_ASSERT(texture->usage().has(sg::texture_usage::copy_dst), "upload target texture lacks copy_dst usage");
+
+    // The region arrives resolved: sg has defaulted it to the whole subresource, bounds-checked it, and skipped it
+    // when empty.
+    auto const layout = staging_layout_of(texture->description().format, region);
+    CC_ASSERT(pixels.size() == layout.size_in_bytes, "pixel data size does not match the copy region");
+
+    auto const staging
+        = _metal_context.upload_ring().lock([&](metal_staging_ring& r) { return r.reserve(layout.size_in_bytes); });
+    adopt_overflow_staging(staging);
+
+    cc::memcpy(staging.bytes().data(), pixels.data(), size_t(layout.size_in_bytes));
+
+    declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write);
+    flush_barriers();
+
+    auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
+    compute_encoder()->copyFromBuffer(
+        staging.buffer, NS::UInteger(staging.offset), NS::UInteger(layout.bytes_per_row),
+        NS::UInteger(layout.bytes_per_image),
+        MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
+        mtl_texture.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
+        MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])));
 }
 
 sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handle buffer,
@@ -266,18 +370,7 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     auto const staging
         = _metal_context.download_ring().lock([&](metal_staging_ring& r) { return r.reserve(size_in_bytes); });
 
-    if (staging.owned != nullptr)
-    {
-        _metal_context.residency().add(staging.owned);
-        auto* const owned = staging.owned;
-        auto& ctx = _metal_context;
-        _metal_context.epochs().defer(
-            [&ctx, owned]
-            {
-                ctx.residency().remove(owned);
-                owned->release();
-            });
-    }
+    adopt_overflow_staging(staging);
 
     declare_buffer(buffer, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
@@ -312,11 +405,45 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
 }
 
-sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_handle,
-                                                                 subresource_index const&,
-                                                                 texture_region const&)
+sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_handle texture,
+                                                                 subresource_index const& subresource,
+                                                                 texture_region const& region)
 {
-    SG_METAL_UNIMPLEMENTED("inline texture download");
+    CC_ASSERT(texture != nullptr, "download source texture is null");
+    CC_ASSERT(!texture->is_expired(), "download source is a transient texture used past its epoch");
+    CC_ASSERT(texture->usage().has(sg::texture_usage::copy_src), "download source texture lacks copy_src usage");
+
+    auto const layout = staging_layout_of(texture->description().format, region);
+    if (layout.size_in_bytes == 0)
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
+
+    auto const staging
+        = _metal_context.download_ring().lock([&](metal_staging_ring& r) { return r.reserve(layout.size_in_bytes); });
+    adopt_overflow_staging(staging);
+
+    declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    flush_barriers();
+
+    auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
+    compute_encoder()->copyFromTexture(
+        mtl_texture.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
+        MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
+        MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
+        staging.buffer, NS::UInteger(staging.offset), NS::UInteger(layout.bytes_per_row),
+        NS::UInteger(layout.bytes_per_image));
+
+    auto destination = cc::pinned_data<byte>::create_uninitialized(layout.size_in_bytes);
+    auto completion = cc::make_async_manual<cc::unit>();
+    auto const size = layout.size_in_bytes;
+
+    _pending_downloads.push_back(
+        [staging, destination, size, completion]() mutable
+        {
+            cc::memcpy(destination.data(), staging.bytes().data(), size_t(size));
+            completion->push_value(cc::unit{});
+        });
+
+    return sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
 }
 
 void metal_command_list::copy_buffer_region(raw_buffer_handle src,

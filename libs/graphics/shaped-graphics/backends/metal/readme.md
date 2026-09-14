@@ -5,8 +5,8 @@
 Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
-Compute pipelines build from a metallib and dispatch.
-Textures, raster, presentation and async transfer still assert.
+Compute pipelines build from a metallib and dispatch, and textures create, bind and transfer.
+Raster, presentation, async transfer and streaming still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -76,6 +76,20 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.
 - **Bindings reach a dispatch through an argument table, not per-encoder setters.**
   One `MTL4ArgumentTable` serves a command list, and a group bound at slot N writes its argument buffer's address into buffer-binding N — so sg's `group_index` *is* the MSL `[[buffer(N)]]` index.
+- **A texture has no layout, so one access tracker serves both resource kinds.**
+  dx12 and vulkan each need two — a texture's tracker carries its layout and partitions it by subresource — and here a
+  texture has no state a buffer does not also have.
+  `metal_resource_access` is that one type, and `current_texture_layout` answers `general` for every texture and range
+  because that is true rather than a placeholder.
+  `cmd.ensure_layout` is honoured as a no-op rather than asserting, so portable code may call it unconditionally, which
+  is what it is for.
+  The subresource partition is an optimization not taken: a texture is one undivided state, so two mips written and
+  read in turn get a barrier they would not strictly need.
+- **A texture view is cached on sg view identity, never on the texture's address.**
+  That distinction is the vulkan build-out's most expensive bug repeated cheaply: a per-frame texture's address is
+  recycled, so an address-keyed cache hands a new texture the previous one's view, of an object that no longer exists.
+  It needs an allocator to reuse an address, so a suite reports it as flaky and a frame loop reports it every few
+  seconds.
 - **A barrier names stages, not resources.**
   `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
   The resource list an sg barrier carries has nowhere to go.

@@ -20,6 +20,9 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_context.cc
     src/shaped-graphics/backends/metal/metal_context.create.cc
     src/shaped-graphics/backends/metal/metal_epoch.cc
+    src/shaped-graphics/backends/metal/metal_format.cc
+    src/shaped-graphics/backends/metal/metal_texture.cc
+    src/shaped-graphics/backends/metal/metal_texture_view_cache.cc
     src/shaped-graphics/backends/metal/metal_feedback.cc
     src/shaped-graphics/backends/metal/metal_memory_heap.cc
     src/shaped-graphics/backends/metal/metal_residency.cc
@@ -39,12 +42,15 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_binding_layout.hh
     src/shaped-graphics/backends/metal/metal_sampler_cache.hh
     src/shaped-graphics/backends/metal/metal_buffer.hh
-    src/shaped-graphics/backends/metal/metal_buffer_access.hh
+    src/shaped-graphics/backends/metal/metal_resource_access.hh
     src/shaped-graphics/backends/metal/metal_common.hh
     src/shaped-graphics/backends/metal/metal_command_list.hh
     src/shaped-graphics/backends/metal/metal_compute_pipeline.hh
     src/shaped-graphics/backends/metal/metal_context.hh
     src/shaped-graphics/backends/metal/metal_epoch.hh
+    src/shaped-graphics/backends/metal/metal_format.hh
+    src/shaped-graphics/backends/metal/metal_texture.hh
+    src/shaped-graphics/backends/metal/metal_texture_view_cache.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
     src/shaped-graphics/backends/metal/metal_memory_heap.hh
     src/shaped-graphics/backends/metal/metal_residency.hh
@@ -76,6 +82,7 @@ if(SC_BUILD_TESTS)
         tests/metal-binding-test.cc
         tests/metal-compute-test.cc
         tests/metal-test.cc
+        tests/metal-texture-test.cc
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc
     )

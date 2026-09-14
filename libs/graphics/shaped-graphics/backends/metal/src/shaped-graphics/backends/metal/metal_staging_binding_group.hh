@@ -45,4 +45,7 @@ private:
     /// The resource each slot names, parallel to `_slots`, so a minted group can keep them alive.
     /// An argument buffer holds raw addresses and keeps nothing alive by itself.
     cc::vector<sg::raw_buffer_handle> _resources;
+
+    /// The texture each slot names, parallel to `_slots` like `_resources`; exactly one of the two is set per slot.
+    cc::vector<sg::raw_texture_handle> _texture_resources;
 };

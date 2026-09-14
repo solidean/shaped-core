@@ -16,7 +16,8 @@ metal_staging_binding_group::metal_staging_binding_group(metal_context& ctx,
   : sg::staging_binding_group(cc::move(layout), cc::move(descriptor_offsets)),
     _ctx(ctx),
     _slots(cc::vector<u64>::create_filled(slot_count, u64(0))),
-    _resources(cc::vector<sg::raw_buffer_handle>::create_defaulted(slot_count))
+    _resources(cc::vector<sg::raw_buffer_handle>::create_defaulted(slot_count)),
+    _texture_resources(cc::vector<sg::raw_texture_handle>::create_defaulted(slot_count))
 {
 }
 
@@ -39,10 +40,19 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
             continue;
         }
 
+        if (auto const* const texture_view = sg::try_as_texture_view(views[i]); texture_view != nullptr)
+        {
+            auto* const bound = _ctx.texture_views().acquire(*texture_view);
+            _slots[slot] = bound != nullptr ? bound->gpuResourceID()._impl : u64(0);
+            _resources[slot] = nullptr;
+            _texture_resources[slot] = texture_view->texture;
+            continue;
+        }
+
         auto const* const buffer_view = sg::try_as_buffer_view(views[i]);
         // sg has already validated the view against the binding, so anything else is a kind this backend has not
-        // reached rather than a caller error — textures are the whole of that list today.
-        CC_ASSERT(buffer_view != nullptr, "the metal backend can only stage buffer views yet");
+        // reached rather than a caller error.
+        CC_ASSERT(buffer_view != nullptr, "the metal backend cannot stage this view kind");
 
         auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer_view->buffer);
 
@@ -50,6 +60,7 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
         // carried alongside it the way a descriptor's would be.
         _slots[slot] = mtl_buffer.gpu_address() + u64(buffer_view->offset_in_bytes);
         _resources[slot] = buffer_view->buffer;
+        _texture_resources[slot] = nullptr;
     }
     (void)b;
 }
@@ -63,6 +74,7 @@ void metal_staging_binding_group::clear_view_descriptors(int first_descriptor, s
 
         _slots[slot] = 0;
         _resources[slot] = nullptr; // releasing the reference is half of what clearing means
+        _texture_resources[slot] = nullptr;
     }
     (void)b;
 }
@@ -114,10 +126,15 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (r != nullptr)
             bound.push_back(r);
 
+    auto bound_textures = cc::vector<sg::raw_texture_handle>();
+    for (auto const& r : _texture_resources)
+        if (r != nullptr)
+            bound_textures.push_back(r);
+
     _ctx.residency().add(arguments);
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
-    return sg::binding_group_handle(
-        std::make_shared<metal_binding_group const>(_ctx, cc::move(typed), arguments, cc::move(bound)));
+    return sg::binding_group_handle(std::make_shared<metal_binding_group const>(
+        _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures)));
 }
 } // namespace sg::backend::metal

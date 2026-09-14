@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_staging_binding_group.hh>
+#include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 
 // Building binding group layouts, pipeline layouts and binding groups.
@@ -113,6 +114,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto slots = cc::vector<argument_slot>::create_filled(slot_count, argument_slot(0));
     auto filled = cc::vector<char>::create_filled(bindings.size(), char(0));
     auto bound_buffers = cc::vector<sg::raw_buffer_handle>();
+    auto bound_textures = cc::vector<sg::raw_texture_handle>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
     {
@@ -169,10 +171,23 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 continue; // the zero already there is the null structure
             }
 
+            // A texture binds by resource id rather than by address — an argument buffer slot is the same 8 bytes
+            // either way.
+            if (auto const* const texture_view = sg::try_as_texture_view(view); texture_view != nullptr)
+            {
+                auto* const bound = _texture_views.acquire(*texture_view);
+                if (bound == nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — the bound texture has no storage", b.name));
+
+                slots[slot_of(b, element)] = bound->gpuResourceID()._impl;
+                bound_textures.push_back(texture_view->texture);
+                continue;
+            }
+
             auto const* const buffer_view = sg::try_as_buffer_view(view);
             if (buffer_view == nullptr)
-                return cc::error(
-                    cc::format("binding_group: '{}' — the metal backend can only bind buffer views yet", b.name));
+                return cc::error(cc::format(
+                    "binding_group: '{}' — the bound view is of a kind the metal backend does not handle", b.name));
             if (buffer_view->buffer == nullptr)
                 return cc::error(cc::format("binding_group: '{}' — a view always binds a resource", b.name));
 
@@ -233,6 +248,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
 
     _residency.add(arguments);
 
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments, cc::move(bound_buffers));
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
+                                                       cc::move(bound_buffers), cc::move(bound_textures));
 }
 } // namespace sg::backend::metal

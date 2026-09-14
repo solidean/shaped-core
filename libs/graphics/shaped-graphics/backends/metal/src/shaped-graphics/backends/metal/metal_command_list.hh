@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_barrier.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
@@ -38,6 +39,9 @@ public:
 
     /// The buffers this list declared against, each needing a finalize at submit or a discard at drop.
     [[nodiscard]] cc::span<sg::raw_buffer_handle const> touched_buffers() const { return _touched_buffers; }
+
+    /// The textures this list declared against; the same contract as touched_buffers.
+    [[nodiscard]] cc::span<sg::raw_texture_handle const> touched_textures() const { return _touched_textures; }
 
     /// The copy-outs this list's downloads are waiting on, handed to the submit that will run them.
     /// Moved out, so the list keeps none afterwards.
@@ -127,6 +131,15 @@ private:
     /// Declare `access` on `buffer` for the op about to be recorded, and remember it for the finalize at submit.
     void declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access);
 
+    /// The texture twin of declare_buffer.
+    /// A texture carries no layout here, so the two differ only in which list the resource is remembered on.
+    void declare_texture(raw_texture_handle const& texture, pipeline_stage_flags stages, access_flags access);
+
+    /// Take ownership of a staging reservation that got a buffer of its own, making it resident and freeing it with
+    /// the epoch.
+    /// A no-op for a reservation that came out of the ring.
+    void adopt_overflow_staging(metal_staging_ring::reservation const& staging);
+
     /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
     /// Called immediately before the op those declares were for.
     void flush_barriers();
@@ -155,6 +168,9 @@ private:
     /// The buffers with a declare awaiting the next flush.
     /// A subset of `_touched_buffers`, cleared per op.
     cc::vector<sg::raw_buffer_handle> _pending_buffers;
+
+    cc::vector<sg::raw_texture_handle> _touched_textures;
+    cc::vector<sg::raw_texture_handle> _pending_textures;
 
     MTL4::ArgumentTable* _argument_table = nullptr;
 

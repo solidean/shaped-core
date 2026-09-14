@@ -90,11 +90,22 @@ void metal_context::advance_epoch()
             return out;
         });
 
+    auto const expiring_textures = _transient_expiring_textures.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_texture const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+
     // Outside the lock: expire() runs the resource's finalizers, which stage a deferred release and take the epoch
     // system's own lock.
     for (auto const& weak : expiring)
         if (auto const buffer = weak.lock())
             buffer->expire();
+    for (auto const& weak : expiring_textures)
+        if (auto const texture = weak.lock())
+            texture->expire();
 
     // The rings' bytes were read (or written) by copies recorded in the closing epoch, so they are only reclaimable
     // once that epoch retires.
@@ -198,7 +209,12 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
     for (auto const& touched : list.touched_buffers())
     {
         auto const& mtl_buffer = static_cast<metal_buffer const&>(*touched);
-        mtl_buffer.access().lock([&](metal_buffer_access& a) { a.discard(list.slot()); });
+        mtl_buffer.access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
+    }
+    for (auto const& touched : list.touched_textures())
+    {
+        auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
+        mtl_texture.access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
     }
 
     // Nothing was committed, so the GPU never saw either object and both go back immediately.
@@ -221,7 +237,12 @@ void metal_context::finalize_touched_buffers(metal_command_list& list)
     for (auto const& touched : list.touched_buffers())
     {
         auto const& mtl_buffer = static_cast<metal_buffer const&>(*touched);
-        (void)mtl_buffer.access().lock([&](metal_buffer_access& a) { return a.finalize(list.slot()); });
+        (void)mtl_buffer.access().lock([&](metal_resource_access& a) { return a.finalize(list.slot()); });
+    }
+    for (auto const& touched : list.touched_textures())
+    {
+        auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
+        (void)mtl_texture.access().lock([&](metal_resource_access& a) { return a.finalize(list.slot()); });
     }
 }
 
@@ -272,6 +293,7 @@ void metal_context::shutdown()
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _samplers.shutdown();
+    _texture_views.shutdown();
 
     if (_compiler != nullptr)
     {
@@ -336,6 +358,8 @@ sg::texture_layout metal_context::async_ready_layout(async_direction) const
 
 sg::texture_layout metal_context::current_texture_layout(raw_texture_handle const&, subresource_range const&) const
 {
+    // A Metal texture has no layout, so `general` is the true and only answer rather than a placeholder — see the
+    // barrier translation, where a pure layout transition emits nothing at all.
     return sg::texture_layout::general;
 }
 
@@ -507,10 +531,10 @@ cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isi
     return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, heap);
 }
 
-cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture_description const&,
-                                                                         allocation_info const&)
+cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture_description const& desc,
+                                                                         allocation_info const& alloc)
 {
-    return cc::error("the metal backend cannot create textures yet");
+    return cc::result<sg::raw_texture_handle>(create_metal_texture(desc, alloc));
 }
 
 cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes)
