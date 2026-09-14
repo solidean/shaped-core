@@ -25,6 +25,7 @@ add_library(nexus
     src/nexus/bench/environment.cc
     src/nexus/bench/report.cc
     src/nexus/bench/run.cc
+    src/nexus/bench/run_async.cc
     src/nexus/bench/statistics.cc
     src/nexus/bench/hardware_counters.cc
     src/nexus/tests/alias.cc
@@ -77,6 +78,7 @@ target_sources(nexus
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
+    src/nexus/async-test.hh
     src/nexus/pgo.hh
     src/nexus/bench/fwd.hh
     src/nexus/bench/barriers.hh
@@ -86,6 +88,7 @@ target_sources(nexus
     src/nexus/bench/report.hh
     src/nexus/bench/result.hh
     src/nexus/bench/run.hh
+    src/nexus/bench/run_async.hh
     src/nexus/bench/run_config.hh
     src/nexus/bench/units.hh
     src/nexus/bench/statistics.hh

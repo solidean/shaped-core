@@ -349,6 +349,22 @@ TEST("bench - BENCHMARK declares the bucket, exclusivity and the main thread")
     CHECK(found->test_config.scheduler == nx::config::scheduler_mode::shared);
 }
 
+TEST("bench - ASYNC_BENCHMARK declares the same bucket, exclusivity and thread as BENCHMARK")
+{
+    auto const& registry = nx::get_static_test_registry();
+
+    auto const* found = static_cast<nx::test_declaration const*>(nullptr);
+    for (auto const& decl : registry.declarations)
+        if (decl.name == "nx::bench - an awaited iteration")
+            found = &decl;
+
+    REQUIRE(found != nullptr);
+    CHECK(found->is_async());
+    CHECK(found->test_config.bucket == nx::config::test_bucket::benchmark);
+    CHECK(found->test_config.exclusive_global);
+    CHECK(found->test_config.main_thread);
+}
+
 TEST("bench - a benchmark stays out of a normal sweep")
 {
     auto const& registry = nx::get_static_test_registry();

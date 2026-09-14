@@ -1,12 +1,11 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-#include <clean-core/thread/thread.hh>
-#include <clean-core/thread/thread_pump.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-net/http/http_client.hh>
 #include <clean-net/http/http_server.hh>
 #include <clean-net/http/polite_client.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -14,29 +13,15 @@ using namespace cc::primitive_defines;
 //
 // A real URL would work exactly the same way -- swap the address in and nothing else changes -- but an example that
 // needs the internet is one that fails for reasons that teach nobody anything.
+//
+// **Awaiting is the integration story, not a detail of the example.**
+// An unthreaded io_system runs on whatever already sweeps `cc::thread_pump_all()`, which in an application is the frame
+// loop, and here is the loop an ASYNC_EXAMPLE's body is homed to on the main thread.
+// A threaded one needs none of that, and nothing in the API changes either way.
+// `cc::async_settled` waits without short-circuiting, since a refused connection is a value this example prints.
 
 namespace
 {
-/// Wait for one async, driving the reactor while we do.
-///
-/// **This is the integration story, not a detail of the example.**
-/// An unthreaded io_system runs on whatever already calls `cc::thread_pump_all()`, which in an application is the
-/// frame loop and here is this function.
-/// A threaded one would need none of this; nothing in the API changes either way.
-///
-/// `cc::async_blocking_get` is NOT the shorter spelling of this, however much it looks like it.
-/// It hands the graph to the ambient scheduler first, and the run's pool parks on a manual node that only a pump can
-/// complete -- so it never reaches the `cc::thread_pump_all()` in its own loop.
-/// Pumping first is the whole difference, and that it has to be hand-rolled is a bug rather than a design:
-/// docs/todo/cnet-waiting-on-an-async.md.
-template <class T>
-void await(cc::shared_async<T> const& a)
-{
-    while (!a->is_ready())
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
-}
-
 /// Something to talk to: three routes and nothing more.
 [[nodiscard]] cc::unique_ptr<cnet::http_server> start_server(cnet::io_system& io)
 {
@@ -67,7 +52,7 @@ void await(cc::shared_async<T> const& a)
 }
 } // namespace
 
-EXAMPLE("clean-net/download")
+ASYNC_EXAMPLE("clean-net/download")
 {
     auto io = cnet::io_system::create({.unthreaded = true});
     auto const server = start_server(*io);
@@ -79,7 +64,7 @@ EXAMPLE("clean-net/download")
     // ---- the whole body, buffered ------------------------------------------------------------------
 
     auto response = cnet::http_get(*client, cc::format("{}/hello", base));
-    await(response);
+    co_await cc::async_settled(response);
 
     cc::println("GET /hello -> {} {}", response->value().status(), response->value().body_text());
     cc::println("  content-type: {}", response->value().head.headers.get("Content-Type").value());
@@ -104,7 +89,7 @@ EXAMPLE("clean-net/download")
                                                return chunk.size();
                                            },
                                            {}, {});
-    await(streamed);
+    co_await cc::async_settled(streamed);
 
     cc::println("");
     cc::println("GET /big  -> {} in {} chunks, {} bytes, none of them kept", streamed->value().status, chunks, received);
@@ -112,7 +97,7 @@ EXAMPLE("clean-net/download")
     // ---- a redirect, followed ----------------------------------------------------------------------
 
     auto redirected = cnet::http_get(*client, cc::format("{}/moved", base));
-    await(redirected);
+    co_await cc::async_settled(redirected);
 
     // The status is the one the request ended on, not the 302 on the way.
     cc::println("");
@@ -121,12 +106,12 @@ EXAMPLE("clean-net/download")
     // ---- a failure, which is a value ---------------------------------------------------------------
 
     auto missing = cnet::http_get(*client, cc::format("{}/nope", base));
-    await(missing);
+    co_await cc::async_settled(missing);
     cc::println("GET /nope  -> {}", missing->value().status());
 
     // A connection nobody is listening for fails the async rather than the status: there is no response to have one.
     auto refused = cnet::http_get(*client, "http://127.0.0.1:1/never", {.timeout = cnet::deadline::after_secs(2)});
-    await(refused);
+    co_await cc::async_settled(refused);
     cc::println("GET :1     -> failed: {}", refused->try_error() != nullptr ? "yes" : "no");
 
     // ---- politeness, which is where retries live ---------------------------------------------------
@@ -141,7 +126,7 @@ EXAMPLE("clean-net/download")
         batch.push_back(cnet::http_get(polite, cc::format("{}/hello", base)));
 
     for (auto const& one : batch)
-        await(one);
+        co_await cc::async_settled(one);
 
     cc::println("");
     cc::println("5 polite requests, 2 at a time, all {}", batch[0]->value().status());

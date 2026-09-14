@@ -219,6 +219,12 @@ What follows from the bucket:
 * **The run installs an ambient async scheduler**, so an example may use `cc::async` without standing up a pool of its own.
   `EXAMPLE("x", no_scheduler)` is how an example that wants to install its own opts out of that.
 
+**An example that awaits is an `ASYNC_EXAMPLE`**, from `nexus/async-test.hh`: the same bucket and the same two baked-in asks, with a coroutine body.
+The body is homed to main, so a windowed example needs nothing and a console one that wants compute hops there with `co_await cc::async_resume_on_compute();`.
+The main thread's loop also sweeps the thread pumps, which is what lets an unthreaded `cnet::io_system` complete a request the body is awaiting.
+[libs/base/clean-net/examples/download.cc](../../libs/base/clean-net/examples/download.cc) is the worked case.
+`no_scheduler` is refused on it, as on every async test.
+
 **The name is a slash path**, and it is load-bearing.
 It is the CLI argument, the gallery entry and the capture slug, so it is written as its own identifier rather than as a sentence.
 As the slug it names both `build/<preset>/captures/` and the committed reference image.

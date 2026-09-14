@@ -262,11 +262,17 @@ Naming one exactly still runs it, as with any other bucket.
 Three things are baked in: the bucket, `exclusive_global` (two tests sharing a machine share its caches and its
 memory bandwidth, so a timing taken while another runs is a timing of the pair), and `main_thread`.
 
-**`main_thread` rules out two combinations, and both assert.**
-`own_pool` — a private pool's worker is never the main thread — and an async body.
-So a benchmark of thread scaling or of async code cannot use `BENCHMARK` today: declare it as a plain `TEST` with
-`nx::config::benchmark` and no `main_thread`.
-A macro for that case is deliberately absent until async benchmarks are actually needed.
+**`main_thread` rules out `own_pool`, and asserts**: a private pool's worker is never the main thread.
+So a benchmark of thread scaling is a plain `TEST` with `nx::config::benchmark` and no `main_thread`.
+
+**A benchmark with a coroutine body is `ASYNC_BENCHMARK`**, from `nexus/async-test.hh`, with the same bucket and the same `main_thread` — homed to main until the body hops away.
+Setup then awaits rather than blocks, and `nx::bench::run` measures synchronous work inside it as usual.
+
+**`nx::bench::run_async` measures async work itself**, from `nexus/bench/run_async.hh`.
+The body starts one iteration and returns its graph, and the harness awaits it, so one iteration is one sample.
+A graph cannot be batched the way a nanosecond body can, so there is no batch calibration, no hardware-counter pass and no overhead estimate.
+The stop rule and the report are the same as `run`'s.
+`nx::bench - an awaited iteration` in `libs/base/nexus/tests/bench-self-benchmark.cc` is the floor it is read against.
 
 `nx::bench::run` also works outside a `BENCHMARK` — in a manual test, or in an application — and simply hands its
 result back rather than reporting it.

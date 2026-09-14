@@ -75,3 +75,15 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
 // A test whose body may co_await; nexus awaits it.
 // Config items compose exactly as with TEST.
 #define ASYNC_TEST(name, ...) NX_IMPL_ASYNC_TEST(name, __COUNTER__, __VA_ARGS__)
+
+// EXAMPLE with a coroutine body, baking in the same three: the example bucket, main_thread and exclusive().
+// The body starts on main and stays there until it hops away, so a windowed example needs nothing, and a console one
+// that wants compute says `co_await cc::async_resume_on_compute();`.
+// no_scheduler is refused, as on every async test; an example installing its own scheduler stays a sync EXAMPLE.
+#define ASYNC_EXAMPLE(name, ...) \
+    NX_IMPL_ASYNC_TEST(name, __COUNTER__, example, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
+
+// BENCHMARK with a coroutine body: the benchmark bucket (which runs alone) and main_thread.
+// Setup can await instead of blocking, and nx::bench::run_async in nexus/bench/run_async.hh measures async work itself.
+#define ASYNC_BENCHMARK(name, ...) \
+    NX_IMPL_ASYNC_TEST(name, __COUNTER__, benchmark, main_thread __VA_OPT__(, ) __VA_ARGS__)

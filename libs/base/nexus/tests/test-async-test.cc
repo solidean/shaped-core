@@ -4,6 +4,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -292,4 +293,27 @@ TEST("async test - a body that hands back a graph other than a coroutine is refu
     REQUIRE(exec.executions.size() == 1);
     CHECK(exec.executions[0].is_considered_failing());
     CHECK(any_error_mentions(exec.executions[0], "must be a coroutine"));
+}
+
+// ASYNC_EXAMPLE's wiring, checked against the registry rather than the macro text.
+// The declaration lives in the example bucket, so no normal sweep runs it — which is part of what is asserted.
+ASYNC_EXAMPLE("nexus/async-example-wiring")
+{
+    CHECK(cc::current_thread_id() == cc::thread_id::main); // homed to main, as EXAMPLE's body runs on main
+    co_return;
+}
+
+TEST("async test - ASYNC_EXAMPLE declares the example bucket, main_thread and exclusive()")
+{
+    auto const* found = static_cast<nx::test_declaration const*>(nullptr);
+    for (auto const& decl : nx::get_static_test_registry().declarations)
+        if (decl.name == "nexus/async-example-wiring")
+            found = &decl;
+
+    REQUIRE(found != nullptr);
+    CHECK(found->is_async());
+    CHECK(found->test_config.bucket == nx::config::test_bucket::example);
+    CHECK(found->test_config.main_thread);
+    CHECK(found->test_config.exclusive_global);
+    CHECK(!nx::test_schedule_config{}.would_run(*found));
 }

@@ -90,6 +90,11 @@ EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run 
 // The name is a slash path: it is the CLI argument and the gallery entry, so it is an identifier, not a sentence.
 // `main_thread` and `exclusive()` are baked in, so the body runs on the thread nx::run was entered on, alone.
 // The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
+
+ASYNC_EXAMPLE("clean-net/download")      // nexus/async-test.hh: the same bucket and asks, with a coroutine body
+{                                        //   homed to main; the main loop also sweeps thread pumps, so an unthreaded
+    auto const r = co_await client->send(request);   // io_system completes while this awaits
+}
 ```
 
 ## Benchmarks (`BENCHMARK` + `nx::bench`)
@@ -140,6 +145,16 @@ auto const r = nx::bench::run("name", body);
 r.time.median; r.time.p95; r.time.ci95_low;    // seconds; p95/p99 only meaningful when .batch = false
 r.items_per_second; r.converged;
 r.find_warning(nx::bench::warning_kind::body_deleted);   // nullptr if it did not fire
+```
+
+```cpp
+#include <nexus/async-test.hh>
+#include <nexus/bench/run_async.hh>
+ASYNC_BENCHMARK("sg stream - upload latency")       // benchmark bucket + main_thread, with a coroutine body
+{
+    auto ctx = co_await make_context();              // setup awaits instead of blocking
+    auto const r = co_await nx::bench::run_async("4 MiB", [&] { return upload(ctx).completion(); });
+}   // run_async: ONE awaited iteration per sample — no batching, no counter pass, no overhead estimate
 ```
 
 Run them: `uv run dev.py benchmark "<match>"` (no arg lists them all).
