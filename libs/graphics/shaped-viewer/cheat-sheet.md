@@ -551,6 +551,8 @@ sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d
 sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: gBindlessTextures2D, gBindlessBuffers, …
 sv::bindless_group          // -> int — the ONE group every table shares; the binding pass numbers them in declaration order
 sv::bindless_declarations(cfg)  // -> cc::string — the annotated HLSL namespace declaring every budgeted table, for the generator to emit
+sv::material_sampler_group  // -> int — the group a permutation's OWN samplers go in, separate from the tables'; its layout is the third in the pipeline layout
+sv::material_sampler_namespace  // -> cc::string_view — the annotated namespace the generator emits them into
 sv::bindless_table_budget   // { bindless_table table; u32 count; }  — count 0 OMITS the table; a non-zero count < 2 ASSERTS (sg reads 1 as a scalar binding)
 sv::bindless_config         // { cc::vector<bindless_table_budget> tables = default_bindless_tables(); }
 sv::make_bindless_bindings(cfg)  // -> cc::vector<sg::binding> — the hand-declared layout; pure, so it needs no context

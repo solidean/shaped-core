@@ -352,7 +352,7 @@ An error names the file, the line and what it could not parse.
 A shader that trips the subset moves the construct outside the namespace; the restriction is on where bindings are declared, not on what a shader may contain.
 
 **A struct carrying `push_constants`, `payload` or `vertex_input` is the one exception**, since its body is exactly what the generator has to reproduce.
-There the pass reads scalars, vectors, matrices, arrays and nested structs — the full constant-block vocabulary — and anything else is an error naming the member.
+There the pass reads scalars, vectors and the `float4xC` matrices, and anything else — an array, a nested struct, a type the table does not carry — is an error naming the member.
 
 ## The type table
 
@@ -574,7 +574,8 @@ Getting it right means emitting HLSL's packing, not C++'s.
 A constant buffer packs in 16-byte rows and an element may not straddle one, so `struct { float2 a; float3 b; }` is 32 bytes in HLSL and 20 in the naive C++ transcription.
 
 Every edge is a silent wrong number if guessed, so **Q14 measures each one against DXC on both targets** rather than restating the folklore.
-The rules it found, in the order the engine applies them:
+The rules it found, stated as DXC's rather than as the pass's.
+The subset above is narrower, and the `row_major` spellings below are how Q14 probed the compiler rather than anything a shader may write.
 
 - **A scalar or vector may not straddle a 16-byte row**, but a row is filled before it is left.
   `float2 a; float3 b;` puts `b` at 16, while `float a; float3 b;` leaves `b` at 4.
