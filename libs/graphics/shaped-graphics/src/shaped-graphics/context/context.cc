@@ -266,6 +266,11 @@ void context::ensure_completion_signals(cc::vector<pending_completion> const& pe
 
 void context::wake_completion_signals()
 {
+#if !CC_HAS_THREADS
+    // Nothing parks on a wake without threads: the pump's GPU wait is the only one, and a raised wake would end it at once
+    // on every sweep from then on.
+    return;
+#else
     auto* const s = _completion_signals.get();
     if (s == nullptr)
         return;
@@ -275,6 +280,7 @@ void context::wake_completion_signals()
             ++generation;
             wake_completion_signal(generation);
         });
+#endif
 }
 
 void context::settle_due_completions()

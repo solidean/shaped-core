@@ -224,8 +224,8 @@ public:
     /// Picks one job and fills a window with it; returns true when more work may be possible right away.
     [[nodiscard]] bool run_one_window();
 
-    /// Settles every finished transfer whose copies have landed.
-    void settle_finished();
+    /// Settles every finished transfer whose copies have landed; true when it settled any.
+    bool settle_finished();
 
     /// Blocks until the oldest outstanding settlement lands, then settles it; false when there is none.
     ///
