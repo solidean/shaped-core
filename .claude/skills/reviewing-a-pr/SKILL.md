@@ -200,6 +200,11 @@ Name it with `title` as usual, and hand it over the same way.
    The critique names the alternatives and prices them, so the maintainer can check the judgement the verdict asserts rather than accept it.
    Both are easy to skip and both are what a maintainer notices missing: a review can be entirely correct about a change nobody can tell they should want.
 
+   **Write the critique for someone who has not read the diff, and check it with one.**
+   Each decision opens with the situation in plain words, and each option says how it works before it is priced.
+   Before handing the round over, give a subagent only the entry text and have it list every term it had to guess and every option it could not explain; fix those and ask again.
+   See [Introduce before you price](../../../tools/review/docs/entry-types/design-critique.md#introduce-before-you-price).
+
    **A changeset touching an example, a capture sidecar or a reference image also owes an [example-showcase](../../../tools/review/docs/entry-types/example-showcase.md) at `02x`.**
    The example's body and every image go in inline, so the maintainer judges a demonstration rather than a hunk.
    Open the image; do not infer it from the code.

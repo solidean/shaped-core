@@ -37,6 +37,10 @@ NAME = "run"
 
 _TIMEOUT_SECONDS = 600
 
+# dev.py is quiet when its stdout is a pipe, which is always the case here: it prints a trace and writes the program's
+# own output to a run log the next build step overwrites.
+_DEV_PY_EXAMPLE = "uv run dev.py example"
+
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Run the example blocks and record what they printed")
@@ -53,6 +57,18 @@ def _allowed(command: str, prefixes: list[str]) -> bool:
     A lint on intent rather than a sandbox — see the module docstring.
     """
     return any(command.strip().startswith(prefix.strip()) for prefix in prefixes if prefix.strip())
+
+
+def executed_command(command: str) -> str:
+    """The command as it is run: a `dev.py example` gains `--mirror-test-output`, so the capture is the example's output.
+
+    `--mirror-test-output` rather than `--mirror-output`, since the latter mirrors every build step as well.
+    A command that already asks for a mirror is left as written.
+    """
+    stripped = command.strip()
+    if not stripped.startswith(_DEV_PY_EXAMPLE) or "--mirror" in stripped:
+        return command
+    return "uv run dev.py --mirror-test-output example" + stripped[len(_DEV_PY_EXAMPLE):]
 
 
 def _capture(command: str, cwd: Path) -> tuple[int, str]:
@@ -108,7 +124,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 continue
 
             print(f"{entry.slug}/{block.block_name}: {command}")
-            code, output = _capture(command, ctx.repo)
+            code, output = _capture(executed_command(command), ctx.repo)
             review.write_atomic(target, output)
             ran += 1
 
