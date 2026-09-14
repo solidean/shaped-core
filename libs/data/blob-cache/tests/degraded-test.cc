@@ -1,6 +1,8 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -34,7 +36,7 @@ TEST("bcache create_disabled answers every read as a miss and drops every write"
     CHECK(!cc::thread_pump_all());
 }
 
-TEST("bcache acquire returns the computed value with no storage at all", singlethreaded)
+ASYNC_TEST("bcache acquire returns the computed value with no storage at all", singlethreaded)
 {
     auto cache = blob_cache::create_disabled();
     auto const key = key_of("disabled", "computed");
@@ -47,7 +49,7 @@ TEST("bcache acquire returns the computed value with no storage at all", singlet
     };
 
     auto const a = cache->acquire(key, compute);
-    CHECK(blob_text(cc::async_blocking_get(a)) == "computed anyway");
+    CHECK(blob_text(co_await a) == "computed anyway");
     CHECK(calls == 1);
 
     // Singleflight is pure in-process machinery, so it works with no storage behind it — a second concurrent caller still shares one compute.
@@ -57,8 +59,8 @@ TEST("bcache acquire returns the computed value with no storage at all", singlet
     auto const c = cache->acquire(key, compute);
     CHECK(b.get() == c.get());
     CHECK(cache->get_stats().singleflight_joins == 1);
-    CHECK(blob_text(cc::async_blocking_get(b)) == "computed anyway");
-    CHECK(blob_text(cc::async_blocking_get(c)) == "computed anyway");
+    CHECK(blob_text(co_await b) == "computed anyway");
+    CHECK(blob_text(co_await c) == "computed anyway");
 
     // Every acquire recomputes, because nothing is ever stored — degraded, not wrong.
     CHECK(calls == 2);
