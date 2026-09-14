@@ -92,13 +92,15 @@ cc::result<include_directive> read_entry(config_document const& doc, isize id, c
             if (doc[child].kind != config_value_kind::scalar)
                 return cc::error(cc::format("line {}: 'kind' takes one value", line));
             auto const& k = doc[child].scalar;
-            if (k == "allow-include")
-                d.allow = true;
-            else if (k == "deny-include")
-                d.allow = false;
+            if (k == "allow-include" || k == "deny-include")
+                d.subject = directive_subject::include;
+            else if (k == "allow-blocking-wait" || k == "deny-blocking-wait")
+                d.subject = directive_subject::blocking_wait;
             else
-                return cc::error(
-                    cc::format("line {}: unknown rule kind '{}' — expected allow-include or deny-include", line, k));
+                return cc::error(cc::format("line {}: unknown rule kind '{}' — expected allow-include, deny-include, "
+                                            "allow-blocking-wait or deny-blocking-wait",
+                                            line, k));
+            d.allow = k.starts_with("allow-");
             saw_kind = true;
         }
         else if (key == "value")
@@ -152,6 +154,8 @@ include_decision lint_config::classify_include(cc::string_view file_path, cc::st
     include_decision decision;
     for (auto const& d : include_directives)
     {
+        if (d.subject != directive_subject::include)
+            continue;
         auto const rel = path_under(d.base_dir, file_path);
         if (!rel.has_value())
             continue;
@@ -163,6 +167,31 @@ include_decision lint_config::classify_include(cc::string_view file_path, cc::st
             continue;
 
         // Last match wins, so a nearer config's narrower entry overrides the blanket one above it.
+        decision = {.verdict = d.allow ? include_verdict::allowed : include_verdict::denied, .reason = d.reason};
+    }
+    return decision;
+}
+
+include_decision lint_config::classify_blocking_wait(cc::string_view file_path, cc::string_view name) const
+{
+    auto const needle = lowered(name);
+
+    include_decision decision;
+    for (auto const& d : include_directives)
+    {
+        if (d.subject != directive_subject::blocking_wait)
+            continue;
+        auto const rel = path_under(d.base_dir, file_path);
+        if (!rel.has_value())
+            continue;
+        if (!d.files.empty() && !any_glob_matches(d.files, rel.value()))
+            continue;
+        if (any_glob_matches(d.exclude_files, rel.value()))
+            continue;
+        if (!any_glob_matches(d.values, needle))
+            continue;
+
+        // Last match wins, exactly as for includes: a library's allowance for one file overrides the blanket deny above it.
         decision = {.verdict = d.allow ? include_verdict::allowed : include_verdict::denied, .reason = d.reason};
     }
     return decision;
