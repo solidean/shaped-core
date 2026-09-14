@@ -69,3 +69,9 @@ rules:
     value: [<string>, <vector>]
     reason: the std:: types an invocable test is parametrized over, which is what pins that nexus accepts them
     files: tests/**
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: the waits run on pools the test owns under no_scheduler, and where a check lands from them is the subject
+    files:
+      - tests/test-threaded-check-test.cc

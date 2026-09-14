@@ -1,4 +1,4 @@
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>

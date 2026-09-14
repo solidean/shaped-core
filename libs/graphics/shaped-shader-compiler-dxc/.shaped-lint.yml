@@ -24,3 +24,17 @@ rules:
     value: [<string>, <vector>]
     reason: "TODO: DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
     files: src/**
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: a manual window test runs a real frame loop, which is where a wait belongs
+    files:
+      - tests/end-to-end-cube-window-test.cc
+      - tests/end-to-end-raytraced-cube-window-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: a pipeline or shader built inside a synchronous check helper, finished rather than left running past the test
+    files:
+      - tests/end-to-end-raster-cache-test.cc
+      - tests/shader_cache-test.cc

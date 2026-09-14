@@ -1,6 +1,6 @@
 #include "vulkan-test-common.hh"
 
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 

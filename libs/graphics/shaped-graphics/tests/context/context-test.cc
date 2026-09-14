@@ -78,14 +78,14 @@ ASYNC_INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg:
     }
 }
 
-ASYNC_INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     // With nothing in flight these are no-ops, but must not fault or move the epoch backwards.
     ctx->process_completed_epochs();
     ctx->block_until_epochs_in_flight(0);
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }
 
@@ -191,7 +191,7 @@ ASYNC_INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::
 
 // block_until_idle is the only blocking spelling left, and it has to mean more than "the GPU is idle": the readback
 // actor delivers a download's bytes on its own thread, after the copy the GPU already finished.
-ASYNC_INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     REQUIRE(ctx->execution() == sg::execution_model::may_block);
@@ -205,8 +205,8 @@ ASYNC_INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU"
     (void)ctx->submit_command_list(cc::move(cmd));
 
     ctx->advance_epoch();
-    co_await ctx->idle_completion();
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
+    ctx->block_until_idle();
 
     // Delivered, without any blocking read on the future — which is the guarantee the download API used to be the only
     // source of.

@@ -59,3 +59,23 @@ rules:
   - kind: allow-include
     value: <atomic>
     reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: block_until_idle's own guarantees are tested here
+    files:
+      - tests/context/context-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: a fuzz step is a synchronous call the fuzzer sequences
+    files:
+      - tests/transfer/transfer-fuzz-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: a helper returning a value, or a restore on every exit path, that its sync callers still rely on
+    files:
+      - tests/transient/transient-test.cc
+      - backends/dx12/tests/dx12-cached-pso-test.cc
+      - backends/dx12/tests/dx12-transient-test.cc
