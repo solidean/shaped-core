@@ -795,7 +795,7 @@ cc::set_current_thread_name("uploader");  // best-effort OS thread name (UTF-8; 
 i32 p = cc::recommended_worker_count();   // >= 1 always; machine, affinity mask and cgroup quota, whichever binds
                                           //   (platform/resource_limits.hh) — the number to size a pool from
 auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
-cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread; nothing does it implicitly
+cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread AND binds cc::main_thread_scheduler(); nothing does it implicitly
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel
 
 #include <clean-core/thread/spin.hh>
@@ -831,6 +831,9 @@ auto reg = cc::register_thread_pump([&] { return step_once(); }); // -> RAII; tr
 cc::thread_pump_all();                    // -> bool; one cycle of every registration. One atomic load when empty
 cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == stopped on the budget
 cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
+// thread_pump_all also runs the CALLING thread's own home (thread_bound_scheduler), so every wait loop services it.
+cc::pump_main_thread(4.0);                // the event loop's call (thread_bound_scheduler.hh): main home + registry +
+                                          //   (threads off) compute/io; false == nothing progressed and the main home is empty
 // GOTCHA: a pump must NOT block on another registration - it holds the only thread, so that one never runs.
 //   Sweep from inside a pump instead (this one is skipped, the others run). Blocking on a GPU fence / OS handle is fine.
 ```
@@ -845,7 +848,7 @@ cc::shared_async<T, E = async_error> = cc::shared_ptr<cc::async<T, E>, impl::asy
 // cc::async_context<T, E>& or omit it; extra args are dependencies (shared_async), awaited + unwrapped to plain
 // values before f runs; errors short-circuit. T deduced (context-free) or explicit; E defaults to async_error.
 auto a = cc::make_async_lazy([]{ return 40; });                             // cold; no context, no deps
-auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else default pool
+auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // eager: worker scope, else compute
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
@@ -916,18 +919,44 @@ root->schedule();  sched.run_until([&]{ return root->is_ready(); }); // the pump
 sched.drain();  sched.empty();      // pump till empty / is anything queued (a queued entry PINS its node alive)
 
 // concurrent execution: work-stealing pool (#include <clean-core/thread/async_thread_pool.hh>)
+cc::scoped_async_homes const homes({.compute_workers = 7, .io_workers = 8}); // an app's startup: owns + installs both
+cc::async_scheduler& c = cc::compute_scheduler();        // the installed compute pool; asserts if none
+cc::async_scheduler& io = cc::io_scheduler();            // the io pool, or compute when no io pool is installed
 cc::async_thread_pool pool;                              // >=1 workers; default = hardware concurrency - 1 (below)
-cc::scoped_default_async_scheduler const ambient(pool);  // THE ambient scheduler: every async belongs to it
+cc::scoped_compute_async_scheduler const ambient(pool);  // or install one by hand (also scoped_io_async_scheduler)
 int v = cc::async_blocking_get(root);                    // caller PARTICIPATES (runs the graph, steals), then blocks
 // ^ hence the -1 default: the driving thread is a worker for the duration. A graph that never forks stays on it
 //   entirely — tens of ns, no cross-thread round trip (docs/systems/async.md "Driving").
-//   An app installs one at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
+//   An app installs compute at startup; a nexus run installs one per phase (nx::no_scheduler opts out).
+//   Libraries never create their own compute/io pools — they use these, which is what avoids oversubscription.
 // route a graph to a SPECIFIC pool by submitting its root there (no per-node affinity system):
 cc::async_thread_pool rpool(2);  int r = rpool.blocking_get(root2);   // or root2->schedule_on(rpool)
 // WITHOUT THREADS (CC_HAS_THREADS == 0) the pool still exists with the same API — no #if at the call site.
 // It starts nothing, worker_count() == 0, the ctor's count is ignored, and blocking_get drives the graph
 // inline on the caller (it reports no steal-capable peers, so nothing is published). It cannot WAIT though:
 // a graph parked on another thread's work never completes, and blocking_get's is_ready() assert says so.
+// HOMES (#include <clean-core/thread/thread_bound_scheduler.hh>) — a node pinned to a scheduler runs EVERY segment
+// of its frame there: first poll, each resume after a wake, each yield. Unhomed nodes pay nothing (docs "Homes").
+auto p = cc::make_async_scheduled_on_main([&] { present(); });            // homed factory; also _lazy_on_main
+auto q = cc::make_async_lazy_on(home, {.inline_deps = cc::async_inline_deps::any}, f, deps...); // any scheduler
+co_await cc::async_resume_on_main();     // coroutine hop: STICKY rehome (options reset); no suspend if already there
+co_await cc::async_resume_on_compute();  // / _io() / async_resume_on(h, opts)
+co_await cc::async_set_home_options({.teardown = cc::async_teardown::at_home}); // never suspends; must be homed
+auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); }); // child elsewhere, value moved out
+cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
+home.drain();                            // end of a loop: runs what is left, incl. deferred at_home teardowns
+// inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)
+// teardown: anywhere (default) | at_home — a NEVER-RESOLVED frame's captures released on a THREAD home; resolved values anywhere
+// GOTCHA: children a homed body starts are NOT homed (a thread home sends them to compute; a pool home keeps them). A home is never re-entered: a blocking wait
+//   inside a homed body does not run that home's other bodies — co_await instead. EVERY scheduler must outlive the nodes
+//   homed to it (~async_scheduler asserts). same_home_only tries only the FIRST pending dep inline before parking.
+// EXCLUSION (#include <clean-core/thread/async_mutex.hh>) — contention PARKS the node; the thread keeps working.
+cc::async_mutex<T> m;  auto g = co_await m.lock();       // guard: g->..., *g; may be held across co_await, released anywhere
+auto grant = m.lock_async();  /* require(grant) */  auto g2 = grant->take_value(); // raw frame; take EXACTLY once
+auto maybe = m.try_lock();                               // cc::optional<guard>; never waits, never barges a queue
+cc::async_shared_mutex<T> rw;  auto r = co_await rw.lock_shared();  // or co_await rw.lock(); writer-preferring
+cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
+// FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)

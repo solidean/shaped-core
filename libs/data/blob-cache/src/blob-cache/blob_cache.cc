@@ -266,12 +266,12 @@ cc::shared_async<blob> blob_cache::acquire(cache_key const& key,
         return cc::move(claim.operation);
     }
 
-    // Started here where there is somewhere to run it, and left COLD where there is not — exactly what make_async_scheduled does, widened to the installed default pool.
+    // Started here where there is somewhere to run it, and left COLD where there is not — exactly what make_async_scheduled does, widened to the installed compute scheduler.
     //
     // Scheduling unconditionally would assert in a program that drives its own graphs and installs no pool, and
     // leaving it cold unconditionally would make a fire-and-forget acquire silently never happen.
     // A cold operation still resolves the moment anybody drives it, which is what blocking_get does first thing.
-    if (cc::async_scheduler::current_or_null() != nullptr || cc::async_scheduler::default_or_null() != nullptr)
+    if (cc::impl::async_can_schedule_here())
         claim.operation->schedule();
 
     return cc::move(claim.operation);

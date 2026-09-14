@@ -79,7 +79,7 @@ void draw_guide(sr::imgui_context const& imgui, sr::window_system const& wsys, f
 }
 } // namespace
 
-TEST("sr - imgui window (manual)", nx::config::manual)
+TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create();
     auto const win = wsys->create_window({.title = "shaped-rendering — close this window to end the test", //

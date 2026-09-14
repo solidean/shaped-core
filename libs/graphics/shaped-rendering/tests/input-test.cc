@@ -34,7 +34,7 @@ TEST("sr - key modifiers combine and test as a bit set", main_thread)
     CHECK(accumulated == (ctrl | shift));
 }
 
-TEST("sr - window system creation reports whether a backend exists", main_thread)
+TEST("sr - window system creation reports whether a backend exists", main_thread, exclusive("sr-window-system"))
 {
     // The API is here either way; only the answer changes.
     // A caller writes this once and it compiles in both builds, which is the point of not gating the types on SR_HAS_WINDOW.
@@ -49,7 +49,7 @@ TEST("sr - window system creation reports whether a backend exists", main_thread
 
 #if SR_HAS_WINDOW
 
-TEST("sr - a fresh window system has no events", main_thread)
+TEST("sr - a fresh window system has no events", main_thread, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});
     CHECK(wsys->events().empty());
@@ -59,7 +59,7 @@ TEST("sr - a fresh window system has no events", main_thread)
     CHECK(wsys->events().empty());
 }
 
-TEST("sr - text input is off until asked for", main_thread)
+TEST("sr - text input is off until asked for", main_thread, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "text"});
@@ -74,7 +74,7 @@ TEST("sr - text input is off until asked for", main_thread)
     CHECK(!win->is_text_input_active());
 }
 
-TEST("sr - relative mouse mode round-trips", main_thread)
+TEST("sr - relative mouse mode round-trips", main_thread, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "capture"});

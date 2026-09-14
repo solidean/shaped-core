@@ -183,7 +183,7 @@ void load_assets()
 // owns_recorder because this drives cc::rec::initialize itself, and nx::run stands a recorder up for the whole binary.
 // Without it the initialize below is a second one, which asserts.
 //
-// No exclusive() needed: an EXAMPLE is main_thread, which already runs beside nothing.
+// No exclusive() needed: EXAMPLE bakes it in, so the example already runs beside nothing.
 EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
 {
     using namespace cc::primitive_defines;

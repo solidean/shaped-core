@@ -14,6 +14,7 @@ The check-attribution contract this rests on is [threaded-checks](threaded-check
 
 **The default is `-j0`** — every core, because a test suite that only runs correctly one at a time is hiding something.
 `-jN` for N > 1 builds a join over the whole phase and drives it on a `cc::async_thread_pool` of N-1 workers, the caller participating as the Nth.
+In a phase with a `main_thread` test the caller runs the bodies handed to it instead.
 
 `-j1` stays first-class, and is not merely "a pool of one".
 It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order.
@@ -44,14 +45,14 @@ Tests sharing a mode form one graph and run as one **phase**; phases run one aft
 |---|---|
 | *(default)* | the run's scheduler, capped by `--jobs` |
 | `own_pool(n)` | a private pool of `n` workers, shared with every other test asking for that same count |
-| `main_thread` | directly on the thread `nx::run` was entered on, in schedule order |
+| `main_thread` | on the thread `nx::run` was entered on, handed there by its node — a flag on top of the mode, see below |
 
 ## The ambient scheduler
 
 A separate axis from the one above: **where the body runs** is one question, **which scheduler the body's own async work belongs to** is another.
 
-Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_default_async_scheduler`).
-A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the process-wide default.
+Every async needs an ambient scheduler and it is an error to touch one without it, so a run installs one for each phase (`cc::install_compute_async_scheduler`).
+A body running as a node on the phase's pool inherits it as a bound worker scope; a directly driven body gets it as the installed compute scheduler.
 
 | Config item | The ambient scheduler |
 |---|---|
@@ -72,7 +73,7 @@ Both drive the body directly, so neither composes with a mode that runs it as a 
 ## Main-thread affinity
 
 Some work must run on the **process main thread** — `sr::window_system` asserts on it, because SDL does.
-No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag orders tests without choosing a thread.
+No `--jobs` value helps: at `-jN` a body runs on whichever worker picks it up, and an exclusion tag excludes tests without choosing a thread.
 
 ```cpp
 TEST("sr - window system creates and shuts down", main_thread) { … }
@@ -85,43 +86,47 @@ A test that wants its body on main and also drives async work of its own can say
 A nested run satisfies that for free: nesting already requires `no_scheduler`, and a directly driven body runs on the outer run's calling thread.
 The case that legitimately trips the assert is a run driven from a thread somebody spawned.
 
-The flag is honoured by driving the body directly, in schedule order with everything else asking for the same ambient scheduler.
-So main-thread tests cannot yet overlap the shared phase — a quality-of-implementation gap, not a property of the API.
+**A `main_thread` test is a node in the shared phase like any other, and runs beside it.**
+Its node takes the phase's locks wherever it runs, then hands the body to the run thread, which acts as a main loop while the phase runs.
+That loop runs handed-over bodies one at a time and pumps the main thread in between — `cc::pump_main_thread`, the call an application's own event loop makes.
+
+The body runs at loop level rather than as a node homed to `cc::main_thread_scheduler()`, and the difference is deliberate.
+A home is never re-entered from inside one of its own bodies, so a homed body that blocks on a graph with a main-homed step would wait forever.
+At loop level the same wait runs that step, exactly as it would in an application.
+
+So `main_thread` says **which thread**, and nothing else.
+It promises no exclusion, not even among main-thread tests: a test that must run alone says `exclusive()`, which `EXAMPLE` bakes in, and one that must not overlap a group says `exclusive(tag)`.
+**A body that blocks may run other tests on its stack**, main-thread ones included, because the wait helps drive whatever is queued.
+That is fair rather than a defect: a test that cannot tolerate it awaits instead of blocking.
+Under `-j1` the run thread drives the nodes one at a time, and a `main_thread` body runs in place.
+In a `-jN` phase with no `main_thread` test, the run thread participates in the pool as before.
 
 Two combinations are asserts rather than quiet demotions:
 
 * **`own_pool(n)`**, because a private pool's worker is never the main thread.
 * **`ASYNC_TEST`**, because the graph it returns is driven by the phase's scheduler and not by the thread the body started on.
+  Allowing it is recorded in [TODO](TODO.md); hopping to main from inside an `ASYNC_TEST` is not the workaround, since the `-j1` driver never pumps the main home and aborts.
 
-## Exclusion is an ordering edge
+## Exclusion is locks
 
 ```cpp
 TEST("sg - clears the backbuffer", exclusive("gpu")) { … }   // never runs beside another "gpu" holder
 TEST("env - rewrites the global config", exclusive())        // runs alone, beside nothing at all
 ```
 
-A test **requires the last holder of each tag it carries**, and becomes that tag's new tail.
-No-arg `exclusive()` runs alone, beside nothing at all.
+Each phase holds one `cc::async_shared_mutex` and one `cc::async_mutex` per tag.
+A test node takes them before its body: the phase lock shared — or exclusively, for `exclusive()` — and then each of its tags.
+It releases them when it resolves, and an `ASYNC_TEST` holds them across every suspend of its graph.
 
-**A no-arg `exclusive()` is not scheduled as a node.**
-A test that runs beside nothing gains nothing from a graph, and as a barrier would cost an edge to every test before it plus a stalled pool.
-So a synchronous one is routed into the **no-scheduler group** instead, which already runs bodies one at a time on the calling thread — the same guarantee, for free.
+A waiting test parks instead of blocking a worker, so the pool runs other tests while it waits.
+That is what lets an `exclusive()` test, an `ASYNC_TEST` and a `main_thread` test all be ordinary nodes in the shared phase, with no barrier and no routing around the graph.
 
-Two consequences worth knowing:
-
-* Such a test **does not order against the shared phase** any more, only within the no-scheduler one.
-  It still runs alone, and the order is still reproducible; it is simply no longer a seam that the tests around it sit before and after.
-* An **`ASYNC_TEST` keeps its scheduler**, because nothing would drive the root it returns.
-  So does a test that asked for `own_pool`.
-
-Every edge points backwards in schedule order, so the result is a DAG by construction.
-That is why there is no admission control, no deadlock to reason about, and no starvation to guard against.
-
-Two properties fall out, and both are features rather than accidents:
-
-* **Exclusion fixes the order, not merely the exclusion.**
-  Holders of a tag run in schedule order within a phase, and in phase order across phases — reproducible, not "whichever won the lock".
-* **Exclusion across scheduler modes is free**, because phases are sequential; only within-phase pairs need an edge.
+- **Tags are taken in name order, after the phase lock, one at a time**, which is what keeps two multi-tag tests from deadlocking.
+- **The phase lock is writer-preferring**: once an `exclusive()` test waits, tests arriving after it wait behind it.
+- **The trade: holders run in arrival order, not schedule order.**
+  Under `-jN` two holders of a tag no longer run in the order the schedule lists them.
+  `-j1` still runs each phase in schedule order, so a failure that depends on the order is still reproducible there.
+- **Exclusion across scheduler modes is free**, because phases are sequential; a lock is only ever contended within its phase.
 
 A test may carry up to `nx::config::max_exclusion_tags` tags.
 Asking for more is an assert, never a silent drop.
@@ -131,7 +136,7 @@ Asking for more is an assert, never a silent drop.
 A test node **always resolves to a value**, never to an error.
 A failure is data on the `test_execution`; the async failure channel is not used at all.
 
-That is load-bearing rather than tidiness: an exclusivity edge feeds one test node into the next, so an error would propagate into every test ordered behind it and turn one red test into a red phase.
+That is load-bearing rather than tidiness: the phase's join requires every test node, so an error would propagate into the join and turn one red test into a red phase.
 
 ## `ASYNC_TEST`
 

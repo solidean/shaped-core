@@ -52,7 +52,9 @@
 // to run without a thread.
 // Nothing is spawned, and you drive processing yourself with process_messages_if_unthreaded[_for_ms](), which
 // is a no-op when a thread is running and so is safe to call unconditionally.
-// That keeps one code path across platforms, and makes tests deterministic and race-free.
+// That keeps one code path across platforms.
+// You are not its only driver: the actor registers as a thread pump, so every blocking wait in the process runs it too,
+// and a cycle you ask for while one of those is mid-cycle is skipped rather than joined.
 // Caveat: unthreaded, on_message and the hooks run on the *calling* thread, so a blocking handler stalls it.
 // The "blocking only stalls this actor" property holds in threaded mode only.
 //
@@ -105,6 +107,7 @@ public:
     /// Runs one processing cycle on the calling thread: drain the inbox, dispatch, one on_process.
     /// Returns true if there may be more work — something was dispatched, or on_process asked to run again.
     /// A no-op returning false unless started unthreaded and not shut down, so it is safe to call unconditionally every frame.
+    /// Also false, without waiting, while another thread's cycle is running — a blocking wait's pump sweep drives this actor too.
     bool process_messages_if_unthreaded();
 
     /// Repeats process_messages_if_unthreaded() until idle or max_ms of wall-clock elapses; max_ms <= 0 runs a single cycle.
@@ -156,6 +159,8 @@ private:
     cc::atomic<bool> _is_shutting_down = false;
     cc::atomic<bool> _is_shut_down = false;
     bool _is_unthreaded = false; // set once at start(); no background thread touches it
+    // Claimed for one unthreaded cycle, which a hand pump and a sweep may race for.
+    cc::atomic<bool> _is_processing = false;
 
     template <class... MessageT>
     friend struct threaded_actor;

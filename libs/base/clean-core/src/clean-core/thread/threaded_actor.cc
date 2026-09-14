@@ -1,6 +1,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -90,6 +91,14 @@ bool cc::threaded_actor_base::process_messages_if_unthreaded()
     // No-op unless we own the loop and are still alive; makes it safe to call unconditionally.
     if (!_is_unthreaded || _is_shut_down.load())
         return false;
+
+    // The inbox has a single consumer, and a hand pump bypasses the registry's own running guard.
+    if (_is_processing.exchange(true))
+        return false;
+    CC_DEFER
+    {
+        _is_processing.store(false);
+    };
 
     bool const dispatched = drain_inbox_messages(false);
     bool const wants_more = get_impl().on_process();

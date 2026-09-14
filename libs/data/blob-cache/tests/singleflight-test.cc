@@ -15,7 +15,7 @@ namespace
 struct gated_compute
 {
     cc::shared_async<blob> node = cc::make_async_manual<blob>();
-    int calls = 0;
+    cc::atomic<int> calls = {0}; // counted on whichever thread drives the pipeline, read on the test's
 
     cc::shared_async<blob> operator()()
     {
@@ -46,12 +46,12 @@ TEST("bcache acquire computes once and shares the result")
     CHECK(f.cache().get_stats().singleflight_joins == 1);
 
     f.idle();
-    CHECK(compute.calls <= 1); // never twice, whatever the driving order turned out to be
+    CHECK(compute.calls.load() <= 1); // never twice, whatever the driving order turned out to be
 
     compute.resolve("computed once");
     CHECK(blob_text(f.settle(a)) == "computed once");
     CHECK(blob_text(f.settle(b)) == "computed once");
-    CHECK(compute.calls == 1);
+    CHECK(compute.calls.load() == 1);
 }
 
 TEST("bcache acquire serves a second caller from storage once the first has finished")
@@ -75,7 +75,7 @@ TEST("bcache acquire serves a second caller from storage once the first has fini
     auto second = gated_compute();
     auto const b = f.cache().acquire(key, [&] { return second(); });
     CHECK(blob_text(f.settle(b)) == "from compute");
-    CHECK(second.calls == 0); // a hit, so the callback is never even asked for
+    CHECK(second.calls.load() == 0); // a hit, so the callback is never even asked for
 }
 
 TEST("bcache acquire runs one compute per distinct key")
@@ -200,7 +200,7 @@ TEST("bcache acquire releases a slot without disturbing a successor under the sa
     auto third = gated_compute();
     auto const c = f.cache().acquire(other, [&] { return third(); });
     CHECK(b.get() == c.get()); // joined, not restarted
-    CHECK(third.calls == 0);
+    CHECK(third.calls.load() == 0);
 
     second.resolve("round two");
     CHECK(blob_text(f.settle(b)) == "round two");
@@ -228,5 +228,5 @@ TEST("bcache acquire forgets an operation nobody is waiting on any more")
     auto again = gated_compute();
     auto const b = f.cache().acquire(key, [&] { return again(); });
     CHECK(blob_text(f.settle(b)) == "done"); // served from storage, not from a retained value
-    CHECK(again.calls == 0);
+    CHECK(again.calls.load() == 0);
 }

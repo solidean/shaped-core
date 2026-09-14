@@ -21,7 +21,7 @@ namespace slib
 /// Fails only on a broken DXC install; a shader that does not compile is an error on the async node, not here.
 ///
 /// Compiles are deduplicated and cached by content: identical flattened source with the same entry point, stage and options compiles once.
-/// Compilation runs on the installed default async pool (cc::install_default_async_scheduler); with none installed the node stays cold until something drives it.
+/// Compilation runs on the installed compute async scheduler (cc::install_compute_async_scheduler); with none installed the node stays cold until something drives it.
 ///
 /// **Windows only in practice.** DXIL reflection reads a container beside the bytecode through the Windows SDK's
 /// d3d12shader.h, which the Linux DXC release does not ship — so a compile here succeeds and then fails at reflection.

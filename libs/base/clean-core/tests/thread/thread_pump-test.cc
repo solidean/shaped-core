@@ -8,11 +8,12 @@
 // deadlock would violate: a sweep reaches everybody, it never re-enters a pump, and a registration that dies stops
 // being reachable before its owner does.
 //
-// Every test here is exclusive() because the registry is PROCESS-GLOBAL.
+// Every test here is exclusive() and main_thread because the registry is PROCESS-GLOBAL.
 // A sibling test blocking on an async sweeps it too, which would call these pumps at moments this file never chose —
 // so running beside anything at all makes the observations here meaningless rather than merely flaky.
+// exclusive() keeps the other tests out, and main_thread keeps out nexus's own main loop, which sweeps between bodies.
 
-TEST("cc::thread_pump_all - a registration stops being reachable when it dies", exclusive())
+TEST("cc::thread_pump_all - a registration stops being reachable when it dies", main_thread, exclusive())
 {
     auto ran = false;
     {
@@ -29,7 +30,7 @@ TEST("cc::thread_pump_all - a registration stops being reachable when it dies", 
     CHECK(!ran); // the registration died with its scope, before `ran` could
 }
 
-TEST("cc::thread_pump_all - one sweep reaches every registration", exclusive())
+TEST("cc::thread_pump_all - one sweep reaches every registration", main_thread, exclusive())
 {
     auto first_ran = false;
     auto second_ran = false;
@@ -52,14 +53,14 @@ TEST("cc::thread_pump_all - one sweep reaches every registration", exclusive())
     CHECK(second_ran); // a sweep does not stop at the first pump, however that one answered
 }
 
-TEST("cc::thread_pump_all - a pump reporting work makes the sweep report it", exclusive())
+TEST("cc::thread_pump_all - a pump reporting work makes the sweep report it", main_thread, exclusive())
 {
     auto const busy = cc::register_thread_pump([] { return true; });
 
     CHECK(cc::thread_pump_all()); // "somebody progressed" is what keeps a driver from sleeping
 }
 
-TEST("cc::thread_pump_all - a pump is never re-entered", exclusive())
+TEST("cc::thread_pump_all - a pump is never re-entered", main_thread, exclusive())
 {
     // The case the whole guard exists for: a handler sweeps — which is how it waits for a sibling — and that sweep must
     // not dispatch this same pump on top of itself, exactly as a busy thread takes no new work.
@@ -86,7 +87,7 @@ TEST("cc::thread_pump_all - a pump is never re-entered", exclusive())
     CHECK(max_depth == 1);
 }
 
-TEST("cc::thread_pump_all - sweeping from inside a pump still reaches the others", exclusive())
+TEST("cc::thread_pump_all - sweeping from inside a pump still reaches the others", main_thread, exclusive())
 {
     // The other half of the guard: skipping the RUNNING pump must not skip the rest, or a handler waiting on a sibling
     // actor would wait forever — which is the deadlock the registry exists to prevent.
@@ -115,7 +116,7 @@ TEST("cc::thread_pump_all - sweeping from inside a pump still reaches the others
     CHECK(swept);
 }
 
-TEST("cc::thread_pump_registration - resetting stops the pump", exclusive())
+TEST("cc::thread_pump_registration - resetting stops the pump", main_thread, exclusive())
 {
     auto ran = false;
     auto registration = cc::register_thread_pump(
@@ -133,7 +134,7 @@ TEST("cc::thread_pump_registration - resetting stops the pump", exclusive())
     CHECK(!ran);
 }
 
-TEST("cc::thread_pump_registration - moving transfers the registration rather than copying it", exclusive())
+TEST("cc::thread_pump_registration - moving transfers the registration rather than copying it", main_thread, exclusive())
 {
     auto ran = false;
     auto first = cc::register_thread_pump(
@@ -156,7 +157,7 @@ TEST("cc::thread_pump_registration - moving transfers the registration rather th
     CHECK(!ran); // one handle owned it, so one reset is enough
 }
 
-TEST("cc::thread_pump_all_for - a non-positive budget runs a single cycle", exclusive())
+TEST("cc::thread_pump_all_for - a non-positive budget runs a single cycle", main_thread, exclusive())
 {
     // A pump that never goes idle, so a budget that looped would not return at all: reaching the CHECK is the assertion.
     auto const busy = cc::register_thread_pump([] { return true; });
@@ -164,7 +165,7 @@ TEST("cc::thread_pump_all_for - a non-positive budget runs a single cycle", excl
     CHECK(cc::thread_pump_all_for(0.0)); // one cycle, reporting work still pending
 }
 
-TEST("cc::thread_pump_all_for - returns false once everything goes idle", exclusive())
+TEST("cc::thread_pump_all_for - returns false once everything goes idle", main_thread, exclusive())
 {
     auto remaining = 3;
     auto const draining = cc::register_thread_pump([&] { return remaining-- > 0; });
@@ -183,7 +184,7 @@ struct counting_actor : cc::threaded_actor_impl<int>
 };
 } // namespace
 
-TEST("cc::threaded_actor - an unthreaded actor is driven without being named", exclusive())
+TEST("cc::threaded_actor - an unthreaded actor is driven without being named", main_thread, exclusive())
 {
     // The whole point of the registry: nothing here mentions the actor, and its message still gets dispatched.
     auto const baseline = cc::registered_thread_pump_count();
@@ -201,7 +202,7 @@ TEST("cc::threaded_actor - an unthreaded actor is driven without being named", e
     CHECK(impl->seen[0] == 7);
 }
 
-TEST("cc::threaded_actor - an actor with a thread of its own registers nothing", exclusive())
+TEST("cc::threaded_actor - an actor with a thread of its own registers nothing", main_thread, exclusive())
 {
     auto const baseline = cc::registered_thread_pump_count();
     auto actor = cc::make_and_start_threaded_actor<counting_actor>();
@@ -222,7 +223,7 @@ struct signaling_actor : cc::threaded_actor_impl<int>
 };
 } // namespace
 
-TEST("cc::threaded_actor - shutdown wakes a thread that is about to sleep", exclusive())
+TEST("cc::threaded_actor - shutdown wakes a thread that is about to sleep", main_thread, exclusive())
 {
     // The race: shutdown() flips a flag the actor thread's wait predicate reads, and that flag is not the inbox mutex's.
     // A notify sent while the thread sits between its last predicate check and the wait it is about to enter is lost,
@@ -246,7 +247,7 @@ TEST("cc::threaded_actor - shutdown wakes a thread that is about to sleep", excl
     CHECK(true); // reaching here at all is the assertion; a lost wakeup hangs rather than fails
 }
 
-TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches the actor", exclusive())
+TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches the actor", main_thread, exclusive())
 {
     // The lifetime half: a pump outliving its actor is a sweep into freed memory, and nothing else would catch it.
     auto const baseline = cc::registered_thread_pump_count();

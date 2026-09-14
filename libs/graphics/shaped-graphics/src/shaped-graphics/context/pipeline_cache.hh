@@ -12,7 +12,7 @@
 /// A second acquire with the same arguments returns the already-created handle / async node instead of rebuilding.
 ///
 /// Layouts are cheap and cached synchronously.
-/// Pipelines are built asynchronously as a cc::async routed to the installed default pool, since PSO creation is multi-ms.
+/// Pipelines are built asynchronously as a cc::async routed to the installed compute scheduler, since PSO creation is multi-ms.
 ///
 /// A context owns one of these, reached via ctx.cached; the acquire_* methods take the owning context so the cache stays a plain member.
 ///

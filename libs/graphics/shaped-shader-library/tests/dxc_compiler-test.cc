@@ -17,7 +17,7 @@ namespace
 {
 /// Drives a compile to completion and returns it.
 ///
-/// acquire() hands back a cold cc::async node — a real app installs a default async pool and its workers
+/// acquire() hands back a cold cc::async node — a real app installs a compute async scheduler and its workers
 /// run it; with none installed the caller drives, which is what these tests do (and what ssc's own tests
 /// do). Driving an already-finished node is a no-op, so a shader the watcher already built passes
 /// straight through.

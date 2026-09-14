@@ -192,7 +192,7 @@ It is a **frame-boundary call**.
 It opens and submits a command list of its own, so it must not run inside one, and it belongs after `advance_epoch` and before the frame's first acquire.
 Every routine it brings up in one tick records into that one list, so their GPU init work batches into a single submit.
 
-**Initialization runs on the ambient async scheduler**, and installing one is the application's job (`cc::install_default_async_scheduler`).
+**Initialization runs on the ambient async scheduler**, and installing one is the application's job (`cc::install_compute_async_scheduler`).
 The tick asserts where there is none rather than standing up a private one.
 A phase nothing can drive would leave every routine pending forever, which is a configuration error and not a state to report.
 While it is driving, the tick participates in that scheduler, so a single-threaded one works too — the phases then run inline on the thread that ticked.
