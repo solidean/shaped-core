@@ -17,9 +17,26 @@ The check-attribution contract this rests on is [threaded-checks](threaded-check
 In a phase with a `main_thread` test the caller runs the bodies handed to it instead.
 
 `-j1` stays first-class, and is not merely "a pool of one".
-It drives one test node at a time under a `cc::singlethreaded_scheduler`, so the run order **is** the schedule order.
+It drives one test node at a time under a `cc::singlethreaded_scheduler`, in the run's seeded order.
 Between drives it pumps the main home and sweeps the thread-pump registry, because a node that hops to main or awaits an unthreaded actor completes only through those.
-That makes it the reproducible-debugging mode: a failure at `-jN` that survives `-j1` is a test bug, and one that vanishes is a concurrency bug.
+That makes it the reproducible-debugging mode: a failure at `-jN` that survives `-j1` with the same `--seed` is a test bug, and one that vanishes is a concurrency bug.
+
+## The run seed
+
+**A real run shuffles**: the order tests are handed to their phases, and the order every invocation runs its children in.
+The seed comes from the clock unless `--seed N` pins it, and the run prints it first: `nexus: run seed N (reproduce with --seed N)`.
+It is printed again beside any failure, and the JUnit report carries it as a `seed` property.
+A test that passes only in one order is hiding a dependency, and the printed seed is what makes the failure that exposes it reproducible.
+
+- **A test's seed derives from the run seed and its name**, never its position, so `dev.py test "<one test>" --seed N` hands it the seed it had in the full run.
+  `nx::config::seed(n)` pins it; `nx::test_seed()` and `nx::test_random()` read it.
+- **A dispatched child's seed derives from its driver's seed, its invocation name and its own name.**
+- **An invocation's children are shuffled before `-c` scoping**, so narrowing to one child never changes the order the others ran in.
+- **Reports keep schedule and match order** whatever order things ran in.
+- **Fuzz tests draw their seed range from the test seed**, so every run explores new programs and a found failure replays under its `--seed`.
+
+A hand-built `test_schedule_config` does not shuffle, for the same reason it defaults to `jobs = 1`: nexus's own meta-tests assert on order.
+An example prints no seed, since its transcript is its documentation and it runs one body.
 
 A **hand-built** `test_schedule_config` defaults the other way, to `jobs = 1`.
 Only `create_from_args` starts at 0, so the parallel default belongs to a real run.

@@ -60,6 +60,19 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; ne
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
 
+## The run seed (`nx::test_seed`)
+
+```cpp
+auto rng = nx::test_random();            // cc::random seeded from this test's seed: run seed + test NAME
+u64 s = nx::test_seed();                 // pinned by nx::config::seed(n); 0 outside a test
+```
+
+- **A real run shuffles** the schedule and every invocation's children, by a clock seed it PRINTS first;
+  `--seed N` (or `dev.py test --seed N`) reproduces the order and every test seed at once.
+- Name-derived, so a filtered re-run of one test gets the seed it had in the full run; a child derives from its driver.
+- Fuzz tests draw their seeds from the test seed.
+- A hand-built config does not shuffle.
+
 ## Thorough runs (`nx::is_thorough`)
 
 ```cpp

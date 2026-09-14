@@ -101,6 +101,7 @@ target_sources(nexus
     src/nexus/tests/execute.hh
     src/nexus/tests/registry.hh
     src/nexus/tests/schedule.hh
+    src/nexus/tests/seed.hh
     src/nexus/tests/thread_scope.hh
     src/nexus/tests/typed_value.hh
     src/nexus/tests/typed_invoke.hh
@@ -204,6 +205,7 @@ if(SC_BUILD_TESTS)
         tests/test-parallel-test.cc
         tests/test-async-test.cc
         tests/test-async-invocable-test.cc
+        tests/test-seed-test.cc
         tests/test-export-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc

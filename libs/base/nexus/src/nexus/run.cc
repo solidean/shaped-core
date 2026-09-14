@@ -238,6 +238,12 @@ int nx::run(int argc, char** argv)
         return 1;
     }
 
+    // First, so it is there whatever the run does next, and a failure anywhere below can be reproduced from the log.
+    // Not under the Catch2 XML reporter, whose stdout is the report, and not for an example, which is one program run
+    // whose transcript is its documentation.
+    if (config.shuffle && !config.report_catch2_xml_results && config.selected_bucket != nx::config::test_bucket::example)
+        cc::println("nexus: run seed {} (reproduce with --seed {})", config.seed, config.seed);
+
     if (config.verbose)
     {
         schedule.print();
@@ -314,8 +320,9 @@ int nx::run(int argc, char** argv)
     // This is additive: the console output below still runs, whatever the reporting mode.
     if (!config.junit_xml_file.empty())
     {
-        auto const written
-            = write_report_file(config.junit_xml_file, write_junit_xml(suite_name(), execution, resources));
+        auto const written = write_report_file(
+            config.junit_xml_file, write_junit_xml(suite_name(), execution, resources,
+                                                   config.shuffle ? cc::optional<u64>(config.seed) : cc::nullopt));
         if (!written.has_value())
             cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
                          written.error().to_string());
@@ -471,6 +478,8 @@ int nx::run(int argc, char** argv)
     {
         if (failed_tests > 0)
         {
+            if (config.shuffle)
+                cc::eprintln("\nrun seed {} — reproduce the order with --seed {}", config.seed, config.seed);
             cc::eprintln("\nFailed tests:");
             for (auto const& exec : execution.executions)
                 print_failing(exec, cc::string());

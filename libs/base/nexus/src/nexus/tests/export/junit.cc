@@ -87,7 +87,8 @@ void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution 
 
 cc::string nx::write_junit_xml(cc::string_view suite_name,
                                nx::test_schedule_execution const& execution,
-                               nx::test_run_resources const& resources)
+                               nx::test_run_resources const& resources,
+                               cc::optional<u64> run_seed)
 {
     int const total_tests = execution.count_total_tests();
     int const failed_tests = execution.count_failed_tests();
@@ -120,6 +121,9 @@ cc::string nx::write_junit_xml(cc::string_view suite_name,
     out += "  <testsuite ";
     emit_suite_attrs(out);
     out += ">\n";
+    if (run_seed.has_value())
+        out.appendf("    <properties>\n      <property name=\"seed\" value=\"{}\"/>\n    </properties>\n",
+                    run_seed.value());
 
     for (auto const& exec : execution.executions)
         emit_testcase(out, suite, exec, cc::string());

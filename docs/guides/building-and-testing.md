@@ -103,6 +103,20 @@ Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the f
 A rate is a different question from a cause, and this answers the cause.
 When you do want the rate, loop it in the shell and count — but expect to lose the logs of all but the last failure.
 
+## Reproducing an order: `--seed N`
+
+Every nexus run shuffles its tests and each invocation's children, and prints the seed it drew as its first line: `nexus: run seed N (reproduce with --seed N)`.
+The same line appears beside the failure summary, and the JUnit report carries it as a `seed` property.
+
+```bash
+uv run dev.py test shaped-graphics-vulkan-test --seed 12002409740908782128
+```
+
+**A failure that reproduces with its seed and not without it is an order dependency**, which is what the shuffle exists to surface.
+One that reproduces at `-jN` but not at `--jobs 1` with the same seed is a concurrency one.
+A test's own seed derives from the run seed and its name, so re-running a single test by name with `--seed` reproduces what it saw in the full run.
+[parallel-execution](../../libs/base/nexus/docs/parallel-execution.md#the-run-seed) has the rules.
+
 ## Presets
 
 Presets live in [CMakePresets.json](../../CMakePresets.json), one per platform × compiler × build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK / Emscripten).

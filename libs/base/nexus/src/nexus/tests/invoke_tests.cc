@@ -4,12 +4,14 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/compare.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
+#include <nexus/tests/seed.hh>
 
 
 bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b)
@@ -141,6 +143,13 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
                                      [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
                                      [](test_declaration const* d) { return d->location.line(); }));
+
+    // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.
+    if (config->shuffle)
+    {
+        auto rng = nx::test_random();
+        rng.shuffle(matches);
+    }
 
     // Checked against the MATCHED set, before any -c scoping: a driver that silently skipped its async children whenever
     // a filter happened to select only sync ones would be wrong in a way nothing reports.

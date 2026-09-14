@@ -3,12 +3,14 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/record/async_scope.hh>
@@ -31,6 +33,7 @@
 #include <nexus/tests/check.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/section.hh>
+#include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
 
 #include <string>        // std::string: key type for the std::unordered_map below
@@ -148,6 +151,9 @@ struct test_context
     // How many leading scope segments this context's path already consumed (see run_test_body): a nested
     // dispatched child starts matching sections at scope[filter_offset].
     int filter_offset = 0;
+
+    // What nx::test_seed() answers inside this test.
+    u64 seed = 0;
 
     // current stats — the test thread's own, so plain and unsynchronized
     int executed_checks = 0;
@@ -466,6 +472,18 @@ cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
     // So a nested execution inherits its ancestor's sink, and only a top-level one owns a buffer.
     auto const* const parent = current_context();
     ctx.verbose_sink = parent != nullptr ? parent->verbose_sink : &execution.verbose_output;
+
+    // Pinned when the declaration says so; otherwise from the name, never the position, so a filtered re-run reproduces it.
+    // A dispatched child derives from its driver's seed and its group, since the same invocable may run under several drivers.
+    auto const& decl = *execution.instance.declaration;
+    auto const name_hash
+        = [](u64 base, cc::string_view text) { return cc::make_hash_of_bytes(cc::as_bytes(text), base); };
+    if (decl.test_config.seed != 0)
+        ctx.seed = u64(decl.test_config.seed);
+    else if (parent != nullptr && !execution.invocation_group.empty())
+        ctx.seed = cc::hash_finalize(name_hash(name_hash(parent->seed, execution.invocation_group), decl.name));
+    else
+        ctx.seed = cc::hash_finalize(name_hash(config.seed, decl.name));
 
     return owned;
 }
@@ -1844,7 +1862,19 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     };
     cc::vector<run_phase> phases;
 
+    // The order tests are handed to their phases in: the schedule's, or shuffled by the run seed.
+    // Slots stay indexed by schedule position, so the report order never changes with it.
+    auto run_order = cc::vector<isize>();
+    run_order.reserve(schedule.instances.size());
     for (isize i = 0; i < schedule.instances.size(); ++i)
+        run_order.push_back(i);
+    if (config.shuffle)
+    {
+        auto rng = cc::random(config.seed);
+        rng.shuffle(run_order);
+    }
+
+    for (auto const i : run_order)
     {
         auto const& instance = schedule.instances[i];
         CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
@@ -2276,6 +2306,13 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
                                      [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
                                      [](test_declaration const* d) { return d->location.line(); }));
 
+    // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.
+    if (config.shuffle)
+    {
+        auto rng = cc::random(parent_ctx->seed);
+        rng.shuffle(matches);
+    }
+
     // -j1 is the reproducible mode, so a parallel invocation runs its children one at a time there too.
     in_parallel = in_parallel && config.jobs != 1;
 
@@ -2385,4 +2422,15 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
     result.executed = int(plan.size());
     parent_ctx->nested_guard.lock([&](cc::unit&) { parent->nested.push_back_range(cc::move(executions)); });
     co_return result;
+}
+
+u64 nx::test_seed()
+{
+    auto const* const ctx = current_context();
+    return ctx != nullptr ? ctx->seed : 0;
+}
+
+cc::random nx::test_random()
+{
+    return cc::random(nx::test_seed());
 }

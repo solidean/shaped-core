@@ -1,6 +1,8 @@
 #include "schedule.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/string/glob.hh>
@@ -173,6 +175,11 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.arg({"v"}, config.verbose, "print the schedule before running it");
     args.arg({"c"}, config.section_filters, {.desc = "run only sections matching this name", .metavar = "NAME"});
 
+    args.arg({"seed"}, config.seed,
+             {.desc = "the run seed: test order, invocation order and every nx::test_seed derive from it; drawn from "
+                      "the clock and printed when not given",
+              .metavar = "N"});
+
     args.arg({"j", "jobs"}, config.jobs,
              {.desc = "how many tests may run at once; 0 means one per hardware thread",
               .metavar = "N",
@@ -283,6 +290,11 @@ nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, ch
     // A suite that only passes one test at a time is hiding something, and the place to find that out is the ordinary run.
     // A hand-built config keeps schedule order, because a test that builds a schedule is usually asserting about it.
     config.jobs = 0;
+
+    // The same asymmetry for order: a real run shuffles, by a seed from the clock that --seed replaces.
+    // Both the steady clock and the cycle counter feed it, so two runs started in the same tick still differ.
+    config.shuffle = true;
+    config.seed = cc::hash_finalize(cc::combine_hash(u64(cc::current_time_steady_secs() * 1e9), cc::current_cycles()));
 
     auto state = cli_state();
     auto args = build_cli(config, state);
