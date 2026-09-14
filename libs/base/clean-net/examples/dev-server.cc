@@ -1,12 +1,10 @@
 #include <clean-core/container/pinned_data.hh>
-#include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-net/address/resolver.hh>
-#include <clean-net/common/clock.hh>
 #include <clean-net/http/http_client.hh>
 #include <clean-net/http/http_server.hh>
 #include <clean-net/ws/websocket.hh>
@@ -26,15 +24,13 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// Let the loop run for a while, for the parts that finish on their own rather than on an async we hold.
-/// Each yield hands the main thread back to its loop, which sweeps the io_system's pump before resuming us.
-cc::shared_async<cc::unit> yield_for_a_moment(f64 seconds)
+/// The first value a handler hands over, as an async the example awaits.
+/// A handler runs on the io_system's thread, so it delivers through a node rather than into a variable the body reads.
+template <class T>
+void deliver_once(cc::shared_async<T> const& node, T value)
 {
-    auto& clk = cnet::system_clock();
-    auto const until = clk.now_ns() + i64(seconds * 1e9);
-
-    while (clk.now_ns() < until)
-        co_await cc::async_yield();
+    if (!node->is_ready())
+        node->push_value(cc::move(value));
 }
 
 /// One file in the temp directory, so `serve_directory` has something to serve.
@@ -70,7 +66,7 @@ struct served_file
 
 ASYNC_EXAMPLE("clean-net/dev-server")
 {
-    auto io = cnet::io_system::create({.unthreaded = true});
+    auto io = cnet::io_system::create({});
     auto const files = served_file();
 
     auto server = cnet::http_server::try_create(*io).value();
@@ -99,20 +95,21 @@ ASYNC_EXAMPLE("clean-net/dev-server")
 
     // ---- a body whose length nobody knows -----------------------------------------------------------
 
-    auto open_streams = cc::vector<cc::shared_ptr<cnet::http_response_stream>>();
+    auto const stream_opened = cc::make_async_manual<cc::shared_ptr<cnet::http_response_stream>>();
     server->route(cnet::http_method::get, "/events",
-                  [&open_streams](cnet::http_server_request const&)
+                  [stream_opened](cnet::http_server_request const&)
                   {
                       return cnet::http_server_response::stream(
-                          "text/event-stream", [&open_streams](cc::shared_ptr<cnet::http_response_stream> body)
-                          { open_streams.push_back(cc::move(body)); });
+                          "text/event-stream", [stream_opened](cc::shared_ptr<cnet::http_response_stream> body)
+                          { deliver_once(stream_opened, cc::move(body)); });
                   });
 
     // ---- a websocket, for the half of a debug UI that is not request-shaped -------------------------
 
-    auto sockets = cc::vector<cc::shared_ptr<cnet::websocket>>();
-    server->websocket_route("/feed", [&sockets](cc::shared_ptr<cnet::websocket> ws, cnet::http_server_request const&)
-                            { sockets.push_back(cc::move(ws)); });
+    auto const socket_accepted = cc::make_async_manual<cc::shared_ptr<cnet::websocket>>();
+    server->websocket_route("/feed",
+                            [socket_accepted](cc::shared_ptr<cnet::websocket> ws, cnet::http_server_request const&)
+                            { deliver_once(socket_accepted, cc::move(ws)); });
 
     // ---- and now play the browser ------------------------------------------------------------------
 
@@ -153,10 +150,7 @@ ASYNC_EXAMPLE("clean-net/dev-server")
     auto events = cnet::http_get(*client, cc::format("{}/events", base));
 
     // The handler is called once the head is out, which has not happened yet.
-    while (open_streams.empty())
-        co_await cc::async_yield();
-
-    auto const body = open_streams[0];
+    auto const body = co_await stream_opened;
     for (auto i = 0; i < 3; ++i)
     {
         auto const written = body->write_text(cc::format("data: tick {}\n\n", i));
@@ -165,7 +159,6 @@ ASYNC_EXAMPLE("clean-net/dev-server")
 
     // Dropping the last reference would end it just as well; this says so out loud.
     body->finish();
-    open_streams.clear();
 
     co_await cc::async_settled(events);
     cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", events->value().status(),
@@ -179,25 +172,23 @@ ASYNC_EXAMPLE("clean-net/dev-server")
     co_await cc::async_settled(connecting);
 
     auto const browser_side = connecting->value();
-    while (sockets.empty())
-        co_await cc::async_yield();
+    auto const server_side = co_await socket_accepted;
 
     // Ping, pong and close are answered by the layer itself; a message is what a caller sees.
     auto const sent = browser_side->send_text("hello from the page");
     co_await cc::async_settled(sent);
 
-    auto heard = sockets[0]->receive();
+    auto heard = server_side->receive();
     co_await cc::async_settled(heard);
     cc::println("ws  page -> server    : {}", heard->value().text());
 
-    auto const replied = sockets[0]->send_text("and back again");
+    auto const replied = server_side->send_text("and back again");
     co_await cc::async_settled(replied);
     auto answer = browser_side->receive();
     co_await cc::async_settled(answer);
     cc::println("ws  server -> page    : {}", answer->value().text());
 
     browser_side->close();
-    co_await yield_for_a_moment(0.05);
 
     // ---- shutdown ----------------------------------------------------------------------------------
 

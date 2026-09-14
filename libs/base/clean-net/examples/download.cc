@@ -15,9 +15,10 @@ using namespace cc::primitive_defines;
 // needs the internet is one that fails for reasons that teach nobody anything.
 //
 // **Awaiting is the integration story, not a detail of the example.**
-// An unthreaded io_system runs on whatever already sweeps `cc::thread_pump_all()`, which in an application is the frame
-// loop, and here is the loop an ASYNC_EXAMPLE's body is homed to on the main thread.
-// A threaded one needs none of that, and nothing in the API changes either way.
+// The io_system has a thread of its own, so nothing here pumps: the body awaits, and resumes on the main thread its
+// ASYNC_EXAMPLE is homed to.
+// An unthreaded one belongs to a loop that drives it instead — a frame loop calling `cc::thread_pump_all()` — and
+// nothing in the API changes either way.
 // `cc::async_settled` waits without short-circuiting, since a refused connection is a value this example prints.
 
 namespace
@@ -54,7 +55,7 @@ namespace
 
 ASYNC_EXAMPLE("clean-net/download")
 {
-    auto io = cnet::io_system::create({.unthreaded = true});
+    auto io = cnet::io_system::create({});
     auto const server = start_server(*io);
     auto const base = cc::format("http://127.0.0.1:{}", server->local().port);
 
