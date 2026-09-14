@@ -46,6 +46,12 @@ struct nx::impl::async_test_sink
     cc::shared_async<cc::unit> root;
 };
 
+namespace
+{
+// Defined beside execute_tests; declared here so a test's context can point at its phase's locks.
+struct phase_locks;
+} // namespace
+
 namespace nx
 {
 namespace
@@ -177,6 +183,13 @@ struct test_context
     // The async system turns that throw into the node's error, and it propagates up the graph an ASYNC_TEST body awaited.
     // That error is the abort the check asked for, already recorded, so finish_async_test must not report it again.
     cc::atomic<bool> aborted_by_check_throw = {false};
+
+    // The exclusion locks of the phase this test runs in, which an async invocation takes a child's tags from.
+    // Null outside a phase that has them: a directly driven phase runs its bodies one at a time, so nothing contends.
+    phase_locks* locks = nullptr;
+
+    // Serializes appends to execution->nested: two async invocations from one body may finish on different threads.
+    cc::mutex<cc::unit> nested_guard;
 
     // Where --verbose trace lines go: the top-level execution's buffer, shared with every context nested under it.
     // Never null while a body runs.
@@ -724,6 +737,19 @@ struct async_test_state
     nx::test_execution* execution = nullptr;
     nx::test_schedule_config const* config = nullptr;
 
+    // Set for a dispatched async child: the boxed arguments its body receives, the scopes it descends with, and how many path segments are already consumed.
+    // A top-level test leaves all three empty and derives its scopes itself.
+    cc::span<nx::typed_value*> values;
+    cc::span<cc::vector<cc::string> const> section_scopes;
+    int filter_offset = 0;
+    bool is_dispatched = false;
+
+    // The phase's exclusion locks, handed to the test's context for the async invocations its body makes.
+    phase_locks* locks = nullptr;
+
+    // Storage for a top-level test's own scopes: its instance's alias fragments, or the run's -c path as one scope.
+    cc::vector<cc::vector<cc::string>> owned_scopes;
+
     cc::unique_ptr<test_context> ctx;
 
     // The ONE ambient link naming this test, made in the first poll and kept alive here for the rest of the node's life.
@@ -745,7 +771,9 @@ struct async_test_state
 
 /// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
 /// Null if the body threw before producing one.
-cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declaration const& decl)
+cc::shared_async<cc::unit> run_async_prologue(test_context& ctx,
+                                              nx::test_declaration const& decl,
+                                              cc::span<nx::typed_value*> values)
 {
     auto* const crash_slot = running_test_slot_for_this_thread();
     scoped_running_test const published(crash_slot);
@@ -763,6 +791,8 @@ cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declar
         auto _ = scoped_test_assertion_handler();
         if (decl.test_config.thorough_only && !ctx.config->thorough)
             SKIP("runs only under --thorough");
+        else if (decl.is_invocable())
+            decl.async_invocable_function(values, sink);
         else
             decl.async_function(sink);
     }
@@ -851,7 +881,19 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         state.started = true;
         state.execution->started_at_steady_s = cc::current_time_steady_secs();
         state.execution->thread = u64(cc::current_thread_id());
-        state.ctx = test_execute_begin(*state.execution, *state.config, {}, /*filter_offset=*/0);
+        if (!state.is_dispatched)
+        {
+            // Resolved exactly as run_scheduled_instance resolves a synchronous test's: the instance's alias fragments, else the run's -c path.
+            if (!state.execution->instance.section_scopes.empty())
+                state.section_scopes = state.execution->instance.section_scopes;
+            else if (!state.config->section_filters.empty())
+            {
+                state.owned_scopes.push_back(state.config->section_filters);
+                state.section_scopes = state.owned_scopes;
+            }
+        }
+        state.ctx = test_execute_begin(*state.execution, *state.config, state.section_scopes, state.filter_offset);
+        state.ctx->locks = state.locks;
         state.ctx->allows_sections = false;
 
         auto const& decl = *state.execution->instance.declaration;
@@ -871,7 +913,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
 
-        state.root = run_async_prologue(*state.ctx, decl);
+        state.root = run_async_prologue(*state.ctx, decl, state.values);
 
         // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
         // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
@@ -1726,15 +1768,22 @@ struct phase_locks
     };
 
     cc::async_shared_mutex<cc::unit> global;
-    cc::vector<cc::unique_ptr<tag_lock>> tags;
+
+    // Looked up from any thread, since an async invocation takes a child's tags while the phase runs.
+    // Each lock is boxed, so a reference handed out stays valid as the list grows.
+    cc::mutex<cc::vector<cc::unique_ptr<tag_lock>>> tags;
 
     cc::async_mutex<cc::unit>& for_tag(cc::string_view tag)
     {
-        for (auto const& t : tags)
-            if (t->tag == tag)
-                return t->mutex;
-        tags.push_back(cc::make_unique<tag_lock>(tag));
-        return tags.back()->mutex;
+        return *tags.lock(
+            [&](cc::vector<cc::unique_ptr<tag_lock>>& all) -> cc::async_mutex<cc::unit>*
+            {
+                for (auto const& t : all)
+                    if (t->tag == tag)
+                        return &t->mutex;
+                all.push_back(cc::make_unique<tag_lock>(tag));
+                return &all.back()->mutex;
+            });
     }
 };
 } // namespace
@@ -1999,7 +2048,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                     {
                         if (async_state == nullptr)
                             async_state = cc::make_unique<async_test_state>(
-                                async_test_state{.execution = execution, .config = &config});
+                                async_test_state{.execution = execution, .config = &config, .locks = &locks});
                         return step_async_test(*async_state, actx);
                     }
 
@@ -2115,4 +2164,225 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   leaked);
 
     return result;
+}
+
+namespace
+{
+/// Whether any test on the ambient chain here — the scheduled test, or an invocable dispatched below it — declares an exclusion tag.
+/// A declared tag on that chain is a held one.
+/// The scheduled test took its tags before its body, a synchronously dispatched child's are its driver's, and an asynchronously dispatched child took its own.
+bool chain_holds_exclusion_tags()
+{
+    for (auto const* l = static_cast<cc::async_ambient_link const*>(cc::async_current_ambient()); l != nullptr;
+         l = l->parent)
+    {
+        if (l->tag != nx::impl::test_ambient_tag())
+            continue;
+        auto const* const ctx = reinterpret_cast<nx::test_context const*>(l->value);
+        if (ctx != nullptr && ctx->execution != nullptr
+            && ctx->execution->instance.declaration->test_config.exclusion_tag_count > 0)
+            return true;
+    }
+    return false;
+}
+
+/// Run one invoked child: wait for a concurrency permit when there is a cap, take the child's exclusion tags from the
+/// phase in name order, then await the child itself.
+/// A coroutine with pointer parameters rather than a lambda, so everything it names lives in its own frame.
+cc::shared_async<cc::unit> run_invoked_child(cc::shared_async<cc::unit> child,
+                                             nx::config::cfg const* child_config,
+                                             phase_locks* locks,
+                                             cc::async_semaphore* permits)
+{
+    auto permit = cc::optional<cc::async_semaphore_permit>();
+    if (permits != nullptr)
+        permit = co_await permits->acquire();
+
+    auto held = cc::vector<cc::async_mutex_guard<cc::unit>>();
+    if (locks != nullptr && child_config->exclusion_tag_count > 0)
+    {
+        auto names = cc::vector<cc::string_view>();
+        for (auto t = 0; t < child_config->exclusion_tag_count && t < nx::config::max_exclusion_tags; ++t)
+        {
+            auto const tag = cc::string_view(child_config->exclusion_tags[t]);
+            auto seen = false;
+            for (auto const& n : names)
+                seen |= n == tag;
+            if (!seen)
+                names.push_back(tag);
+        }
+        cc::sort(names); // the same order a top-level test takes them in, which is what keeps acquisition acyclic
+        for (auto const& name : names)
+            held.push_back(co_await locks->for_tag(name).lock());
+    }
+
+    co_await child;
+}
+
+/// What one child of an async invocation needs for as long as it runs.
+struct planned_child
+{
+    nx::test_declaration const* decl = nullptr;
+    cc::vector<cc::vector<cc::string>> scopes;
+};
+} // namespace
+
+cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::string name,
+                                                                          cc::vector<std::type_index> signature,
+                                                                          cc::vector<nx::typed_value> boxes,
+                                                                          bool in_parallel,
+                                                                          isize max_concurrent)
+{
+    // Everything below runs on first poll, which inherits the awaiting body's ambient — so this is the driver's context.
+    auto* const parent_ctx = current_context();
+    CC_ASSERT(parent_ctx != nullptr && parent_ctx->execution != nullptr, "nx::async_invoke_tests_* must be awaited "
+                                                                         "from inside a running test");
+    CC_ASSERT(!parent_ctx->allows_sections, "nx::async_invoke_tests_* must be awaited from an async test body; a "
+                                            "synchronous body uses nx::invoke_tests");
+
+    auto result = invocation_result{};
+    auto* const parent = parent_ctx->execution;
+    auto const& config = *parent_ctx->config;
+
+    // The boxes live in this frame until the last child resolves, which is what lets a child take them by const&.
+    auto values = cc::vector<nx::typed_value*>();
+    values.reserve(boxes.size());
+    for (auto& b : boxes)
+        values.push_back(&b);
+
+    int const consumed = current_filter_consumed();
+    auto const scopes = current_section_scopes();
+    auto const permits_segment = [](cc::span<cc::string const> sc, int idx, cc::string_view seg)
+    { return idx >= int(sc.size()) || cc::string_view(sc[idx]) == seg; };
+
+    if (!scopes.empty())
+    {
+        auto any_group = false;
+        for (auto const& sc : scopes)
+            any_group |= permits_segment(sc, consumed, name);
+        if (!any_group)
+            co_return result;
+    }
+
+    auto const* registry = active_registry();
+    if (registry == nullptr)
+        registry = &get_static_test_registry();
+
+    auto matches = cc::vector<test_declaration const*>();
+    for (auto const& decl : registry->declarations)
+        if (decl.is_invocable() && signatures_equal(decl.signature, signature))
+            matches.push_back(&decl);
+    cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
+                                     [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
+                                     [](test_declaration const* d) { return d->location.line(); }));
+
+    // -j1 is the reproducible mode, so a parallel invocation runs its children one at a time there too.
+    in_parallel = in_parallel && config.jobs != 1;
+
+    auto const* const slot = current_slot_declaration();
+    auto const chain_holds_tags = chain_holds_exclusion_tags();
+    auto* const locks = [&]() -> phase_locks*
+    {
+        for (auto const* l = static_cast<cc::async_ambient_link const*>(cc::async_current_ambient()); l != nullptr;
+             l = l->parent)
+        {
+            if (l->tag != test_ambient_tag())
+                continue;
+            auto* const ctx = reinterpret_cast<test_context*>(l->value);
+            if (ctx != nullptr && ctx->locks != nullptr)
+                return ctx->locks;
+        }
+        return nullptr;
+    }();
+
+    auto plan = cc::vector<planned_child>();
+    for (auto const* decl : matches)
+    {
+        ++result.matched;
+
+        auto child_scopes = cc::vector<cc::vector<cc::string>>();
+        if (!scopes.empty())
+        {
+            for (auto const& sc : scopes)
+                if (permits_segment(sc, consumed, name) && permits_segment(sc, consumed + 1, decl->name))
+                    child_scopes.push_back(sc);
+            if (child_scopes.empty())
+                continue;
+        }
+
+        if (is_declaration_active(decl))
+        {
+            report_invocation_cycle(decl);
+            continue;
+        }
+
+        if (slot != nullptr)
+        {
+            auto const why = find_unhonoured_async_dispatch_config(decl->test_config, slot->test_config,
+                                                                   chain_holds_tags, in_parallel);
+            CC_ASSERTS(why.empty(), cc::format("nx::async_invoke_tests_{}: \"{}\" declares {} — it runs under \"{}\"",
+                                               in_parallel ? "in_parallel" : "in_sequence", decl->name, why, slot->name));
+        }
+
+        plan.push_back(planned_child{.decl = decl, .scopes = cc::move(child_scopes)});
+    }
+
+    // Pre-sized and never resized while a child runs, so the execution each context points at stays where it is.
+    auto executions = cc::vector<test_execution>();
+    executions.resize_to_defaulted(plan.size());
+
+    auto runs = cc::vector<cc::shared_async<cc::unit>>();
+    runs.reserve(plan.size());
+    auto permits = cc::unique_ptr<cc::async_semaphore>();
+    if (in_parallel && max_concurrent > 0)
+        permits = cc::make_unique<cc::async_semaphore>(max_concurrent);
+
+    for (isize i = 0; i < plan.size(); ++i)
+    {
+        auto& child = plan[i];
+        auto& execution = executions[i];
+        execution.instance.declaration = child.decl;
+        execution.instance.registry = registry;
+        execution.invocation_group = name;
+
+        auto node = cc::shared_async<cc::unit>();
+        if (child.decl->is_async())
+        {
+            // The same node an ASYNC_TEST gets, so the child's asks — main_thread included — are honoured the same way.
+            auto state = cc::make_unique<async_test_state>(async_test_state{
+                .execution = &execution,
+                .config = &config,
+                .values = values,
+                .section_scopes = child.scopes,
+                .filter_offset = consumed + 2,
+                .is_dispatched = true,
+                .locks = locks,
+            });
+            node = cc::make_async_lazy<cc::unit>([state = cc::move(state)](cc::async_context<cc::unit>& actx) mutable
+                                                 { return step_async_test(*state, actx); });
+        }
+        else
+        {
+            // A synchronous child runs start to finish in one poll, on main when it asks for main.
+            auto const run = [&execution, &config, &child, consumed, vals = cc::span<nx::typed_value*>(values)]
+            {
+                cc::async_no_worker_scope const unbound; // as for any test body: what it schedules is its own business
+                run_test_body(
+                    execution, config, [&] { child.decl->invocable_function(vals); }, child.scopes, consumed + 2);
+                return cc::unit{};
+            };
+            node = child.decl->test_config.main_thread ? cc::make_async_lazy_on_main(run) : cc::make_async_lazy(run);
+        }
+
+        runs.push_back(run_invoked_child(cc::move(node), &child.decl->test_config, locks, permits.get()));
+        if (!in_parallel)
+            co_await runs.back();
+    }
+
+    if (in_parallel && !runs.empty())
+        co_await cc::async_all(cc::span<cc::shared_async<cc::unit> const>(runs));
+
+    result.executed = int(plan.size());
+    parent_ctx->nested_guard.lock([&](cc::unit&) { parent->nested.push_back_range(cc::move(executions)); });
+    co_return result;
 }

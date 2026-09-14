@@ -309,6 +309,24 @@ TEST("sg backend - vulkan")
   `exclusive()` on the driver covers every tag.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
 
+```cpp
+#include <nexus/async-test.hh>
+ASYNC_INVOCABLE_TEST("sg stream - settles", (sg::context_handle const& h))   // coroutine body; same matching key
+{ co_await h->stream.bytes_to_buffer(buf, data).completion(); CHECK(true); }
+
+ASYNC_TEST("sg dx12 backend")                        // only an ASYNC body can await an invocation
+{
+    auto const r = co_await nx::async_invoke_tests_in_sequence("dx12", ctx);  // one child at a time, match order
+    co_await nx::async_invoke_tests_in_parallel("dx12", {.max_concurrent = 4}, ctx);   // fan-out; serial under -j1
+}
+```
+
+- **The sync `nx::invoke_tests` asserts if its MATCHED set (before `-c`) holds an async invocable.**
+- **An async invocation arranges a child's asks**: `main_thread` runs it on main; its `exclusive(tag)`s are taken from the phase.
+  **Never both**: a tagged child under a chain already holding a tag is refused.
+  `exclusive()` needs an `exclusive()` driver and is refused `in_parallel`; scheduler modes must match the driver's.
+- Boxed arguments outlive every child, so `T const&` parameters are safe across a suspend.
+
 ## Running tests
 
 ```bash

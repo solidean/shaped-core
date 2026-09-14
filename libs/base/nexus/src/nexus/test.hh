@@ -28,6 +28,13 @@ void register_async_test(char const* name,
                          cc::unique_function<void(async_test_sink&)> fn,
                          cc::source_location loc);
 
+// Registers an ASYNC_INVOCABLE_TEST: `fn` runs the body with args sourced from typed_value slots and deposits its graph in the sink.
+void register_async_invocable_test(char const* name,
+                                   config::cfg test_config,
+                                   cc::vector<std::type_index> signature,
+                                   cc::unique_function<void(cc::span<nx::typed_value*>, async_test_sink&)> fn,
+                                   cc::source_location loc);
+
 // Registers an invocable (inert) test.
 // `signature` is the decayed argument-type join key, and `fn` runs the body with args sourced from typed_value slots.
 // Non-template so test.hh stays light.

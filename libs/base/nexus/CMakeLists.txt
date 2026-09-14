@@ -203,6 +203,7 @@ if(SC_BUILD_TESTS)
         tests/test-threaded-check-test.cc
         tests/test-parallel-test.cc
         tests/test-async-test.cc
+        tests/test-async-invocable-test.cc
         tests/test-export-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc

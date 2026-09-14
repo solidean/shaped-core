@@ -16,6 +16,16 @@ void nx::impl::register_async_test(char const* name,
     nx::get_static_test_registry().add_async_declaration(name, test_config, cc::move(fn), loc);
 }
 
+void nx::impl::register_async_invocable_test(char const* name,
+                                             config::cfg test_config,
+                                             cc::vector<std::type_index> signature,
+                                             cc::unique_function<void(cc::span<nx::typed_value*>, async_test_sink&)> fn,
+                                             cc::source_location loc)
+{
+    nx::get_static_test_registry().add_async_invocable_declaration(name, test_config, cc::move(signature), cc::move(fn),
+                                                                   loc);
+}
+
 void nx::impl::register_invocable_test(char const* name,
                                        config::cfg test_config,
                                        cc::vector<std::type_index> signature,
