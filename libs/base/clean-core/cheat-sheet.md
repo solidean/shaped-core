@@ -943,6 +943,7 @@ co_await cc::async_resume_on_main();     // coroutine hop: STICKY rehome (option
 co_await cc::async_resume_on_compute();  // / _io() / async_resume_on(h, opts)
 co_await cc::async_set_home_options({.teardown = cc::async_teardown::at_home}); // never suspends; must be homed
 auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); }); // child elsewhere, value moved out
+root->try_home_cold(cc::main_thread_scheduler()); // host-side: home a COLD coroutine / _on node; false for a plain frame
 cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
 home.drain();                            // end of a loop: runs what is left, incl. deferred at_home teardowns
 // inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)

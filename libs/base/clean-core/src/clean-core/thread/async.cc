@@ -1183,6 +1183,29 @@ bool cc::async_node_base::rehome(async_scheduler& home, async_home_options optio
     return false;
 }
 
+bool cc::async_node_base::try_home_cold(async_scheduler& home, async_home_options options)
+{
+    async_scheduler* previous = nullptr;
+    {
+        lock_scope g(this);
+        auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+        if (async_node_state((w & state_mask) >> state_shift) != async_node_state::cold || !ops()->frame_has_home_word)
+            return false;
+        if ((w & homed_bit) != 0)
+            previous = impl::async_home_of(home_word());
+        home_word() = impl::async_make_home_word(&home, options);
+        _state_and_ops.store(w | homed_bit, cc::memory_order_release);
+    }
+
+    if (previous != &home)
+    {
+        home._homed_nodes.fetch_add(1, cc::memory_order_relaxed);
+        if (previous != nullptr)
+            previous->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
+    }
+    return true;
+}
+
 void cc::async_node_base::set_home_options(async_home_options options)
 {
     lock_scope g(this);

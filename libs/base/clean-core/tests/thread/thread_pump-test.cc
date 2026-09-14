@@ -1,4 +1,7 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
@@ -262,3 +265,28 @@ TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches 
     auto const impl = actor->take_impl<counting_actor>();
     CHECK(impl->seen.empty());
 }
+
+// A blocking wait parked in a pool used to sleep on the root alone, deaf to a pump only it would ever sweep.
+// Without threads the drive already falls out to a sweep, so the case worth pinning is the threaded participant.
+#if CC_HAS_THREADS
+TEST("cc::thread_pump_all - a thread parked in a pool still sweeps the pump its graph waits on", main_thread, exclusive())
+{
+    cc::async_thread_pool pool(2);
+    auto const delivered = cc::make_async_manual<int>();
+
+    auto sweeps = cc::atomic<int>{0};
+    auto const pump = cc::register_thread_pump(
+        [&]
+        {
+            // An unthreaded semantic thread: it delivers only when swept, and wakes nobody when it has something.
+            if (sweeps.fetch_add(1) != 3)
+                return false;
+            delivered->push_value(41);
+            return true;
+        });
+
+    auto const root = cc::make_async_lazy([](int v) { return v + 1; }, delivered);
+    CHECK(cc::async_blocking_get_on(pool, root) == 42);
+    CHECK(sweeps.load() >= 4);
+}
+#endif

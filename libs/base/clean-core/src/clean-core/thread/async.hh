@@ -248,8 +248,9 @@ template <cc::node_class_index Cls,
           async_teardown_fn TE,
           async_frame_invoke_fn FI,
           async_frame_destroy_fn FD,
-          async_frame_except_fn FX>
-inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, FI, FD, FX, Cls};
+          async_frame_except_fn FX,
+          bool HomeWord>
+inline constexpr cc::async_type_ops async_type_ops_v = {TV, TE, FI, FD, FX, Cls, HomeWord};
 
 /// The descriptor for a concrete async<T, E> with NO compute frame — a manual/push node, or a born-ready factory.
 /// A reference into the shared, collapsed instance above.
@@ -261,7 +262,8 @@ inline constexpr cc::async_type_ops const& async_type_ops_for
                        async_teardown_ptr<E>(),
                        nullptr,
                        nullptr,
-                       nullptr>;
+                       nullptr,
+                       false>;
 
 /// The descriptor for an async<T, E> running an inline frame of type G.
 /// Installed by set_frame, which is what determines G — the node births frameless and is re-pointed here before it is shared.
@@ -272,7 +274,8 @@ inline constexpr cc::async_type_ops const& async_type_ops_for_frame
                        async_teardown_ptr<E>(),
                        &async_frame_invoke<G>,
                        &async_frame_destroy<G>,
-                       async_frame_except_ptr<E>()>;
+                       async_frame_except_ptr<E>(),
+                       false>;
 
 /// The descriptor for an async<T, E> whose frame slot opens with a home word and holds a G behind it.
 /// A homed node's, and every coroutine's: a coroutine reserves the word so it can hop without reallocating.
@@ -283,7 +286,8 @@ inline constexpr cc::async_type_ops const& async_type_ops_for_homed_frame
                        async_teardown_ptr<E>(),
                        &async_homed_frame_invoke<G>,
                        &async_homed_frame_destroy<G>,
-                       async_frame_except_ptr<E>()>;
+                       async_frame_except_ptr<E>(),
+                       true>;
 
 // error-propagation hook: produce a fresh, independent copy of a dependency's error for a dependent node.
 // The default copies, so a custom E must be copyable where this is used.

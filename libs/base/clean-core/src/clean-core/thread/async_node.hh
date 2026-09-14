@@ -718,6 +718,10 @@ struct alignas(64) cc::async_type_ops
     void (*frame_resolve_exception)(async_node_base* node);
 
     cc::node_class_index class_index; // concrete async<T, E> size class (free_storage frees by it)
+
+    /// The frame slot opens with a home word, so the node can be homed without touching its frame.
+    /// True for every coroutine and every `_on` factory; false for a plain frame and for a frameless node.
+    bool frame_has_home_word;
 };
 
 namespace cc
@@ -858,6 +862,11 @@ public:
 
     /// Replace a homed node's options, keeping its home; the same caller restriction as rehome applies.
     void set_home_options(async_home_options options);
+
+    /// Home a node that has not started yet, from outside its frame — what a host does to place a graph it did not build.
+    /// False, and nothing changes, when the node is no longer cold or its frame reserved no home word: only coroutines and the `_on` factories reserve one.
+    /// Call before scheduling; racing it against a schedule() of the same node is a caller bug.
+    bool try_home_cold(async_scheduler& home, async_home_options options = {});
 
     /// Drive this node as a dependency of a node homed to `required_home` whose policy is same_home_only:
     /// it runs only if it is homed there too, and is otherwise left for the driver to schedule.

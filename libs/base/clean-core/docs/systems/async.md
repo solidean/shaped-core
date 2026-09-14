@@ -679,6 +679,8 @@ cc::shared_async<cc::unit> upload_texture(sg::context& ctx, cc::string path)
   `async_resume_on_main()`, `_compute()` and `_io()` name the well-known homes.
 - `co_await cc::async_set_home_options(options)` changes options in place and never suspends.
 - `co_await cc::async_run_on(h, f)` runs `f` as a child homed to `h` and hands back its value, without moving the body.
+- `node->try_home_cold(h[, options])` homes a node that has not started, from outside its frame — for a host placing a graph it did not build, as a test runner does.
+  It returns false and changes nothing unless the node is cold and its frame reserved a home word, which only coroutines and the `_on` factories do.
 
 A hop resets options to the target's defaults unless it is given its own, because options describe a node's relation to its *current* home.
 Threads off, a hop still re-queues, so the rest of the body runs at that home's next pump point exactly as it would with threads.
@@ -720,6 +722,9 @@ It still creates a `thread_bound_scheduler` for a thread it genuinely owns.
 A main thread blocked in `cc::async_blocking_get` on a graph with a main-homed step in the middle would otherwise wait forever, and the wait and the step usually live in different libraries.
 Pool participation, the no-slot fallback, `async_drive_until_ready` and `cc::thread_pump_all()` all do it; a push to a home whose owner is parked wakes it wherever it parks.
 `thread_pump_all` reaches the home through one TLS read rather than a registry entry, so a threaded sweep with nothing registered stays one atomic load.
+
+**The same waits sweep the thread-pump registry**, since a semantic thread with no thread of its own delivers only when some blocked thread sweeps it.
+A participant parked in a pool therefore sleeps in 1 ms slices while any pump is registered, and sweeps between them; with none registered it sleeps until woken, as before.
 
 **A home is never re-entered from inside one of its own bodies.**
 A blocking wait inside a main-homed body does not run other main-homed bodies, which would see half-finished main-thread state.
