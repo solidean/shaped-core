@@ -17,9 +17,37 @@ namespace sg::backend::dx12
 {
 namespace
 {
-/// The first hardware adapter that supports D3D12, into `out`; false when there is none.
+/// Whether an HRESULT says the GPU went away rather than that it cannot do what was asked.
+///
+/// The distinction decides whether looking at the NEXT adapter is sensible: an adapter that does not support
+/// feature level 11_0 is simply not a candidate, and one that just reset is a machine in trouble.
+[[nodiscard]] bool is_device_loss_hresult(HRESULT hr)
+{
+    return hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_HUNG;
+}
+
+/// What searching for a hardware adapter found.
+enum class adapter_search
+{
+    found,       ///< `out` holds it
+    none,        ///< no hardware adapter supports D3D12 here
+    device_lost, ///< one reported a reset/removal, and that is NOT a reason to go and use a different GPU
+};
+
+struct adapter_search_result
+{
+    adapter_search status = adapter_search::none;
+    HRESULT device_loss_hr = S_OK;
+};
+
+/// The first hardware adapter that supports D3D12, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
-bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
+///
+/// **A device-loss HRESULT stops the search rather than skipping the adapter.**
+/// Treating a reset GPU as "unsuitable" and quietly moving to the next one migrates the whole process to a
+/// different physical device, which nobody asked for and which surfaces much later as something unrelated.
+/// A reset is what `is_device_lost()` exists to report, so it is reported.
+adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
 {
     for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
     {
@@ -29,11 +57,18 @@ bool find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
-        if (SUCCEEDED(D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr)))
-            return true;
+        HRESULT const hr = D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr);
+        if (SUCCEEDED(hr))
+            return {.status = adapter_search::found};
+
+        if (is_device_loss_hresult(hr))
+        {
+            out = nullptr;
+            return {.status = adapter_search::device_lost, .device_loss_hr = hr};
+        }
     }
     out = nullptr;
-    return false;
+    return {.status = adapter_search::none};
 }
 
 /// What `SC_DX12_ADAPTER` asks of this process.
@@ -212,7 +247,9 @@ bool sg::backend::dx12::has_hardware_adapter()
         if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
             return false;
         ComPtr<IDXGIAdapter1> adapter;
-        return find_hardware_adapter(factory.Get(), adapter);
+        // A reset adapter is still a hardware adapter: answering `false` here would quietly hand the run to
+        // WARP, which is the same substitution this function's caller is trying to avoid.
+        return find_hardware_adapter(factory.Get(), adapter).status != adapter_search::none;
     }();
     return has;
 }
@@ -252,7 +289,15 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // The warp pin hides hardware from every request, an explicit `hardware` included, not only from hardware_or_warp.
     auto const hardware_hidden = pin == adapter_pin::warp;
     ComPtr<IDXGIAdapter1> adapter;
-    if (choice != dx12_adapter::warp && (hardware_hidden || !find_hardware_adapter(factory.Get(), adapter)))
+    auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
+
+    // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
+    // a different one would hide that behind whatever goes wrong next.
+    if (search.status == adapter_search::device_lost)
+        return dx12_error(search.device_loss_hr, "the hardware adapter reports a device reset or removal; "
+                                                 "something already running on this GPU took it down");
+
+    if (choice != dx12_adapter::warp && search.status != adapter_search::found)
     {
         if (choice == dx12_adapter::hardware && hardware_hidden)
             return cc::error("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER=warp hides them)");
