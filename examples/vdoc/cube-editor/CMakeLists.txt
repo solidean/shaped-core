@@ -7,6 +7,18 @@ if(NOT (WIN32 AND SC_HAS_DXC_COMPILER AND SC_HAS_SDL3 AND TARGET shaped-graphics
     return()
 endif()
 
+# Its own gate passed, so the question left is which backend the build was ASKED for.
+# This example creates a dx12 context directly, so a build set to vulkan gets a target that says so rather than
+# one that silently is not there.
+sc_resolve_example_backend(_editor_backend _editor_mode SUPPORTS dx12)
+if(_editor_mode STREQUAL "none")
+    return()
+endif()
+if(_editor_mode STREQUAL "stub")
+    sc_add_example_backend_stub(vdoc-cube-editor-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
+    return()
+endif()
+
 # One binary, two EXAMPLEs over shared setup — the case a single-file example cannot show.
 sc_add_example(vdoc-cube-editor-example
     SOURCES

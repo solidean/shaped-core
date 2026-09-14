@@ -34,6 +34,9 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 #
 # Declared here rather than inside an example, and unconditionally: it is repo-wide by name and by description, and
 # an example's own early return would make the cache entry appear and disappear with an unrelated feature detection.
+# Every graphical example resolves it through sc_resolve_example_backend: a named backend that was not built is a
+# configure error, one an example does not support gives a stub target under that example's name, and `auto` takes
+# the example's own first choice. See docs/platforms.md.
 set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12 or vulkan")
 set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan)
 
