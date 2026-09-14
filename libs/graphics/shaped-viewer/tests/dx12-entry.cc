@@ -47,7 +47,8 @@ TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
         SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
 
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
+    auto ctx = sg::create_dx12_context(
+        {.enable_debug_layer = true, .enable_dred = true, .adapter = sg::backend::dx12::dx12_adapter::warp});
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
@@ -59,8 +60,8 @@ TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
 
 TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
 {
-    auto ctx
-        = sg::create_dx12_context({.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    auto ctx = sg::create_dx12_context(
+        {.enable_debug_layer = true, .enable_dred = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));

@@ -13,6 +13,7 @@
 #include <shaped-graphics/backends/dx12/dx12_descriptor_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_async.hh>
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
+#include <shaped-graphics/backends/dx12/dx12_dred.hh> // note_device_removed_if_lost appends dred_report
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
@@ -65,6 +66,14 @@ struct sg::backend::dx12::dx12_config
     /// Enable the D3D12 debug/validation layer.
     /// Best-effort: skipped when it isn't installed.
     bool enable_debug_layer = false;
+
+    /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
+    ///
+    /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
+    /// turning on where a removal is what you are chasing.
+    /// Independent of the debug layer: DRED is the runtime's own bookkeeping and needs no Graphics Tools.
+    /// See libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_dred.hh.
+    bool enable_dred = false;
 
     /// The adapter the device is created on.
     dx12_adapter adapter = dx12_adapter::hardware;
@@ -312,7 +321,10 @@ private:
             reason = _device->GetDeviceRemovedReason();
         if (reason == S_OK)
             return false;
-        mark_device_lost(cc::format("{} (device removed, reason=0x{:08X})", what, u32(reason)));
+        // DRED is empty unless it was armed and the runtime has something to say, so this appends nothing in
+        // the default configuration and the whole breadcrumb trail when it was asked for.
+        mark_device_lost(
+            cc::format("{} (device removed, reason=0x{:08X}){}", what, u32(reason), dred_report(_device.Get())));
         return true;
     }
 

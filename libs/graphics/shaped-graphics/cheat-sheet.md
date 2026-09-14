@@ -103,6 +103,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
+                                                   //   the reason carries DRED's breadcrumbs + page fault when dx12_config::enable_dred was set BEFORE device creation
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
 ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)

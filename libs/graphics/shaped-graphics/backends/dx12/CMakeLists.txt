@@ -7,6 +7,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_context.cc
     src/shaped-graphics/backends/dx12/dx12_gpu_load.cc
     src/shaped-graphics/backends/dx12/dx12_context.create.cc
+    src/shaped-graphics/backends/dx12/dx12_dred.cc
     src/shaped-graphics/backends/dx12/dx12_epoch.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.cc
     src/shaped-graphics/backends/dx12/dx12_command_list.queries.cc
@@ -122,6 +123,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
+        tests/dx12-dred-test.cc
         tests/dx12-validation-broadcast-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc

@@ -8,6 +8,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_dred.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
@@ -233,6 +234,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     UINT const factory_flags = 0;
     if (config.enable_debug_layer)
         enable_debug_layer_once();
+
+    // Before the device, and that is the whole constraint: the runtime decides at creation whether to carry the
+    // bookkeeping, so arming it afterwards records nothing.
+    if (config.enable_dred)
+        enable_dred_once();
 
     ComPtr<IDXGIFactory4> factory;
     if (HRESULT hr = CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&factory)); FAILED(hr))
