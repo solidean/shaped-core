@@ -187,14 +187,36 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
         log_debug_layer_message(level, description);
 }
 
-// Turns the D3D12 debug layer on, at most once for the whole process, and reports whether it is available.
+// Whether EnableDebugLayer has actually run in this process.
+// Distinct from "a caller asked for it": the request can be refused, and the difference is what makes the refusal below correct.
+cc::atomic<bool>& debug_layer_armed()
+{
+    static cc::atomic<bool> armed = false;
+    return armed;
+}
+
+// Whether this process has brought up a D3D12 device yet.
+// Set once a device is created, WARP included -- the debug layer is process-wide, so a software device closes the window just as a hardware one does.
+cc::atomic<bool>& process_has_device()
+{
+    static cc::atomic<bool> has_device = false;
+    return has_device;
+}
+// Activates the D3D12 debug layer for the whole process, at most once, and reports whether it is available.
 //
 // EnableDebugLayer is a PROCESS-wide switch rather than a per-device one, so calling it per context creation is both redundant and unsafe:
 // with several contexts coming up at once, one thread flipping it while another is inside CreateDXGIFactory2 makes that call fail with DXGI_ERROR_INVALID_CALL.
 // A function-local static gives thread-safe once-only initialization and hands every later caller the same answer.
 //
+// It must also precede this process's FIRST DEVICE, which is the constraint with teeth.
+// Arming the layer once a device exists does not merely fail to validate it: on an NVIDIA driver it RESETS the adapter,
+// and every D3D12CreateDevice probe on that adapter then returns DXGI_ERROR_DEVICE_RESET while the GPU itself is fine.
+// A process that wants validation therefore has to ask for it on the first context it creates, which is what debug_layer_armed guards below.
+//
+// One-way by construction, and deliberately so: a context created earlier may still be relying on the layer, so nothing here ever turns it back off.
+//
 // Best-effort: the layer needs the "Graphics Tools" feature, and a host without it runs unvalidated rather than failing to create a context.
-bool enable_debug_layer_once()
+bool activate_global_debug_layer_once()
 {
     static bool const enabled = []
     {
@@ -202,6 +224,7 @@ bool enable_debug_layer_once()
         if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
             return false;
         debug->EnableDebugLayer();
+        debug_layer_armed() = true;
         return true;
     }();
     return enabled;
@@ -269,8 +292,14 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // It also makes concurrent context creation fail: CreateDXGIFactory2 with it set intermittently returns DXGI_ERROR_INVALID_CALL when several threads are in there at once.
     // So it was pure cost.
     UINT const factory_flags = 0;
-    if (config.enable_debug_layer)
-        enable_debug_layer_once();
+    // Refused rather than done anyway: activating the layer now would reset the adapter, and that would surface
+    // later as a GPU looking broken to every context this process creates afterwards.
+    if (config.activate_global_debug_layer && !debug_layer_armed() && process_has_device())
+        return dx12_error(E_INVALIDARG, "the dx12 debug layer must be activated before this process creates its "
+                                        "first device; ask for it on the first context instead");
+
+    if (config.activate_global_debug_layer)
+        activate_global_debug_layer_once();
 
     // Before the device, and that is the whole constraint: the runtime decides at creation whether to carry the
     // bookkeeping, so arming it afterwards records nothing.
@@ -314,6 +343,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ComPtr<ID3D12Device> device;
     if (HRESULT hr = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
+    process_has_device() = true;
 
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -352,7 +382,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     // With the debug layer live, route validation messages through the context, so a listener can be set on it later.
     // Registered here rather than right after device creation: the callback needs the context to consult.
-    if (config.enable_debug_layer)
+    //
+    // Keyed on the layer actually being active, NOT on this context having asked for it: a context created after
+    // something else activated it is validated all the same, and its messages belong on a listener rather than stderr.
+    if (debug_layer_armed())
         ctx->_message_callback_cookie = register_debug_callback(ctx->_device.Get(), ctx.get());
 
     // Completion timelines first: every copyable resource takes its groups from this pool at construction, so it

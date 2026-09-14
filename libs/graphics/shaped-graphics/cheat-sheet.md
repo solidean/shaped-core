@@ -177,7 +177,11 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { enable_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
+//   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
+//   it must be activated before the process's FIRST device: a later activation is refused, because performing it
+//   resets the adapter on some NVIDIA drivers (DXGI_ERROR_DEVICE_RESET on a healthy GPU). ask on the first context.
 // create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 

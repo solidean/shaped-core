@@ -44,7 +44,11 @@ struct sg::backend::vulkan::vulkan_config
     /// Enable the Khronos validation layer plus a debug messenger for its messages.
     /// Messages reach set_message_callback when one is installed, and the recording log otherwise — not stderr directly.
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
-    /// The analogue of dx12_config::enable_debug_layer, and off by default for the same reason: it costs real time.
+    /// Off by default for the same reason as dx12_config::activate_global_debug_layer: it costs real time.
+    /// The machinery underneath is NOT the same, though, and the naming difference is the tell.
+    /// Vulkan attaches validation to the VkInstance this context creates, so it really is per-context: `false` here means
+    /// this context is unvalidated whatever any other context did, and a later context can validate without touching this one.
+    /// D3D12 has only a process-wide switch, which is why its flag is named for activating something global.
     bool enable_validation_layers = false;
 
     /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across

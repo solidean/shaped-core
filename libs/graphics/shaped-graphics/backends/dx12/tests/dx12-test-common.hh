@@ -86,7 +86,7 @@ inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_ha
 inline cc::result<dx12_context_handle> make_test_context(dx12_config config = {})
 {
     config.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp;
-    config.enable_debug_layer = true;
+    config.activate_global_debug_layer = true;
     return as_test_context(sg::create_dx12_context(config));
 }
 

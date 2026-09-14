@@ -1,5 +1,6 @@
 #include "vulkan-test-common.hh"
 
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -26,7 +27,16 @@ TEST("sg vulkan backend - device", exclusive("vulkan-device"))
     if (ctx == nullptr)
         SKIP("no vulkan device");
     else
+    {
         nx::invoke_tests("device", ctx);
+
+        // A device loss during our own tests is a defect, not an environment quirk to tolerate.
+        // Vulkan has no equivalent of dx12's poll, so this sees only a loss some operation already noticed --
+        // which every submitting test does.
+        CHECK(!ctx->is_device_lost())
+            .context(
+                cc::format("the device was lost while running this binary's GPU tests: {}", ctx->device_loss_reason()));
+    }
 }
 
 // One alias per invocable, so `dev.py test "sg vulkan - <name>"` still selects that one test.

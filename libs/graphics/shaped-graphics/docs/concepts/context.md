@@ -9,7 +9,7 @@ A backend subclasses it — `sg::backend::dx12::dx12_context`, `sg::backend::vul
 ```cpp
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-auto ctx = sg::create_dx12_context({.enable_debug_layer = true}).value();  // -> cc::result<sg::context_handle>
+auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true}).value();  // -> cc::result<sg::context_handle>
 ```
 
 `sg::context_handle` is `std::shared_ptr<sg::context>`.

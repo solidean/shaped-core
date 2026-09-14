@@ -63,9 +63,30 @@ enum class sg::backend::dx12::dx12_adapter : sg::u8
 /// The flags are independent.
 struct sg::backend::dx12::dx12_config
 {
-    /// Enable the D3D12 debug/validation layer.
-    /// Best-effort: skipped when it isn't installed.
-    bool enable_debug_layer = false;
+    /// Ask for the D3D12 debug/validation layer, which is a PROCESS-WIDE switch and not a per-context one.
+    ///
+    /// `true` activates it for the whole process, if it is not active already.
+    /// `false` means only that THIS context does not ask for it, and never that this context runs unvalidated:
+    /// once anything has activated the layer, every context created afterwards is validated too.
+    ///
+    /// **There is no way to deactivate it, and none is offered.**
+    /// D3D12 makes the switch one-way, and a context that asked for validation is still relying on it -- so a later
+    /// `false` must not, and does not, take it away.
+    /// That asymmetry is why this is named for activating rather than for enabling.
+    ///
+    /// There is no per-device alternative to reach for either.
+    /// ID3D12DebugDevice is obtained FROM a device that already carries the layer and only tunes it; a device created
+    /// without the layer cannot be given one afterwards.
+    ///
+    /// **It must be activated before this process creates its first device.**
+    /// Activating it later is undefined per the D3D12 contract, and on at least one NVIDIA driver it RESETS the
+    /// adapter: D3D12CreateDevice on it then fails with DXGI_ERROR_DEVICE_RESET for seconds while the GPU is healthy.
+    /// So create_dx12_context REFUSES a late activation instead of performing it, and the caller asks on the first
+    /// context the process creates.
+    /// dx12-debug-layer-order-manual-test.cc demonstrates the reset in raw D3D12.
+    ///
+    /// Best-effort: skipped when the layer isn't installed.
+    bool activate_global_debug_layer = false;
 
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
@@ -163,7 +184,7 @@ public:
     }
 
     /// Routes this device's debug-layer messages to `callback` instead of stderr.
-    /// Only ever called when the context was created with enable_debug_layer, and only for messages raised after creation returned.
+    /// Only ever called while the debug layer is active in this process, and only for messages raised after creation returned.
     /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.
     /// Passing an empty function restores the stderr default.
     void set_message_callback(cc::unique_function<void(dx12_message_severity, cc::string_view)> callback)
@@ -339,6 +360,15 @@ private:
     }
 
 public:
+    /// Asks the device whether it has been removed, and marks the context lost when it has.
+    /// Returns whether the device is gone.
+    ///
+    /// Device loss is otherwise noticed only by an operation that fails on it, so a reset that lands after the
+    /// last submit leaves `is_device_lost()` false.
+    /// This is the authoritative answer: it consults GetDeviceRemovedReason directly, and folds the DRED report
+    /// into the loss reason like every other detection point.
+    bool poll_device_removal() { return note_device_removed_if_lost(S_OK, "device removal poll"); }
+
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override
     {
         CC_ASSERT(dynamic_cast<dx12_command_list*>(cmd.get()) != nullptr, "command list is not a dx12 command list");

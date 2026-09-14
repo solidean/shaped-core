@@ -124,6 +124,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-entry.cc
         tests/dx12-context-test.cc
         tests/dx12-dred-test.cc
+        tests/dx12-debug-layer-order-manual-test.cc
         tests/dx12-validation-broadcast-test.cc
         tests/dx12-epoch-test.cc
         tests/dx12-command-pool-test.cc

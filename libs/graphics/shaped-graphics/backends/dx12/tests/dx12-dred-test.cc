@@ -22,7 +22,7 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - DRED reports the removal it was armed for", nx::config::exclusive())
 {
-    auto created = sg::create_dx12_context({.enable_debug_layer = true, .enable_dred = true});
+    auto created = sg::create_dx12_context({.activate_global_debug_layer = true, .enable_dred = true});
     if (created.has_error())
         SKIP("no Direct3D 12 device");
 
