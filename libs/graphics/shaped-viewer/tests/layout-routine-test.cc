@@ -214,4 +214,55 @@ INVOCABLE_TEST("sv - a group is created against a layout whose static samplers i
     auto const g2 = ctx.transient.create_binding_group(
         plain, group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
     CHECK(g2 != nullptr);
+
+    // And BOUND, which is the half a create alone cannot reach: every backend's bind_group asserts the group's
+    // layout against the one the bound pipeline was built with, so a group created against a layout the pipeline
+    // does not carry is caught here and nowhere earlier.
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build layout.hlsl");
+
+    auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
+    auto const ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
+    (void)cc::try_async_blocking_get(vs);
+    (void)cc::try_async_blocking_get(ps);
+
+    auto const* const compiled_vs = vs->try_value();
+    auto const* const compiled_ps = ps->try_value();
+    REQUIRE(compiled_vs != nullptr);
+    REQUIRE(compiled_ps != nullptr);
+
+    auto const* const constants_binding = [&]() -> sg::binding const*
+    {
+        for (auto const& b : compiled_vs->bindings)
+            if (b.type == sg::binding_type::uniform_buffer)
+                return &b;
+        return nullptr;
+    }();
+    REQUIRE(constants_binding != nullptr);
+
+    auto const pipeline_layout
+        = ctx.cached.acquire_pipeline_layout({.groups = {layout}, .inline_constants = *constants_binding});
+    auto pipeline = ctx.cached.acquire_raster_pipeline(
+        sg::raster_pipeline_description{.layout = pipeline_layout,
+                                        .vertex_shader = *compiled_vs,
+                                        .fragment_shader = *compiled_ps,
+                                        .topology = sg::primitive_topology::triangle_list,
+                                        .rasterization = {.cull = sg::cull_mode::none},
+                                        .color_targets = {{.format = sg::pixel_format::rgba16_float}}});
+    auto const built = cc::async_blocking_get(pipeline);
+    REQUIRE(built != nullptr);
+
+    auto const target = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 8, .height = 8, .usage = sg::texture_usage::render_target});
+    auto cmd = ctx.create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
+        scope.bind_pipeline(*built);
+        scope.bind<group>(*g);
+    }
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    ctx.block_until_idle();
 }
