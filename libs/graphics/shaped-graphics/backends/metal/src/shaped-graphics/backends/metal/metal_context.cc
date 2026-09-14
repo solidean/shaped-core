@@ -17,14 +17,17 @@ CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.metal");
 
 metal_context::metal_context(MTL::Device* device,
                              MTL4::CommandQueue* queue,
+                             MTL4::Compiler* compiler,
                              MTL::SharedEvent* epoch_event,
                              MTL::SharedEvent* submission_event)
   : sg::context(sg::backend_kind::metal, sg::thread_model::multi_threaded, k_accepted_shader_formats),
     _device(device),
     _queue(queue),
+    _compiler(compiler),
     _epochs(device, queue, epoch_event, submission_event)
 {
     CC_ASSERT(_device != nullptr && _queue != nullptr, "a metal context needs a device and a queue");
+    CC_ASSERT(_compiler != nullptr, "a metal context needs a compiler");
     _feedback = std::make_shared<metal_feedback_sink>(*this);
 }
 
@@ -269,6 +272,13 @@ void metal_context::shutdown()
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
     _samplers.shutdown();
+
+    if (_compiler != nullptr)
+    {
+        _compiler->release();
+        _compiler = nullptr;
+    }
+
     _residency.shutdown();
 
     _queue->release();
@@ -523,10 +533,10 @@ cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout
     return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 
-cc::result<sg::compute_pipeline_handle> metal_context::try_create_compute_pipeline(compute_pipeline_description const&,
-                                                                                   lifetime_scope)
+cc::result<sg::compute_pipeline_handle> metal_context::try_create_compute_pipeline(compute_pipeline_description const& desc,
+                                                                                   lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create compute pipelines yet");
+    return cc::result<sg::compute_pipeline_handle>(create_metal_compute_pipeline(desc, scope));
 }
 
 cc::result<sg::raster_pipeline_handle> metal_context::try_create_raster_pipeline(raster_pipeline_description const&,

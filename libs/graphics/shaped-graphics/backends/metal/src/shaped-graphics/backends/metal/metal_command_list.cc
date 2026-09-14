@@ -3,7 +3,9 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <shaped-graphics/backends/metal/metal_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
+#include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 
@@ -66,6 +68,27 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     // information for; it is not a correctness gap.
     _encoder->barrierAfterQueueStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
     return _encoder;
+}
+
+MTL4::ArgumentTable* metal_command_list::argument_table()
+{
+    if (_argument_table != nullptr)
+        return _argument_table;
+
+    auto* const descriptor = MTL4::ArgumentTableDescriptor::alloc()->init();
+    // One buffer slot per binding group sg budgets, plus the one it reserves for itself — the whole address space a
+    // pipeline layout can name.
+    // Metal allows 31, so the cap is sg's rather than the API's.
+    descriptor->setMaxBufferBindCount(NS::UInteger(sg::max_binding_groups + 1));
+    descriptor->setInitializeBindings(true);
+    descriptor->setLabel(ns_string("sg command list"));
+
+    NS::Error* error = nullptr;
+    _argument_table = _metal_context.device()->newArgumentTable(descriptor, &error);
+    descriptor->release();
+    CC_ASSERT(_argument_table != nullptr, "the metal device refused an argument table");
+
+    return _argument_table;
 }
 
 void metal_command_list::end_encoder()
@@ -345,19 +368,57 @@ void metal_command_list::copy_buffer_region(raw_buffer_handle src,
                                       NS::UInteger(dst_offset_in_bytes), NS::UInteger(size_in_bytes));
 }
 
-void metal_command_list::compute_bind_pipeline(compute_pipeline const&)
+void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
 {
-    SG_METAL_UNIMPLEMENTED("binding a compute pipeline");
+    auto const& mtl_pipeline = static_cast<metal_compute_pipeline const&>(pipeline);
+    _bound_compute = &mtl_pipeline;
+
+    auto* const encoder = compute_encoder();
+    encoder->setComputePipelineState(mtl_pipeline.state());
+    encoder->setArgumentTable(argument_table());
 }
 
-void metal_command_list::compute_bind_group(int, binding_group const&)
+void metal_command_list::compute_bind_group(int group_index, binding_group const& group)
 {
-    SG_METAL_UNIMPLEMENTED("binding a compute binding group");
+    CC_ASSERT(group_index >= 0 && group_index < sg::max_binding_groups, "group index is out of range");
+
+    auto const& mtl_group = static_cast<metal_binding_group const&>(group);
+
+    // A layout that pins a group index may only ever be bound there, which is what makes a shader compiled against it
+    // read the table slot it expects.
+    if (auto const pinned = mtl_group.layout().group_index(); pinned.has_value())
+        CC_ASSERT(int(pinned.value()) == group_index, "this binding group's layout pins it to a different group index");
+
+    // The group's argument buffer address goes into the table's buffer slot, which IS the MSL [[buffer(N)]] index.
+    argument_table()->setAddress(mtl_group.argument_address(), NS::UInteger(group_index));
+
+    // The buffers are copied rather than the group held: a binding_group arrives by reference and has no handle to
+    // take, and what a dispatch needs is the access list rather than the group itself.
+    auto& slot_buffers = _group_buffers[group_index];
+    slot_buffers.clear();
+    for (auto const& buffer : mtl_group.bound_buffers())
+        slot_buffers.push_back(buffer);
 }
 
-void metal_command_list::compute_dispatch(int, int, int)
+void metal_command_list::compute_dispatch(int x, int y, int z)
 {
-    SG_METAL_UNIMPLEMENTED("a compute dispatch");
+    CC_ASSERT(_bound_compute != nullptr, "a dispatch needs a bound compute pipeline");
+    CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch dimensions must be non-negative");
+
+    if (x == 0 || y == 0 || z == 0)
+        return;
+
+    // Everything the bound groups name is read by this dispatch, so it is declared now rather than at bind time: a
+    // group bound and then rebound before any dispatch never ran, and should leave no barrier behind.
+    for (auto const& slot_buffers : _group_buffers)
+        for (auto const& buffer : slot_buffers)
+            declare_buffer(buffer, sg::pipeline_stage_flag::compute,
+                           sg::access_flag::shader_read | sg::access_flag::shader_write);
+    flush_barriers();
+
+    auto const size = _bound_compute->workgroup_size();
+    compute_encoder()->dispatchThreadgroups(MTL::Size(NS::UInteger(x), NS::UInteger(y), NS::UInteger(z)),
+                                            MTL::Size(NS::UInteger(size.x), NS::UInteger(size.y), NS::UInteger(size.z)));
 }
 
 void metal_command_list::compute_set_inline_constants(cc::span<byte const>, cc::optional<isize>)

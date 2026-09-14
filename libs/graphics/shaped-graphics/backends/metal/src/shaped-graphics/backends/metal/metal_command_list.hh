@@ -131,6 +131,13 @@ private:
     /// Called immediately before the op those declares were for.
     void flush_barriers();
 
+    /// The argument table every bound group is written into, created on first use.
+    ///
+    /// **MTL4 binds through a table rather than per-encoder setters.** One table serves this list, and a group bound
+    /// at slot N writes its argument buffer's address into buffer-binding N — which is what makes sg's group_index the
+    /// MSL `[[buffer(N)]]` index directly.
+    [[nodiscard]] MTL4::ArgumentTable* argument_table();
+
     metal_context& _metal_context;
     MTL4::CommandAllocator* _allocator = nullptr;
     MTL4::CommandBuffer* _buffer = nullptr;
@@ -148,6 +155,16 @@ private:
     /// The buffers with a declare awaiting the next flush.
     /// A subset of `_touched_buffers`, cleared per op.
     cc::vector<sg::raw_buffer_handle> _pending_buffers;
+
+    MTL4::ArgumentTable* _argument_table = nullptr;
+
+    /// The pipeline currently bound, for the workgroup size a thread-count dispatch divides by.
+    metal_compute_pipeline const* _bound_compute = nullptr;
+
+    /// Per slot, the buffers the group bound there names — copied at bind time, because a binding_group is handed over
+    /// by reference and has no handle to take.
+    /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
+    cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
 
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///

@@ -5,7 +5,8 @@
 Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
-Pipelines, textures, raster, presentation and async transfer still assert.
+Compute pipelines build from a metallib and dispatch.
+Textures, raster, presentation and async transfer still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -65,6 +66,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
   They cannot collide, because sg already requires that index to be unique within its group.
+- **A pipeline is built through an explicit compiler object.**
+  MTL4 makes compilation an `MTL4Compiler` the context owns, where Metal 3 hid it behind the device.
+  A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.
+- **Bindings reach a dispatch through an argument table, not per-encoder setters.**
+  One `MTL4ArgumentTable` serves a command list, and a group bound at slot N writes its argument buffer's address into buffer-binding N — so sg's `group_index` *is* the MSL `[[buffer(N)]]` index.
 - **A barrier names stages, not resources.**
   `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
   The resource list an sg barrier carries has nowhere to go.
@@ -138,7 +144,12 @@ A handler still in flight then does nothing instead of reporting into freed memo
 
 ## Testing
 
-`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, and what Metal reports where.
+`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, transfer, the bind path, compute, and what Metal reports where.
+
+The tier-1 suite has **no compute execution test at all** — it cannot, because bytecode is per-backend by construction — so this tier is the specification for the dispatch path.
+`double_compute.metal` is checked in beside the `double_compute.metallib.h` compiled from it, with the command line in the source's own comment.
+So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
+Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.
 The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 

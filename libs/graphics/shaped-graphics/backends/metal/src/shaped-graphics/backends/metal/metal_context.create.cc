@@ -85,6 +85,22 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
         return error;
     }
 
+    // One compiler per context.
+    // MTL4 makes compilation an explicit object where Metal 3 hid it behind the device, and it is what every pipeline
+    // build goes through.
+    auto* const compiler_descriptor = MTL4::CompilerDescriptor::alloc()->init();
+    NS::Error* compiler_error = nullptr;
+    auto* const compiler = device->newCompiler(compiler_descriptor, &compiler_error);
+    compiler_descriptor->release();
+
+    if (compiler == nullptr)
+    {
+        auto error = metal_error(compiler_error, "could not create the metal compiler");
+        queue->release();
+        device->release();
+        return error;
+    }
+
     auto* const epoch_event = device->newSharedEvent();
     auto* const submission_event = device->newSharedEvent();
     if (epoch_event == nullptr || submission_event == nullptr)
@@ -93,6 +109,7 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
             epoch_event->release();
         if (submission_event != nullptr)
             submission_event->release();
+        compiler->release();
         queue->release();
         device->release();
         return cc::error("could not create the metal epoch timelines");
@@ -101,7 +118,7 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     // From here on the context owns every handle above, so nothing below may release one — the destructor would free it
     // a second time.
     // That is why the guard-style unwinds stop here rather than continuing past construction.
-    auto ctx = std::make_shared<metal_context>(device, queue, epoch_event, submission_event);
+    auto ctx = std::make_shared<metal_context>(device, queue, compiler, epoch_event, submission_event);
     ctx->set_adapter_info(describe(device));
     ctx->create_staging_rings(config.upload_ring_bytes, config.download_ring_bytes);
 

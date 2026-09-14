@@ -11,6 +11,7 @@
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_command_list.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/backends/metal/metal_memory_heap.hh>
@@ -60,6 +61,7 @@ public:
     /// therefore neither copyable nor movable — so it is built in place here.
     metal_context(MTL::Device* device,
                   MTL4::CommandQueue* queue,
+                  MTL4::Compiler* compiler,
                   MTL::SharedEvent* epoch_event,
                   MTL::SharedEvent* submission_event);
     ~metal_context() override;
@@ -79,6 +81,10 @@ public:
 
     /// MTLSamplerStates for bound sampler values, shared context-wide.
     [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
+
+    /// The MTL4 compiler every pipeline is built through.
+    /// One per context: MTL4 makes compilation an explicit object where Metal 3 hid it behind the device.
+    [[nodiscard]] MTL4::Compiler* compiler() const { return _compiler; }
 
     /// The rings inline transfers stage through, guarded because a list may record on any thread.
     [[nodiscard]] cc::mutex<metal_staging_ring>& upload_ring() { return _upload_ring; }
@@ -102,6 +108,9 @@ public:
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<metal_pipeline_layout_handle> create_metal_pipeline_layout(
         sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<metal_compute_pipeline_handle> create_metal_compute_pipeline(
+        sg::compute_pipeline_description const& desc,
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<staging_binding_group_handle> create_metal_staging_binding_group(
         sg::binding_group_layout_handle layout,
@@ -256,6 +265,7 @@ private:
     sg::command_list_slot_allocator _slots;
     metal_residency_set _residency;
     metal_sampler_cache _samplers;
+    MTL4::Compiler* _compiler = nullptr;
     cc::mutex<metal_staging_ring> _upload_ring;
     cc::mutex<metal_staging_ring> _download_ring;
 

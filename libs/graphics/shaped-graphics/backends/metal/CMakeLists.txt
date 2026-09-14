@@ -16,6 +16,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_buffer.cc
     src/shaped-graphics/backends/metal/metal_common.cc
     src/shaped-graphics/backends/metal/metal_command_list.cc
+    src/shaped-graphics/backends/metal/metal_compute_pipeline.cc
     src/shaped-graphics/backends/metal/metal_context.cc
     src/shaped-graphics/backends/metal/metal_context.create.cc
     src/shaped-graphics/backends/metal/metal_epoch.cc
@@ -41,6 +42,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_buffer_access.hh
     src/shaped-graphics/backends/metal/metal_common.hh
     src/shaped-graphics/backends/metal/metal_command_list.hh
+    src/shaped-graphics/backends/metal/metal_compute_pipeline.hh
     src/shaped-graphics/backends/metal/metal_context.hh
     src/shaped-graphics/backends/metal/metal_epoch.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
@@ -72,6 +74,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/metal-barrier-test.cc
         tests/metal-binding-test.cc
+        tests/metal-compute-test.cc
         tests/metal-test.cc
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc

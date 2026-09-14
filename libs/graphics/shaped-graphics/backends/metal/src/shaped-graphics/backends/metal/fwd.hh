@@ -21,6 +21,7 @@ struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder tak
 class metal_binding_group;
 class metal_binding_group_layout;
 class metal_pipeline_layout;
+class metal_compute_pipeline;
 class metal_staging_binding_group;
 class metal_sampler_cache; // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
 class metal_buffer;
@@ -34,6 +35,7 @@ using metal_memory_heap_handle = std::shared_ptr<metal_memory_heap const>;
 using metal_binding_group_handle = std::shared_ptr<metal_binding_group const>;
 using metal_binding_group_layout_handle = std::shared_ptr<metal_binding_group_layout const>;
 using metal_pipeline_layout_handle = std::shared_ptr<metal_pipeline_layout const>;
+using metal_compute_pipeline_handle = std::shared_ptr<metal_compute_pipeline>;
 
 // metal_texture is declared by the milestone that adds it.
 
