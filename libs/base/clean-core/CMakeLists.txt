@@ -89,6 +89,7 @@ add_library(clean-core
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/thread_pump.cc
+    src/clean-core/thread/async_parker.cc
     src/clean-core/thread/async.cc
     src/clean-core/thread/async_ambient.cc
     src/clean-core/thread/async_thread_pool.cc
@@ -608,6 +609,7 @@ if(SC_BUILD_TESTS)
         tests/thread/thread_pump-test.cc
         tests/thread/threaded_actor-test.cc
     )
+    sc_nexus_binary(clean-core-test KINDS tests)
 
     target_link_libraries(clean-core-test
         PRIVATE

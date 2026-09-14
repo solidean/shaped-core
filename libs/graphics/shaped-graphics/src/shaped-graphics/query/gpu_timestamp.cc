@@ -13,6 +13,19 @@ cc::shared_async<cc::unit const> gpu_timestamp::completion() const
     return _heap_future != nullptr ? _heap_future->completion() : cc::shared_async<cc::unit const>();
 }
 
+cc::shared_async<u64> gpu_timestamp::ticks() const
+{
+    if (_heap_future == nullptr)
+        return {};
+    return cc::make_async_lazy(
+        [index = _index](cc::pinned_data<u64 const> const& heap)
+        {
+            CC_ASSERT(index < heap.size(), "timestamp index out of range for its heap download");
+            return heap[index];
+        },
+        _heap_future->data());
+}
+
 cc::optional<u64> gpu_timestamp::try_get_ticks() const
 {
     if (_heap_future == nullptr)

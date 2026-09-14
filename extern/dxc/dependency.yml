@@ -22,8 +22,9 @@ upstreams:
     asset_linux: linux_dxc_2026_05_26.x86_64.tar.gz
     pin_hash_linux: 928b3e9986d11dc4279050e02340950c29bcbd1e5efb9d3ded9669dade37639d
     license: LicenseRef-Microsoft-DXC-Binary
-    # The Windows zip ships one license member; the Linux tarball ships the MS terms and the LLVM ones separately.
-    license_files: [.install/LICENSE.txt, .install/LICENSE-LLVM.txt]
+    # The Windows zip ships the MS terms, an MIT text and the LLVM license; the Linux tarball ships no MIT text.
+    # download-dxc.py maps each by name, so every platform writes the same file for the same text.
+    license_files: [.install/LICENSE.txt, .install/LICENSE-LLVM.txt, .install/LICENSE-MIT.txt]
     used_by: shaped-shader-compiler-dxc — HLSL to sg::compiled_shader
     notes: |
       The one dependency that is not permissively licensed, and the only one we take as a binary rather than as source.
@@ -31,4 +32,4 @@ upstreams:
       It permits redistributing the "distributable code" (dxcompiler.dll, dxil.dll) with an application, which is exactly how we use it.
       It is on the license allowlist as a named exception rather than by category; re-read the terms on any version bump.
       Building DXC from source instead would be an LLVM-scale build, which is why we take the binary.
-      The release zip names its license member inconsistently across versions, so download-dxc.py finds it by pattern and normalizes it to .install/LICENSE.txt.
+      The releases name their license members per platform, so download-dxc.py maps each by name onto the files `license_files` declares.

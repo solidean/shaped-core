@@ -1,7 +1,9 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/stat.hh>
+#include <nexus/async-test.hh>
 #include <nexus/bench/bench.hh>
 #include <nexus/bench/run.hh>
+#include <nexus/bench/run_async.hh>
 #include <nexus/test.hh>
 
 // The harness measuring itself.
@@ -136,4 +138,13 @@ BENCHMARK("nx::bench - the measured work itself")
                        nx::bench::sink(acc);
                        it.items(32);
                    });
+}
+
+// What run_async adds to an iteration, which is the floor any awaited measurement is read against.
+// The graph is born ready, so what remains is the harness's own coroutine frame, the await and the clock pair.
+ASYNC_BENCHMARK("nx::bench - an awaited iteration")
+{
+    (void)co_await nx::bench::run_async("a graph that is already ready", [] { return cc::make_async_from_value(1); });
+    (void)co_await nx::bench::run_async("a lazy graph run on the pool",
+                                        [] { return cc::make_async_lazy([] { return nx::bench::keep(2); }); });
 }

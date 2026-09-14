@@ -43,6 +43,11 @@ public:
     /// Depend on it to chain work off a measurement without blocking anything; an invalid timestamp hands back null.
     [[nodiscard]] cc::shared_async<cc::unit const> completion() const;
 
+    /// The raw GPU tick, as an async that resolves once it lands: `auto const t = co_await timestamp.ticks();`.
+    /// Fails when the readback is cancelled or fails; null on an invalid timestamp.
+    /// Only differences are meaningful.
+    [[nodiscard]] cc::shared_async<u64> ticks() const;
+
     /// The raw GPU tick if ready (polls), else nullopt.
     /// Only differences are meaningful.
     [[nodiscard]] cc::optional<u64> try_get_ticks() const;

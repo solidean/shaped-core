@@ -1,4 +1,6 @@
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -56,8 +58,8 @@ sg::compiled_shader compile_compute(ssc::dxc::compiler& comp, char const* source
 }
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample, read back",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample, read back",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -106,16 +108,14 @@ INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample,
     REQUIRE(fill_group_layout != nullptr);
     auto fill_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {fill_group_layout}});
     REQUIRE(fill_pipeline_layout != nullptr);
-    auto fill_pipe
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout}));
+    auto fill_pipe = co_await ctx.cached.acquire_compute_pipeline({.shader = fill, .layout = fill_pipeline_layout});
     REQUIRE(fill_pipe != nullptr);
 
     auto sample_group_layout = ctx.cached.acquire_binding_group_layout(sample.bindings);
     REQUIRE(sample_group_layout != nullptr);
     auto sample_pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {sample_group_layout}});
     REQUIRE(sample_pipeline_layout != nullptr);
-    auto sample_pipe = cc::async_blocking_get(
-        ctx.cached.acquire_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout}));
+    auto sample_pipe = co_await ctx.cached.acquire_compute_pipeline({.shader = sample, .layout = sample_pipeline_layout});
     REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.
@@ -151,14 +151,12 @@ INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, sample,
     auto future = down->download.data_from_buffer<float>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
 
     // Point-sampling texel centers reproduces exactly what pass 1 wrote: Out[i] == i.
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != float(i))
+        if (data[i] != float(i))
             ok = false;
     CHECK(ok);
 }

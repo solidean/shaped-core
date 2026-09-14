@@ -4,8 +4,10 @@
 #include <blob-cache/impl/cache_paths.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -43,7 +45,8 @@ TEST("bcache creates a missing directory tree, and says so again on the second c
 }
 
 // exclusive() because this one is about the PROCESS-WIDE default, which every other test shares.
-TEST("bcache opens a database inside a directory tree it had to create", exclusive())
+// main_thread because it awaits an unthreaded store: only a loop that owns its thread drives one, and nexus's main loop is it.
+ASYNC_TEST("bcache opens a database inside a directory tree it had to create", main_thread, exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -55,9 +58,9 @@ TEST("bcache opens a database inside a directory tree it had to create", exclusi
     auto const db_path = cc::format("{}/cache.db", directory);
     auto cache = blob_cache::create({.path = db_path, .unthreaded = true});
 
+    // Awaited rather than pumped by hand: the main loop sweeps the store, and the store's post wakes the loop.
     auto opened = cache->opened();
-    for (auto i = 0; i < 1000 && !opened->is_ready(); ++i)
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(opened);
 
     REQUIRE(opened->is_ready());
     CHECK(cache->get_stats().is_backed_by_storage);

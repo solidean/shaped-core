@@ -83,6 +83,7 @@ if(SC_BUILD_TESTS)
         tests/conformance/recovery-conformance-test.cc
         tests/conformance/snapshots-conformance-test.cc
     )
+    sc_nexus_binary(versioned-document-file-test KINDS tests)
 
     # babel-serializer is linked for the test fixture alone, which fabricates a damaged file on purpose.
     # No library source here includes it, which is what keeps .shaped-lint.yml free of a sqlite entry.

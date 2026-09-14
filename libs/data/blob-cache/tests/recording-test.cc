@@ -6,6 +6,8 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -53,9 +55,10 @@ f64 accumulated(cc::rec::recording const& r, cc::string_view name)
 }
 } // namespace
 
-TEST("bcache/recording - hits and misses are recorded as they are counted",
-     nx::config::exclusive(),
-     nx::config::owns_recorder)
+ASYNC_TEST("bcache/recording - hits and misses are recorded as they are counted",
+           nx::config::exclusive(),
+           nx::config::owns_recorder,
+           nx::config::main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -67,12 +70,13 @@ TEST("bcache/recording - hits and misses are recorded as they are counted",
 
     {
         auto f = cache_fixture();
+        (void)co_await f.opened();
         auto const key = key_of("shader", "recorded");
 
         // One miss, then a store, then one hit.
-        CHECK(!f.settle(f.cache().get(key)).has_value());
-        f.settle_only(f.cache().put(key, make_blob("bytes")));
-        CHECK(f.settle(f.cache().get(key)).has_value());
+        CHECK(!(co_await f.cache().get(key)).has_value());
+        (void)co_await f.cache().put(key, make_blob("bytes"));
+        CHECK((co_await f.cache().get(key)).has_value());
     }
 
     cc::rec::flush_blocking();

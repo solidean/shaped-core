@@ -15,6 +15,7 @@
 #include <utility>
 
 // The test target declares this package itself (sc_add_shader_package in the CMakeLists); generated into the build dir and private to this binary.
+#include <nexus/async-test.hh>
 #include <sg_test_shaders.hh>
 
 using namespace cc::primitive_defines;
@@ -31,8 +32,8 @@ using namespace cc::primitive_defines;
 // backend, so two tests reaching for the same type would see each other's phase counts — and the one that ran second
 // would assert against a routine that was already initialized.
 // Tests needing TWO contexts live in routine-contexts-test.cc, which cannot be backend-agnostic for that reason.
-// So does any test whose `singlethreaded` or `exclusive` must hold: nx::invoke_tests runs a child under its driver's
-// config, so on an INVOCABLE_TEST both are ignored.
+// So does any test that must be `singlethreaded`: an invocation cannot give a child a scheduler its driver does not run on.
+// An `exclusive` tag does hold here, since the drivers' async invocation takes a child's tags around its run.
 
 namespace
 {
@@ -302,9 +303,9 @@ INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache do
     ctx->drop_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
-               (sg::context_handle const& ctx),
-               exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx != nullptr);
 
@@ -339,13 +340,11 @@ INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
     auto const future = down->download.data_from_buffer<u32>(out.raw(), 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 3u + 7u)
+        if (data[i] != u32(i) * 3u + 7u)
             ok = false;
     CHECK(ok);
 }
@@ -369,7 +368,7 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
 
     // The exclusion tag is what makes `inits == 1` meaningful.
     // sg::reload_generation() is process-global, and a concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
-    // The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
+    // The tag is honoured because the drivers' async invocation takes it around this test's run.
     //
     // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
     // backend in the same process would otherwise carry in.
@@ -406,8 +405,10 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
     CHECK(racing_routine::inits.load() == 1);
 }
 
+// Holds sg-reload-generation too: a reload another test signals re-runs this routine's init and resets the count.
 INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
-               (sg::context_handle const& ctx))
+               (sg::context_handle const& ctx),
+               exclusive("sg-reload-generation"))
 {
     // Unguarded, the plain-int increment races and the total lands below the expected count.
     REQUIRE(ctx != nullptr);
@@ -457,7 +458,7 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 // slow output, which is why the parameter is part of the registry key rather than something execute() re-checks.
 // Holds sg-reload-generation for the same reason as the concurrent-acquire test.
 // `inits == 1` is only meaningful while no other test signals a process-wide reload.
-// The tag is honoured because every driver dispatching this test holds it too, which nx::invoke_tests asserts.
+// The tag is honoured because the drivers' async invocation takes it around this test's run.
 INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
                (sg::context_handle const& ctx),
                exclusive("sg-reload-generation"))

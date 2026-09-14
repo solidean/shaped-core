@@ -64,8 +64,16 @@ void dx12_context::shutdown()
     // Groups outliving this simply destroy their fences instead of returning to a list that is gone.
     _group_pool.shutdown();
 
+    // The waiter may be parked on both fences, so it is joined before they go.
+    stop_completion_signals();
     _submission_fence.Reset();
     _epoch_fence.Reset();
+    for (HANDLE* const event : {&_completion_submission_event, &_completion_epoch_event, &_completion_wake_event})
+        if (*event != nullptr)
+        {
+            CloseHandle(*event);
+            *event = nullptr;
+        }
 
     // Last thing before the device goes: after this no debug-layer message can reach a context that is on its way out.
     unregister_message_callback();

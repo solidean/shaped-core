@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_barrier.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
@@ -295,7 +297,7 @@ TEST("sg dx12 - d3d12_layout_from maps the layouts")
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::copy_src) == D3D12_BARRIER_LAYOUT_COPY_SOURCE);
 }
 
-INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -331,7 +333,7 @@ INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12_conte
 
     c.submit_dx12_command_list(cc::move(cmd.value()));
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
 
     // Getting here without a device-removed means the debug layer accepted the texture barriers.
     CHECK(!c.is_shut_down());

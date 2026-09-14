@@ -1,6 +1,6 @@
 #include "vulkan-test-common.hh"
 
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -10,6 +10,9 @@
 #include "triangle.ps.spirv.h"
 #include "triangle.psbuf.spirv.h"
 #include "triangle.vs.spirv.h"
+
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -57,7 +60,8 @@ sg::vertex_input_layout make_vertex_layout()
 }
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -84,7 +88,7 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
     REQUIRE(pipeline_layout != nullptr);
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = pipeline_layout,
         .vertex_shader = make_shader(
             sg::shader_stage::vertex,
@@ -96,7 +100,7 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
             "ps_main"),
         .vertex_input = make_vertex_layout(),
         .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-    }));
+    });
     REQUIRE(pipeline != nullptr);
 
     auto cmd = ctx.create_command_list();
@@ -124,10 +128,8 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const pixels = future.try_get_bytes();
-    REQUIRE(pixels.has_value());
-    REQUIRE(pixels.value().size() == isize(k_extent) * isize(k_extent) * 4);
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == isize(k_extent) * isize(k_extent) * 4);
 
     // Every pixel is either the triangle's red or the scope's blue, and a half-covering triangle produces
     // meaningfully many of each.
@@ -135,7 +137,7 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
     int blues = 0;
     for (int i = 0; i < k_extent * k_extent; ++i)
     {
-        auto const* p = reinterpret_cast<u8 const*>(pixels.value().data()) + isize(i) * 4;
+        auto const* p = reinterpret_cast<u8 const*>(pixels.data()) + isize(i) * 4;
         if (p[0] == 255 && p[1] == 0 && p[2] == 0 && p[3] == 255)
             ++reds;
         else if (p[0] == 0 && p[1] == 0 && p[2] == 255 && p[3] == 255)
@@ -154,8 +156,8 @@ INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores", (vulkan
 // and reopen it with LOAD ops.
 // Without that the validation layer reports VUID-vkCmdPipelineBarrier2-None-09553, and with a broken reopen the clear
 // would come back instead of the drawn pixels.
-INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -185,8 +187,8 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
     auto compute_group_layout = ctx.cached.acquire_binding_group_layout(compute_shader.bindings);
     auto compute_pipeline_layout
         = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {compute_group_layout}});
-    auto compute_pipeline = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = compute_shader, .layout = compute_pipeline_layout}));
+    auto compute_pipeline = co_await ctx.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = compute_shader, .layout = compute_pipeline_layout});
     REQUIRE(compute_pipeline != nullptr);
 
     sg::named_view const compute_out
@@ -211,7 +213,7 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
         {.x = -1.0f, .y = 3.0f, .r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
     };
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = raster_pipeline_layout,
         .vertex_shader = make_shader(
             sg::shader_stage::vertex,
@@ -223,7 +225,7 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
                                        "ps_from_buffer"),
         .vertex_input = make_vertex_layout(),
         .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-    }));
+    });
     REQUIRE(pipeline != nullptr);
 
     sg::named_view const raster_in = {.name = "Values", .view = sg::buffer<u32>::from_raw(values).as_readonly_buffer()};
@@ -253,16 +255,14 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
     auto future = down->download.bytes_from_texture(target.raw());
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const pixels = future.try_get_bytes();
-    REQUIRE(pixels.has_value());
+    auto const pixels = co_await future.bytes();
 
     // The triangle covers every pixel, and each carries Values[3] == 6 in its red channel.
     // A green pixel would mean the clear survived, so the reopen lost the draw.
     bool all_six = true;
     for (int i = 0; i < k_extent * k_extent; ++i)
     {
-        auto const* p = reinterpret_cast<u8 const*>(pixels.value().data()) + isize(i) * 4;
+        auto const* p = reinterpret_cast<u8 const*>(pixels.data()) + isize(i) * 4;
         if (p[0] != 6 || p[1] != 0 || p[2] != 0 || p[3] != 255)
             all_six = false;
     }
@@ -278,7 +278,7 @@ INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same list",
 // the code below.
 // Declaring the handle before the context is the deterministic form of the same thing.
 // Owns its context: the context's teardown is the subject.
-TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-device"))
 {
     sg::raster_pipeline_handle pipeline; // declared first, so it is destroyed LAST — after the context
     {
@@ -290,7 +290,7 @@ TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-
         auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
         REQUIRE(pipeline_layout != nullptr);
 
-        pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
             .layout = pipeline_layout,
             .vertex_shader = make_shader(
                 sg::shader_stage::vertex,
@@ -302,7 +302,7 @@ TEST("sg vulkan - a pipeline handle may outlive its context", exclusive("vulkan-
                 "ps_main"),
             .vertex_input = make_vertex_layout(),
             .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
-        }));
+        });
         REQUIRE(pipeline != nullptr);
     } // the context releases the pipeline's device objects here, and validation must stay quiet
 }

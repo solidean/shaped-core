@@ -42,6 +42,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "runner_args: an unrecognized '--jobs N' leaves N as a bare token, which the test_name "
                         "positional then swallows, and the run silently filters instead of narrowing its width. "
                         "A low count is what reproduces a small CI runner's scheduling on a wide dev machine.")
+    p.add_argument("--seed", type=int, metavar="N",
+                   help="The run seed, forwarded to the runner: test order, invocation order and every "
+                        "nx::test_seed derive from it. Every nexus run prints the one it drew, so a failure "
+                        "reproduces with the seed from its log.")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the selected test itself, reachable from its body through "
                         "nx::test_args(). Forwarded to the runner as one string and tokenized there, "
@@ -93,6 +97,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # Prepended, so an explicit `-- --jobs 4` after it still wins by being parsed later.
     if args.jobs is not None:
         runner_args = ["--jobs", str(args.jobs), *runner_args]
+
+    if args.seed is not None:
+        runner_args = ["--seed", str(args.seed), *runner_args]
 
     # One string, deliberately: the runner tokenizes it, so the test's own flags never have to survive
     # dev.py's argument handling — which strips a leading `--` and would otherwise eat the separator.

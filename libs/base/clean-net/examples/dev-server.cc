@@ -1,17 +1,14 @@
 #include <clean-core/container/pinned_data.hh>
-#include <clean-core/container/vector.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-#include <clean-core/thread/thread.hh>
-#include <clean-core/thread/thread_pump.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-net/address/resolver.hh>
-#include <clean-net/common/clock.hh>
 #include <clean-net/http/http_client.hh>
 #include <clean-net/http/http_server.hh>
 #include <clean-net/ws/websocket.hh>
-#include <nexus/test.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -27,23 +24,13 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// The first value a handler hands over, as an async the example awaits.
+/// A handler runs on the io_system's thread, so it delivers through a node rather than into a variable the body reads.
 template <class T>
-void await(cc::shared_async<T> const& a)
+void deliver_once(cc::shared_async<T> const& node, T value)
 {
-    while (!a->is_ready())
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
-}
-
-/// Pump for a while, for the parts that finish on their own rather than on an async we hold.
-void pump_for_a_moment(f64 seconds)
-{
-    auto& clk = cnet::system_clock();
-    auto const until = clk.now_ns() + i64(seconds * 1e9);
-
-    while (clk.now_ns() < until)
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
+    if (!node->is_ready())
+        node->push_value(cc::move(value));
 }
 
 /// One file in the temp directory, so `serve_directory` has something to serve.
@@ -77,9 +64,9 @@ struct served_file
 };
 } // namespace
 
-EXAMPLE("clean-net/dev-server")
+ASYNC_EXAMPLE("clean-net/dev-server")
 {
-    auto io = cnet::io_system::create({.unthreaded = true});
+    auto io = cnet::io_system::create({});
     auto const files = served_file();
 
     auto server = cnet::http_server::try_create(*io).value();
@@ -108,28 +95,28 @@ EXAMPLE("clean-net/dev-server")
 
     // ---- a body whose length nobody knows -----------------------------------------------------------
 
-    auto open_streams = cc::vector<cc::shared_ptr<cnet::http_response_stream>>();
+    auto const stream_opened = cc::make_async_manual<cc::shared_ptr<cnet::http_response_stream>>();
     server->route(cnet::http_method::get, "/events",
-                  [&open_streams](cnet::http_server_request const&)
+                  [stream_opened](cnet::http_server_request const&)
                   {
                       return cnet::http_server_response::stream(
-                          "text/event-stream", [&open_streams](cc::shared_ptr<cnet::http_response_stream> body)
-                          { open_streams.push_back(cc::move(body)); });
+                          "text/event-stream", [stream_opened](cc::shared_ptr<cnet::http_response_stream> body)
+                          { deliver_once(stream_opened, cc::move(body)); });
                   });
 
     // ---- a websocket, for the half of a debug UI that is not request-shaped -------------------------
 
-    auto sockets = cc::vector<cc::shared_ptr<cnet::websocket>>();
-    server->websocket_route("/feed", [&sockets](cc::shared_ptr<cnet::websocket> ws, cnet::http_server_request const&)
-                            { sockets.push_back(cc::move(ws)); });
+    auto const socket_accepted = cc::make_async_manual<cc::shared_ptr<cnet::websocket>>();
+    server->websocket_route("/feed",
+                            [socket_accepted](cc::shared_ptr<cnet::websocket> ws, cnet::http_server_request const&)
+                            { deliver_once(socket_accepted, cc::move(ws)); });
 
     // ---- and now play the browser ------------------------------------------------------------------
 
     auto client = cnet::make_http_client(*io).value();
 
-    auto home = cnet::http_get(*client, cc::format("{}/", base));
-    await(home);
-    cc::println("GET  {:<21} -> {} {}", "/", home->value().status(), home->value().body_text());
+    auto const home = co_await cnet::http_get(*client, cc::format("{}/", base));
+    cc::println("GET  {:<21} -> {} {}", "/", home.status(), home.body_text());
 
     auto posted = cnet::http_request{.method = cnet::http_method::post,
                                      .target = cnet::http_target::parse(cc::format("{}/echo", base)).value()};
@@ -137,23 +124,20 @@ EXAMPLE("clean-net/dev-server")
     // `make_pinned_data` moves the string in rather than copying it.
     posted.body = cc::make_pinned_data(cc::string("ping")).reinterpret_as<byte const>();
 
-    auto echoed = cnet::http_send(*client, cc::move(posted));
-    await(echoed);
-    cc::println("POST {:<21} -> {} {}", "/echo", echoed->value().status(), echoed->value().body_text());
+    auto const echoed = co_await cnet::http_send(*client, cc::move(posted));
+    cc::println("POST {:<21} -> {} {}", "/echo", echoed.status(), echoed.body_text());
 
     if (files.written)
     {
-        auto served = cnet::http_get(*client, cc::format("{}/files/{}", base, files.name));
-        await(served);
-        cc::println("GET  {:<21} -> {} {}", "/files/<file>", served->value().status(), served->value().body_text());
+        auto const served = co_await cnet::http_get(*client, cc::format("{}/files/{}", base, files.name));
+        cc::println("GET  {:<21} -> {} {}", "/files/<file>", served.status(), served.body_text());
     }
 
     // Every way out of the root is a 404, whether it is spelled plainly or hidden behind a percent-escape.
     for (auto const escape : {"/files/../secret", "/files/%2e%2e/secret"})
     {
-        auto refused = cnet::http_get(*client, cc::format("{}{}", base, escape));
-        await(refused);
-        cc::println("GET  {:<21} -> {}", escape, refused->value().status());
+        auto const refused = co_await cnet::http_get(*client, cc::format("{}{}", base, escape));
+        cc::println("GET  {:<21} -> {}", escape, refused.status());
     }
 
     // ---- the streamed body, from both ends ---------------------------------------------------------
@@ -162,48 +146,43 @@ EXAMPLE("clean-net/dev-server")
     auto events = cnet::http_get(*client, cc::format("{}/events", base));
 
     // The handler is called once the head is out, which has not happened yet.
-    while (open_streams.empty())
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
-
-    auto const body = open_streams[0];
+    auto const body = co_await stream_opened;
     for (auto i = 0; i < 3; ++i)
-        await(body->write_text(cc::format("data: tick {}\n\n", i)));
+    {
+        auto const written = body->write_text(cc::format("data: tick {}\n\n", i));
+        (void)co_await written;
+    }
 
     // Dropping the last reference would end it just as well; this says so out loud.
     body->finish();
-    open_streams.clear();
 
-    await(events);
-    cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", events->value().status(),
-                events->value().body.size(), 3);
+    auto const& streamed = co_await events;
+    cc::println("GET  {:<21} -> {} chunked, {} bytes after {} writes", "/events", streamed.status(),
+                streamed.body.size(), 3);
 
     // ---- the websocket, from both ends -------------------------------------------------------------
 
     cc::println("");
     auto resolver = cnet::resolver::try_create(*io).value();
     auto connecting = cnet::websocket_connect(*io, *resolver, cc::format("ws://127.0.0.1:{}/feed", server->local().port));
-    await(connecting);
-
-    auto const browser_side = connecting->value();
-    while (sockets.empty())
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
+    auto const browser_side = co_await connecting;
+    auto const server_side = co_await socket_accepted;
 
     // Ping, pong and close are answered by the layer itself; a message is what a caller sees.
-    await(browser_side->send_text("hello from the page"));
+    auto const sent = browser_side->send_text("hello from the page");
+    (void)co_await sent;
 
-    auto heard = sockets[0]->receive();
-    await(heard);
-    cc::println("ws  page -> server    : {}", heard->value().text());
+    auto const receiving = server_side->receive();
+    auto const& heard = co_await receiving;
+    cc::println("ws  page -> server    : {}", heard.text());
 
-    await(sockets[0]->send_text("and back again"));
-    auto answer = browser_side->receive();
-    await(answer);
-    cc::println("ws  server -> page    : {}", answer->value().text());
+    auto const replied = server_side->send_text("and back again");
+    (void)co_await replied;
+    auto const answering = browser_side->receive();
+    auto const& answer = co_await answering;
+    cc::println("ws  server -> page    : {}", answer.text());
 
     browser_side->close();
-    pump_for_a_moment(0.05);
 
     // ---- shutdown ----------------------------------------------------------------------------------
 

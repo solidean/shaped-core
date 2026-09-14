@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>          // offsetof
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -54,8 +56,8 @@ struct sg::vertex_layout_of<vertex>
     }
 };
 
-INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleared target",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -90,7 +92,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleare
     desc.topology = sg::primitive_topology::triangle_list;
     desc.rasterization.cull = sg::cull_mode::none; // avoid winding-vs-culling concerns in the test
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     // The render target (rgba8, readable back) and the triangle's vertices (all red).
@@ -132,11 +134,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a cleare
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
 
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 

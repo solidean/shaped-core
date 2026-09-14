@@ -50,6 +50,21 @@ bool signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_inde
 // A scheduler mode other than the default must match the slot's exactly: `singlethreaded`, `no_scheduler`, `own_pool(n)`.
 // nx::invoke_tests asserts on a non-empty answer, so this is the rule that assert enforces.
 cc::string find_unhonoured_dispatch_config(config::cfg const& child, config::cfg const& slot);
+
+// Why an async invocation cannot run `child`, spelled for an assert message, or empty when it can.
+//
+// An async invocation arranges what a synchronous one can only inherit: `main_thread` homes the child to main, and a
+// child's exclusion tags are taken from the phase around the child.
+// Two rules remain.
+// Tags are held by the invoking chain or by the child, never both: a child taking a tag while its chain holds one is
+// the out-of-order acquisition that deadlocks against a test holding both.
+// `exclusive()` still needs an `exclusive()` slot, since the slot holds the phase lock shared, and it is refused in a
+// parallel invocation, where "alone" would have to mean alone among siblings too.
+// Scheduler modes must match the slot's exactly, as for a synchronous child.
+cc::string find_unhonoured_async_dispatch_config(config::cfg const& child,
+                                                 config::cfg const& slot,
+                                                 bool chain_holds_tags,
+                                                 bool in_parallel);
 } // namespace impl
 
 /// Runs every INVOCABLE_TEST whose *decayed* argument signature matches `Args...`, passing `args...`.

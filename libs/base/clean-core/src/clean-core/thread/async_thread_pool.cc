@@ -1,7 +1,9 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
+#include <clean-core/thread/thread_pump.hh>
 
 #if CC_HAS_THREADS
 #include <clean-core/string/print.hh>
@@ -409,40 +411,15 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         // Deaf to injected work, but harmlessly so — with no slot there is nothing this thread could have run anyway.
         root.schedule_on(*this);
 
-        // Except a thread that owns a home: the root may need a step only that home runs, so it must never park deaf to it.
-        if (home != nullptr)
+        // Parked on the root, and on the thread's home when it has one: the root may need a step only that home runs.
+        // Not on the pumps — a pool participant never drives one (see thread_pump.hh).
+        auto parker = cc::impl::async_parker(root, home, false);
+        while (!parker.is_root_done())
         {
-            while (!root.is_ready())
-                if (!home->pump_cycle())
-                    home->wait_for_work(1.0);
-            return;
+            if (home != nullptr && home->pump_cycle())
+                continue;
+            parker.park();
         }
-
-        struct sync
-        {
-            std::mutex m;
-            std::condition_variable cv;
-            bool done = false;
-        };
-        sync s;
-
-        // notify UNDER the lock so this hook (running on a worker) fully returns before this frame — and thus `s` —
-        // is destroyed.
-        bool const already = root.install_completion_hook_or_ready(
-            [](void* p)
-            {
-                auto* sp = static_cast<sync*>(p);
-                std::lock_guard<std::mutex> lk(sp->m);
-                sp->done = true;
-                sp->cv.notify_one();
-            },
-            &s);
-
-        if (already)
-            return; // completed before we installed the hook: no wait, no notify pending
-
-        std::unique_lock<std::mutex> lk(s.m);
-        s.cv.wait(lk, [&] { return s.done; });
         return;
     }
 
@@ -586,15 +563,14 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             }
 
             {
+                auto const released = [&]
+                {
+                    return waiter.done.load(cc::memory_order_relaxed) || _stop.load(cc::memory_order_relaxed)
+                        || _wake_epoch.load(cc::memory_order_relaxed) != epoch
+                        || (home != nullptr && _home_epoch.load(cc::memory_order_relaxed) != home_epoch);
+                };
                 std::unique_lock<std::mutex> lk(_wait_m);
-                _wait_cv.wait(lk,
-                              [&]
-                              {
-                                  return waiter.done.load(cc::memory_order_relaxed)
-                                      || _stop.load(cc::memory_order_relaxed)
-                                      || _wake_epoch.load(cc::memory_order_relaxed) != epoch
-                                      || (home != nullptr && _home_epoch.load(cc::memory_order_relaxed) != home_epoch);
-                              });
+                _wait_cv.wait(lk, released);
             }
             _sleepers.fetch_sub(1, cc::memory_order_relaxed);
             if (home != nullptr)
@@ -712,7 +688,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
     if (root.is_cold())
         root.schedule_on(*this); // a homed root was refused here: send it home
 
-    // Then pump whatever it queued, and this thread's home, which is every home there is without threads.
+    // Then pump whatever it queued, this thread's home, which is every home there is without threads, and every registered
+    // pump, which is every semantic thread there is.
     // Anything reachable runs, so falling out with the root not ready means the graph is parked on something no thread here will ever deliver.
     auto* const home = cc::impl::async_tls().home;
     while (!root.is_ready())
@@ -724,7 +701,10 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             impl::async_poll_work_item(*n);
             continue;
         }
-        if (home == nullptr || !home->pump_cycle())
+        if (home != nullptr && home->pump_cycle())
+            continue;
+        // A pump may resume work onto this queue while reporting no progress of its own, so the queue decides.
+        if (!cc::impl::thread_pump_registry() && _queue.empty())
             break;
     }
 

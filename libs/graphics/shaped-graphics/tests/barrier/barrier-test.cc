@@ -1,5 +1,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -25,7 +27,7 @@ sg::raw_buffer_handle make_buffer(sg::context_handle const& ctx, isize size)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - two concurrent command lists record and submit independently", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - two concurrent command lists record and submit independently", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const a = make_buffer(ctx, isize(16) * sizeof(int));
@@ -55,19 +57,15 @@ INVOCABLE_TEST("sg - two concurrent command lists record and submit independentl
     ctx->submit_command_list(cc::move(c1));
     ctx->submit_command_list(cc::move(c2));
 
-    ctx->block_until_idle();
-    auto const da = fa.try_get_data();
-    ctx->block_until_idle();
-    auto const db = fb.try_get_data();
-    REQUIRE(da.has_value());
-    REQUIRE(db.has_value());
-    CHECK(da.value()[0] == 0);
-    CHECK(da.value()[15] == 15);
-    CHECK(db.value()[0] == 1000);
-    CHECK(db.value()[15] == 1015);
+    auto const da = co_await fa.data();
+    auto const db = co_await fb.data();
+    CHECK(da[0] == 0);
+    CHECK(da[15] == 15);
+    CHECK(db[0] == 1000);
+    CHECK(db[15] == 1015);
 }
 
-INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     auto const buf = make_buffer(ctx, 256);
@@ -86,13 +84,11 @@ INVOCABLE_TEST("sg - self-copy within one buffer orders read+write in one list",
     auto future = cmd->download.bytes_from_buffer(buf, 128, 128);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 128);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 128);
     bool matches = true;
     for (int i = 0; i < 128; ++i)
-        if (bytes.value()[i] != pattern(i))
+        if (bytes[i] != pattern(i))
             matches = false;
     CHECK(matches);
 }

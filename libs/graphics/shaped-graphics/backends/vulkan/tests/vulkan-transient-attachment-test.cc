@@ -1,5 +1,7 @@
 #include "vulkan-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -30,8 +32,8 @@ constexpr int k_frames = 120;
 constexpr int k_epochs_in_flight = 2;
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - a transient attachment recreated every pipelined epoch",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a transient attachment recreated every pipelined epoch",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -66,6 +68,6 @@ INVOCABLE_TEST("sg vulkan - a transient attachment recreated every pipelined epo
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     CHECK(!ctx.is_device_lost());
 }

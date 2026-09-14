@@ -111,6 +111,7 @@ if(SC_BUILD_TESTS)
         tests/dxc_compiler-test.cc
         tests/binding/binding_groups-test.cc
     )
+    sc_nexus_binary(shaped-shader-library-test KINDS tests)
 
     # The binding corpus is one data file both parsers are checked against -- this one, and the build-time
     # generator's once it exists. Baked in at configure time so the test needs no path into the source tree,

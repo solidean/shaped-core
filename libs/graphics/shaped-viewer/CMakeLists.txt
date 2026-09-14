@@ -206,6 +206,7 @@ if(SC_BUILD_TESTS)
         tests/asset-loading-test.cc
         tests/shader-package-test.cc
     )
+    sc_nexus_binary(shaped-viewer-test KINDS tests)
 
     target_link_libraries(shaped-viewer-test
         PRIVATE

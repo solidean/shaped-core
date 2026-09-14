@@ -107,7 +107,7 @@ public:
     /// Runs one processing cycle on the calling thread: drain the inbox, dispatch, one on_process.
     /// Returns true if there may be more work — something was dispatched, or on_process asked to run again.
     /// A no-op returning false unless started unthreaded and not shut down, so it is safe to call unconditionally every frame.
-    /// Also false, without waiting, while another thread's cycle is running — a blocking wait's pump sweep drives this actor too.
+    /// Also false, without waiting, while another cycle is running — a pump sweep drives this actor too.
     bool process_messages_if_unthreaded();
 
     /// Repeats process_messages_if_unthreaded() until idle or max_ms of wall-clock elapses; max_ms <= 0 runs a single cycle.
@@ -287,6 +287,10 @@ private:
 
         this->_inbox.lock([&](cc::vector<cc::variant<MessageT...>>& queue) { queue.emplace_back(cc::move(msg)); });
         this->_inbox_cond_var.notify_one();
+
+        // Unthreaded, the message waits for a sweep, so whoever is parked waiting for one has to hear about it.
+        if (this->_is_unthreaded)
+            cc::thread_pump_notify();
         return true;
     }
 

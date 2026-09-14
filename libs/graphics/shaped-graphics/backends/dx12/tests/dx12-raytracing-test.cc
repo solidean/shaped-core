@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
 #include <clean-core/container/span.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
@@ -28,7 +30,7 @@ sg::raw_buffer_handle upload_triangle_vertices(dx12::dx12_context_handle const& 
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
 
@@ -57,7 +59,7 @@ INVOCABLE_TEST("sg dx12 - raytracing builds a blas and a tlas", (dx12::dx12_cont
     REQUIRE(tlas != nullptr);
     handle->submit_command_list(cc::move(cmd));
     handle->advance_epoch();
-    handle->block_until_idle(); // let the builds finish on the GPU
+    co_await handle->idle_completion(); // let the builds finish on the GPU
 
     // Prebuild sizes and instance count are part of the public sg::blas / sg::tlas contract.
     CHECK(blas->size_in_bytes() > 0);

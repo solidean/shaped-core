@@ -40,22 +40,41 @@ TEST("order matters", singlethreaded) { }//   singlethreaded  — ambient cc::si
                                          //     runs inline on the body's thread, in order
 TEST("opens a window", main_thread) { }  //   main_thread     — body runs on the process MAIN thread (SDL wants that);
                                          //     a flag, not a mode, so it composes; runs BESIDE the shared phase (add
-                                         //     exclusive() to run alone); own_pool / ASYNC_TEST assert
+                                         //     exclusive() to run alone); own_pool asserts. On ASYNC_TEST: homed to
+                                         //     main until the body hops away
 TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-worker pool, shared per count
 // Exclusion is LOCKS (cc::async_mutex per tag + a phase-wide shared lock): holders PARK, and run in arrival order
 // under -jN — only -j1 keeps schedule order. Tags are taken in name order, so multi-tag tests cannot deadlock.
 
 #include <nexus/async-test.hh>           // separate header: TEST pays nothing for the async templates
-ASYNC_TEST("cache - resolves a miss")    // a TEST whose body may co_await; nexus awaits the body
+ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; nexus awaits the body
 {                                        //   a CHECK at any depth below it still lands on THIS test
     auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
     CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
-}                                        // no co_ keyword? then `return` a COLD cc::shared_async<cc::unit> instead
+}                                        // must be a coroutine: nothing to await? end with `co_return;`
+// Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
+// Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
+// A blocking get (cc::async_blocking_get, ctx.block_until_idle) in a library's tests is a `blocking-wait` lint finding:
+//   await instead, or allow the file by name in that library's .shaped-lint.yml where the wait is the subject.
+// SKIP / REQUIRE work as in a TEST, at any depth below the body.
 
 // Buckets: every test is in one bucket — normal (default), manual, pgo_benchmark, benchmark, or example. A sweep selects
 // one bucket; `disabled` is orthogonal and can apply to any. Exact-naming a test runs it regardless of bucket; a
 // substring filter never leaves the swept bucket (`test "bench"` won't drag in manual tests — use --manual).
 ```
+
+## The run seed (`nx::test_seed`)
+
+```cpp
+auto rng = nx::test_random();            // cc::random seeded from this test's seed: run seed + test NAME
+u64 s = nx::test_seed();                 // pinned by nx::config::seed(n); 0 outside a test
+```
+
+- **A real run shuffles** the schedule and every invocation's children, by a clock seed it PRINTS first;
+  `--seed N` (or `dev.py test --seed N`) reproduces the order and every test seed at once.
+- Name-derived, so a filtered re-run of one test gets the seed it had in the full run; a child derives from its driver.
+- Fuzz tests draw their seeds from the test seed.
+- A hand-built config does not shuffle.
 
 ## Thorough runs (`nx::is_thorough`)
 
@@ -87,7 +106,42 @@ EXAMPLE("clean-core/vector")             // swept only via `--examples`, or run 
 // The name is a slash path: it is the CLI argument and the gallery entry, so it is an identifier, not a sentence.
 // `main_thread` and `exclusive()` are baked in, so the body runs on the thread nx::run was entered on, alone.
 // The run still installs an ambient async scheduler; EXAMPLE("x", no_scheduler) is how one installs its own.
+
+ASYNC_EXAMPLE("clean-net/download")      // nexus/async-test.hh: the same bucket and asks, with a coroutine body
+{                                        //   homed to main; the main loop also sweeps thread pumps, so an unthreaded
+    auto const r = co_await client->send(request);   // io_system completes while this awaits
+}
 ```
+
+## Apps and commands (`APP`, `COMMAND`)
+
+A program living in a nexus binary beside its tests, so a tool needs no separate `-core` library to be testable.
+
+```cpp
+COMMAND("lint", default_entry)            // exits with what it returns; a failed CHECK turns a 0 into 1
+{
+    auto const findings = lint(nx::test_args());
+    return findings.empty() ? 0 : 2;
+}
+APP("viewer") { run_viewer(nx::test_args()); }   // runs until closed; ASYNC_APP / ASYNC_COMMAND (co_return the status) too
+// Both bake in main_thread and exclusive(), like EXAMPLE. Never swept by a test run.
+
+TEST("lint - a clean file exits 0", main_thread, exclusive())   // run_command runs in THIS test's slot
+{ CHECK(nx::run_command("lint", {"fixtures/clean.cc"}) == 0); }
+```
+
+**What a command line selects**, name first:
+
+```bash
+tool lint a.cc          # an app or command named first runs with the rest of the line
+tool --tests "lint -"   # --tests (or --examples, --benchmarks, --manual, --apps, --commands, --list-tests-json,
+                        #   --reporter) hands the line to nexus; an exact test name does too
+tool a.cc --fix         # otherwise the default_entry takes the WHOLE line — nexus parses none of it
+tool                    # no default: an overview of what the binary holds, exit 0
+```
+
+- **At most one `default_entry`, and only on an app or command** — checked on every run, `--tests` included.
+- dev.py passes `--tests`; a substring filter without it is an error naming the fix.
 
 ## Benchmarks (`BENCHMARK` + `nx::bench`)
 
@@ -137,6 +191,16 @@ auto const r = nx::bench::run("name", body);
 r.time.median; r.time.p95; r.time.ci95_low;    // seconds; p95/p99 only meaningful when .batch = false
 r.items_per_second; r.converged;
 r.find_warning(nx::bench::warning_kind::body_deleted);   // nullptr if it did not fire
+```
+
+```cpp
+#include <nexus/async-test.hh>
+#include <nexus/bench/run_async.hh>
+ASYNC_BENCHMARK("sg stream - upload latency")       // benchmark bucket + main_thread, with a coroutine body
+{
+    auto ctx = co_await make_context();              // setup awaits instead of blocking
+    auto const r = co_await nx::bench::run_async("4 MiB", [&] { return upload(ctx).completion(); });
+}   // run_async: ONE awaited iteration per sample — no batching, no counter pass, no overhead estimate
 ```
 
 Run them: `uv run dev.py benchmark "<match>"` (no arg lists them all).
@@ -290,6 +354,24 @@ TEST("sg backend - vulkan")
   So `exclusive(tag)`, `main_thread` or a scheduler mode on an `INVOCABLE_TEST` asserts at dispatch unless the scheduled test holds the same.
   `exclusive()` on the driver covers every tag.
 - Type-parametrized (templated) tests are not implemented; [docs/invocable-tests.md](docs/invocable-tests.md) has the full mechanism and the planned shape.
+
+```cpp
+#include <nexus/async-test.hh>
+ASYNC_INVOCABLE_TEST("sg stream - settles", (sg::context_handle const& h))   // coroutine body; same matching key
+{ co_await h->stream.bytes_to_buffer(buf, data).completion(); CHECK(true); }
+
+ASYNC_TEST("sg dx12 backend")                        // only an ASYNC body can await an invocation
+{
+    auto const r = co_await nx::async_invoke_tests_in_sequence("dx12", ctx);  // one child at a time, match order
+    co_await nx::async_invoke_tests_in_parallel("dx12", {.max_concurrent = 4}, ctx);   // fan-out; serial under -j1
+}
+```
+
+- **The sync `nx::invoke_tests` asserts if its MATCHED set (before `-c`) holds an async invocable.**
+- **An async invocation arranges a child's asks**: `main_thread` runs it on main; its `exclusive(tag)`s are taken from the phase.
+  **Never both**: a tagged child under a chain already holding a tag is refused.
+  `exclusive()` needs an `exclusive()` driver and is refused `in_parallel`; scheduler modes must match the driver's.
+- Boxed arguments outlive every child, so `T const&` parameters are safe across a suspend.
 
 ## Running tests
 

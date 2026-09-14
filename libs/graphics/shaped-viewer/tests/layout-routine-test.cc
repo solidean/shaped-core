@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -55,7 +57,8 @@ INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::co
     CHECK(tick.is_idle());
 }
 
-INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one pass", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one pass",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -116,7 +119,7 @@ INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)ctx.routines.tick_until_idle();
 
@@ -128,13 +131,13 @@ INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe in one
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Reaching here means every pipeline variant built and the whole list recorded and ran.
     CHECK(output.width() == output_size[0]);
 }
 
-INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -159,7 +162,7 @@ INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport"
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)ctx.routines.tick_until_idle();
 
@@ -172,13 +175,13 @@ INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad viewport"
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     CHECK(output.width() == 32);
 }
 
-INVOCABLE_TEST("sv - a group is created against a layout whose static samplers it does not resupply",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samplers it does not resupply",
+                     (sg::context_handle const& ctx_h))
 {
     // The pairing the two halves of the API have to make: `acquire_binding_group_layout<G>(runtime_samplers)`
     // bakes a sampler G left dynamic into the layout, and `create_binding_group(layout, G{...})` then gathers
@@ -224,8 +227,8 @@ INVOCABLE_TEST("sv - a group is created against a layout whose static samplers i
 
     auto const vs = sv::shaders::layout.vertex.main_vs->acquire(ctx);
     auto const ps = sv::shaders::layout.fragment.border_ps->acquire(ctx);
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(ps);
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
     auto const* const compiled_vs = vs->try_value();
     auto const* const compiled_ps = ps->try_value();
@@ -250,7 +253,7 @@ INVOCABLE_TEST("sv - a group is created against a layout whose static samplers i
                                         .topology = sg::primitive_topology::triangle_list,
                                         .rasterization = {.cull = sg::cull_mode::none},
                                         .color_targets = {{.format = sg::pixel_format::rgba16_float}}});
-    auto const built = cc::async_blocking_get(pipeline);
+    auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
     auto const target = ctx.persistent.create_texture_2d(
@@ -264,5 +267,5 @@ INVOCABLE_TEST("sv - a group is created against a layout whose static samplers i
     }
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }

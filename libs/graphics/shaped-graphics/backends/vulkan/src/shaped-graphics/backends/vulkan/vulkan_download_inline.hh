@@ -127,6 +127,7 @@ public:
     /// Submitted-only on purpose — a download recorded into a list the caller has not submitted yet can never
     /// progress, so counting it would turn this into a hang rather than a wait.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     /// Records a pending ring capacity (> 0), applied at the next epoch boundary (apply_pending_budget).
     void set_budget(isize capacity);

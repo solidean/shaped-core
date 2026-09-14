@@ -10,6 +10,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -372,7 +373,9 @@ REC_TEST("record/scope - a disabled category leaves the pair balanced")
     CHECK(c.count_named("still-recorded") == 1);
 }
 
-REC_TEST("record/scope - a scope that opens and closes between two suspends is fine")
+ASYNC_TEST("record/scope - a scope that opens and closes between two suspends is fine",
+           nx::config::exclusive(),
+           nx::config::owns_recorder)
 {
     rec_fixture const fixture(deterministic_config());
 
@@ -392,7 +395,7 @@ REC_TEST("record/scope - a scope that opens and closes between two suspends is f
             co_return 7;
         }();
 
-        CHECK(cc::async_blocking_get(work) == 7);
+        CHECK(co_await work == 7);
         cc::rec::flush_blocking();
     }
 

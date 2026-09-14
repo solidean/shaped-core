@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/record/fwd.hh>
@@ -104,6 +105,9 @@ struct nx::test_execution
     // The child's own name is instance.declaration->name, so its addressable path is invocation_group / declaration name / sections.
     cc::vector<test_execution> nested;
     cc::string invocation_group;
+
+    // What a COMMAND's body returned; empty for anything that is not a command, or a command that never returned.
+    cc::optional<int> exit_code;
 
     // Failing if this test's own tree fails or any dispatched child fails.
     [[nodiscard]] bool is_considered_failing() const;

@@ -1,4 +1,6 @@
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -20,7 +22,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-TEST("sg dx12 - DRED reports the removal it was armed for", nx::config::exclusive())
+ASYNC_TEST("sg dx12 - DRED reports the removal it was armed for", nx::config::exclusive())
 {
     auto created = sg::create_dx12_context({.activate_global_debug_layer = true, .enable_dred = true});
     if (created.has_error())
@@ -41,7 +43,7 @@ TEST("sg dx12 - DRED reports the removal it was armed for", nx::config::exclusiv
         ctx.submit_command_list(cc::move(cmd));
     }
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     CHECK(!ctx.is_device_lost()); // the premise: nothing has gone wrong yet
 

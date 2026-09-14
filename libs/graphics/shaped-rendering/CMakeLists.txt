@@ -136,6 +136,7 @@ if(SC_BUILD_TESTS)
         tests/gpu-types-test.cc
         tests/shader-package-test.cc
     )
+    sc_nexus_binary(shaped-rendering-test KINDS tests)
 
     target_link_libraries(shaped-rendering-test
         PRIVATE

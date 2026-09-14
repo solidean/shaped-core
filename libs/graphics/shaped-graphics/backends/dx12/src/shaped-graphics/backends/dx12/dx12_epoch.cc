@@ -267,6 +267,72 @@ void dx12_context::wait_for_next_inflight_epoch()
         wait_for_epoch(oldest.value());
 }
 
+bool dx12_context::are_transfers_drained() const
+{
+    return _download_inline.is_submitted_drained() && _download_async.is_idle() && _upload_async.is_idle();
+}
+
+sg::submission_token dx12_context::last_issued_submission()
+{
+    if (!_submission_fence)
+        return sg::submission_token::not_submitted;
+    u64 const issued = _next_submission.lock([](sg::submission_token& next) { return u64(next); });
+    return issued <= u64(sg::submission_token::first) ? sg::submission_token::not_submitted
+                                                      : sg::submission_token(issued - 1);
+}
+
+void dx12_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
+{
+    (void)wake_generation; // an auto-reset event holds a wake until it is consumed, so none can be missed
+    if (_completion_wake_event == nullptr)
+        return;
+
+    HANDLE events[3] = {};
+    DWORD count = 0;
+    DWORD submission_index = MAXDWORD;
+    DWORD epoch_index = MAXDWORD;
+    if (submission != 0 && _submission_fence)
+    {
+        if (_armed_submission != submission)
+        {
+            HRESULT const hr = _submission_fence->SetEventOnCompletion(submission, _completion_submission_event);
+            CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed for the completion signal");
+            _armed_submission = submission;
+        }
+        submission_index = count;
+        events[count++] = _completion_submission_event;
+    }
+    if (epoch != 0 && _epoch_fence)
+    {
+        if (_armed_epoch != epoch)
+        {
+            HRESULT const hr = _epoch_fence->SetEventOnCompletion(epoch, _completion_epoch_event);
+            CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed for the completion signal");
+            _armed_epoch = epoch;
+        }
+        epoch_index = count;
+        events[count++] = _completion_epoch_event;
+    }
+    events[count++] = _completion_wake_event;
+
+    DWORD const r = WaitForMultipleObjects(count, events, FALSE, INFINITE);
+    // A fired registration is spent, so the next wait for that target has to register again.
+    if (r == WAIT_OBJECT_0 + submission_index)
+        _armed_submission = 0;
+    else if (r == WAIT_OBJECT_0 + epoch_index)
+        _armed_epoch = 0;
+
+    // A removed device completes every registration at once, since its fences jump to UINT64_MAX.
+    note_device_removed_if_lost(S_OK, "completion signal wait");
+}
+
+void dx12_context::wake_completion_signal(u64 generation)
+{
+    (void)generation;
+    if (_completion_wake_event != nullptr)
+        SetEvent(_completion_wake_event);
+}
+
 bool dx12_context::is_submission_complete(sg::submission_token token) const
 {
     if (token == sg::submission_token::not_submitted)

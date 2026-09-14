@@ -1,12 +1,15 @@
 #include "dx12-test-common.hh"
 
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2), reused here with an extra storage-texture
 // binding the shader doesn't touch — enough to drive the texture UAV descriptor + the dispatch barrier.
 #include "double_compute.dxil.h"
+
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -66,8 +69,8 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
     }
 }
 
-INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transitions + validates it",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -101,8 +104,8 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = c.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(c.cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await c.cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     auto const typed = sg::texture_2d::from_raw(tex);
@@ -125,12 +128,10 @@ INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture transiti
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }

@@ -1,5 +1,7 @@
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <imgui/imgui.h>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/imgui_context.hh>
@@ -35,7 +37,7 @@ struct imgui_fixture
     /// `display_pos` is where the target's top-left sits in imgui's coordinate space.
     /// Zero for a lone viewport at the origin, and the window's desktop position for a multi-viewport secondary window — the routine has to subtract it from both the projection and the scissors.
     template <class F>
-    void frame(F&& build_ui, tg::pos2f display_pos = tg::pos2f(0.0f, 0.0f))
+    cc::shared_async<cc::unit> frame(F build_ui, tg::pos2f display_pos = tg::pos2f(0.0f, 0.0f))
     {
         imgui.begin_frame({.display_size = tg::vec2i(target_width, target_height), .delta_time = 1.0f / 60.0f});
         build_ui();
@@ -52,8 +54,8 @@ struct imgui_fixture
         // frame.
         // Naming it up front is what lets a test assert on its first call, and it couples the test to a choice the
         // code under test makes.
-        // It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness — see
-        // libs/graphics/shaped-graphics/docs/TODO.md.
+        // It goes away once a routine's readiness is an async, where this becomes a co_await on it — see
+        // libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
         sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
         (void)ctx->routines.tick_until_idle();
 
@@ -68,19 +70,17 @@ struct imgui_fixture
         // What a real frame ends with.
         // Draining here also keeps each test self-contained: transient geometry is recycled, and no GPU work is left in flight when the fixture is torn down.
         ctx->advance_epoch();
-        ctx->block_until_idle();
+        co_await ctx->idle_completion();
     }
 
-    [[nodiscard]] cc::pinned_data<byte const> read_back()
+    [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> read_back()
     {
         auto cmd = ctx->create_command_list();
         auto const future = cmd->download.bytes_from_texture(target.raw());
         ctx->submit_command_list(cc::move(cmd));
 
-        ctx->block_until_idle();
-        auto bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
-        return cc::move(bytes).value();
+        auto const bytes = co_await future.bytes();
+        co_return bytes;
     }
 };
 
@@ -134,14 +134,17 @@ void draw_test_window()
 }
 } // namespace
 
-INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"),
+                     exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
         SKIP("no device accepting DXIL, or no DXC");
 
-    f->frame(&draw_test_window);
-    auto const pixels = f->read_back();
+    co_await f->frame(&draw_test_window);
+    auto const pixels = co_await f->read_back();
     REQUIRE(pixels.size() == isize(target_width) * isize(target_height) * 4);
 
     // Deliberately not a golden-image comparison: that would break on every imgui version bump without catching anything these checks do not.
@@ -154,8 +157,10 @@ INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target", (s
     CHECK(pixel_at(pixels, 250, 250) == byte(0));
 }
 
-INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
-               (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"),
+                     exclusive("sr-imgui-context"))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
     // geometry arrives in desktop coordinates and the target covers only part of the desktop, so the routine must subtract the window's origin.
@@ -170,44 +175,53 @@ INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on 
         list->AddRectFilled(ImVec2(100.0f, 100.0f), ImVec2(150.0f, 150.0f), IM_COL32(255, 0, 0, 255));
     };
 
-    f->frame(draw_box);
-    auto const centered = f->read_back();
+    co_await f->frame(draw_box);
+    auto const centered = co_await f->read_back();
     CHECK(pixel_at(centered, 125, 125) != byte(0));
     CHECK(pixel_at(centered, 85, 95) == byte(0));
 
     // Same geometry, but the target's top-left is now at (40, 30) in imgui space — so it must land 40 left and 30 up from where it did, and vacate where it was.
-    f->frame(draw_box, tg::pos2f(40.0f, 30.0f));
-    auto const shifted = f->read_back();
+    co_await f->frame(draw_box, tg::pos2f(40.0f, 30.0f));
+    auto const shifted = co_await f->read_back();
     CHECK(pixel_at(shifted, 85, 95) != byte(0));
     CHECK(pixel_at(shifted, 125, 125) == byte(0));
 }
 
-INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"),
+                     exclusive("sr-imgui-context"),
+                     exclusive("sg-reload-generation"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
         SKIP("no device accepting DXIL, or no DXC");
 
-    f->frame(&draw_test_window);
-    CHECK(any_pixel_drawn(f->read_back()));
+    co_await f->frame(&draw_test_window);
+    auto const before_reload = co_await f->read_back();
+    CHECK(any_pixel_drawn(before_reload));
 
     // A reload re-runs the routine's init_declare, which rebuilds the layouts.
     // A pipeline still cached against the old ones would now be stale — this is the check that the routine drops them and keeps drawing.
     sg::signal_reload();
 
-    f->frame(&draw_test_window);
-    CHECK(any_pixel_drawn(f->read_back()));
+    co_await f->frame(&draw_test_window);
+    auto const after_reload = co_await f->read_back();
+    CHECK(any_pixel_drawn(after_reload));
 }
 
-INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
+                     (sg::context_handle const& ctx),
+                     exclusive("slib-shader-library"),
+                     exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
     if (f == nullptr)
         SKIP("no device accepting DXIL, or no DXC");
 
-    f->frame([] {}); // no windows at all
+    co_await f->frame([] {}); // no windows at all
 
-    auto const pixels = f->read_back();
+    auto const pixels = co_await f->read_back();
     REQUIRE(pixels.size() == isize(target_width) * isize(target_height) * 4);
     CHECK(!any_pixel_drawn(pixels)); // still the clear color
 }

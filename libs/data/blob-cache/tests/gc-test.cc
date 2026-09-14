@@ -1,12 +1,14 @@
 #include "cache_fixture.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
 using namespace bcache::test;
 
-TEST("bcache collects down to the target once it is over the limit")
+ASYNC_TEST("bcache collects down to the target once it is over the limit", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -18,10 +20,12 @@ TEST("bcache collects down to the target once it is over the limit")
             c.limits.target_total_bytes = 20 * 1024;
         });
 
-    for (auto i = 0; i < 20; ++i)
-        f.settle_only(f.cache().put(key_of("bulk", cc::format("entry-{}", i)), make_blob_of_size(4096, u8(i + 1))));
+    (void)co_await f.opened();
 
-    f.settle_only(f.cache().collect_garbage());
+    for (auto i = 0; i < 20; ++i)
+        (void)co_await f.cache().put(key_of("bulk", cc::format("entry-{}", i)), make_blob_of_size(4096, u8(i + 1)));
+
+    (void)co_await f.cache().collect_garbage();
 
     // The cumulative counters, not this pass's: crossing the limit already started a pass on the put path, so an explicit collection afterwards legitimately finds nothing left to do.
     auto const stats = f.cache().get_stats();
@@ -32,7 +36,7 @@ TEST("bcache collects down to the target once it is over the limit")
     CHECK(stats.stored_bytes <= 20 * 1024);
 }
 
-TEST("bcache evicts the cheap bulky cold entry before the dear little hot one")
+ASYNC_TEST("bcache evicts the cheap bulky cold entry before the dear little hot one", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -45,22 +49,24 @@ TEST("bcache evicts the cheap bulky cold entry before the dear little hot one")
             c.access_epoch_secs = 1; // so a touch below is actually recorded rather than quantized away
         });
 
+    (void)co_await f.opened();
+
     auto const bulky = key_of("score", "bulky-cheap");
     auto const precious = key_of("score", "small-dear");
     auto const filler = key_of("score", "filler");
 
     // 8 KiB that took a millisecond to make, against 512 bytes that took ten minutes.
-    f.settle_only(f.cache().put(bulky, make_blob_of_size(8192, 1), {.compute_time_secs = 0.001}));
-    f.settle_only(f.cache().put(precious, make_blob_of_size(512, 2), {.compute_time_secs = 600}));
-    f.settle_only(f.cache().put(filler, make_blob_of_size(8192, 3), {.compute_time_secs = 0.001}));
+    (void)co_await f.cache().put(bulky, make_blob_of_size(8192, 1), {.compute_time_secs = 0.001});
+    (void)co_await f.cache().put(precious, make_blob_of_size(512, 2), {.compute_time_secs = 600});
+    (void)co_await f.cache().put(filler, make_blob_of_size(8192, 3), {.compute_time_secs = 0.001});
 
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
 
-    CHECK(f.settle(f.cache().get(precious)).has_value()); // survives: expensive per byte of disk it occupies
+    CHECK((co_await f.cache().get(precious)).has_value()); // survives: expensive per byte of disk it occupies
     CHECK(f.cache().get_stats().stored_bytes <= 6 * 1024);
 }
 
-TEST("bcache treats an unrecorded compute cost as unknown rather than free")
+ASYNC_TEST("bcache treats an unrecorded compute cost as unknown rather than free", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -73,22 +79,23 @@ TEST("bcache treats an unrecorded compute cost as unknown rather than free")
             c.limits.target_total_bytes = 4 * 1024;
             c.default_compute_time_secs = 10;
         });
+    (void)co_await f.opened();
 
     auto const unknown_cost = key_of("score", "unknown");
     auto const known_cheap = key_of("score", "known-cheap");
 
-    f.settle_only(f.cache().put(unknown_cost, make_blob_of_size(4096, 1)));
-    f.settle_only(f.cache().put(known_cheap, make_blob_of_size(4096, 2), {.compute_time_secs = 0.0001}));
-    f.settle_only(f.cache().put(key_of("score", "filler"), make_blob_of_size(4096, 3), {.compute_time_secs = 0.0001}));
+    (void)co_await f.cache().put(unknown_cost, make_blob_of_size(4096, 1));
+    (void)co_await f.cache().put(known_cheap, make_blob_of_size(4096, 2), {.compute_time_secs = 0.0001});
+    (void)co_await f.cache().put(key_of("score", "filler"), make_blob_of_size(4096, 3), {.compute_time_secs = 0.0001});
 
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
 
     // The default is far above the declared cheap cost, so the undeclared entry outranks it.
-    CHECK(f.settle(f.cache().get(unknown_cost)).has_value());
-    CHECK(!f.settle(f.cache().get(known_cheap)).has_value());
+    CHECK((co_await f.cache().get(unknown_cost)).has_value());
+    CHECK(!(co_await f.cache().get(known_cheap)).has_value());
 }
 
-TEST("bcache tells a declared cost of zero apart from no declared cost")
+ASYNC_TEST("bcache tells a declared cost of zero apart from no declared cost", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -103,21 +110,22 @@ TEST("bcache tells a declared cost of zero apart from no declared cost")
             c.limits.target_total_bytes = 4 * 1024;
             c.default_compute_time_secs = 10;
         });
+    (void)co_await f.opened();
 
     auto const undeclared = key_of("score", "undeclared");
     auto const declared_free = key_of("score", "declared-free");
 
-    f.settle_only(f.cache().put(undeclared, make_blob_of_size(4096, 1)));
-    f.settle_only(f.cache().put(declared_free, make_blob_of_size(4096, 2), {.compute_time_secs = 0}));
-    f.settle_only(f.cache().put(key_of("score", "filler"), make_blob_of_size(4096, 3), {.compute_time_secs = 0}));
+    (void)co_await f.cache().put(undeclared, make_blob_of_size(4096, 1));
+    (void)co_await f.cache().put(declared_free, make_blob_of_size(4096, 2), {.compute_time_secs = 0});
+    (void)co_await f.cache().put(key_of("score", "filler"), make_blob_of_size(4096, 3), {.compute_time_secs = 0});
 
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
 
-    CHECK(f.settle(f.cache().get(undeclared)).has_value());
-    CHECK(!f.settle(f.cache().get(declared_free)).has_value());
+    CHECK((co_await f.cache().get(undeclared)).has_value());
+    CHECK(!(co_await f.cache().get(declared_free)).has_value());
 }
 
-TEST("bcache frees nothing until the last entry naming an object is gone")
+ASYNC_TEST("bcache frees nothing until the last entry naming an object is gone", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -125,33 +133,34 @@ TEST("bcache frees nothing until the last entry naming an object is gone")
     // The deduplication property.
     // It is also the reason an eviction phase must never stop because a batch freed zero bytes.
     auto f = cache_fixture();
+    (void)co_await f.opened();
     auto const shared = make_blob_of_size(4096, 5);
 
-    f.settle_only(f.cache().put(key_of("dedup", "one"), shared));
-    f.settle_only(f.cache().put(key_of("dedup", "two"), shared));
+    (void)co_await f.cache().put(key_of("dedup", "one"), shared);
+    (void)co_await f.cache().put(key_of("dedup", "two"), shared);
 
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
     auto const with_both = f.cache().get_stats().stored_bytes;
     CHECK(with_both >= 4096);
 
-    CHECK(f.settle(f.cache().invalidate(key_of("dedup", "one"))));
-    auto const after_first = f.settle(f.cache().collect_garbage());
+    CHECK((co_await f.cache().invalidate(key_of("dedup", "one"))));
+    auto const after_first = co_await f.cache().collect_garbage();
 
     // Zero bytes freed, because the object still has a live reference.
     CHECK(after_first.objects_reclaimed == 0);
     CHECK(after_first.bytes_reclaimed == 0);
     CHECK(f.cache().get_stats().stored_bytes == with_both);
-    CHECK(f.settle(f.cache().get(key_of("dedup", "two"))).has_value());
+    CHECK((co_await f.cache().get(key_of("dedup", "two"))).has_value());
 
-    CHECK(f.settle(f.cache().invalidate(key_of("dedup", "two"))));
-    auto const after_second = f.settle(f.cache().collect_garbage());
+    CHECK((co_await f.cache().invalidate(key_of("dedup", "two"))));
+    auto const after_second = co_await f.cache().collect_garbage();
 
     CHECK(after_second.objects_reclaimed == 1);
     CHECK(after_second.bytes_reclaimed >= 4096);
     CHECK(f.cache().get_stats().stored_bytes == 0);
 }
 
-TEST("bcache enforces a max entry count as well as a byte ceiling")
+ASYNC_TEST("bcache enforces a max entry count as well as a byte ceiling", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -163,60 +172,68 @@ TEST("bcache enforces a max entry count as well as a byte ceiling")
             c.limits.max_entries = 4;
         });
 
-    for (auto i = 0; i < 12; ++i)
-        f.settle_only(f.cache().put(key_of("count", cc::format("entry-{}", i)), make_blob_of_size(64, u8(i + 1))));
+    (void)co_await f.opened();
 
-    f.settle_only(f.cache().collect_garbage());
+    for (auto i = 0; i < 12; ++i)
+        (void)co_await f.cache().put(key_of("count", cc::format("entry-{}", i)), make_blob_of_size(64, u8(i + 1)));
+
+    (void)co_await f.cache().collect_garbage();
     CHECK(f.cache().get_stats().entry_count <= 4);
 }
 
-TEST("bcache leaves a cache under its limits untouched")
+ASYNC_TEST("bcache leaves a cache under its limits untouched", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture([](cache_config& c) { c.limits.max_total_bytes = i64(1) << 30; });
 
-    f.settle_only(f.cache().put(key_of("calm", "a"), make_blob("small")));
-    f.settle_only(f.cache().put(key_of("calm", "b"), make_blob("also small")));
+    (void)co_await f.opened();
 
-    auto const collected = f.settle(f.cache().collect_garbage());
+    (void)co_await f.cache().put(key_of("calm", "a"), make_blob("small"));
+    (void)co_await f.cache().put(key_of("calm", "b"), make_blob("also small"));
+
+    auto const collected = co_await f.cache().collect_garbage();
     CHECK(collected.entries_expired == 0);
     CHECK(collected.entries_evicted == 0);
     CHECK(collected.objects_reclaimed == 0);
 
-    CHECK(f.settle(f.cache().get(key_of("calm", "a"))).has_value());
-    CHECK(f.settle(f.cache().get(key_of("calm", "b"))).has_value());
+    CHECK((co_await f.cache().get(key_of("calm", "a"))).has_value());
+    CHECK((co_await f.cache().get(key_of("calm", "b"))).has_value());
 }
 
-TEST("bcache set_limits takes effect on the next pass")
+ASYNC_TEST("bcache set_limits takes effect on the next pass", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture([](cache_config& c) { c.limits.max_total_bytes = i64(1) << 30; });
 
-    for (auto i = 0; i < 8; ++i)
-        f.settle_only(f.cache().put(key_of("limits", cc::format("entry-{}", i)), make_blob_of_size(4096, u8(i + 1))));
+    (void)co_await f.opened();
 
-    f.settle_only(f.cache().collect_garbage());
+    for (auto i = 0; i < 8; ++i)
+        (void)co_await f.cache().put(key_of("limits", cc::format("entry-{}", i)), make_blob_of_size(4096, u8(i + 1)));
+
+    (void)co_await f.cache().collect_garbage();
     CHECK(f.cache().get_stats().entry_count == 8);
 
     f.cache().set_limits({.max_total_bytes = 8 * 1024, .target_total_bytes = 4 * 1024});
     CHECK(f.cache().get_limits().max_total_bytes == 8 * 1024);
 
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
     CHECK(f.cache().get_stats().stored_bytes <= 4 * 1024);
 }
 
-TEST("bcache reports a file size larger than the payload it accounts for")
+ASYNC_TEST("bcache reports a file size larger than the payload it accounts for", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("size", "one"), make_blob_of_size(16384, 1)));
-    f.settle_only(f.cache().collect_garbage());
+
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("size", "one"), make_blob_of_size(16384, 1));
+    (void)co_await f.cache().collect_garbage();
 
     auto const stats = f.cache().get_stats();
     CHECK(stats.stored_bytes >= 16384);

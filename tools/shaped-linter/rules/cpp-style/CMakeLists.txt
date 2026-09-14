@@ -5,6 +5,7 @@
 
 target_sources(shaped-linter-core PRIVATE
     blessed-includes/blessed_includes.cc
+    blocking-wait/blocking_wait.cc
     default-init-assignment/default_init_assignment.cc
     qualified-primitive/qualified_primitive.cc
     qualified-type-definition/qualified_type_definition.cc
@@ -13,6 +14,7 @@ target_sources(shaped-linter-core PRIVATE
 if(SC_BUILD_TESTS)
     target_sources(shaped-linter-test PRIVATE
         blessed-includes/blessed_includes-test.cc
+        blocking-wait/blocking_wait-test.cc
         default-init-assignment/default_init_assignment-test.cc
         qualified-primitive/qualified_primitive-test.cc
         qualified-type-definition/qualified_type_definition-test.cc

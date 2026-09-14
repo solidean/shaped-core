@@ -1,10 +1,14 @@
 #include <blob-cache/blob_cache.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
 
@@ -34,7 +38,7 @@ ssc::dxc::shader_description make_desc()
 }
 } // namespace
 
-TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
+ASYNC_TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -42,7 +46,7 @@ TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
     auto async_shader = cache.compile(make_desc());
     REQUIRE(async_shader != nullptr);
 
-    sg::compiled_shader shader = cc::async_blocking_get(async_shader);
+    sg::compiled_shader shader = co_await async_shader;
     CHECK(shader.stage == sg::shader_stage::compute);
     CHECK(shader.format == sg::shader_format::dxil);
     CHECK(!shader.bytecode.empty());
@@ -52,7 +56,7 @@ TEST("ssc::dxc shader_cache - compiles and resolves to bytecode + reflection")
     CHECK(shader.bindings[0].name == cc::string_view("Output"));
 }
 
-TEST("ssc::dxc shader_cache - same key returns the same async node")
+ASYNC_TEST("ssc::dxc shader_cache - same key returns the same async node")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -72,11 +76,11 @@ TEST("ssc::dxc shader_cache - same key returns the same async node")
 
     // Identity is all this test asks about, but the nodes are real compiles running on the ambient scheduler —
     // so they are finished here rather than abandoned mid-flight, which the run would report as leaked work.
-    (void)cc::try_async_blocking_get(a);
-    (void)cc::try_async_blocking_get(c);
+    co_await cc::async_settled(a);
+    co_await cc::async_settled(c);
 }
 
-TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
+ASYNC_TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
 {
     ssc::dxc::shader_cache cache;
     cache.add_default_in_memory_provider();
@@ -86,7 +90,7 @@ TEST("ssc::dxc shader_cache - a compile error surfaces as an async error")
     desc.source = "[numthreads(1,1,1)] void main() { this is not valid HLSL }";
 
     auto async_shader = cache.compile(desc);
-    auto const outcome = cc::try_async_blocking_get(async_shader);
+    auto const outcome = co_await cc::async_as_result(async_shader);
     CHECK(outcome.has_error());
 }
 
@@ -107,15 +111,16 @@ TEST("ssc::dxc shader_cache - a compile persists across cache instances")
     auto store = bcache::blob_cache::create({.path = path, .unthreaded = true});
 
     // Two drivers, both needed: the sweep resolves what the compile is parked on, the drain resumes the compile.
-    // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER,
-    // and bounded, so a compile that can never finish fails the test instead of hanging it.
+    // Driven by hand rather than through cc::async_blocking_get because the point here is the store's message ORDER.
+    // Waits on readiness alone: no pool ever sweeps a pump, so this loop is the only thing that can move the compile.
     auto const settle = [&](auto const& node)
     {
         CC_RECORD_SCOPE("dxc_test.settle");
 
-        for (auto i = 0; i < 100000 && !node->is_ready(); ++i)
+        while (!node->is_ready())
         {
-            (void)cc::thread_pump_all();
+            if (!cc::thread_pump_all())
+                cc::this_thread_yield();
             scheduler.drain();
         }
         CHECK(node->is_ready());

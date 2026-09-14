@@ -25,11 +25,13 @@ add_library(nexus
     src/nexus/bench/environment.cc
     src/nexus/bench/report.cc
     src/nexus/bench/run.cc
+    src/nexus/bench/run_async.cc
     src/nexus/bench/statistics.cc
     src/nexus/bench/hardware_counters.cc
     src/nexus/tests/alias.cc
     src/nexus/tests/check.cc
     src/nexus/tests/config.cc
+    src/nexus/tests/entry.cc
     src/nexus/tests/invoke_tests.cc
     src/nexus/tests/execute.cc
     src/nexus/tests/registry.cc
@@ -77,6 +79,7 @@ target_sources(nexus
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
     src/nexus/test.hh
+    src/nexus/async-test.hh
     src/nexus/pgo.hh
     src/nexus/bench/fwd.hh
     src/nexus/bench/barriers.hh
@@ -86,6 +89,7 @@ target_sources(nexus
     src/nexus/bench/report.hh
     src/nexus/bench/result.hh
     src/nexus/bench/run.hh
+    src/nexus/bench/run_async.hh
     src/nexus/bench/run_config.hh
     src/nexus/bench/units.hh
     src/nexus/bench/statistics.hh
@@ -94,10 +98,12 @@ target_sources(nexus
     src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
     src/nexus/tests/config.hh
+    src/nexus/tests/entry.hh
     src/nexus/tests/invoke_tests.hh
     src/nexus/tests/execute.hh
     src/nexus/tests/registry.hh
     src/nexus/tests/schedule.hh
+    src/nexus/tests/seed.hh
     src/nexus/tests/thread_scope.hh
     src/nexus/tests/typed_value.hh
     src/nexus/tests/typed_invoke.hh
@@ -200,6 +206,9 @@ if(SC_BUILD_TESTS)
         tests/test-threaded-check-test.cc
         tests/test-parallel-test.cc
         tests/test-async-test.cc
+        tests/test-async-invocable-test.cc
+        tests/test-seed-test.cc
+        tests/test-entry-test.cc
         tests/test-export-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc
@@ -218,6 +227,7 @@ if(SC_BUILD_TESTS)
         tests/fuzz-minimize-test.cc
         tests/fuzz-regression-test.cc
     )
+    sc_nexus_binary(nexus-test KINDS tests)
 
     target_link_libraries(nexus-test
         PRIVATE

@@ -48,6 +48,7 @@ from tools.review.lib.entry.askhash import hash_ask  # noqa: E402
 from tools.review.lib.entry.grammar import ReviewParseError, ack_name  # noqa: E402
 from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
+from tools.review.cmd.run import executed_command  # noqa: E402
 from tools.review.lib.entry.write import (  # noqa: E402
     append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
 )
@@ -1811,6 +1812,14 @@ def test_a_collapsed_diff_is_fetched_rather_than_embedded(root: Path) -> None:
                     f"{row['slug']}: a collapsed card must not embed its diff"
     finally:
         server.shutdown()
+
+
+def test_a_dev_py_example_runs_with_its_output_mirrored(root: Path) -> None:
+    """dev.py is quiet on a pipe, so a capture that does not ask for a mirror holds a trace instead of the example."""
+    assert executed_command("uv run dev.py example clean-core/vector") \
+        == "uv run dev.py --mirror-test-output example clean-core/vector"
+    assert executed_command("uv run dev.py --mirror-output example x") == "uv run dev.py --mirror-output example x"
+    assert executed_command("echo hi") == "echo hi"
 
 
 # ---- harness ----------------------------------------------------------------

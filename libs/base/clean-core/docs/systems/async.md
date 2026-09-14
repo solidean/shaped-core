@@ -259,6 +259,7 @@ A node awaiting a push that never comes therefore hangs rather than reporting no
 
 **This is a bridge between synchronous and asynchronous code, and nothing more.**
 Reaching for it often is the signal to step back: make the surrounding code async, write an `ASYNC_TEST`, hand the async to a caller that can await it.
+In a library's tests it is a `blocking-wait` lint finding, allowed by file only where the wait, or a scheduler the test owns, is the subject.
 Calling it from inside a frame is legal and participates rather than idling, but every blocked thread is one that cannot help — overused, that is how a graph starves or deadlocks.
 
 `cc::async_blocking_get_on(scheduler, root)` names a scheduler instead of taking the ambient one, for code that owns one and means *that* one: a benchmark measuring a pool, a test standing one up.
@@ -679,6 +680,8 @@ cc::shared_async<cc::unit> upload_texture(sg::context& ctx, cc::string path)
   `async_resume_on_main()`, `_compute()` and `_io()` name the well-known homes.
 - `co_await cc::async_set_home_options(options)` changes options in place and never suspends.
 - `co_await cc::async_run_on(h, f)` runs `f` as a child homed to `h` and hands back its value, without moving the body.
+- `node->try_home_cold(h[, options])` homes a node that has not started, from outside its frame — for a host placing a graph it did not build, as a test runner does.
+  It returns false and changes nothing unless the node is cold and its frame reserved a home word, which only coroutines and the `_on` factories do.
 
 A hop resets options to the target's defaults unless it is given its own, because options describe a node's relation to its *current* home.
 Threads off, a hop still re-queues, so the rest of the body runs at that home's next pump point exactly as it would with threads.
@@ -720,6 +723,33 @@ It still creates a `thread_bound_scheduler` for a thread it genuinely owns.
 A main thread blocked in `cc::async_blocking_get` on a graph with a main-homed step in the middle would otherwise wait forever, and the wait and the step usually live in different libraries.
 Pool participation, the no-slot fallback, `async_drive_until_ready` and `cc::thread_pump_all()` all do it; a push to a home whose owner is parked wakes it wherever it parks.
 `thread_pump_all` reaches the home through one TLS read rather than a registry entry, so a threaded sweep with nothing registered stays one atomic load.
+
+### Who drives a pump
+
+**An unthreaded component is driven by the loop that owns it, and a thread parked in a pool never sweeps.**
+The loops that sweep the registry are a frame loop or a test calling `cc::thread_pump_all()`, and `cc::pump_main_thread()` with nexus's main loop.
+So is a blocking drive on a scheduler with no threads of its own.
+**Nothing sweeps on a clock.**
+A pump that gains work says so with `cc::thread_pump_notify()` — a post to an unthreaded actor does it for you, and so does registration — and a loop parked on that signal wakes and sweeps once.
+`cc::impl::async_parker` is that park: it ends on the awaited node resolving, a pump signalling when the park drives pumps, or the thread's home getting work.
+
+**Why parked pool threads stay out of it — this has been tried.**
+Letting them sweep makes awaiting an unthreaded component from any pool thread work, first by sweeping in short timed slices and then by waking every parked thread on each notify.
+Both hand a component's handlers to whichever unrelated thread happened to be parked.
+A test pumping its own io_system then races that thread over the state its handlers write.
+And a hand-driven cycle finds the component busy elsewhere, so it returns before the work it asked for has run.
+The slices were a timer besides, and the prompt wakes made the race common rather than rare.
+In a threaded build every unthreaded component is test-only or loop-owned by intent, so the rule costs nothing real.
+
+**So a coroutine awaiting an unthreaded component runs where its loop is**: homed to the main thread (`main_thread` on an `ASYNC_TEST`), or in a program whose frame loop pumps.
+Awaited from a plain pool thread, it waits until some loop happens to sweep — possibly forever, since no pool thread will.
+Without threads none of this applies: the one thread is every loop, and a pool's drive sweeps the registry before it gives up.
+
+**The registry has no owners, so a loop that sweeps runs every registered component, not only its own.**
+nexus's run loop on the main thread is such a loop, and it wakes on every `cc::thread_pump_notify`.
+So a test that pumps an unthreaded component itself, from a pool thread, races that loop exactly as it would race a sweeping pool thread.
+The loop can take the component's reply, and the woken graph then resumes on the scheduler bound on the loop's thread rather than on the test's.
+A test that uses an unthreaded component therefore awaits it from `main_thread` instead of pumping it; blob-cache's tests are the worked case.
 
 **A home is never re-entered from inside one of its own bodies.**
 A blocking wait inside a main-homed body does not run other main-homed bodies, which would see half-finished main-thread state.

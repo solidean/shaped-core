@@ -188,6 +188,9 @@ void vulkan_context::shutdown()
 
     if (_device != VK_NULL_HANDLE)
     {
+        // Before the device goes idle rather than after: stopping wakes the waiter with an empty submit, and that submit
+        // must have finished before the timeline it raises is destroyed below.
+        stop_completion_signals();
         _queue_guard.lock([&](int&) { vkDeviceWaitIdle(_device); });
 
         // Before the device: the ring holds a buffer and a mapped allocation on it.
@@ -216,6 +219,11 @@ void vulkan_context::shutdown()
                 p.in_epoch = {};
             });
 
+        if (_completion_wake_timeline != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(_device, _completion_wake_timeline, nullptr);
+            _completion_wake_timeline = VK_NULL_HANDLE;
+        }
         if (_submission_timeline != VK_NULL_HANDLE)
         {
             vkDestroySemaphore(_device, _submission_timeline, nullptr);

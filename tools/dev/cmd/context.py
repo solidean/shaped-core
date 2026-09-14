@@ -16,6 +16,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
+from tools.dev.lib.project.targets import carries_examples, carries_tests, is_tool
 
 
 @dataclass(frozen=True)
@@ -56,12 +57,16 @@ class Context:
         sys.exit(1)
 
     def is_test_target(self, target: dev.Target) -> bool:
-        """Project convention: test executables are named '*-test'."""
-        return target.kind == "EXECUTABLE" and target.name.endswith("-test")
+        """A nexus binary carrying tests, as the build's nexus-binaries.json records it."""
+        return carries_tests(target)
 
     def is_example_target(self, target: dev.Target) -> bool:
-        """Project convention: example executables are named '*-example'."""
-        return target.kind == "EXECUTABLE" and target.name.endswith("-example")
+        """A nexus binary carrying examples, as the build's nexus-binaries.json records it."""
+        return carries_examples(target)
+
+    def is_tool_target(self, target: dev.Target) -> bool:
+        """A nexus binary that is also a program a user runs, whatever tests or examples it carries."""
+        return is_tool(target)
 
     def default_preset_name(self) -> str:
         name = self.policy.default_build.get(platform.system())

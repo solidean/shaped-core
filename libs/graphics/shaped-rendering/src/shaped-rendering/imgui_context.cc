@@ -480,10 +480,6 @@ void imgui_context::begin_frame(window& win, float delta_time)
 {
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
 
-    // A span whose ends are in different functions, so the unmatched form — end_frame owes the close.
-    // ImGui's frame IS a bracket across user code, and there is no block to wrap.
-    CC_RECORD_SCOPE_BEGIN("sr.imgui.frame");
-
     auto& wsys = win.system();
     install_clipboard(wsys);
     install_viewports(wsys, win);
@@ -524,6 +520,7 @@ void imgui_context::begin_frame(window& win, float delta_time)
 void imgui_context::begin_frame(frame_info const& info)
 {
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
+
     CC_ASSERT(info.delta_time > 0.0f, "delta time must be positive — imgui divides by it");
     CC_ASSERT(info.display_size[0] > 0 && info.display_size[1] > 0, "display size must be positive");
 
@@ -536,6 +533,12 @@ void imgui_context::begin_frame(frame_info const& info)
     io.DisplaySize = ImVec2(float(info.display_size[0]), float(info.display_size[1]));
     io.DisplayFramebufferScale = ImVec2(info.framebuffer_scale[0], info.framebuffer_scale[1]);
     io.DeltaTime = info.delta_time;
+
+    // A span whose ends are in different functions, so the unmatched form — end_frame owes the close.
+    // ImGui's frame IS a bracket across user code, and there is no block to wrap.
+    // Opened here, the one begin every frame reaches and past every assert, so the close in end_frame always has a match:
+    // an assert caught by a test would otherwise leave the scope open on its thread.
+    CC_RECORD_SCOPE_BEGIN("sr.imgui.frame");
 
     _frame_started = true; // NewFrame is the point past which load_settings can no longer reach every window
     ImGui::NewFrame();

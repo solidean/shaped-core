@@ -202,7 +202,9 @@ def test(
                                 if jsr.needs_launcher(preset.is_emscripten, target.artifact) else [])
                 except jsr.NotFound as e:
                     raise SystemExit(f"error: {e}") from None
-                cmd = [*launcher, str(target.artifact)]
+                # --tests first: a nexus binary runs its default app or command, or lists what it holds, unless the line
+                # selects tests — and ahead of the name, so a test named like one of its commands still means the test.
+                cmd = [*launcher, str(target.artifact), "--tests"]
                 if test_name:
                     cmd.append(test_name)
                 # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.

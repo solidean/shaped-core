@@ -154,6 +154,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-raytracing-test.cc
         tests/dx12-query-test.cc
     )
+    sc_nexus_binary(shaped-graphics-dx12-test KINDS tests)
 
     target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
 

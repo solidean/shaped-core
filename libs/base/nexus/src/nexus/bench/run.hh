@@ -26,6 +26,15 @@ result run_measured(cc::string_view name,
                     bool body_owns_loop,
                     cc::function_ref<void(isize count, iteration& it)> body);
 
+/// Whether sampling may stop after the samples `r` holds now, setting `r.converged` when it does.
+/// `measured_secs` is what the effort floor counts and `wall_secs` what the cap counts; shared by run and run_async, so
+/// both stop by the same rule.
+bool sampling_should_stop(result& r, run_config const& cfg, f64 measured_secs, f64 wall_secs);
+
+/// The tail both harnesses share once sampling stopped: the statistics, the convergence and sample-count notes, the
+/// recording, and handing the result to the running test.
+void finish_sampled_result(result& r, run_config const& cfg, f64 wall_secs);
+
 /// Moves the handle to the next iteration.
 /// The harness's own loop calls this; a body never does, which is why it is not a member.
 void advance(iteration& it, isize index);

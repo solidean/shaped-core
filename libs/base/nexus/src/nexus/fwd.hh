@@ -11,11 +11,12 @@ namespace nx
 using namespace cc::primitive_defines;
 
 // Declared here so each header defines its types qualified rather than opening the namespace around them.
-struct typed_value;          // the type-erased box an invocable test is called with (tests/typed_value.hh)
-struct test_instance;        // one scheduled run of a test declaration (tests/schedule.hh)
-struct test_schedule;        // the runs a CLI invocation selected (tests/schedule.hh)
-struct test_schedule_config; // what the CLI arguments select (tests/schedule.hh)
-struct test_thread_scope;    // attributes a thread's checks to a captured test (tests/thread_scope.hh)
+struct typed_value;                 // the type-erased box an invocable test is called with (tests/typed_value.hh)
+struct parallel_invocation_options; // how wide an async invocation fans out (async-test.hh)
+struct test_instance;               // one scheduled run of a test declaration (tests/schedule.hh)
+struct test_schedule;               // the runs a CLI invocation selected (tests/schedule.hh)
+struct test_schedule_config;        // what the CLI arguments select (tests/schedule.hh)
+struct test_thread_scope;           // attributes a thread's checks to a captured test (tests/thread_scope.hh)
 
 enum class filter_mode; // how the positional filters are read (tests/schedule.hh)
 

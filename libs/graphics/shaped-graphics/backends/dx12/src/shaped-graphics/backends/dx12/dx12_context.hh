@@ -549,6 +549,10 @@ public:
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
+    [[nodiscard]] bool are_transfers_drained() const override;
+    [[nodiscard]] sg::submission_token last_issued_submission() override;
+    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
+    void wake_completion_signal(u64 generation) override;
 
     void shutdown() override;
 
@@ -585,6 +589,16 @@ public:
     // Waits on the epoch fence create a per-call event, so wait_for_epoch stays safe to invoke from any thread.
     ComPtr<ID3D12Fence> _epoch_fence;
     ComPtr<ID3D12Fence> _submission_fence;
+
+    // The completion signal waiter's events, auto-reset and created with the context.
+    // A fence registration cannot be withdrawn, so each event lives until shutdown and a stale one only wakes spuriously.
+    // `_armed_*` is the target each fence event is registered for, so a re-arm for the same target registers nothing new;
+    // touched only by the waiter.
+    HANDLE _completion_submission_event = nullptr;
+    HANDLE _completion_epoch_event = nullptr;
+    HANDLE _completion_wake_event = nullptr;
+    u64 _armed_submission = 0;
+    u64 _armed_epoch = 0;
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

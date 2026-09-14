@@ -1,8 +1,10 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -46,20 +48,16 @@ ASYNC_TEST("async test - async_all fans out from a test body")
     CHECK(co_await a + co_await b == 7);
 }
 
-// The pre-coroutine spelling, still supported: a body with no co_ keyword must RETURN the graph to await.
-// It has to be cold, which a coroutine body is by construction and a returned graph is not.
-ASYNC_TEST("async test - a body may still return a graph instead of awaiting")
-{
-    return cc::make_async_lazy<cc::unit>(
-        [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-        {
-            CHECK(1 + 1 == 2);
-            return actx.resolve_to_value(cc::unit{});
-        });
-}
-
 namespace
 {
+// A coroutine taking its count by value: a parameter lives in the frame, where a lambda's capture would not.
+cc::shared_async<cc::unit> check_n_times(int n)
+{
+    for (auto k = 0; k < n; ++k)
+        CHECK(true);
+    co_return;
+}
+
 // Runs `body` as a nested async test and returns the run's result.
 // Every test below that nests a run is no_scheduler, as any nesting test must be.
 nx::test_schedule_execution run_async(cc::unique_function<void(nx::impl::async_test_sink&)> body, int jobs = 1)
@@ -80,9 +78,13 @@ TEST("async test - a graph that resolves to an error fails the test, without pro
         [](nx::impl::async_test_sink& sink)
         {
             CHECK(true); // so the test is not failed merely for having no checks
-            nx::impl::submit_test_async(
-                sink, cc::make_async_lazy<cc::unit>([](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-                                                    { return actx.error(cc::any_error("deliberate")); }));
+            // A cc::unit coroutine has no co_return for an error, so it fails the way a body usually does: by awaiting one.
+            nx::impl::submit_test_async(sink,
+                                        []() -> cc::shared_async<cc::unit>
+                                        {
+                                            (void)co_await
+                                                []() -> cc::shared_async<int> { co_return cc::error("deliberate"); }();
+                                        }());
         });
 
     REQUIRE(exec.executions.size() == 1);
@@ -101,19 +103,17 @@ TEST("async test - work left running past the graph still fails the test by name
     auto const exec = run_async(
         [](nx::impl::async_test_sink& sink)
         {
-            nx::impl::submit_test_async(sink, cc::make_async_lazy<cc::unit>(
-                                                  [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-                                                  {
-                                                      // Scheduled under this test's context and then abandoned: never awaited, never cancelled.
-                                                      // It is the run's scheduler that now holds it, which is exactly the interference the check exists to find.
-                                                      auto abandoned = cc::make_async_lazy<int>(
-                                                          [](cc::async_context<int>& inner) -> cc::async_step_status
-                                                          { return inner.resolve_to_value(1); });
-                                                      abandoned->schedule();
+            nx::impl::submit_test_async(sink,
+                                        []() -> cc::shared_async<cc::unit>
+                                        {
+                                            // Scheduled under this test's context and then abandoned: never awaited, never cancelled.
+                                            // It is the run's scheduler that now holds it, which is exactly the interference the check exists to find.
+                                            auto abandoned = cc::make_async_lazy([] { return 1; });
+                                            abandoned->schedule();
 
-                                                      CHECK(true);
-                                                      return actx.resolve_to_value(cc::unit{});
-                                                  }));
+                                            CHECK(true);
+                                            co_return;
+                                        }());
         });
 
     REQUIRE(exec.executions.size() == 1);
@@ -137,18 +137,8 @@ TEST("async test - checks land on the right test when async and plain tests inte
                                 for (auto k = 0; k < i; ++k)
                                     CHECK(true);
                             });
-        reg.add_async_declaration(cc::format("async{}", i), {},
-                                  [i](nx::impl::async_test_sink& sink)
-                                  {
-                                      nx::impl::submit_test_async(
-                                          sink, cc::make_async_lazy<cc::unit>(
-                                                    [i](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-                                                    {
-                                                        for (auto k = 0; k < i; ++k)
-                                                            CHECK(true);
-                                                        return actx.resolve_to_value(cc::unit{});
-                                                    }));
-                                  });
+        reg.add_async_declaration(cc::format("async{}", i), {}, [i](nx::impl::async_test_sink& sink)
+                                  { nx::impl::submit_test_async(sink, check_n_times(i)); });
     }
 
     auto const schedule = nx::test_schedule::create({}, reg);
@@ -166,4 +156,164 @@ TEST("async test - checks land on the right test when async and plain tests inte
         CHECK(exec.executions[(i - 1) * 2].root.executed_checks == i);
         CHECK(exec.executions[(i - 1) * 2 + 1].root.executed_checks == i);
     }
+}
+
+namespace
+{
+// A SKIP two frames below the body: the throw ends this coroutine's node, and its error reaches the body's root through the await.
+cc::shared_async<int> skipping_helper()
+{
+    SKIP("nothing to test on this host");
+    co_return 1;
+}
+
+cc::shared_async<int> requiring_helper()
+{
+    REQUIRE(1 == 2);
+    co_return 1;
+}
+
+/// The outcome of one async test run nested at `jobs`, whose body is the coroutine `make_body` returns.
+nx::test_schedule_execution run_coroutine(cc::shared_async<cc::unit> (*make_body)(), int jobs)
+{
+    return run_async([make_body](nx::impl::async_test_sink& sink) { nx::impl::submit_test_async(sink, make_body()); },
+                     jobs);
+}
+
+bool any_error_mentions(nx::test_execution const& e, cc::string_view text)
+{
+    auto found = false;
+    for (auto const& err : e.root.errors)
+        found |= err.expr.contains(text);
+    return found;
+}
+} // namespace
+
+// A SKIP or a failed REQUIRE ends an async body by throwing inside a poll, which cc::async turns into the node's error.
+// That error IS the abort the check asked for, so it must neither fail a skipped test nor report a failed REQUIRE twice.
+TEST("async test - SKIP in a coroutine body skips the test, directly and from an awaited coroutine", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        auto const direct = run_coroutine(
+            []() -> cc::shared_async<cc::unit>
+            {
+                SKIP("not on this host");
+                co_return;
+            },
+            jobs);
+        REQUIRE(direct.executions.size() == 1);
+        CHECK(!direct.executions[0].is_considered_failing());
+        CHECK(direct.executions[0].root.errors.empty());
+
+        auto const nested = run_coroutine(
+            []() -> cc::shared_async<cc::unit>
+            {
+                (void)co_await skipping_helper();
+                CHECK(false); // never reached: the skip ended the body through the await
+            },
+            jobs);
+        REQUIRE(nested.executions.size() == 1);
+        CHECK(!nested.executions[0].is_considered_failing());
+        CHECK(nested.executions[0].root.errors.empty());
+    }
+}
+
+TEST("async test - a failed REQUIRE in a coroutine body fails the test once, not twice", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        auto const direct = run_coroutine(
+            []() -> cc::shared_async<cc::unit>
+            {
+                REQUIRE(1 == 2);
+                co_return;
+            },
+            jobs);
+        REQUIRE(direct.executions.size() == 1);
+        CHECK(direct.executions[0].is_considered_failing());
+        CHECK(direct.executions[0].root.errors.size() == 1);
+        CHECK(!any_error_mentions(direct.executions[0], "async graph failed"));
+
+        auto const nested = run_coroutine(
+            []() -> cc::shared_async<cc::unit>
+            {
+                (void)co_await requiring_helper();
+                co_return;
+            },
+            jobs);
+        REQUIRE(nested.executions.size() == 1);
+        CHECK(nested.executions[0].is_considered_failing());
+        CHECK(!any_error_mentions(nested.executions[0], "async graph failed"));
+
+        auto const required_value = run_coroutine(
+            []() -> cc::shared_async<cc::unit>
+            {
+                auto const missing = cc::optional<int>();
+                auto const v = REQUIRED_VALUE(missing);
+                CHECK(v == 0); // never reached
+                co_return;
+            },
+            jobs);
+        REQUIRE(required_value.executions.size() == 1);
+        CHECK(required_value.executions[0].is_considered_failing());
+        CHECK(!any_error_mentions(required_value.executions[0], "async graph failed"));
+    }
+}
+
+TEST("async test - a graph error that is not a check's abort still fails the test by name", no_scheduler)
+{
+    auto const exec = run_coroutine(
+        []() -> cc::shared_async<cc::unit>
+        {
+            CHECK(true);
+            (void)co_await cc::make_async_lazy<int>([](cc::async_context<int>& actx) -> cc::async_step_status
+                                                    { return actx.error(cc::any_error("deliberate")); });
+        },
+        1);
+    REQUIRE(exec.executions.size() == 1);
+    CHECK(exec.executions[0].is_considered_failing());
+    CHECK(any_error_mentions(exec.executions[0], "async graph failed"));
+}
+
+TEST("async test - a body that hands back a graph other than a coroutine is refused by name", no_scheduler)
+{
+    auto const exec = run_async(
+        [](nx::impl::async_test_sink& sink)
+        {
+            auto raw = cc::make_async_lazy<cc::unit>(
+                [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+                {
+                    CHECK(true);
+                    return actx.resolve_to_value(cc::unit{});
+                });
+            nx::impl::submit_test_async(sink, cc::move(raw));
+        });
+
+    REQUIRE(exec.executions.size() == 1);
+    CHECK(exec.executions[0].is_considered_failing());
+    CHECK(any_error_mentions(exec.executions[0], "must be a coroutine"));
+}
+
+// ASYNC_EXAMPLE's wiring, checked against the registry rather than the macro text.
+// The declaration lives in the example bucket, so no normal sweep runs it — which is part of what is asserted.
+ASYNC_EXAMPLE("nexus/async-example-wiring")
+{
+    CHECK(cc::current_thread_id() == cc::thread_id::main); // homed to main, as EXAMPLE's body runs on main
+    co_return;
+}
+
+TEST("async test - ASYNC_EXAMPLE declares the example bucket, main_thread and exclusive()")
+{
+    auto const* found = static_cast<nx::test_declaration const*>(nullptr);
+    for (auto const& decl : nx::get_static_test_registry().declarations)
+        if (decl.name == "nexus/async-example-wiring")
+            found = &decl;
+
+    REQUIRE(found != nullptr);
+    CHECK(found->is_async());
+    CHECK(found->test_config.bucket == nx::config::test_bucket::example);
+    CHECK(found->test_config.main_thread);
+    CHECK(found->test_config.exclusive_global);
+    CHECK(!nx::test_schedule_config{}.would_run(*found));
 }

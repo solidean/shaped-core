@@ -1,5 +1,7 @@
 #include <clean-core/container/vector.hh>
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -40,7 +42,8 @@ struct params
 };
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -81,8 +84,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     // Two independent outputs so the two dispatches don't alias: out1 for the full set, out2 for the partial.
@@ -114,21 +116,21 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale + bias
     disp->compute.dispatch_threads(count);
     ctx.submit_command_list(cc::move(disp));
 
-    auto read_back = [&](sg::raw_buffer_handle const& buf) -> cc::vector<u32>
+    // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
+    auto read_back = [&](sg::raw_buffer_handle const& buf) -> cc::shared_async<cc::vector<u32>>
     {
         auto down = ctx.create_command_list();
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx.submit_command_list(cc::move(down));
-        ctx.block_until_idle();
-        auto const data = future.try_get_data();
+        auto const data = co_await future.data();
         cc::vector<u32> result;
-        for (auto const v : data.value())
+        for (auto const v : data)
             result.push_back(v);
-        return result;
+        co_return result;
     };
 
-    auto const r1 = read_back(out1_buf);
-    auto const r2 = read_back(out2_buf);
+    auto const r1 = co_await read_back(out1_buf);
+    auto const r2 = co_await read_back(out2_buf);
     REQUIRE(r1.size() == isize(count));
     REQUIRE(r2.size() == isize(count));
 

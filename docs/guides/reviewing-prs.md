@@ -83,6 +83,30 @@ Rewriting at build time only is refuted by hot reload, and by a location counter
 Generating from reflection is refuted by the same DXC behaviour that motivates the whole branch.
 Neither was written down, and the recommendation was to write them into the design doc rather than to change any code.
 
+### Written for someone who has not read the diff
+
+**Every entry that argues — the critique above all, then the verdict — is written for a reader who has not opened the branch.**
+The reviewer writes it after reading everything, which is exactly when the branch's vocabulary stops feeling like vocabulary.
+So introduce each mechanism before judging it: the situation as a concrete scenario, then each option as *how it works / pro / con / verdict*, in bullets.
+[design-critique](../../tools/review/docs/entry-types/design-critique.md#introduce-before-you-price) has the shape, and the cold-read check that catches what the author cannot see.
+
+pr-173 is the worked case: a correct critique the maintainer could not follow — "nothing is properly introduced" — and a verdict they found "always hard to read" as paragraphs.
+
+### Two alternatives the maintainer wants on the table
+
+These are not preferences that decide a case.
+They are options the maintainer likes to **see beside the recommendation**, and then weighs per case — so a critique or a design entry that could offer one and does not has left out a candidate.
+
+- **The strict rule that is obviously correct, beside the clever permissive one.**
+  A rule narrow enough to be trivially right, whose later relaxation is purely additive, is a real alternative to a cleverer rule that accepts more today.
+  The async-tests design review is the worked case: letting an async invocable take a lock its driver did not hold was going to need a name-ordering constraint to stay deadlock-free.
+  The maintainer's counter-proposal was "the driver may hold tags, or the child may, never both".
+  It is deadlock-free by the same argument top-level exclusion is, and relaxable later without breaking anything it accepted.
+- **Deleting a legacy spelling, beside accommodating it.**
+  When a new design has to grow a rule only to keep an old spelling working, removing the spelling is an alternative in its own right.
+  The same review spent a round designing how `main_thread` should treat an `ASYNC_TEST` body that returns a raw graph instead of being a coroutine.
+  The maintainer asked whether the spelling was needed at all; it was not, and removing it deleted the question along with the rule.
+
 ## A PR arrives red, and fixing it is the review's job
 
 **The normal flow here is: one contributor writes the branch on the one platform they have, opens the PR while CI is failing, and the review happens next.**
@@ -335,6 +359,22 @@ One arm called `slib::create_dxc_spirv_compiler()`, and the other called somethi
 
 The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
 That branch had two of them and its PR body named one, which is the ratio to expect.
+
+### A one-for-one migration keeps the old idiom's breadth, and that is where to look
+
+When a change translates a pattern mechanically — blocking into awaiting, one API into its successor — each call site inherits what the old spelling had to do, not what the site needs.
+The translation is correct, so it survives review, and it cements a wait or a check the new API made unnecessary.
+So for each translated idiom, ask what the site actually needs and whether the new API has a narrower spelling for it.
+
+pr-173 is the worked case, twice, and the maintainer caught both rather than the review.
+
+- `ctx->block_until_idle(); future.try_get_data()` became `co_await ctx->idle_completion(); future.try_get_data()` in 144 places.
+  A readback needs only its own bytes, which the future's own completion already signals; the idle wait held every submission, actor and epoch besides.
+  The fix added `future.data()` and awaited that instead.
+- A hand-rolled `await(a)` that pumped until `a->is_ready()` became `co_await cc::async_settled(a); a->value()` everywhere.
+  Only one site inspected the failure; everywhere else a plain `co_await` was shorter and failed by name instead of asserting.
+
+The tell is a new line that reads as ceremony around the value the site wanted.
 
 ### A guarantee only the old implementation gave is not a regression
 

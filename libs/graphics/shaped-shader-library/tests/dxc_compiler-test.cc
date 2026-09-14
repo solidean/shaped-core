@@ -3,6 +3,8 @@
 #if SLIB_HAS_DXC
 
 #include <clean-core/common/log.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
@@ -108,7 +110,7 @@ TEST("slib - dxc compiles both entry points of one file", exclusive("slib-shader
     CHECK(ps.bytecode.size() > 0);
 }
 
-TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-shader-library"))
+ASYNC_TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-shader-library"))
 {
     slib::shader_asset_handle broken;
     slib::shader_definition definitions[] = {
@@ -127,7 +129,7 @@ TEST("slib - dxc reports a broken shader on the async channel", exclusive("slib-
     // A shader that does not build must not throw or abort — it is an error a caller handles.
     auto const shader = broken->acquire(k_target_format);
     REQUIRE(shader != nullptr);
-    (void)cc::try_async_blocking_get(shader);
+    co_await cc::async_settled(shader);
     CHECK(shader->has_error());
 }
 
@@ -270,7 +272,7 @@ TEST("slib - the group number reaches DXIL as a space and SPIR-V as a set", excl
     CHECK(spirv_both->group_index.value() == 0);
 }
 
-TEST("slib - an attribute the pass cannot honour fails the compile", exclusive("slib-shader-library"))
+ASYNC_TEST("slib - an attribute the pass cannot honour fails the compile", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
     auto compiler = make_dxc_compiler();
@@ -289,7 +291,7 @@ void main() {}
 )";
 
     auto const shader = lib.compile_source(k_bad, sg::shader_stage::compute, "main", k_target_format);
-    (void)cc::try_async_blocking_get(shader);
+    co_await cc::async_settled(shader);
     REQUIRE(shader->has_error());
     CHECK(shader->try_error()->underlying().to_string().contains("is not an attribute this pass knows"));
 }

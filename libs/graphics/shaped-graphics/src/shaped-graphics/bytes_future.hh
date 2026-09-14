@@ -4,6 +4,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/error/result.hh> // cc::any_error
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -33,7 +34,7 @@ private:
 /// Copyable and movable, and it outlives the command list that recorded it.
 /// It holds the destination span, a pin keeping that destination alive until the transfer finishes, and the
 /// completion node the backend pushes once those bytes are valid.
-/// Read the bytes with try_get_bytes() once ready, or depend on completion() to chain off it without blocking.
+/// Await the bytes with bytes(), poll them with try_get_bytes(), or depend on completion() to chain off the transfer.
 ///
 /// Completion rides on `cc::async`, so `completion()` composes a transfer into an async graph without blocking.
 /// Cancellation — a dropped recording list, a dropped destination — arrives as `cc::async_error::make_cancelled()`
@@ -77,9 +78,13 @@ public:
     /// Depend on it to chain work off a transfer without blocking anything; null on an invalid future.
     [[nodiscard]] cc::shared_async<cc::unit const> completion() const { return _completion; }
 
+    /// The bytes, as an async that resolves once they land: `auto const bytes = co_await future.bytes();`.
+    /// Fails with the completion's error when the transfer is cancelled or fails; null on an invalid future.
+    /// An inline download lands only after its recording list is submitted, so await it after submitting.
+    [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> bytes() const;
+
     /// The result bytes if delivered (polls), else nullopt — including when the transfer settled on its error channel.
     /// The returned pinned_data keeps the bytes alive on its own, so it stays valid even past this future's lifetime.
-    /// To block until delivered, use ctx.block_until_idle() and then poll.
     [[nodiscard]] cc::optional<cc::pinned_data<byte const>> try_get_bytes() const;
 
     // members
@@ -125,9 +130,27 @@ public:
     /// The node completing when this transfer settles — see bytes_future::completion.
     [[nodiscard]] cc::shared_async<cc::unit const> completion() const { return _bytes.completion(); }
 
+    /// The typed result, as an async that resolves once it lands: `auto const data = co_await future.data();`.
+    /// Fails when the transfer is cancelled or fails, or when the byte count is not a multiple of sizeof(T); null on
+    /// an invalid future.
+    [[nodiscard]] cc::shared_async<cc::pinned_data<T const>> data() const
+    {
+        auto bytes = _bytes.bytes();
+        if (bytes == nullptr)
+            return {};
+        return cc::make_async_lazy<cc::pinned_data<T const>>(
+            [](cc::async_context<cc::pinned_data<T const>>& ctx, cc::pinned_data<byte const> received)
+            {
+                auto typed = received.template try_reinterpret_as<T const>();
+                if (!typed.has_value())
+                    return ctx.error(cc::any_error("the downloaded byte count is not a multiple of the element size"));
+                return ctx.success(cc::move(typed.value()));
+            },
+            cc::move(bytes));
+    }
+
     /// The typed result if delivered (polls).
     /// Yields nullopt when the byte count is not a multiple of sizeof(T).
-    /// To block until delivered, use ctx.block_until_idle() and then poll.
     [[nodiscard]] cc::optional<cc::pinned_data<T const>> try_get_data() const
     {
         auto const bytes = _bytes.try_get_bytes();

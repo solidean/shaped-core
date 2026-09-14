@@ -1,5 +1,7 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -10,40 +12,44 @@ using namespace bcache::test;
 
 // exclusive() because the subject IS the window between expired and deleted, and a sibling test sweeping the pump
 // registry drives this store's on_process — which closes that window — at a moment this test did not choose.
-TEST("bcache treats an expired entry as a miss before anything deletes it", exclusive())
+ASYNC_TEST("bcache treats an expired entry as a miss before anything deletes it", exclusive(), main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("downloads", "manifest");
 
-    f.settle_only(f.cache().put(key, make_blob("fresh"), {.ttl_secs = 60}));
-    CHECK(blob_text(f.settle(f.cache().get(key)).value().data) == "fresh");
+    (void)co_await f.cache().put(key, make_blob("fresh"), {.ttl_secs = 60});
+    CHECK(blob_text((co_await f.cache().get(key)).value().data) == "fresh");
 
     f.clock().advance(61);
 
-    CHECK(!f.settle(f.cache().get(key)).has_value());
+    CHECK(!(co_await f.cache().get(key)).has_value());
     CHECK(f.cache().get_stats().expired_as_miss == 1);
 
     // Still physically there — the read path never takes a write lock, so nothing was deleted to answer that miss.
     CHECK(f.cache().get_stats().entry_count == 1);
 }
 
-TEST("bcache collects an expired entry and the object behind it")
+ASYNC_TEST("bcache collects an expired entry and the object behind it", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("downloads", "temporary");
 
-    f.settle_only(f.cache().put(key, make_blob_of_size(4096, 3), {.ttl_secs = 30}));
+    (void)co_await f.cache().put(key, make_blob_of_size(4096, 3), {.ttl_secs = 30});
     CHECK(f.cache().get_stats().stored_bytes >= 4096);
 
     f.clock().advance(31);
 
-    auto const collected = f.settle(f.cache().collect_garbage());
+    auto const collected = co_await f.cache().collect_garbage();
     CHECK(collected.entries_expired == 1);
     CHECK(collected.objects_reclaimed == 1);
     CHECK(collected.bytes_reclaimed >= 4096);
@@ -52,7 +58,7 @@ TEST("bcache collects an expired entry and the object behind it")
     CHECK(f.cache().get_stats().stored_bytes == 0);
 }
 
-TEST("bcache tells a ttl of zero apart from no ttl at all")
+ASYNC_TEST("bcache tells a ttl of zero apart from no ttl at all", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -60,69 +66,75 @@ TEST("bcache tells a ttl of zero apart from no ttl at all")
     // What the optional buys: absent means never, and 0 means already expired.
     // A sentinel-carrying double could only ever have meant one of the two.
     auto f = cache_fixture();
+    (void)co_await f.opened();
     auto const never = key_of("ttl", "absent");
     auto const immediate = key_of("ttl", "zero");
 
-    f.settle_only(f.cache().put(never, make_blob("no ttl")));
-    f.settle_only(f.cache().put(immediate, make_blob("ttl of zero"), {.ttl_secs = 0}));
+    (void)co_await f.cache().put(never, make_blob("no ttl"));
+    (void)co_await f.cache().put(immediate, make_blob("ttl of zero"), {.ttl_secs = 0});
 
-    CHECK(f.settle(f.cache().get(never)).has_value());
-    CHECK(!f.settle(f.cache().get(immediate)).has_value());
+    CHECK((co_await f.cache().get(never)).has_value());
+    CHECK(!(co_await f.cache().get(immediate)).has_value());
     CHECK(f.cache().get_stats().expired_as_miss == 1);
 }
 
-TEST("bcache leaves an entry with no ttl alone forever")
+ASYNC_TEST("bcache leaves an entry with no ttl alone forever", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const permanent = key_of("shader", "permanent");
     auto const temporary = key_of("shader", "temporary");
 
-    f.settle_only(f.cache().put(permanent, make_blob("keep me")));
-    f.settle_only(f.cache().put(temporary, make_blob("drop me"), {.ttl_secs = 10}));
+    (void)co_await f.cache().put(permanent, make_blob("keep me"));
+    (void)co_await f.cache().put(temporary, make_blob("drop me"), {.ttl_secs = 10});
 
     f.clock().advance(3600 * 24 * 365);
-    f.settle_only(f.cache().collect_garbage());
+    (void)co_await f.cache().collect_garbage();
 
-    CHECK(blob_text(f.settle(f.cache().get(permanent)).value().data) == "keep me");
-    CHECK(!f.settle(f.cache().get(temporary)).has_value());
+    CHECK(blob_text((co_await f.cache().get(permanent)).value().data) == "keep me");
+    CHECK(!(co_await f.cache().get(temporary)).has_value());
 }
 
 // exclusive() for the same reason: it counts what ONE pass expired, and a sibling's sweep would have run passes of
 // its own over this store first.
-TEST("bcache expiry beats eviction scoring", exclusive())
+ASYNC_TEST("bcache expiry beats eviction scoring", exclusive(), main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     // The point of TTLs in a shared cache: a big short-lived artifact must not be able to crowd out unrelated durable content, however expensive that artifact was to make.
     auto f = cache_fixture([](cache_config& c) { c.limits.max_total_bytes = 1 << 30; });
+    (void)co_await f.opened();
 
     auto const expensive_but_expiring = key_of("temp", "artifact");
     auto const cheap_but_permanent = key_of("keep", "small");
 
-    f.settle_only(
-        f.cache().put(expensive_but_expiring, make_blob_of_size(8192, 1), {.ttl_secs = 60, .compute_time_secs = 600}));
-    f.settle_only(f.cache().put(cheap_but_permanent, make_blob_of_size(64, 2), {.compute_time_secs = 0.001}));
+    (void)co_await f.cache().put(expensive_but_expiring, make_blob_of_size(8192, 1),
+                                 {.ttl_secs = 60, .compute_time_secs = 600});
+    (void)co_await f.cache().put(cheap_but_permanent, make_blob_of_size(64, 2), {.compute_time_secs = 0.001});
 
     f.clock().advance(61);
-    auto const collected = f.settle(f.cache().collect_garbage());
+    auto const collected = co_await f.cache().collect_garbage();
 
     // Nothing was over any limit, so the ONLY thing collected is the expired one — the expensive one.
     CHECK(collected.entries_expired == 1);
     CHECK(collected.entries_evicted == 0);
-    CHECK(!f.settle(f.cache().get(expensive_but_expiring)).has_value());
-    CHECK(f.settle(f.cache().get(cheap_but_permanent)).has_value());
+    CHECK(!(co_await f.cache().get(expensive_but_expiring)).has_value());
+    CHECK((co_await f.cache().get(cheap_but_permanent)).has_value());
 }
 
-TEST("bcache acquire recomputes once its ttl has run out")
+ASYNC_TEST("bcache acquire recomputes once its ttl has run out", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("downloads", "http");
 
     auto calls = 0;
@@ -132,16 +144,16 @@ TEST("bcache acquire recomputes once its ttl has run out")
         return make_blob(calls == 1 ? "first fetch" : "second fetch");
     };
 
-    CHECK(blob_text(f.settle(f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "first fetch");
-    f.idle();
+    CHECK(blob_text((co_await f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "first fetch");
+    (void)co_await f.idle();
 
-    CHECK(blob_text(f.settle(f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "first fetch");
+    CHECK(blob_text((co_await f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "first fetch");
     CHECK(calls == 1);
 
     f.clock().advance(101);
 
     // Expired, so the entry is a miss — but it is still THERE, and entries are immutable, so the recomputed value cannot replace it.
     // What the caller gets back is what it just computed, which is the contract.
-    CHECK(blob_text(f.settle(f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "second fetch");
+    CHECK(blob_text((co_await f.cache().acquire(key, fetch, {.put = {.ttl_secs = 100}}))) == "second fetch");
     CHECK(calls == 2);
 }

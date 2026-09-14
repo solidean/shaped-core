@@ -1,4 +1,6 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-compiler-dxc/all.hh>
@@ -31,8 +33,8 @@ void main()
 
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access, readback",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access, readback",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -162,14 +164,13 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared access,
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.value().size() == 2);
-    CHECK(data.value()[0] == b0_value + b3_value);
-    CHECK(data.value()[1] == u32(texel_value));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 2);
+    CHECK(data[0] == b0_value + b3_value);
+    CHECK(data[1] == u32(texel_value));
 }
 
-INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -249,6 +250,6 @@ INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::con
         disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
     }
 }

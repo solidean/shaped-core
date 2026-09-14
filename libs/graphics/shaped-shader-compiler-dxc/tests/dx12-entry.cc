@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -20,7 +21,7 @@ constexpr char const* warp_driver = "ssc::dxc + dx12 - warp backend";
 constexpr char const* hardware_driver = "ssc::dxc + dx12 - hardware backend";
 } // namespace
 
-TEST("ssc::dxc + dx12 - warp backend")
+ASYNC_TEST("ssc::dxc + dx12 - warp backend")
 {
     // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
@@ -31,7 +32,7 @@ TEST("ssc::dxc + dx12 - warp backend")
         SKIP("no dx12 WARP device");
     else
     {
-        nx::invoke_tests("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
@@ -44,7 +45,7 @@ TEST("ssc::dxc + dx12 - warp backend")
     }
 }
 
-TEST("ssc::dxc + dx12 - hardware backend")
+ASYNC_TEST("ssc::dxc + dx12 - hardware backend")
 {
     auto ctx = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
@@ -54,7 +55,7 @@ TEST("ssc::dxc + dx12 - hardware backend")
         SKIP("no dx12 hardware device");
     else
     {
-        nx::invoke_tests("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
         // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the

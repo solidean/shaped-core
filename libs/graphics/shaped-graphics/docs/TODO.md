@@ -209,11 +209,17 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is exactly this shape — a readback that needs the concurrency and sees nothing.
   Re-test it against the entry-barrier model before treating it as open.
 
-- **Migrate the suites to `ASYNC_TEST`.**
-  nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
-  The blocker was that `cc::async` could not resume on the main thread; a coroutine now can, with `co_await cc::async_resume_on_main()`.
-  `ASYNC_TEST` still asserts against nexus's `main_thread` flag, so the window and present suites hop inside the test body rather than asking for the flag.
-  Closing that in nexus is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
+- **Directly awaitable futures, if `co_await future.data()` ever reads as noise.**
+  `bytes_future`, `data_future<T>` and `gpu_timestamp` hand out their result through `bytes()`, `data()` and `ticks()`, each a `cc::shared_async` built from `completion()`.
+  An `operator co_await` on the future types would let a caller write `co_await future` instead.
+  It was left out so sg's value types carry no coroutine machinery, and it is additive whenever it is wanted.
+
+- **Readiness as an async, so the GPU tests stop working around it.**
+  The suites are async: the entry drivers await `nx::async_invoke_tests_in_sequence`, and the tests await `ctx.idle_completion()`.
+  Two workarounds remain, both waiting on a readiness signal rather than on the migration.
+  A tick drives only routines already registered, so a test prewarms each variant by name before asserting on its first frame; a routine's readiness as an async would let it await instead.
+  sv's `frames_until_executed` and the furnace loop re-record frames until a path-traced state object lands; the same signal for that would turn both into one await.
+  What still blocks otherwise — manual window loops, fuzz steps, a few synchronous compile helpers — is allowed by file in each library's `.shaped-lint.yml`.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
   The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
@@ -222,3 +228,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That is allowed under the amortization rule, and it still asserts on a `never_block` context.
   So the per-frame back-pressure call is the one thing a WebGPU target will hit on its first frame, and `try_advance_epoch` is the spelling that already exists for it.
   What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).
+  **The completion-signal contract is blocking, and WebGPU in a browser cannot block.**
+  `sg::context` owns a waiter thread that calls the backend's `wait_for_completion_signal` until a GPU counter reaches a target, then settles what is due.
+  WebGPU offers only a callback, `onSubmittedWorkDone`, so the contract flips there.
+  The backend calls `settle_due_completions()` when it learns of progress, and dx12 and vulkan run the waiter themselves.
+  Reshape the seam that way before writing the backend, rather than emulating a blocking wait over the callback.

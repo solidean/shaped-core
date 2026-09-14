@@ -23,6 +23,7 @@ void nx::impl::apply_config_item(config::cfg& result, config::cfg const& rhs)
     // A flag, so it accumulates like exclusive_global rather than overriding: a config asking for it wins.
     result.main_thread |= rhs.main_thread;
     result.thorough_only |= rhs.thorough_only;
+    result.default_entry |= rhs.default_entry;
 
     // Exclusion accumulates rather than overriding: two config items each naming a tag mean the test holds both.
     result.exclusive_global |= rhs.exclusive_global;

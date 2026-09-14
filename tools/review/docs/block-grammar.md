@@ -255,6 +255,7 @@ The two are mutually exclusive and the parser enforces it, so the "not reproduce
 `cmd:` alone shows a command for the reader to run; `cmd:` with an `output:` shows what the agent captured out of band, which is how a tool `review run` cannot execute still gets its evidence in.
 
 `review run` executes the `run:` blocks, writes the capture into `attachments/`, and splices `output:`, `status:`, `sha:` and `at:` back in.
+A `uv run dev.py example` command runs with `--mirror-test-output` added, because dev.py is quiet on a pipe and would otherwise hand back its trace instead of the example's output.
 Nothing else in the tool ever spawns a process out of an entry, and the server never does.
 
 The allowed command prefixes are `run_prefixes` in `review.toml`, **empty by default** — running examples through `dev.py` is a fact about shaped-core, and this tool reviews any git repository.

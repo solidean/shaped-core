@@ -2,6 +2,8 @@
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
@@ -27,7 +29,7 @@ constexpr isize seam_gap = 64;    // bytes left before the seam when we park the
 constexpr isize xfer_bytes = 128; // > seam_gap, so the transfer must cross the seam
 } // namespace
 
-TEST("sg dx12 - inline upload splits across the ring seam")
+ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
@@ -39,7 +41,7 @@ TEST("sg dx12 - inline upload splits across the ring seam")
 
     // Drain, then park the upload ring cursor `seam_gap` bytes before the physical seam.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     c._upload_inline.debug_set_cursor(u64(ring_bytes - seam_gap));
 
     auto const before = c._upload_inline.debug_cursor();
@@ -66,15 +68,13 @@ TEST("sg dx12 - inline upload splits across the ring seam")
     auto fut = down->download.bytes_from_buffer(buf, 0, xfer_bytes);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
-    auto bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == xfer_bytes);
+    auto const bytes = co_await fut.bytes();
+    REQUIRE(bytes.size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)
-        CHECK(bytes.value()[i] == byte((i * 7 + 3) & 0xFF));
+        CHECK(bytes[i] == byte((i * 7 + 3) & 0xFF));
 }
 
-TEST("sg dx12 - inline download splits across the ring seam")
+ASYNC_TEST("sg dx12 - inline download splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
     REQUIRE(ctx_r.has_value());
@@ -95,7 +95,7 @@ TEST("sg dx12 - inline download splits across the ring seam")
 
     // Drain (so the readback ring is empty), then park its cursor `seam_gap` bytes before the seam.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     c._download_inline.debug_set_cursor(u64(ring_bytes - seam_gap));
 
     auto const before = c._download_inline.debug_cursor();
@@ -112,10 +112,8 @@ TEST("sg dx12 - inline download splits across the ring seam")
 
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
-    auto bytes = fut.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == xfer_bytes);
+    auto const bytes = co_await fut.bytes();
+    REQUIRE(bytes.size() == xfer_bytes);
     for (isize i = 0; i < xfer_bytes; ++i)
-        CHECK(bytes.value()[i] == byte((i * 5 + 1) & 0xFF));
+        CHECK(bytes[i] == byte((i * 5 + 1) & 0xFF));
 }

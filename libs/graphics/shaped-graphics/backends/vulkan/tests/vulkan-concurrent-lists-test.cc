@@ -2,6 +2,8 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <shaped-graphics/all.hh>
 
 using namespace cc::primitive_defines;
@@ -48,8 +50,8 @@ bool matches(cc::span<byte const> bytes, isize count, int salt)
 }
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next",
-               (sg::backend::vulkan::vulkan_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg vulkan - a buffer written by one concurrently recorded list and read by the next",
+                     (sg::backend::vulkan::vulkan_context_handle const& ctx))
 {
     auto const buffer
         = ctx->persistent.create_raw_buffer(k_buffer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
@@ -69,17 +71,15 @@ INVOCABLE_TEST("sg vulkan - a buffer written by one concurrently recorded list a
     ctx->submit_command_list(cc::move(writer));
     ctx->submit_command_list(cc::move(reader));
 
-    ctx->block_until_idle();
-    auto const read_back = future.try_get_bytes();
-    REQUIRE(read_back.has_value());
-    CHECK(matches(read_back.value(), k_buffer_bytes, 41));
+    auto const read_back = co_await future.bytes();
+    CHECK(matches(read_back, k_buffer_bytes, 41));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next",
-               (sg::backend::vulkan::vulkan_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded list and read by the next",
+                     (sg::backend::vulkan::vulkan_context_handle const& ctx))
 {
     // Sampled as well as copyable, so the layout the lists rest in is a specific one rather than a transfer layout.
     auto const tex = ctx->persistent.create_raw_texture(
@@ -103,11 +103,9 @@ INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded list 
     ctx->submit_command_list(cc::move(writer));
     ctx->submit_command_list(cc::move(reader));
 
-    ctx->block_until_idle();
-    auto const read_back = future.try_get_bytes();
-    REQUIRE(read_back.has_value());
-    CHECK(matches(read_back.value(), k_texture_bytes, 17));
+    auto const read_back = co_await future.bytes();
+    CHECK(matches(read_back, k_texture_bytes, 17));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }

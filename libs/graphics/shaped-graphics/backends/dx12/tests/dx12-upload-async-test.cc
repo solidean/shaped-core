@@ -2,6 +2,8 @@
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -28,7 +30,7 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 
 // A single upload larger than one staging window must pack across several windows, pipelining and recycling as it goes.
 // A fresh context with deliberately tiny windows forces it.
-TEST("sg dx12 - async upload larger than a staging window packs across windows")
+ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 4096});
     REQUIRE(ctx.has_value());
@@ -45,13 +47,11 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
     auto future = down->download.bytes_from_buffer(buf, 0, n);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == n);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == n);
     bool matches = true;
     for (isize i = 0; i < n; ++i)
-        if (bytes.value()[i] != byte(i * 7 + 1))
+        if (bytes[i] != byte(i * 7 + 1))
             matches = false;
     CHECK(matches);
 }
@@ -60,7 +60,7 @@ TEST("sg dx12 - async upload larger than a staging window packs across windows")
 // Each targets its own buffer; all must read back intact.
 // Window 0 shares its staging slot with window 3, so the window fence must observe window 0's completion before window 3 overwrites that slot.
 // That aliasing is what the 1-based window-fence values guard — see submit_window in dx12_upload_async.cc.
-TEST("sg dx12 - many async uploads recycle the staging windows")
+ASYNC_TEST("sg dx12 - many async uploads recycle the staging windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
@@ -85,11 +85,9 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
         auto future = down->download.bytes_from_buffer(bufs[k], 0, each);
         c.submit_command_list(cc::move(down));
 
-        c.block_until_idle();
-        auto const bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
+        auto const bytes = co_await future.bytes();
         for (isize i = 0; i < each; ++i)
-            if (bytes.value()[i] != byte(i + k))
+            if (bytes[i] != byte(i + k))
                 all_ok = false;
     }
     CHECK(all_ok);
@@ -98,7 +96,7 @@ TEST("sg dx12 - many async uploads recycle the staging windows")
 // Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and split a single job across windows, all while recycling.
 // That is a shape the exact-fill and single-large-upload tests miss.
 // Distinct buffers; each must read back intact.
-TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
+ASYNC_TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
     REQUIRE(ctx.has_value());
@@ -128,12 +126,10 @@ TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
         auto future = down->download.bytes_from_buffer(bufs[k], 0, n);
         c.submit_command_list(cc::move(down));
 
-        c.block_until_idle();
-        auto const bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
-        REQUIRE(bytes.value().size() == n);
+        auto const bytes = co_await future.bytes();
+        REQUIRE(bytes.size() == n);
         for (isize i = 0; i < n; ++i)
-            if (bytes.value()[i] != byte(i * (k * 13 + 7)))
+            if (bytes[i] != byte(i * (k * 13 + 7)))
                 all_ok = false;
     }
     CHECK(all_ok);

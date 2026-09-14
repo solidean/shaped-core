@@ -1,6 +1,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -46,8 +48,8 @@ void main(uint3 tid : SV_DispatchThreadID)
 )";
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispatch",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a compute dispatch",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -88,7 +90,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     REQUIRE(tlas != nullptr);
     ctx.submit_command_list(cc::move(build));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Compile the inline-RT compute shader and build a pipeline over its reflected bindings (scene + Out).
     ssc::dxc::shader_description sd;
@@ -113,8 +115,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     pld.groups = {group_layout};
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline
-        = cc::async_blocking_get(ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     auto out_buf = ctx.persistent.create_raw_buffer(isize(2 * sizeof(u32)),
@@ -137,11 +138,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in a com
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
     cc::vector<u32> result;
-    for (auto const v : data.value())
+    for (auto const v : data)
         result.push_back(v);
     REQUIRE(result.size() == 2);
 

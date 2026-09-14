@@ -6,6 +6,7 @@
 #include <clean-core/string/print.hh>
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/runner.hh>
+#include <nexus/tests/seed.hh>
 
 #include <string_view> // bridges cc::string into std::ostream
 
@@ -144,8 +145,11 @@ bool test::execute_fuzz_test(cc::string_view test_var)
         return false;
     }
 
-    for (int seed = 1; seed <= _seed_count; ++seed)
+    // Drawn from the test's seed, so every run explores different programs and a failure's seed replays under --seed.
+    auto seeds = nx::test_random();
+    for (auto attempt = 0; attempt < _seed_count; ++attempt)
     {
+        auto const seed = int(seeds.next_u32() & 0x7fffffff);
         auto res = execute_fuzzer(seed);
         if (res.is_ok || !res.failing_run.has_value())
             continue;

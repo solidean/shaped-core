@@ -289,6 +289,34 @@ void cc::thread_bound_scheduler::wait_for_work(double max_ms)
 #endif
 }
 
+void cc::thread_bound_scheduler::wait_for_work_or_wake(double max_secs)
+{
+    CC_ASSERT(is_owner_thread(), "only a home's owner thread waits for its work");
+#if CC_HAS_THREADS
+    std::unique_lock lock(_mutex);
+    // Inside one of our own bodies the queue is not ours to run, so queued work is no reason to stop waiting.
+    auto const counts_work = !is_inside_own_body();
+    auto const released
+        = [&] { return _wake_requested || (counts_work && (!_incoming.empty() || _local_next != _local.size())); };
+    if (max_secs < 0)
+        _work_cv.wait(lock, released);
+    else if (!released())
+        cc::impl::condition_wait_secs(_work_cv, lock, max_secs);
+    _wake_requested = false;
+#else
+    CC_UNUSED(max_secs);
+#endif
+}
+
+void cc::thread_bound_scheduler::wake()
+{
+#if CC_HAS_THREADS
+    std::lock_guard const lock(_mutex);
+    _wake_requested = true;
+    _work_cv.notify_all();
+#endif
+}
+
 bool cc::pump_main_thread(double max_ms)
 {
     CC_ASSERT(cc::current_thread_id() == cc::thread_id::main, "cc::pump_main_thread must be called on the main thread");

@@ -71,6 +71,7 @@ if(SC_BUILD_TESTS)
         tests/degraded-test.cc
         tests/threaded-test.cc
     )
+    sc_nexus_binary(blob-cache-test KINDS tests)
 
     # babel-serializer is linked for the schema test alone, which fabricates an incompatible file on purpose.
     # No library source exposes it, which is what keeps .shaped-lint.yml free of a sqlite entry.

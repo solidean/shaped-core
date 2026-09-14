@@ -9,6 +9,13 @@ cc::optional<cc::pinned_data<byte const>> bytes_future::try_get_bytes() const
     return _data;
 }
 
+cc::shared_async<cc::pinned_data<byte const>> bytes_future::bytes() const
+{
+    if (_completion == nullptr)
+        return {};
+    return cc::make_async_lazy([data = _data](cc::unit) { return data; }, _completion);
+}
+
 cc::optional<cc::pinned_data<byte const>> bytes_future::wait_get_bytes() const
 {
     if (_completion == nullptr)

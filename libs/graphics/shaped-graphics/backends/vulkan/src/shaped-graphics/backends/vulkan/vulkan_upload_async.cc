@@ -43,13 +43,15 @@ void vulkan_upload_actor::on_message(vulkan_transfer_wake)
 
 bool vulkan_upload_actor::on_process()
 {
-    _system.settle_finished();
+    // A settlement is progress even when nothing else is: it resumed whoever awaited the transfer, and a pump sweep
+    // that heard "no progress" may stop driving before that continuation runs.
+    auto const settled = _system.settle_finished();
     if (_system.run_one_window())
         return true;
 
     // Nothing could be staged — every job is stalled, or they are all done.
     // Outstanding settlements are waited for rather than slept on, since the actor may get no further message.
-    return _system.wait_and_settle();
+    return _system.wait_and_settle() || settled;
 }
 
 // --- setup ---------------------------------------------------------------------------------------
@@ -58,6 +60,7 @@ cc::result<cc::unit> vulkan_upload_async_system::initialize(vulkan_context& ctx,
 {
     CC_ASSERT(window_bytes > 0, "the async upload window must be positive");
     _ctx = &ctx;
+    _drain.notify_on_drained(&ctx);
     _desired_window_bytes.store(window_bytes, cc::memory_order_relaxed);
 
     auto const type_info = VkSemaphoreTypeCreateInfo{
@@ -246,11 +249,12 @@ void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool d
         job.stream->completion->push_error(cc::async_error::make_cancelled());
 }
 
-void vulkan_upload_async_system::settle_finished()
+bool vulkan_upload_async_system::settle_finished()
 {
     if (_awaiting.empty())
-        return;
+        return false;
 
+    auto settled = false;
     u64 landed = 0;
     vkGetSemaphoreCounterValue(_ctx->_device, _window_timeline, &landed);
 
@@ -263,6 +267,7 @@ void vulkan_upload_async_system::settle_finished()
         }
         auto entry = cc::move(_awaiting[i]);
         _awaiting.remove_at(i);
+        settled = true;
 
         if (entry.stream != nullptr && entry.stream->completion != nullptr && !entry.stream->completion->is_ready())
         {
@@ -272,6 +277,7 @@ void vulkan_upload_async_system::settle_finished()
                 entry.stream->completion->push_error(cc::async_error::make_cancelled());
         }
     }
+    return settled;
 }
 
 bool vulkan_upload_async_system::wait_and_settle()
@@ -611,9 +617,10 @@ bool vulkan_upload_async_system::run_one_window()
 
     if (transfer_done)
     {
-        if (streaming)
-            _awaiting.push_back(
-                {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
+        // Every transfer waits for its copy to land, not only a stream: the drain token rides the entry, and dropping it
+        // here would report the upload delivered while the transfer queue has not run it yet.
+        _awaiting.push_back(
+            {.drain = job.drain, .window_value = job.last_window_value, .stream = job.stream, .delivered = true});
         _pending.remove_at(index);
     }
     else if (payload_done && job.source != nullptr)

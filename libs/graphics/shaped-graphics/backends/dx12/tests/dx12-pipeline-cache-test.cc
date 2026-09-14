@@ -7,6 +7,9 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See dx12-compute-test.cc.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // Exercises the sg-level built-in cache (ctx.cached) end to end: group-layout and pipeline-layout
@@ -37,8 +40,8 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline layout + async compute pipeline",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -65,7 +68,7 @@ INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline la
     CHECK(p1.get() == p2.get());
 
     // Drive the async build inline (no pool installed) and confirm it resolved to a real pipeline.
-    sg::compute_pipeline_handle pipeline = cc::async_blocking_get(p1);
+    sg::compute_pipeline_handle pipeline = co_await p1;
     REQUIRE(pipeline != nullptr);
     CHECK(pipeline->workgroup_size().x == 64);
 
@@ -89,13 +92,11 @@ INVOCABLE_TEST("sg pipeline_cache - ctx.cached dedups group layout + pipeline la
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }
@@ -124,8 +125,8 @@ INVOCABLE_TEST("sg pipeline_cache - static samplers participate in the layout ke
     CHECK(a.get() != b.get());       // a different static sampler => a different cached group layout
 }
 
-INVOCABLE_TEST("sg pipeline_cache - a different shader yields a different pipeline node",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg pipeline_cache - a different shader yields a different pipeline node",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -148,8 +149,8 @@ INVOCABLE_TEST("sg pipeline_cache - a different shader yields a different pipeli
     CHECK(base.get() != other.get());
 
     // Identity is the claim, but both are real PSO builds on the ambient scheduler — finished here rather than left running past the test.
-    (void)cc::try_async_blocking_get(base);
-    (void)cc::try_async_blocking_get(other);
+    co_await cc::async_settled(base);
+    co_await cc::async_settled(other);
 }
 
 INVOCABLE_TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key",

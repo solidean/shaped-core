@@ -4,12 +4,14 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/compare.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <nexus/fwd.hh> // also what puts the bare sized aliases in scope inside nx
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
+#include <nexus/tests/seed.hh>
 
 
 bool nx::impl::signatures_equal(cc::span<std::type_index const> a, cc::span<std::type_index const> b)
@@ -58,6 +60,34 @@ cc::string nx::impl::find_unhonoured_dispatch_config(config::cfg const& child, c
             return "no_scheduler";
         return "a non-default scheduler mode";
     }
+
+    return {};
+}
+
+cc::string nx::impl::find_unhonoured_async_dispatch_config(config::cfg const& child,
+                                                           config::cfg const& slot,
+                                                           bool chain_holds_tags,
+                                                           bool in_parallel)
+{
+    if (child.exclusive_global && !slot.exclusive_global)
+        return "exclusive(), which needs an exclusive() driver";
+    if (child.exclusive_global && in_parallel)
+        return "exclusive(), which a parallel invocation cannot give it among its siblings";
+
+    if (child.exclusion_tag_count > 0 && chain_holds_tags)
+        return cc::format("exclusive(\"{}\") while the invoking chain already holds a tag; the driver may hold tags or "
+                          "its "
+                          "children may, never both",
+                          cc::string_view(child.exclusion_tags[0]));
+
+    // Exclusion and main_thread are arranged by the invocation, so only the scheduler mode is left to the sync rule.
+    auto mode_only_child = child;
+    mode_only_child.exclusive_global = false;
+    mode_only_child.exclusion_tag_count = 0;
+    mode_only_child.main_thread = false;
+    auto const mode = find_unhonoured_dispatch_config(mode_only_child, slot);
+    if (!mode.empty())
+        return cc::format("{}, which the driver has to declare as well", mode);
 
     return {};
 }
@@ -113,6 +143,23 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
     cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
                                      [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
                                      [](test_declaration const* d) { return d->location.line(); }));
+
+    // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.
+    if (config->shuffle)
+    {
+        auto rng = nx::test_random();
+        rng.shuffle(matches);
+    }
+
+    // Checked against the MATCHED set, before any -c scoping: a driver that silently skipped its async children whenever
+    // a filter happened to select only sync ones would be wrong in a way nothing reports.
+    for (auto const* decl : matches)
+        CC_ASSERTS(!decl->is_async(), cc::format("nx::invoke_tests: \"{}\" is an ASYNC_INVOCABLE_TEST, which a "
+                                                 "synchronous invocation cannot "
+                                                 "run — make the driver an ASYNC_TEST and co_await "
+                                                 "nx::async_invoke_tests_in_sequence or "
+                                                 "nx::async_invoke_tests_in_parallel",
+                                                 decl->name));
 
     for (auto const* decl : matches)
     {

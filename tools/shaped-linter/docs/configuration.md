@@ -49,8 +49,8 @@ The policy it carries is unknown, so every verdict taken against it would be a g
 
 | Field | Required | Meaning |
 |---|---|---|
-| `kind` | yes | `allow-include` or `deny-include` |
-| `value` | yes | the include as written (`<atomic>`), or a list of them; each is a glob, so `<d3d12*.h>` covers a family |
+| `kind` | yes | `allow-include` or `deny-include`, or `allow-blocking-wait` or `deny-blocking-wait` |
+| `value` | yes | the include as written (`<atomic>`), or the name of a blocking call (`async_blocking_get`); a list of them works too, and each is a glob, so `<d3d12*.h>` covers a family |
 | `reason` | yes | printed with the finding — for a deny it names the replacement |
 | `files` | no | glob or list of globs; the entry applies only to these |
 | `exclude-files` | no | glob or list of globs; the entry does not apply to these |
@@ -95,6 +95,25 @@ rules:
 ```
 
 A library never edits the root to make room for itself.
+
+## Blocking waits
+
+`deny-blocking-wait` and `allow-blocking-wait` take the names of blocking calls and scope them with `files:` exactly as the include entries do.
+The last matching entry decides, and **nothing matching means allowed** — unlike an include, a call is only a finding where a config denied it.
+The `blocking-wait` rule reads them.
+The repo denies `cc::async_blocking_get` and its forms across test sources, where a test awaits instead, and allows them by name in the files whose subject is the wait itself.
+
+```yaml
+rules:
+  - kind: deny-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on]
+    reason: await it in an ASYNC_TEST — a blocking get holds a worker the run needs
+    files: tests/**
+  - kind: allow-blocking-wait
+    value: [async_blocking_get_on, try_async_blocking_get_on]
+    reason: these tests stand up their own schedulers, and driving them is the subject
+    files: tests/thread/async-pool-test.cc
+```
 
 ## The generated baseline block
 

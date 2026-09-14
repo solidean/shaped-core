@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -74,8 +76,8 @@ struct test_window
 };
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden window",
-               (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden window",
+                     (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -122,10 +124,10 @@ INVOCABLE_TEST("sg dx12 - swapchain create, describe, and present on a hidden wi
     }
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -159,5 +161,5 @@ INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx12_con
     frame(win.resize_client(128, 96), tg::vec4f(0, 1, 0, 1));            // shrink — and again
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }

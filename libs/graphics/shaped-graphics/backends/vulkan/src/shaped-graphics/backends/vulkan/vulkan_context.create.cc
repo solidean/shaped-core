@@ -681,6 +681,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto ctx = std::make_shared<vulkan_context>(instance, best_device, device, queue, best_family, epoch_timeline,
                                                 submission_timeline, messenger);
 
+    // Starts at 0 and only the host raises it, so the completion signal waiter's first wake is generation 1.
+    if (VkResult r = create_timeline_semaphore(device, 0, ctx->_completion_wake_timeline); r != VK_SUCCESS)
+        return vulkan_error(r, "vkCreateSemaphore (completion wake timeline) failed");
+
     // The context owns every handle above from here on, and its destructor releases them.
     // Disarming the guard now rather than at the end of the function is what keeps a later failure from freeing
     // them twice — once through ~vulkan_context and once through the guard.
