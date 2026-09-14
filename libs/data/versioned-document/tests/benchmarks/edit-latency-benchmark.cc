@@ -21,6 +21,7 @@
 //   uv run dev.py benchmark "bench-vdoc-edit-latency" --timeout 0
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/run.hh>
@@ -36,8 +37,6 @@
 #include <versioned-document/snapshot_cache.hh>
 #include <versioned-document/snapshot_document.hh>
 #include <versioned-document/value_builder.hh>
-
-#include <chrono>
 
 namespace vdoc_bench
 {
@@ -95,11 +94,9 @@ struct vdoc::component_traits<vdoc_bench::wall>
 namespace
 {
 using namespace cc::primitive_defines;
-using clock_type = std::chrono::steady_clock;
-
-[[nodiscard]] double seconds_since(clock_type::time_point t0)
+[[nodiscard]] double seconds_since(double t0)
 {
-    return std::chrono::duration<double>(clock_type::now() - t0).count();
+    return cc::current_time_steady_secs() - t0;
 }
 
 /// The four stages of one edit, timed inside the measured body and recorded as shares of it.
@@ -275,21 +272,21 @@ stage_shares one_linear_edit(session& s, isize index)
 {
     auto out = stage_shares();
 
-    auto const t_build = clock_type::now();
+    auto const t_build = cc::current_time_steady_secs();
     auto op = build_move(s.graph, s.cache, s.head, index % s.entities, f64(index) + 0.5);
     out.build = seconds_since(t_build);
 
     auto const previous = s.head;
-    auto const t_add = clock_type::now();
+    auto const t_add = cc::current_time_steady_secs();
     s.head = s.graph.add(cc::move(op));
     out.add = seconds_since(t_add);
 
-    auto const t_advance = clock_type::now();
+    auto const t_advance = cc::current_time_steady_secs();
     auto const advanced = vdoc::advance_snapshot(s.graph, s.cache, previous, s.head);
     out.advance = seconds_since(t_advance);
     CC_ASSERT(advanced, "the snapshot must roll onto a single-parent child");
 
-    auto const t_apply = clock_type::now();
+    auto const t_apply = cc::current_time_steady_secs();
     s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, s.head, s.policy, s.report, s.changes, {.cache = &s.cache},
                         &s.stats);
     out.apply = seconds_since(t_apply);
@@ -314,17 +311,17 @@ stage_shares one_fanned_drag(session& s, isize frames)
 
     for (isize i = 0; i < frames; ++i)
     {
-        auto const t_build = clock_type::now();
+        auto const t_build = cc::current_time_steady_secs();
         auto op = build_move(s.graph, s.cache, s.head, 0, f64(i) * 0.01);
         out.build += seconds_since(t_build);
 
-        auto const t_add = clock_type::now();
+        auto const t_add = cc::current_time_steady_secs();
         auto const frame = s.graph.add(cc::move(op));
         out.add += seconds_since(t_add);
         drag_frames.push_back(frame);
 
         auto const previous = i == 0 ? s.head : drag_frames[i - 1];
-        auto const t_apply = clock_type::now();
+        auto const t_apply = cc::current_time_steady_secs();
         s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, frame, s.policy, s.report, s.changes,
                             {.cache = &s.cache}, &s.stats);
         out.apply += seconds_since(t_apply);
@@ -356,21 +353,21 @@ stage_shares one_chained_drag(session& s, isize frames)
     {
         auto const previous = chain.empty() ? base : chain.back();
 
-        auto const t_build = clock_type::now();
+        auto const t_build = cc::current_time_steady_secs();
         auto op = build_move(s.graph, s.cache, previous, 0, f64(i) * 0.02);
         out.build += seconds_since(t_build);
 
-        auto const t_add = clock_type::now();
+        auto const t_add = cc::current_time_steady_secs();
         auto const frame = s.graph.add(cc::move(op));
         out.add += seconds_since(t_add);
         chain.push_back(frame);
 
-        auto const t_advance = clock_type::now();
+        auto const t_advance = cc::current_time_steady_secs();
         auto const advanced = vdoc::advance_snapshot(s.graph, s.cache, previous, frame);
         out.advance += seconds_since(t_advance);
         CC_ASSERT(advanced, "a chained frame is a single-parent child");
 
-        auto const t_apply = clock_type::now();
+        auto const t_apply = cc::current_time_steady_secs();
         s.doc = vdoc::apply(cc::move(s.doc), s.graph, previous, frame, s.policy, s.report, s.changes,
                             {.cache = &s.cache}, &s.stats);
         out.apply += seconds_since(t_apply);

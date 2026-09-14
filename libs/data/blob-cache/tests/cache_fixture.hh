@@ -15,7 +15,7 @@
 ///   the async graph is driven by a scheduler bound to THIS thread, so waking a parked frame needs no pool.
 ///
 /// The third is the one that is easy to get wrong.
-/// Completing a node schedules whatever was parked on it, and scheduling routes to the current worker or to the installed default pool — with neither, it asserts.
+/// Completing a node schedules whatever was parked on it, and scheduling routes to the current worker or to the installed compute scheduler — with neither, it asserts.
 /// Binding a singlethreaded_scheduler here gives the whole graph, actor included, somewhere to run.
 
 namespace bcache::test

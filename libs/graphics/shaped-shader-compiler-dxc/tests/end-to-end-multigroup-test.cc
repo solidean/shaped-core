@@ -7,11 +7,11 @@
 
 using namespace cc::primitive_defines;
 
-// The point of the group/pipeline-layout split, exercised end to end on WARP.
+// The point of the group/pipeline-layout split, exercised end to end.
 // A pipeline layout with two group slots lets an entire group be rebound at one slot without disturbing the other.
 // Slot 0 (input A + output) stays bound while slot 1's group is swapped between two different B buffers.
 // Each dispatch yields A + B for its B, proving "same slot-0 group, different slot-1 group".
-// Everything is driven through the backend-agnostic sg::context API — the dx12 WARP device is only how the context is created.
+// Everything is driven through the backend-agnostic sg::context API — the dx12 device is only how the context is created.
 
 namespace
 {

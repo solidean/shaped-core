@@ -1,11 +1,12 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/spin.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
-
-#include <chrono>
 
 using namespace cc::primitive_defines;
 
@@ -115,8 +116,21 @@ cc::thread_pump_registration cc::register_thread_pump(cc::unique_function<bool()
 
 bool cc::thread_pump_all()
 {
+    // The calling thread's own home first: every blocking wait that sweeps here then also runs the homed steps only this
+    // thread may run, without the home ever sitting in the registry where every other thread's sweep would pay for it.
+    auto more = false;
+    if (auto* const home = cc::impl::async_tls().home)
+        more = home->pump_cycle();
+    more |= cc::impl::thread_pump_registry();
+    return more;
+}
+
+bool cc::impl::thread_pump_registry()
+{
     if (g_registration_count.load() == 0)
         return false;
+
+    auto more = false;
 
     // Snapshot under the lock, call outside it: a pump is free to register or deregister — an actor handler creating
     // another actor does exactly that — and holding the lock across the call would deadlock on it.
@@ -132,7 +146,6 @@ bool cc::thread_pump_all()
             }
         });
 
-    auto more = false;
     for (auto* const entry : snapshot)
     {
         if (entry->running.exchange(true))
@@ -155,12 +168,12 @@ bool cc::thread_pump_all_for(double max_ms)
     if (max_ms <= 0)
         return thread_pump_all();
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::duration<double, std::milli>(max_ms);
+    auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
     while (true)
     {
         if (!thread_pump_all())
             return false; // idle: nothing left to do
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (cc::current_time_steady_secs() >= deadline)
             return true; // stopped on the budget with work still pending
     }
 }

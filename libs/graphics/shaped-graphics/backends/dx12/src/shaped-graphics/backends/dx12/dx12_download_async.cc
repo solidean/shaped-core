@@ -473,7 +473,8 @@ private:
         {
             // A sink-driven read has no pin to consult: its sink is the destination, and it lives as long as the
             // transfer does.
-            bool const wanted = mj.sink != nullptr || mj.pin.lock() != nullptr;
+            auto const pinned = mj.pin.lock(); // held across the copy: the future may drop its destination meanwhile
+            bool const wanted = mj.sink != nullptr || pinned != nullptr;
             if (wanted)
                 mj.deferred_cpu_copy();
             if (mj.completion)

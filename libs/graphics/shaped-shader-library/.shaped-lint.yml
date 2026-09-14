@@ -19,7 +19,6 @@ rules:
     reason: the watch backend runs its own OS wait loop, which is what a file watcher is
     files:
       - src/shaped-shader-library/filesystem/impl/watch_backend_windows.cc
-      - src/shaped-shader-library/impl/reload_watcher.cc
 
   - kind: allow-include
     value: [<filesystem>, <fstream>]

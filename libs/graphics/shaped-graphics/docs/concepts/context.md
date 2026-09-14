@@ -80,7 +80,7 @@ It is idempotent, and a backend's destructor runs it for you — call it yoursel
 
 A download's completion is a [`cc::async`](../../../../base/clean-core/src/clean-core/thread/async.hh) node.
 `ctx.wait_for(future)` drives that node on the **ambient scheduler**, and asserts when none is installed.
-Install one at startup with `cc::install_default_async_scheduler` or a `cc::scoped_default_async_scheduler`; a nexus run installs its own, so tests need nothing.
+Install one at startup with `cc::install_compute_async_scheduler` or a `cc::scoped_compute_async_scheduler`; a nexus run installs its own, so tests need nothing.
 
 That buys the composition: `future.completion()` is a node other async work can depend on, so a readback chains into a graph without anyone blocking.
 Cancellation — a dropped recording list, a dropped destination — arrives on that node as `cc::async_error::make_cancelled()` rather than as a future that simply never completes.

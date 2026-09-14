@@ -7,7 +7,7 @@
 
 using namespace cc::primitive_defines;
 
-// Inline texture copy on WARP: upload tightly-packed pixels into a texture, read them back, and verify the round-trip.
+// Inline texture copy: upload tightly-packed pixels into a texture, read them back, and verify the round-trip.
 // Exercises the 256/512 row/placement padding, the region path, block-compressed formats, and the copy_dst/copy_src layout barriers the copy drives.
 
 namespace

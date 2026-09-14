@@ -1,5 +1,6 @@
 #include "cnet-test-types.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/function/function_ref.hh>
@@ -19,12 +20,17 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 /// Drive the process pump until `done`, or give up.
 ///
 /// The budget is wall-clock rather than a spin count: a round count measures how fast this machine is rather than
 /// how long the reactor was given, and a debug build burns thousands of yields in the time one handoff takes.
 bool wait_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 {
+    CC_RECORD_SCOPE("cnet_test.wait_for");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 
@@ -210,9 +216,72 @@ CNET_IO_TEST("cnet - a refused connection fails, and says why")
     auto const abandoned = server.where();
     server.listener = {};
 
-    auto connected = tcp_connect(*server.io, abandoned, deadline::after_secs(5));
+    // Without the option, Windows retransmits the SYN and the refusal takes about two seconds to arrive.
+    auto connected = tcp_connect(*server.io, abandoned, deadline::after_secs(5), {.fail_fast_on_refused = true});
     CHECK(wait_for([&] { return connected->is_ready(); }));
     CHECK(connected->try_error() != nullptr);
+}
+
+CNET_IO_TEST("cnet - a connect burst past the listen backlog still connects once the server accepts", thorough_only)
+{
+    // Windows refuses a SYN a full backlog has no room for, and Linux drops it.
+    // Either way the SYN retransmission is what rides it out.
+    // This pins that the default keeps it, which `fail_fast_on_refused` would give up.
+    // The overflowed connects land on the stack's first retransmission, so the test costs one initial RTO, about a second.
+    auto io = io_system::try_create({.unthreaded = true});
+    if (io.has_error())
+        SKIP("this platform has no sockets");
+    if (!native_transport(*io.value()).is_supported())
+        SKIP("this platform has no sockets");
+
+    auto const backlog = 4;
+    auto listener = stream_listener::try_create(*io.value(), endpoint(ip_address::loopback(ip_family::v4), 0),
+                                                {.backlog = backlog});
+    REQUIRE(listener.has_value());
+    auto const where = listener.value()->local();
+
+    // Twice the backlog, so the whole overflow fits the drained queue on the first retransmission.
+    // A burst many times the backlog retransmits in waves that arrive together, and how many rounds a stack makes differs by platform.
+    auto const burst = 2 * backlog;
+
+    // Every connect is initiated before the accept is even submitted, so the queue overflows.
+    auto connects = cc::vector<cc::shared_async<cc::shared_ptr<stream_connection>>>();
+    for (auto i = 0; i < burst; ++i)
+        connects.push_back(tcp_connect(*io.value(), where, deadline::after_secs(30)));
+
+    auto accepted = cc::vector<cc::shared_ptr<stream_connection>>();
+    auto accepting = listener.value()->accept();
+    auto accept_failed = false;
+    auto all_connected = [&]
+    {
+        if (accepted.size() < burst && accepting->is_ready())
+        {
+            // A failed accept ends the wait, and the checks below report it.
+            if (accepting->try_error() != nullptr)
+            {
+                accept_failed = true;
+                return true;
+            }
+            accepted.push_back(accepting->take_value());
+            if (accepted.size() < burst)
+                accepting = listener.value()->accept();
+        }
+        for (auto const& c : connects)
+        {
+            // A connect that gave up can never be accepted, so it ends the wait too.
+            if (c->is_ready() && c->try_error() != nullptr)
+                return true;
+            if (!c->is_ready())
+                return false;
+        }
+        return accepted.size() == burst;
+    };
+
+    // The budget covers several rounds of SYN backoff, and only a failure ever spends it.
+    CHECK(wait_for(all_connected, 30.0));
+    CHECK(!accept_failed);
+    for (auto const& c : connects)
+        CHECK(c->try_error() == nullptr);
 }
 
 CNET_IO_TEST("cnet - an operation on a closed connection fails without reaching the reactor")

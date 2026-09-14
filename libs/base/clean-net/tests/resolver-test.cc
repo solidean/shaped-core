@@ -1,6 +1,7 @@
 #include "cnet-test-types.hh"
 
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/common/profiling.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
@@ -19,8 +20,13 @@ using namespace cnet;
 
 namespace
 {
+// `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
+using cnet::cc_rec_domain;
+
 bool pump_until(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 {
+    CC_RECORD_SCOPE("cnet_test.pump_until");
+
     auto& clk = system_clock();
     auto const deadline_ns = clk.now_ns() + i64(budget_secs * 1e9);
 

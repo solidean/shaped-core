@@ -35,7 +35,7 @@ enum class nx::config::scheduler_mode
     none,     // bodies driven directly on the calling thread, in schedule order
 };
 
-// WHICH scheduler the async system uses inside a test — the one cc::install_default_async_scheduler installs.
+// WHICH scheduler the async system uses inside a test — the one cc::install_compute_async_scheduler installs.
 // Every async needs one, so a run provides it; a test only names this to get something other than the default.
 enum class nx::config::ambient_mode
 {
@@ -55,6 +55,7 @@ struct nx::config::cfg
 {
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
+    bool thorough_only = false; // skipped unless the run is --thorough; orthogonal to `bucket` and `enabled`
     int seed = 0;
 
     scheduler_mode scheduler = scheduler_mode::shared;
@@ -138,6 +139,15 @@ constexpr struct
     void apply(cfg& result) const { result.owns_recorder = true; }
 } owns_recorder;
 
+// This test runs only under --thorough, and a default run skips it rather than leaving it out.
+// For a test whose whole point is ground a default run cannot afford, so there is no narrower version of it worth running.
+// A test that CAN be narrowed stays a normal test and branches on nx::is_thorough() instead.
+// Honoured wherever the body runs, a child dispatched through nx::invoke_tests included.
+constexpr struct
+{
+    void apply(cfg& result) const { result.thorough_only = true; }
+} thorough_only;
+
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.
 // Intended for tests that open windows, or are otherwise incompatible with unattended execution.
@@ -179,8 +189,9 @@ constexpr struct
 } example;
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
-// Expressed as an ordering edge between test nodes rather than a lock, so it is deadlock-free by construction and reproducible: holders run in schedule order.
-// Repeat it to hold several tags — a test then waits for the last holder of each.
+// Expressed as locks the test node takes before its body: one async mutex per tag, and a phase-wide shared lock that this holds exclusively.
+// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs each phase in schedule order.
+// Repeat it to hold several tags — they are taken in name order, which keeps two multi-tag tests from deadlocking.
 constexpr auto exclusive(char const* tag = nullptr)
 {
     struct excluder
@@ -201,7 +212,7 @@ constexpr auto exclusive(char const* tag = nullptr)
     return excluder{tag};
 }
 
-// Run this test with NO ambient scheduler at all: none bound to its thread, and none installed as the default.
+// Run this test with NO ambient scheduler at all: none bound to its thread, and no compute scheduler installed.
 // Its body is driven directly, in schedule order, alongside the other tests asking for the same.
 //
 // Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.
@@ -229,7 +240,8 @@ constexpr struct
 
 // Run this test's body on the process MAIN thread — the one nx::run was entered on.
 // For a test whose subject asserts on it: sr::window_system does, because SDL does.
-// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound.
+// Orthogonal to the scheduler mode: it says WHICH thread, not whether one is bound, and not that nothing else runs.
+// It promises no exclusion, not even among main_thread tests: add exclusive() to run alone, or exclusive(tag) to exclude a group.
 // own_pool and ASYNC_TEST cannot be combined with it and assert, because either could only be honoured by ignoring one of the two asks.
 constexpr struct
 {

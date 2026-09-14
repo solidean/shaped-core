@@ -5,10 +5,10 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/thread/async_coroutine.hh> // cc::async_start
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 
@@ -18,15 +18,9 @@ using namespace cc::primitive_defines;
 //
 // This is what a capture run drives, so what it pins is that the authoring surface cannot tell the difference —
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
-// On the main thread because the path tracer's shader compiles run inline through `try_async_blocking_get`, which
-// does not complete from inside a pool worker (same reason as `pathtraced-view-test`).
-TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_thread)
+INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -60,6 +54,9 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
     // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
     auto const loop_start = cc::current_time_steady_secs();
 
+    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
+    auto background = cc::shared_async<cc::unit>();
+
     for (auto f : viewer.frames())
     {
         CHECK(f.viewport_size() == size);
@@ -76,6 +73,7 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
 
         accumulated = view.accumulated_frames();
         pending_at_end = f.pending_resource_work();
+        background = f.background_work();
 
         // A headless loop is ended by the body alone: nothing polls, so there is no close button and no quit.
         // Eight frames that TRACED, rather than eight frames: see the note above the deadline.
@@ -86,6 +84,7 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
     }
 
     CHECK(frames_drawn >= 8);
+    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
 
     // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
@@ -100,13 +99,10 @@ TEST("sv - headless viewer runs a frame loop with no window", nx::config::main_t
 // boundary — and a JPEG truncated that way still decodes, flat-filling the tail from the last DC value.
 // That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
 // decoding the result back and checking its extent is the assertion that matters here.
-TEST("sv - a capture writes a complete image and ends the loop", nx::config::main_thread)
+// The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
+INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -146,6 +142,9 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
     // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
     auto const loop_start = cc::current_time_steady_secs();
 
+    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
+    auto background = cc::shared_async<cc::unit>();
+
     for (auto f : sv::interactive(ctx, "sv-test/capture"))
     {
         auto view = f.window().view();
@@ -169,11 +168,15 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
                          .half_extent_v = tg::vec3f(0, 0, 0.4f),
                          .emission = tg::vec3f(12, 12, 12)});
 
+        background = f.background_work();
+
         ++frames;
         // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
         // A deadline rather than a frame count — see the note at the top of this loop.
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
+
+    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
     // non-empty, and that is the whole failure being guarded against.
@@ -205,13 +208,10 @@ TEST("sv - a capture writes a complete image and ends the loop", nx::config::mai
 // Nothing discovers capture names any more — a `.capture.json` beside the example declares them — so this is the only
 // thing standing between a renamed callback and a plausible, wrong reference image: the default view, written under
 // the old name's filename, refreshed into the repository by a sweep that reported success.
-TEST("sv - a capture nothing registered fails without writing", nx::config::main_thread)
+// The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
+INVOCABLE_TEST("sv - a capture nothing registered fails without writing", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -251,6 +251,13 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::main
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
 }
 
+namespace
+{
+// The clock the timeout test below spends its capture against: frozen until the body moves it, so running out takes no time.
+// Only that test reads it, and nexus never runs one test twice at once.
+double g_timeout_test_now = 0.0;
+} // namespace
+
 // A capture that runs out of clock must leave NOTHING at the path it was given.
 //
 // dev.py reads a file at that path as the run having succeeded — the exit code alone cannot tell it otherwise — so an
@@ -258,13 +265,10 @@ TEST("sv - a capture nothing registered fails without writing", nx::config::main
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-TEST("sv - a capture that times out writes beside the requested path, not to it", nx::config::main_thread)
+INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
+               (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();
@@ -282,36 +286,49 @@ TEST("sv - a capture that times out writes beside the requested path, not to it"
     cc::remove_file(path);
     cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
 
-    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
-    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
-    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "64x48");
+    g_timeout_test_now = 0.0;
+    auto const timeout_seconds = 60.0;
 
-    // Above the accumulation cap, so no amount of waiting reaches it, against a clock that runs out almost at once.
-    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "100000");
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "2");
+    // Above the accumulation cap, so no number of frames settles it; only the clock can end this run.
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = path,
+                                             .size = tg::vec2i(64, 48),
+                                             .accumulate_frames = 100000,
+                                             .timeout_seconds = timeout_seconds,
+                                             .clock_seconds = [] { return g_timeout_test_now; }};
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
 
-    auto frames = 0;
+    auto traced_before_timeout = false;
 
-    // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its material permutations have
-    // compiled, and those compile on the ambient scheduler rather than on this thread.
-    // So a loop guard expressed as a frame count is really a bound on compile latency, and these are expressed as a
-    // deadline instead.
-    // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
+    // WORKAROUND, and the same one sv_test::tick_until carries: the clock is only run out once a frame has traced.
+    // Earlier, the material compiles that frame started would still be in flight when the loop ends, outliving the test.
+    // So the loop guard is a deadline on compile latency rather than a frame count.
     auto const loop_start = cc::current_time_steady_secs();
-    for (auto f : sv::interactive(ctx, "sv-test/capture-timeout"))
+
+    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
+    auto background = cc::shared_async<cc::unit>();
+
+    for (auto f : sv::interactive(ctx, "sv-test/capture-timeout", {}, request))
     {
         auto view = f.window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
         view.add_scene().add_mesh(mesh);
+        background = f.background_work();
 
-        ++frames;
-        // The capture's own 2 s timeout ends this loop; this only stops a hang from becoming a test timeout.
-        // A deadline rather than a frame count — see the note above.
+        // The whole timeout passes within this frame, so the capture gives up as it ends.
+        if (view.accumulated_frames() > 0)
+        {
+            traced_before_timeout = true;
+            g_timeout_test_now = timeout_seconds;
+        }
+
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
+
+    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
+    CHECK(traced_before_timeout);
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
     CHECK(cc::file_read_stream_adapter::open(path).has_error());

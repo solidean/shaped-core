@@ -85,7 +85,9 @@ void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution 
 }
 } // namespace
 
-cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_execution const& execution)
+cc::string nx::write_junit_xml(cc::string_view suite_name,
+                               nx::test_schedule_execution const& execution,
+                               nx::test_run_resources const& resources)
 {
     int const total_tests = execution.count_total_tests();
     int const failed_tests = execution.count_failed_tests();
@@ -103,6 +105,11 @@ cc::string nx::write_junit_xml(cc::string_view suite_name, nx::test_schedule_exe
     {
         os.appendf("name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"0\" assertions=\"{}\" time=\"{}\"",
                    suite, total_tests, failed_tests, total_checks, total_time);
+        if (resources.cpu_machine_fraction >= 0)
+            os.appendf(" cpu_load=\"{:.4f}\" cores_used=\"{:.2f}\"", resources.cpu_machine_fraction,
+                       resources.cpu_cores_used);
+        if (resources.peak_resident_bytes >= 0)
+            os.appendf(" peak_resident_bytes=\"{}\"", resources.peak_resident_bytes);
     };
 
     cc::string out;

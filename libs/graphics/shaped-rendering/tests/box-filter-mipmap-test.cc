@@ -1,6 +1,5 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -40,14 +39,9 @@ void prewarm_every_variant(sg::context& ctx)
 }
 } // namespace
 
-// Only one slib::shader_library may exist at a time — the generated package symbols are process-wide
-// globals — so this cannot run beside another test that builds one.
-TEST("sr - box filter mipmap generates every shape's chain", exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
+    REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
     // The routine acquires its shaders through the library, so without a registered package there is nothing to
@@ -150,12 +144,9 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 
 // The shapes rather than the sizes are what this covers: a cube and a 1D array both index their slice on an axis a
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
-TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
+    REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
     auto compiler = slib::create_dxc_compiler();
@@ -230,12 +221,9 @@ TEST("sr - box filter mipmap writes every slice of every shape", exclusive("slib
 
 // An odd extent is where the halving rule stops being obvious: the second tap clamps to the level's edge rather
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
-TEST("sr - box filter mipmap halves an odd extent by averaging pairs", exclusive("slib-shader-library"))
+INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
+    REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
     auto compiler = slib::create_dxc_compiler();

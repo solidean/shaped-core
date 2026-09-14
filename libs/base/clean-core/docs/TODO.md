@@ -27,6 +27,14 @@ Add entries as we discover them, and remove them as they land.
   `babel::json`'s writer is the first, with an exponent-bit check in json_writer.cc — exact, and needing no `<cmath>`, which is not blessed there.
   A `cc::is_finite` / `is_nan` / `is_inf` trio next to the other scalar utilities would take all three call sites this will grow.
 
+## function
+
+- **`cc::function_ref` does not accept a plain function portably.**
+  It stores its target as `void*` and casts it back to `Fn*`, and a function pointer to `void*` is only conditionally supported.
+  clang-cl accepts `cc::function_ref<void()>(my_function)`; clang on Linux, macOS, iOS and wasm rejects it, so the mistake builds on Windows and breaks CI elsewhere.
+  The fix is a separate function-pointer member (or a union with the object pointer) chosen at construction, plus a test that passes a function.
+  Until then a caller wraps it: `libs/data/babel-serializer/tests/trace/chrome_trace-test.cc` passes `[] { busy_round(); }` for exactly this reason.
+
 ## platform
 
 - **`cc::symbolizer` is not thread-safe, and the symbolize tests flake because of it.**

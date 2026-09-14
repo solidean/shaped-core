@@ -99,6 +99,9 @@ struct async_node_traits
 {
     static constexpr bool supports_weak = true;
 
+    /// destroy_object may hand the teardown to a homed node's home instead of running it — see async_node_base::teardown_payload_or_defer.
+    static constexpr bool can_defer_destroy = true;
+
     // intrusive: the node IS the async node, control included; free by the concrete class stashed in the node
     static constexpr isize node_size(isize payload_size, isize) { return payload_size; }
     static constexpr isize node_align(isize payload_align) { return payload_align; }
@@ -109,7 +112,8 @@ struct async_node_traits
     static void inc_weak(async_node_base* p);
     static bool release_weak(async_node_base* p);
     static bool try_lock_strong(async_node_base* p);
-    static void destroy_object(async_node_base* p);
+    /// True when the teardown was deferred: the caller then neither releases the collective weak count nor frees.
+    static bool destroy_object(async_node_base* p);
     static void free_storage(async_node_base* p);
 };
 } // namespace impl
@@ -125,19 +129,50 @@ using async_node_weak = cc::weak_ptr<async_node_base, impl::async_node_traits>;
 
 } // namespace cc
 
+/// Where a homed node's frame is destroyed when the node is dropped before it ever resolved.
+/// A resolved node already destroyed its frame at home, inside its own poll, and its value is destroyed wherever the last handle drops either way.
+enum class cc::async_teardown : cc::u8
+{
+    anywhere, // on whichever thread drops the last handle — what an unhomed node does
+    at_home,  // handed to the home, for captures that must be released on its thread
+};
+
+/// Whether a homed node drives a not-yet-started dependency on its own stack.
+enum class cc::async_inline_deps : cc::u8
+{
+    home_default,   // whatever the home's default_inline_deps says
+    any,            // drive any dependency inline — the throughput choice, and what an unhomed node does
+    same_home_only, // drive only dependencies homed here; everything else goes to compute and this node parks
+};
+
+/// The options a node's home word carries beside the home itself — see "Homes" in libs/base/clean-core/docs/systems/async.md.
+struct cc::async_home_options
+{
+    async_teardown teardown = async_teardown::anywhere;
+    async_inline_deps inline_deps = async_inline_deps::home_default;
+};
+
 /// Where runnable nodes go.
 /// The async machinery only ever asks a scheduler to make a node runnable — it never owns execution and never blocks.
 /// A worker binds a scheduler to its thread with async_worker_scope; nodes reach it via async_scheduler::current().
-/// Two implementations ship: singlethreaded_scheduler below, and async_thread_pool (async_thread_pool.hh).
+/// Three implementations ship: singlethreaded_scheduler below, async_thread_pool (async_thread_pool.hh) and thread_bound_scheduler (thread_bound_scheduler.hh).
+/// Any of them can be a node's home.
 ///
 /// A queued node is passed as a shared handle, so the scheduler co-owns it while it waits.
 /// A node therefore cannot be destroyed while runnable, which is what makes a required dependency freely schedulable and steal-safe.
-struct cc::async_scheduler
+///
+/// alignas(64) costs nothing — a process holds a handful of schedulers — and it is what leaves six low bits of a
+/// scheduler pointer free for a node's home options, so later options need no new storage.
+struct alignas(64) cc::async_scheduler
 {
     /// True if a node enqueued here may be picked up by ANOTHER thread.
     /// Fixed at construction, so the poll loop reads it as a plain field rather than paying a virtual call per step.
     /// The poll loop publishes a node's dependencies only when this holds — see "Publish all-but-one" in libs/base/clean-core/docs/systems/async.md.
     bool const has_steal_capable_peers;
+
+    /// What `async_inline_deps::home_default` means for a node homed here.
+    /// Pools default to `any`, a thread home to `same_home_only`.
+    async_inline_deps const default_inline_deps;
 
     /// Make a node runnable on the CURRENT worker (local / hot enqueue).
     /// Called only when a worker scope is active on this thread.
@@ -159,10 +194,31 @@ struct cc::async_scheduler
     /// cc::async_blocking_get is what turns that second case into "wait and try again", so a caller does not have to.
     virtual void participate_until_ready(async_node_base& root) = 0;
 
-    virtual ~async_scheduler() = default;
+    /// Take over the teardown of `node`, a homed node dropped before it resolved whose options ask for `at_home`.
+    /// Returns false to have the caller tear it down in place, which is the default and the right answer on the home's own thread.
+    /// Returning true transfers the strong owners' collective weak count: the scheduler must later call impl::async_run_deferred_teardown(node).
+    virtual bool try_defer_teardown(async_node_base* node)
+    {
+        CC_UNUSED(node);
+        return false;
+    }
+
+    /// How many live, unresolved nodes are homed here — a home must outlive every one of them.
+    [[nodiscard]] isize homed_node_count() const { return _homed_nodes.load(cc::memory_order_acquire); }
+
+    /// Asserts no live, unresolved node is still homed here: a later wake of one would submit to a destroyed scheduler.
+    /// Runs after a derived destructor has drained its own queues, whose abandoned homed nodes stop counting as they are released.
+    virtual ~async_scheduler();
 
 protected:
-    explicit async_scheduler(bool steal_capable_peers) : has_steal_capable_peers(steal_capable_peers) {}
+    explicit async_scheduler(bool steal_capable_peers, async_inline_deps inline_deps = async_inline_deps::any)
+      : has_steal_capable_peers(steal_capable_peers), default_inline_deps(inline_deps)
+    {
+    }
+
+private:
+    friend struct async_node_base;
+    cc::atomic<isize> _homed_nodes = {0};
 
 public:
     /// The scheduler bound to the current thread.
@@ -170,46 +226,84 @@ public:
     [[nodiscard]] static async_scheduler& current();
     [[nodiscard]] static async_scheduler* current_or_null();
 
-    /// The process-wide default scheduler that compute nodes route to when they cannot run on the current thread.
-    /// Null unless one is installed (see install_default_async_scheduler).
+    /// The process-wide compute scheduler: where unhomed work routes when it cannot run on the current thread.
+    /// Null unless one is installed (see install_compute_async_scheduler).
     /// Read-mostly — install once at startup, before the graphs that depend on it run.
-    static void set_default(async_scheduler* sched);
-    [[nodiscard]] static async_scheduler* default_or_null();
+    static void set_compute(async_scheduler* sched);
+    [[nodiscard]] static async_scheduler* compute_or_null();
+
+    /// The process-wide io scheduler, or null when none is installed — cc::io_scheduler() is the lookup that falls back to compute.
+    static void set_io(async_scheduler* sched);
+    [[nodiscard]] static async_scheduler* io_or_null();
 };
 
 namespace cc
 {
-/// Install `scheduler` as the process-wide default: everything the async system does needs one, and this is where it comes from.
+/// Install `scheduler` as the process-wide compute scheduler: everything the async system does needs one, and this is where it comes from.
 ///
 /// **An application installs one early, before any async work**, and a nexus run installs one per phase — see nx::no_scheduler for the test that wants none.
-/// cc::async_thread_pool is the multi-threaded one to reach for; cc::singlethreaded_scheduler makes every graph run inline on whoever drives it.
+/// cc::scoped_async_homes installs compute and io together; cc::singlethreaded_scheduler makes every graph run inline on whoever drives it.
 ///
-/// Asserts if a default is already installed: overriding a live one is almost never correct, since asyncs created under the old default may outlive the new one.
-/// Pair with uninstall_default_async_scheduler, or use scoped_default_async_scheduler.
-void install_default_async_scheduler(async_scheduler& scheduler);
+/// Asserts if one is already installed: overriding a live one is almost never correct, since asyncs created under the old one may outlive the new one.
+/// Pair with uninstall_compute_async_scheduler, or use scoped_compute_async_scheduler.
+void install_compute_async_scheduler(async_scheduler& scheduler);
 
-/// Remove `scheduler` as the process-wide default.
+/// Remove `scheduler` as the process-wide compute scheduler.
 /// Asserts it is the currently installed one, and must run before it is destroyed.
-void uninstall_default_async_scheduler(async_scheduler& scheduler);
+void uninstall_compute_async_scheduler(async_scheduler& scheduler);
 
-/// The scheduler this thread's async work belongs to: the bound worker scope if there is one, else the installed default.
+/// Install `scheduler` as the process-wide io scheduler, for work that blocks — reads, network, anything sized for waiting rather than for cores.
+/// Optional: with none installed, cc::io_scheduler() hands back compute instead.
+/// Asserts if one is already installed.
+void install_io_async_scheduler(async_scheduler& scheduler);
+
+/// Remove `scheduler` as the process-wide io scheduler; asserts it is the installed one.
+void uninstall_io_async_scheduler(async_scheduler& scheduler);
+
+/// The installed compute scheduler.
+/// Asserts if none is installed.
+[[nodiscard]] async_scheduler& compute_scheduler();
+
+/// The installed io scheduler, or the compute scheduler when no io scheduler is installed.
+/// The fallback keeps a library that hops to io working in a binary that never set one up, at the cost of that work sharing compute's cores.
+[[nodiscard]] async_scheduler& io_scheduler();
+
+/// The scheduler this thread's async work belongs to: the bound worker scope if there is one, else the installed compute scheduler.
 /// Asserts if there is neither — interacting with the async system without an ambient scheduler is an error, not a fallback.
 [[nodiscard]] async_scheduler& ambient_async_scheduler();
 } // namespace cc
 
-/// RAII: installs `scheduler` as the process-wide default for the scope.
-struct cc::scoped_default_async_scheduler
+/// RAII: installs `scheduler` as the process-wide compute scheduler for the scope.
+struct cc::scoped_compute_async_scheduler
 {
-    explicit scoped_default_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
+    explicit scoped_compute_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
     {
-        install_default_async_scheduler(scheduler);
+        install_compute_async_scheduler(scheduler);
     }
-    ~scoped_default_async_scheduler() { uninstall_default_async_scheduler(_scheduler); }
+    ~scoped_compute_async_scheduler() { uninstall_compute_async_scheduler(_scheduler); }
 
-    scoped_default_async_scheduler(scoped_default_async_scheduler const&) = delete;
-    scoped_default_async_scheduler(scoped_default_async_scheduler&&) = delete;
-    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler const&) = delete;
-    scoped_default_async_scheduler& operator=(scoped_default_async_scheduler&&) = delete;
+    scoped_compute_async_scheduler(scoped_compute_async_scheduler const&) = delete;
+    scoped_compute_async_scheduler(scoped_compute_async_scheduler&&) = delete;
+    scoped_compute_async_scheduler& operator=(scoped_compute_async_scheduler const&) = delete;
+    scoped_compute_async_scheduler& operator=(scoped_compute_async_scheduler&&) = delete;
+
+private:
+    async_scheduler& _scheduler;
+};
+
+/// RAII: installs `scheduler` as the process-wide io scheduler for the scope.
+struct cc::scoped_io_async_scheduler
+{
+    explicit scoped_io_async_scheduler(async_scheduler& scheduler) : _scheduler(scheduler)
+    {
+        install_io_async_scheduler(scheduler);
+    }
+    ~scoped_io_async_scheduler() { uninstall_io_async_scheduler(_scheduler); }
+
+    scoped_io_async_scheduler(scoped_io_async_scheduler const&) = delete;
+    scoped_io_async_scheduler(scoped_io_async_scheduler&&) = delete;
+    scoped_io_async_scheduler& operator=(scoped_io_async_scheduler const&) = delete;
+    scoped_io_async_scheduler& operator=(scoped_io_async_scheduler&&) = delete;
 
 private:
     async_scheduler& _scheduler;
@@ -236,7 +330,7 @@ private:
 ///
 /// The state it restores is an ordinary one — a foreign thread has never had a scheduler bound — so this only makes it reachable from inside a worker.
 /// It is what a host driving foreign code inside its own graph needs: work that code schedules must not land in the host's queue, to be run later, out of its owner's lifetime.
-/// A node created here still routes to the installed default pool, exactly as it would on a thread that never had a scheduler.
+/// A node created here still routes to the installed compute scheduler, exactly as it would on a thread that never had a scheduler.
 struct cc::async_no_worker_scope
 {
     async_no_worker_scope();
@@ -603,8 +697,9 @@ enum class cc::async_node_state : cc::u8
 /// It recovers what a base-typed pointer cannot: how to destroy the typed value or error, and how to run and destroy the inline frame.
 /// It also carries the size class, which the intrusive free path needs long after the concrete type is erased.
 ///
-/// alignas(32) is load-bearing: the node packs the 5 low bits of this pointer with the lifecycle state + wake + lock, so every instance must be 32-aligned to keep those bits free.
-struct alignas(32) cc::async_type_ops
+/// alignas(64) is load-bearing: the node packs the 6 low bits of this pointer with the lifecycle state, wake, lock and homed bits, so every instance must be 64-aligned to keep those bits free.
+/// The price is 16 B of rodata per descriptor (48 -> 64), one descriptor per frame type and never per node.
+struct alignas(64) cc::async_type_ops
 {
     void (*teardown_value)(async_node_base*); // destroy the resolved value in the payload (ready_value)
     void (*teardown_error)(async_node_base*); // destroy the resolved error in the payload (ready_error)
@@ -627,7 +722,8 @@ struct alignas(32) cc::async_type_ops
 
 namespace cc
 {
-static_assert(alignof(async_type_ops) >= 32, "async_type_ops must be 32-aligned so its low 5 bits are free for tags");
+static_assert(alignof(async_type_ops) >= 64, "async_type_ops must be 64-aligned so its low 6 bits are free for tags");
+static_assert(sizeof(async_type_ops) == 64, "async_type_ops is one line of rodata; the 64-alignment must not grow it");
 
 namespace impl
 {
@@ -641,6 +737,48 @@ void async_typed_teardown(async_node_base* n);
 /// Declared here for the same reason: it reaches the protected finish_error_emplace.
 template <class E>
 void async_frame_resolve_current_exception(async_node_base* n);
+
+// ---- the home word ----
+//
+// A homed node's frame slot opens with one word: the home's scheduler pointer, with the node's home options in its low bits.
+// async_scheduler is 64-aligned, so six bits are free; three are used.
+// Only a node whose control word carries the homed bit has one, and it is valid only while the node is unresolved:
+// a resolved value larger than 24 B is built over it.
+
+inline constexpr u64 async_home_teardown_bit = 0x1;
+inline constexpr u64 async_home_inline_shift = 1;
+inline constexpr u64 async_home_inline_mask = u64(0x3) << async_home_inline_shift;
+inline constexpr u64 async_home_pointer_mask = ~u64(0x3F);
+
+/// Bytes the home word takes at the front of a frame slot, which is what a homed frame's inline budget loses.
+inline constexpr isize async_home_word_bytes = 8;
+
+[[nodiscard]] inline u64 async_make_home_word(async_scheduler* home, async_home_options options)
+{
+    return reinterpret_cast<u64>(home) | (options.teardown == async_teardown::at_home ? async_home_teardown_bit : 0)
+         | (u64(options.inline_deps) << async_home_inline_shift);
+}
+
+[[nodiscard]] inline async_scheduler* async_home_of(u64 word)
+{
+    return reinterpret_cast<async_scheduler*>(word & async_home_pointer_mask);
+}
+
+[[nodiscard]] inline async_home_options async_home_options_of(u64 word)
+{
+    return {.teardown = (word & async_home_teardown_bit) != 0 ? async_teardown::at_home : async_teardown::anywhere,
+            .inline_deps = async_inline_deps((word & async_home_inline_mask) >> async_home_inline_shift)};
+}
+
+/// Run the teardown a scheduler took over through async_scheduler::try_defer_teardown, then drop the weak count that kept the node's storage alive.
+/// Call on the thread the teardown was deferred to.
+void async_run_deferred_teardown(async_node_base* node);
+
+/// Creates and binds the main thread's home; called once, by cc::mark_current_thread_as_main.
+void async_bind_main_thread_home();
+
+/// cc::main_thread_scheduler() as its base, for headers that must not include thread_bound_scheduler.hh.
+[[nodiscard]] async_scheduler& async_main_home();
 } // namespace impl
 
 } // namespace cc
@@ -688,7 +826,7 @@ public:
     // scheduling / driving
 public:
     /// Idempotent hint: make this node runnable.
-    /// Routes to the current worker (hot) if a worker scope is active here, else to the installed default pool.
+    /// Routes to the current worker (hot) if a worker scope is active here, else to the installed compute scheduler.
     /// Never implies ownership of execution, and is safe to call twice, or from a completed dependency waking many dependents.
     /// A running node records a re-poll request instead of enqueuing.
     /// The node must be shared-owned, created via make_shared.
@@ -708,6 +846,25 @@ public:
     /// Install a one-shot completion callback, fired once when this node becomes ready (the pool blocking driver uses this).
     /// Returns true if the node was ALREADY ready, in which case no callback was installed and you must not wait.
     bool install_completion_hook_or_ready(void (*fn)(void*), void* ctx);
+
+    // homes — see "Homes" in libs/base/clean-core/docs/systems/async.md
+public:
+    /// The scheduler this node is homed to, or null for an unhomed or already resolved node.
+    [[nodiscard]] async_scheduler* home_or_null();
+
+    /// Make `home` this node's home, with `options`; returns true if it was already homed there.
+    /// Only the node's own running frame may call this — it is what a coroutine hop does — and its frame slot must reserve a home word.
+    bool rehome(async_scheduler& home, async_home_options options);
+
+    /// Replace a homed node's options, keeping its home; the same caller restriction as rehome applies.
+    void set_home_options(async_home_options options);
+
+    /// Drive this node as a dependency of a node homed to `required_home` whose policy is same_home_only:
+    /// it runs only if it is homed there too, and is otherwise left for the driver to schedule.
+    void poll_as_dep(async_scheduler& required_home);
+
+    /// True while any strong owner remains; readable through a weak reference, since the counts outlive the object.
+    [[nodiscard]] bool has_strong_owners() const { return (_counts.load(cc::memory_order_acquire) >> 32) != 0; }
 
     // subscription (called by the poll loop)
 public:
@@ -801,6 +958,26 @@ protected:
         init_control_word(ops, async_node_state::cold);
     }
 
+    /// Like install_frame, with a home word at the front of the slot and the frame 8 B behind it.
+    /// `home_word` is 0 for a frame that only reserves the word — every coroutine does, so a hop needs no reallocation.
+    /// A non-zero word sets the homed bit and counts this node against its home.
+    template <isize FrameCapacity, class G, class... Args>
+    void install_homed_frame(async_type_ops const* ops, u64 home_word, Args&&... args)
+    {
+        static_assert(
+            isize(sizeof(G)) + impl::async_home_word_bytes <= FrameCapacity && alignof(G) <= impl::async_frame_align,
+            "frame does not fit the inline slot behind its home word — set_frame boxes those");
+        new (cc::placement_new, frame_storage()) u64(home_word);
+        new (cc::placement_new, reinterpret_cast<byte*>(frame_storage()) + impl::async_home_word_bytes)
+            G(cc::forward<Args>(args)...);
+        init_control_word(ops, async_node_state::cold);
+        if (home_word != 0)
+        {
+            _state_and_ops.store(_state_and_ops.load(cc::memory_order_relaxed) | homed_bit, cc::memory_order_relaxed);
+            impl::async_home_of(home_word)->_homed_nodes.fetch_add(1, cc::memory_order_relaxed);
+        }
+    }
+
     /// End the in-place frame's lifetime, if this node has one — manual/push nodes and the born-ready factories are frameless.
     /// Idempotent only in the sense that each teardown path calls it exactly once.
     ///
@@ -842,9 +1019,13 @@ protected:
             lock_scope g(this);
             if (!conts().empty())                  // leaf/common case has no dependents: skip the steal + wake
                 continuations = cc::move(conts()); // steal dependents to wake after we release the lock
+            auto const w = _state_and_ops.load(cc::memory_order_relaxed); // stable: only the lock holder writes it
+            if ((w & homed_bit) != 0) [[unlikely]]
+                release_home(); // before the value can overwrite the home word; a resolved node needs no home
             unresolved().~async_unresolved(); // ambient + deps + (now-empty) head, all of which the value overwrites
             new (cc::placement_new, value_storage()) T(cc::forward<Args>(args)...); // value at payload offset 0
-            store_state(async_node_state::ready_value);
+            _state_and_ops.store((w & ~state_mask) | (u64(async_node_state::ready_value) << state_shift),
+                                 cc::memory_order_release);
         }
         if (!continuations.empty())
             continuations.notify_all(); // outside the lock: waking a dependent / firing a latch takes other locks
@@ -868,9 +1049,13 @@ protected:
             lock_scope g(this);
             if (!conts().empty())
                 continuations = cc::move(conts());
+            auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+            if ((w & homed_bit) != 0) [[unlikely]]
+                release_home();
             unresolved().~async_unresolved();
             new (cc::placement_new, value_storage()) E(cc::forward<Args>(args)...); // error at payload offset 0
-            store_state(async_node_state::ready_error);
+            _state_and_ops.store((w & ~state_mask) | (u64(async_node_state::ready_error) << state_shift),
+                                 cc::memory_order_release);
         }
         if (!continuations.empty())
             continuations.notify_all();
@@ -882,10 +1067,14 @@ protected:
     /// Called once by async_node_traits at strong 0 (destroy_object); free_storage reclaims the raw node afterwards.
     void teardown_payload();
 
+    /// The strong-0 entry: teardown_payload, except that a homed node's teardown goes to its home when its options ask for at_home and the home accepts it.
+    /// Returns true when deferred, which transfers the strong owners' collective weak count to the home.
+    bool destroy_payload();
+
     // shared helpers for the typed node
 protected:
     /// Stash this node's type-erased ops, so the base can destroy the typed value and free the right size class through a base-typed pointer.
-    /// Called ONCE from the derived ctor, before the node is shared: it stores the 32-aligned ops pointer into the control word with state=cold.
+    /// Called ONCE from the derived ctor, before the node is shared: it stores the 64-aligned ops pointer into the control word with state=cold.
     /// The ops bits never change afterwards, because free_storage reads them at weak 0 — so teardown_payload never clears them.
     void set_ops(async_type_ops const* ops)
     {
@@ -894,7 +1083,7 @@ protected:
 
     /// Combined ops + initial state store, for construction only: the node is not yet shared, so one plain relaxed store suffices.
     /// It folds set_ops and an initial state transition — the manual/push node births external_pending — that would otherwise not merge across the atomic.
-    /// `ops` must be 32-aligned, leaving bits 0..4 free; wake and lock start clear.
+    /// `ops` must be 64-aligned, leaving bits 0..5 free; wake, lock and homed start clear.
     void init_control_word(async_type_ops const* ops, async_node_state state)
     {
         _state_and_ops.store(reinterpret_cast<u64>(ops) | (u64(state) << state_shift), cc::memory_order_relaxed);
@@ -915,22 +1104,40 @@ protected:
     // internal
 private:
     void unsubscribe_all_slow(); // non-empty walk behind unsubscribe_all's inline empty-guard
-    bool try_begin_running();
+    /// 0 when this thread may not run the node; 1 when it may and the node is unhomed; otherwise the node's home word.
+    /// A home word is never 0 or 1, since the scheduler pointer is 64-aligned and non-null.
+    u64 try_begin_running();
+    u64 try_begin_running_as_dep(async_scheduler* required_home);
+    void submit_home_and_unlock(); // the homed tail of schedule / reschedule_self, entered holding the lock
+    void release_home();           // stop counting against the home; under the lock, on a homed node not yet ready
+    bool teardown_payload_or_defer(async_node_state s);
+    void teardown_payload_as(async_node_state s);
+    void poll_running(u64 run); // the loop behind poll() and poll_as_dep(), entered holding `running`
     void drop_ready_pending_deps();
-    void schedule_pending_deps(async_node_base* except); // make pending deps runnable; skips `except` if non-null
+    /// Make pending deps runnable; skips `except` if non-null.
+    /// With `offload` set, a cold dep is scheduled onto it rather than onto this thread's scheduler; a homed dep still goes to its own home.
+    void schedule_pending_deps(async_node_base* except, async_scheduler* offload = nullptr);
     bool subscribe_to_pending_deps();               // returns true if a dep was found already ready (abort parking)
     bool try_subscribe(async_node_base* dependent); // on the dep: subscribe unless already ready
     void route_after_schedule();                    // enqueue exactly once after a cold/blocked -> scheduled transition
     void reschedule_self();
     async_step_status invoke_frame_step(async_context_base& ctx); // one compute step, with the frame's exceptions contained
 
-    // packed control word (_state_and_ops) — the low 5 bits tag the 32-aligned ops pointer
+    // packed control word (_state_and_ops) — the low 6 bits tag the 64-aligned ops pointer
 private:
     static constexpr u64 lock_bit = 0x1;  // bit 0: the spinlock
     static constexpr u64 wake_bit = 0x2;  // bit 1: re-poll requested for a running node
     static constexpr u64 state_shift = 2; // bits 2..4: async_node_state (7 values)
     static constexpr u64 state_mask = u64(0x7) << state_shift;
-    static constexpr u64 ops_mask = ~u64(0x1F); // bits 5..63: the 32-aligned async_type_ops pointer
+    // bit 5: the node has a home, and its frame slot opens with a home word.
+    // It stays set once the node resolves, while a large value overwrites the word, so it is only ever acted on together with a not-ready state.
+    static constexpr u64 homed_bit = 0x20;
+    static constexpr u64 ops_mask = ~u64(0x3F); // bits 6..63: the 64-aligned async_type_ops pointer
+
+    [[nodiscard]] bool is_homed() const { return (_state_and_ops.load(cc::memory_order_relaxed) & homed_bit) != 0; }
+
+    /// The home word; valid only on a homed node that is not ready, which callers establish under the node lock or by holding `running`.
+    [[nodiscard]] u64& home_word() { return *reinterpret_cast<u64*>(frame_storage()); }
 
     static bool is_ready_state(async_node_state s)
     {
@@ -1010,13 +1217,14 @@ private:
     template <class E>
     friend void impl::async_frame_resolve_current_exception(async_node_base*); // reaches finish_error_emplace
     friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
+    friend void impl::async_run_deferred_teardown(async_node_base*);
 
     /// Intrusive refcount (async_node_traits): strong owners in the high half, weak in the low half — continuation cells plus the strong owners' collective one.
     /// Born 1/1 by init_control.
     /// Fused into one word at offset 0, so the last strong drop can test both counts with a single load and skip both locked RMWs when it is the sole owner (cc::fused_refcount).
     cc::atomic<u64> _counts = {0};
 
-    /// Packed control word: the 32-aligned async_type_ops pointer in bits 5..63, the lifecycle state in bits 2..4, the wake-pending flag in bit 1, the spinlock in bit 0.
+    /// Packed control word: the 64-aligned async_type_ops pointer in bits 6..63, the homed flag in bit 5, the lifecycle state in bits 2..4, the wake-pending flag in bit 1, the spinlock in bit 0.
     /// Folding lock + state + wake in with the ops pointer is what keeps the fixed header at 16 B alongside _counts.
     /// Set once at construction (set_ops); the ops bits never change, so free_storage can read them at weak 0.
     ///
@@ -1075,9 +1283,9 @@ inline bool impl::async_node_traits::try_lock_strong(async_node_base* p)
 {
     return cc::fused_refcount::try_lock_strong(p->_counts);
 }
-inline void impl::async_node_traits::destroy_object(async_node_base* p)
+inline bool impl::async_node_traits::destroy_object(async_node_base* p)
 {
-    p->teardown_payload();
+    return p->destroy_payload();
 }
 inline void impl::async_node_traits::free_storage(async_node_base* p)
 {

@@ -392,6 +392,7 @@ cc::shared_async<cc::shared_ptr<stream_connection>> native_transport::connect(en
     op->kind = impl::io_op_kind::connect;
     op->socket = s;
     op->peer = where;
+    op->fail_fast_on_refused = options.fail_fast_on_refused;
     op->deadline_ns = deadline_to_absolute(_io, d);
     op->socket_owner = holder;
 

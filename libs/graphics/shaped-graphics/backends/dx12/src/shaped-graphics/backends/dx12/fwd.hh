@@ -25,6 +25,7 @@ struct dx12_texture_upload;
 struct dx12_texture_download;
 
 enum class dx12_message_severity : u8; // how bad a debug-layer message is (see dx12_context.hh)
+enum class dx12_adapter : u8;          // which adapter a context is created on (see dx12_context.hh)
 
 enum class cpu_descriptor_slot : int;  // a slot in a CPU descriptor heap (see dx12_cpu_descriptor_heap.hh)
 enum class dx12_query_heap_type : u32; // which query heap a query lives in (see dx12_query.hh)

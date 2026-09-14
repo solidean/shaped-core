@@ -880,6 +880,11 @@ struct placement_new_tag
 template <class T>
 union cc::storage_for // NOLINT(cppcoreguidelines-special-member-functions)
 {
+    // User-provided rather than defaulted: clang before 22 deletes a union's defaulted default constructor when T has
+    // none, even though `dummy` is the member it initializes — so cc::optional of a type with no default constructor
+    // did not compile there.
+    constexpr storage_for() noexcept : dummy() {}
+
     // empty dtor in order to not initialize value but preserve triviality
     ~storage_for()
         requires(!std::is_trivially_destructible_v<T>)
@@ -889,7 +894,7 @@ union cc::storage_for // NOLINT(cppcoreguidelines-special-member-functions)
         requires std::is_trivially_destructible_v<T>
     = default;
 
-    byte dummy = {};
+    byte dummy;
     T value;
 };
 

@@ -15,7 +15,7 @@
 /// The key is a cc::hash128 over the full compile identity — source, entry point, stage, model, options — and the value is a shared async compiled shader.
 /// A second compile() for the same key returns the SAME async node, whether the first is still in flight or already finished, so a shader is never compiled twice.
 ///
-/// Compilation runs on the installed default async pool (cc::install_default_async_scheduler).
+/// Compilation runs on the installed compute async scheduler (cc::install_compute_async_scheduler).
 /// With none installed, cc::async_blocking_get drives it inline on the calling thread.
 /// Each worker uses its own thread-local ssc::dxc::compiler, since the compiler is one-per-thread / not thread-safe.
 

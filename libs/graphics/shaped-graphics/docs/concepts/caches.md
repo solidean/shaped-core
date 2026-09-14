@@ -95,7 +95,7 @@ A test that is *about* caching opens its own store and passes it here.
 ## Async: the build runs off the frame path
 
 `acquire_compute_pipeline` and `shader_cache::compile` return an async handle rather than a finished object, because driver PSO lowering and DXC compilation are multi-millisecond work.
-Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the ambient scheduler** (`cc::install_default_async_scheduler`).
+Both build on [`cc::async`](../../../../base/clean-core/docs/systems/async.md): the returned node is **scheduled onto the ambient scheduler** (`cc::install_compute_async_scheduler`).
 Blocking on it drives it there, so the same handle works whether that scheduler is a pool or a single-threaded one.
 
 The result types are the `sg::async_*` typedefs (`async_compiled_shader`, `async_compute_pipeline`, `async_raster_pipeline`, `async_raytracing_pipeline`).

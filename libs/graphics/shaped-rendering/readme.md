@@ -110,9 +110,15 @@ The render-routine framework is tested in shaped-graphics, where it lives; concr
 uv run dev.py test "sr"                 # everything in shaped-rendering
 uv run dev.py test "sr - "              # the window suite — headless, runs anywhere
 uv run dev.py test "sr::impl"           # the imgui arithmetic — no device needed, runs everywhere
-uv run dev.py test "sr::imgui_routine"  # imgui end to end on a dx12 WARP device (skips without one)
+uv run dev.py test "sr::imgui_routine"  # imgui end to end on a dx12 device
+uv run dev.py test "sr dx12 - hardware" # every GPU test, on the one hardware context they share
 uv run dev.py test "sg - routine"       # the render-routine framework tests (in shaped-graphics)
 ```
+
+The GPU tests — the imgui routine and both mipmap routines — are `INVOCABLE_TEST`s taking an `sg::context_handle`.
+[tests/dx12-entry.cc](tests/dx12-entry.cc) brings up one context per adapter and runs them all against it, following sg's [adapter rules](../shaped-graphics/docs/testing.md#devices-and-adapters).
+The hardware adapter is the default, and WARP runs where there is none or under `--thorough`.
+Each test still selects by its own name, which runs it on both drivers.
 
 The window suite runs on SDL's dummy video driver, so it needs no display.
 What that cannot reach — a real window manager delivering close and resize events, and a real native handle — lives in the manual bucket and needs a display:

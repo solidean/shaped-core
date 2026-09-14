@@ -44,7 +44,7 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     if (pending.empty())
         return result;
 
-    auto const start = cc::current_time_steady_secs();
+    auto const start = options.clock_seconds();
 
     // The reload generation is read ONCE, here.
     // That is what keeps a reload from landing in the middle of a frame: everything this tick does belongs to one
@@ -66,7 +66,7 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     {
         // Checked BETWEEN passes, never inside a phase — a phase is not interruptible except where it yields, which
         // is why the budget is documented as pacing rather than a deadline.
-        if (options.budget_secs.has_value() && cc::current_time_steady_secs() - start >= options.budget_secs.value())
+        if (options.budget_secs.has_value() && options.clock_seconds() - start >= options.budget_secs.value())
         {
             result.budget_exhausted = true;
             break;

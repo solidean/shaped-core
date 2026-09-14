@@ -2,23 +2,18 @@
 
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
 
-// Headless flat-PBR raytrace on WARP (or a hardware device).
+// Headless flat-PBR raytrace.
 // It builds a random triangle cloud through the managers and dispatches one direct-lit ray per pixel via pbr_raytrace_routine, driven to completion.
 // The view_renderer drives the path tracer now, so this keeps the simpler flat routine exercised directly.
 // The slib-acquired ray-tracing shaders compile, the DXR pipeline + shader table build, the TLAS is built, and dispatch_rays runs.
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image.
 // Reaching the end without an assert/exception means every GPU stage succeeded.
-TEST("sv - flat-PBR raytraced view (headless)")
+INVOCABLE_TEST("sv - flat-PBR raytraced view (headless)", (sg::context_handle const& ctx_h))
 {
-    auto ctx_r = sg::create_dx12_context({.enable_debug_layer = true, .use_warp = true});
-    if (ctx_r.has_error())
-        SKIP("no Direct3D 12 device (hardware or WARP)");
-    sg::context_handle const ctx_h = ctx_r.value();
-    sg::context& ctx = *ctx_h;
+    auto& ctx = *ctx_h;
 
     {
         auto probe = ctx.create_command_list();

@@ -17,10 +17,13 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
   Read the cost section before assuming the default is free.
 - [parallel-execution](parallel-execution.md) — a run is a graph of `cc::async` nodes: `--jobs`, per-test scheduler modes, `exclusive` tags, and `ASYNC_TEST`.
   Read the exclusion section before assuming two tests can share a resource.
+- [test-runtime](test-runtime.md) — keeping a test's runtime proportional to what it proves.
+  `nx::is_thorough()` narrows an expensive test for the default run, `thorough_only` skips one with no narrow version, and a profiled run finds the slow one.
 - [catch2-runner-compat](catch2-runner-compat.md) — the CLI layer: which Catch2 v3 flags nexus accepts, how IDE discovery works, buckets, name and file filters, and the JUnit and JSON side-outputs.
 - [args](args.md) — `nx::args`, one declaration of a command line producing parsing, help, diagnostics and completion.
   The grammar section is the spec; read it before adding a flag spelling.
 - [stdlib-migration](stdlib-migration.md) — the remaining `std::` usages and what each is waiting on, so the move onto clean-core can finish as clean-core grows.
+- [TODO](TODO.md) — known follow-ups, starting with `ASYNC_EXAMPLE`.
 
 ## Elsewhere
 

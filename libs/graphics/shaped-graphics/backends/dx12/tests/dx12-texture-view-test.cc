@@ -10,7 +10,7 @@
 
 using namespace cc::primitive_defines;
 
-// End-to-end texture views on WARP: a texture's as_*_view() becomes a real D3D12 SRV/UAV inside a binding
+// End-to-end texture views: a texture's as_*_view() becomes a real D3D12 SRV/UAV inside a binding
 // group, and binding one to a compute dispatch transitions it to the right layout via the barrier system.
 
 namespace

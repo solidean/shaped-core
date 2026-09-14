@@ -31,6 +31,7 @@
 #include "../conformance/store_fixture.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/bench/units.hh>
@@ -41,19 +42,15 @@
 #include <versioned-document/snapshot_cache.hh>
 #include <versioned-document/snapshot_document.hh>
 
-#include <chrono>
-
 using namespace cc::primitive_defines;
 using namespace vdoc::file;
 using namespace vdoc::file::test;
 
 namespace
 {
-using clock_type = std::chrono::steady_clock;
-
-[[nodiscard]] double seconds_since(clock_type::time_point t0)
+[[nodiscard]] double seconds_since(double t0)
 {
-    return std::chrono::duration<double>(clock_type::now() - t0).count();
+    return cc::current_time_steady_secs() - t0;
 }
 
 /// A document of a realistic editing session: `ops` ops, each giving one new entity a handful of properties.
@@ -125,7 +122,7 @@ struct stage_times
 {
     auto times = stage_times();
 
-    auto const t_open = clock_type::now();
+    auto const t_open = cc::current_time_steady_secs();
     auto opened = medium.open();
     REQUIRE(opened.has_value());
     auto const file = cc::move(opened.value());
@@ -134,7 +131,7 @@ struct stage_times
     ops_loaded = file->ops().size();
     auto const head = file->refs().get(cc::string_view("main"));
 
-    auto const t_materialize = clock_type::now();
+    auto const t_materialize = cc::current_time_steady_secs();
     auto const raw = file->ops().materialize(head, file->snapshot_cache());
     times.materialize = seconds_since(t_materialize);
     CHECK(raw.property_count() > 0);
@@ -163,19 +160,19 @@ struct stage_times
     auto edit_cache = vdoc::snapshot_cache();
     edit_cache.install(head, vdoc::snapshot_document::create_owning_copy(raw), /*pinned =*/true);
 
-    auto const t_edit = clock_type::now();
+    auto const t_edit = cc::current_time_steady_secs();
     auto const fresh = extend(graph, head, 1'000'000, edits, &edit_cache);
     times.edit = seconds_since(t_edit);
 
     // Only the NEW ops are handed over: the rest are already in the store, and re-offering them would time a copy the
     // publish itself does not need.
-    auto const t_publish = clock_type::now();
+    auto const t_publish = cc::current_time_steady_secs();
     copy_ops_into(*file, graph, fresh);
     auto const published = wait_for(*file, file->publish({.refs = {{cc::string("main"), fresh.back()}}}));
     times.publish = seconds_since(t_publish);
     REQUIRE(published.has_value());
 
-    auto const t_close = clock_type::now();
+    auto const t_close = cc::current_time_steady_secs();
     file->close();
     times.close = seconds_since(t_close);
 
@@ -188,7 +185,7 @@ struct stage_times
 /// loader's share that dominates, which is the honest thing to report about an OPEN.
 [[nodiscard]] double seconds_hashing(vdoc::op_graph const& graph, cc::span<vdoc::op_id const> ids, isize edits)
 {
-    auto const t0 = clock_type::now();
+    auto const t0 = cc::current_time_steady_secs();
     auto matched = isize(0);
 
     for (auto const& id : ids)

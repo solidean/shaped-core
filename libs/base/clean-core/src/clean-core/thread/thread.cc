@@ -1,12 +1,14 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/common/utility.hh>    // cc::max
+#include <clean-core/thread/async_node.hh> // cc::impl::async_bind_main_thread_home
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh> // cc::impl::condition_wait_secs
 
 // Outside the CC_HAS_THREADS guard: the OS's own thread id and its scheduler tick describe the PLATFORM, and a
 // single-threaded build still runs on one.
 #if defined(_WIN32)
-#include <clean-core/common/utility.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <timeapi.h> // timeBeginPeriod / timeEndPeriod, which <Windows.h> does not pull in under LEAN_AND_MEAN
 #elif defined(__APPLE__)
@@ -17,7 +19,7 @@
 
 #if CC_HAS_THREADS
 // <chrono> is expensive and normally confined to time.cc; this is the one other place that needs it, because
-// std::this_thread::sleep_for takes a duration and there is no other portable way to spell one.
+// std::this_thread::sleep_for and std::condition_variable::wait_for take a duration and there is no other portable way to spell one.
 #include <chrono>
 #include <thread>
 
@@ -31,6 +33,11 @@ void cc::this_thread_sleep_secs(double secs)
     if (secs <= 0)
         return;
     std::this_thread::sleep_for(std::chrono::duration<double>(secs));
+}
+
+void cc::impl::condition_wait_secs(std::condition_variable& cv, std::unique_lock<std::mutex>& lock, double secs)
+{
+    (void)cv.wait_for(lock, std::chrono::duration<double>(cc::max(secs, 0.0)));
 }
 #else
 
@@ -122,7 +129,11 @@ void cc::mark_current_thread_as_main()
               "cc::current_thread_id()");
     CC_ASSERT(!g_main_claimed.exchange(true, cc::memory_order_relaxed) || tl_thread_id == thread_id::main,
               "another thread already claimed cc::thread_id::main");
+    if (tl_thread_id == thread_id::main)
+        return; // marked again, as a nested run does: the main home is already bound
+
     tl_thread_id = thread_id::main;
+    cc::impl::async_bind_main_thread_home();
 }
 
 #if CC_HAS_THREADS

@@ -156,6 +156,7 @@ A **manual** operation completes when its owner signals it, and times out if nob
 
 cnet::tcp_connect(io, where);                           // cc::shared_async<cc::shared_ptr<stream_connection>>
 cnet::tcp_connect(io, where, cnet::deadline::after_secs(10), {.no_delay = true, .v6_only = true});
+cnet::tcp_connect(io, where, d, {.fail_fast_on_refused = true});  // a refused loopback connect fails at once, not after ~2 s on Windows
 
 cnet::stream_listener::try_create(io, endpoint(addr, 0));  // port 0 = pick one; local() says which
 listener->accept();                                     // cc::shared_async<cc::shared_ptr<stream_connection>>, no deadline by default
@@ -174,6 +175,10 @@ Three things worth knowing.
 A handle closed under the reactor can be reissued to the next socket the process opens.
 
 `bytes` passed to `send` must stay alive and unmodified until the operation completes.
+
+**`fail_fast_on_refused` is opt-in because it also gives up riding out a full listen backlog.**
+Windows retransmits the SYN of a refused connect, so probing a closed loopback port takes about 2 s without it.
+Those same retransmissions are what let a connect burst past the backlog succeed once the server accepts, and with the option on it fails at once instead.
 
 ## Names
 

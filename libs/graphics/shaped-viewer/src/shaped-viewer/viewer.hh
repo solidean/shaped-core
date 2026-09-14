@@ -142,6 +142,9 @@ private:
     /// Separate from `resources()` because that one hands out a mutable manager, and asking a count should not.
     [[nodiscard]] isize pending_resource_work() const;
 
+    /// `frame::background_work`'s answer.
+    [[nodiscard]] cc::shared_async<cc::unit> background_work();
+
     /// Installs the capture this run is taking; the viewer must have been created headless for it.
     ///
     /// **Only `sv::interactive` calls this.**
@@ -204,4 +207,6 @@ private:
     /// interactive() owns the viewer it opens, so it starts the loop the same way frames() does.
     friend frame_range interactive(cc::string_view id, viewer_config config);
     friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config);
+    friend frame_range interactive(cc::string_view id, viewer_config config, sr::capture_request capture);
+    friend frame_range interactive(sg::context& ctx, cc::string_view id, viewer_config config, sr::capture_request capture);
 };

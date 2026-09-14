@@ -1,3 +1,4 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
 #include <nexus/test.hh>
@@ -10,7 +11,6 @@
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 
-#include <chrono>
 
 // The whole stack in one loop, driven by a person: a real window, a real swapchain, imgui rendered through sg.
 //
@@ -79,7 +79,7 @@ void draw_guide(sr::imgui_context const& imgui, sr::window_system const& wsys, f
 }
 } // namespace
 
-TEST("sr - imgui window (manual)", nx::config::manual)
+TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create();
     auto const win = wsys->create_window({.title = "shaped-rendering — close this window to end the test", //
@@ -87,17 +87,9 @@ TEST("sr - imgui window (manual)", nx::config::manual)
                                           .height = 900});
 
     // A real adapter by preference — this is meant to be looked at — but WARP renders it just as correctly, only slower, so a machine without a usable D3D12 GPU still gets to run the test.
-    auto const ctx = [&]
-    {
-        auto hardware = sg::create_dx12_context({});
-        if (hardware.has_value())
-            return hardware.value();
-
-        cc::println("no hardware D3D12 adapter ({}) — falling back to WARP", hardware.error().to_string());
-        auto warp = sg::create_dx12_context({.use_warp = true});
-        REQUIRE(warp.has_value());
-        return warp.value();
-    }();
+    auto const ctx_r = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+    REQUIRE(ctx_r.has_value());
+    auto const ctx = ctx_r.value();
 
     auto compiler = slib::create_dxc_compiler();
     REQUIRE(compiler.has_value());
@@ -113,7 +105,7 @@ TEST("sr - imgui window (manual)", nx::config::manual)
 
     cc::println("opened {}x{}; close the window to end", win->width(), win->height());
 
-    auto last_time = std::chrono::steady_clock::now();
+    auto last_time = cc::current_time_steady_secs();
     auto smoothed_fps = 0.0f;
 
     while (!win->is_close_requested())
@@ -125,8 +117,8 @@ TEST("sr - imgui window (manual)", nx::config::manual)
         if (win->is_minimized())
             continue;
 
-        auto const now = std::chrono::steady_clock::now();
-        auto const delta_time = std::chrono::duration<float>(now - last_time).count();
+        auto const now = cc::current_time_steady_secs();
+        auto const delta_time = float(now - last_time);
         last_time = now;
         smoothed_fps = smoothed_fps == 0.0f ? 1.0f / delta_time : smoothed_fps * 0.95f + (1.0f / delta_time) * 0.05f;
 

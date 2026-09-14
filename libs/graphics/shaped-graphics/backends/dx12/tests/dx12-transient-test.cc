@@ -1,5 +1,6 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/common/utility.hh> // CC_DEFER
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -8,7 +9,7 @@ using namespace cc::primitive_defines;
 // The generic transient contract — round-trips, independence, expiry, storage reuse, the deferred set_budget — is pinned backend-agnostically in tests/transient/transient-test.cc.
 // That suite runs here too, via the dx12 driver.
 // This file keeps only what is specific to the dx12 placement math.
-// On WARP so it runs headless on CI.
+// It runs on every adapter the entry drivers bring up, WARP included.
 // See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/memory.md.
 
 namespace
@@ -25,6 +26,14 @@ INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epochs", (
     REQUIRE(handle != nullptr);
     auto& c = *handle;
     c.transient.set_budget(isize(512) * 1024); // applied at the next advance_epoch (see set_budget)
+    // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
+    // set_budget is deferred, hence the advance that applies it.
+    CC_DEFER
+    {
+        c.transient.set_budget(sg::context_transient_scope::default_budget_bytes);
+        c.advance_epoch();
+        c.block_until_idle();
+    };
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 

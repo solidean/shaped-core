@@ -19,7 +19,8 @@ void vulkan_download_actor::on_message(vulkan_download_copy_job job)
 
     // A destination dropped mid-flight is a cancellation, not a delivery: the bytes were never written anywhere the
     // caller can see, so anything holding completion() must see that rather than a success it cannot act on.
-    bool const wanted = job.pin.lock() != nullptr;
+    auto const pinned = job.pin.lock(); // held across the copy: the future may drop its destination meanwhile
+    bool const wanted = pinned != nullptr;
     if (wanted && job.deferred_cpu_copy)
         job.deferred_cpu_copy();
 

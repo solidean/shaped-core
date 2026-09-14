@@ -135,6 +135,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Vulkan has no creation-time equivalent, so it would be a hint one backend honours and the other ignores.
   Acceptable for a pure performance hint, and worth stating in [concepts/views.md](concepts/views.md) if it lands.
   Worth doing only with a measurement behind it: a fast clear is a bandwidth win on a full-screen target and noise on a small one.
+- **The VA-range allowlist entry is wider than the case it is for.**
+  `resources contain the GPU Virtual Address range` in `dx12_expected_messages.hh` is a substring match, shared by every listener.
+  So two persistent placements overlapping through a caller's allocator bug would be muted too, not only the transient heap's reuse.
+  It stays unnarrowed on purpose: real applications raise the message many times per frame, and its text differs between drivers, so parsing each one is unattractive.
+  No sg test provokes it yet; only sv's frame loop does.
 - **Vertex attributes: go location-based, drop the HLSL semantic from the public API.**
   `vertex_attribute` identifies an input by an **HLSL `semantic` + `semantic_index` string** — the one identity that does not survive a change of shader language.
   Every other target matches vertex inputs by a **numeric location**: SPIR-V/Vulkan `layout(location=N)`, WGSL/WebGPU `@location(N)`, Metal `[[attribute(N)]]`.
@@ -206,8 +211,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
 - **Migrate the suites to `ASYNC_TEST`.**
   nexus already has it, and sg is now the kind of library it was built for: every completion has a `cc::async` form, so a test can depend on one instead of draining the device.
-  What blocks it is that `cc::async` cannot resume on the main thread, and `ASYNC_TEST` asserts against nexus's `main_thread` flag — which the window and present suites need.
-  Closing that in clean-core is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
+  The blocker was that `cc::async` could not resume on the main thread; a coroutine now can, with `co_await cc::async_resume_on_main()`.
+  `ASYNC_TEST` still asserts against nexus's `main_thread` flag, so the window and present suites hop inside the test body rather than asking for the flag.
+  Closing that in nexus is what finally removes `block_until_idle()` from the tests, leaving it to the tools and loading screens it was named for.
 
 - **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
   The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.

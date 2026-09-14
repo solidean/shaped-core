@@ -216,10 +216,12 @@ if(SC_BUILD_TESTS)
 
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
-    # The ray-traced view tests need a real dx12 device (create_dx12_context) and DXC to compile the shaders.
-    # Both compile only where those exist; each SKIPs at runtime when the device reports no ray tracing.
+    # The GPU tests need a dx12 device and DXC to compile the shaders, so they compile only where both exist.
+    # dx12-entry.cc brings up one context per adapter and invokes them all against it.
+    # The ray-tracing ones SKIP at runtime when the device reports no ray tracing.
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-viewer-test PRIVATE
+            tests/dx12-entry.cc
             tests/raytraced-view-test.cc
             tests/headless-viewer-test.cc
             tests/pathtraced-view-test.cc
@@ -250,6 +252,7 @@ if(SC_BUILD_TESTS)
                 bsdf_probe.hlsl:compute:BsdfProbe
                 bsdf_probe.hlsl:binding:probe_bindings
         )
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

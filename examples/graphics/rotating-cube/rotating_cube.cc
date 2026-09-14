@@ -8,6 +8,7 @@
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
 
+#include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -29,8 +30,6 @@
 #else
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #endif
-
-#include <chrono>
 
 using namespace cc::primitive_defines;
 
@@ -181,18 +180,14 @@ struct orbit_camera
 
 [[nodiscard]] double now_seconds()
 {
-    auto const t = std::chrono::steady_clock::now().time_since_epoch();
-    return std::chrono::duration<double>(t).count();
+    return cc::current_time_steady_secs();
 }
 
 /// Whatever context this build has a backend for.
 [[nodiscard]] cc::result<sg::context_handle> create_context()
 {
 #if ROTATING_CUBE_BACKEND_DX12
-    auto ctx = sg::create_dx12_context({});
-    if (ctx.has_error())
-        ctx = sg::create_dx12_context({.use_warp = true}); // WARP draws this correctly, only slower
-    return ctx;
+    return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); // WARP draws this correctly, only slower
 #else
     return sg::create_vulkan_context({});
 #endif
@@ -352,8 +347,8 @@ EXAMPLE("shaped-graphics/rotating-cube")
     auto dragging = false;
     auto spin = tg::angle_f::make_from_degree(0.0f);
     auto frames = u32(0);
-    auto const start = now_seconds();
-    auto last_time = start;
+    auto last_time = now_seconds();
+    auto const capture_start = capture.clock_seconds();
 
     while (true)
     {
@@ -448,7 +443,7 @@ EXAMPLE("shaped-graphics/rotating-cube")
                 cc::eprintln("capture failed: {}", written.error().to_string());
             break;
         }
-        if (capture.active && time - start > capture.timeout_seconds)
+        if (capture.active && capture.clock_seconds() - capture_start > capture.timeout_seconds)
         {
             cc::eprintln("capture timed out");
             break;

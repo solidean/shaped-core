@@ -1,11 +1,11 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
-
-#include <chrono>
 
 void cc::threaded_actor_base::start(threaded_actor_mode mode)
 {
@@ -92,6 +92,14 @@ bool cc::threaded_actor_base::process_messages_if_unthreaded()
     if (!_is_unthreaded || _is_shut_down.load())
         return false;
 
+    // The inbox has a single consumer, and a hand pump bypasses the registry's own running guard.
+    if (_is_processing.exchange(true))
+        return false;
+    CC_DEFER
+    {
+        _is_processing.store(false);
+    };
+
     bool const dispatched = drain_inbox_messages(false);
     bool const wants_more = get_impl().on_process();
     return dispatched || wants_more;
@@ -102,12 +110,12 @@ bool cc::threaded_actor_base::process_messages_if_unthreaded_for_ms(double max_m
     if (max_ms <= 0)
         return process_messages_if_unthreaded();
 
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::duration<double, std::milli>(max_ms);
+    auto const deadline = cc::current_time_steady_secs() + max_ms / 1000.0;
     while (true)
     {
         if (!process_messages_if_unthreaded())
             return false; // idle: nothing left to do
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (cc::current_time_steady_secs() >= deadline)
             return true; // stopped on the budget with work still pending
     }
 }

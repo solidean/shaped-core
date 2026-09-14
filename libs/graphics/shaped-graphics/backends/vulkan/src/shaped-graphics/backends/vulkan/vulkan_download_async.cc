@@ -429,7 +429,7 @@ bool vulkan_download_async_system::run_one_window()
                 return true;
             }
         }
-        else
+        else if (auto const pinned = job.pin.lock()) // the future may have dropped its destination during the wait
             cc::memcpy(job.destination.data() + done - chunk, staged, size_t(chunk));
 
         if (job.stream != nullptr)

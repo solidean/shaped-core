@@ -105,6 +105,8 @@ So the flag never describes a build it did not get.
 
 No API appears or disappears with it.
 Threaded types fall back to running on the calling thread: `cc::threaded_actor` runs on whoever pumps it, and sg drains its copy actors before any wait.
+An event loop calls `cc::pump_main_thread(max_ms)`, which with threads off also steps the compute and io schedulers — the only place a scheduled async runs without someone blocking on it.
+Homed asyncs keep their semantics: every home is the one thread, but a hop still re-queues to that home's next pump point.
 See [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/threading.md) for what that costs a caller.
 It does change struct layout — node_allocation's slab header — so it is a whole-build switch, never per-target.
 

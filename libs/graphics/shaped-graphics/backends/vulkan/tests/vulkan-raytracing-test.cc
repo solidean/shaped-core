@@ -37,13 +37,10 @@ sg::raw_buffer_handle make_triangle_vertices(sg::context& ctx)
 }
 } // namespace
 
-TEST("sg vulkan - builds a triangle blas and a tlas over it")
+INVOCABLE_TEST("sg vulkan - builds a triangle blas and a tlas over it", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = vulkan::test::make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
     auto& ctx = *handle;
-    if (!static_cast<vulkan::vulkan_context&>(ctx).is_raytracing_supported())
+    if (!ctx.is_raytracing_supported())
         SKIP("no ray tracing on this device");
 
     auto const verts = make_triangle_vertices(ctx);
@@ -86,13 +83,10 @@ TEST("sg vulkan - builds a triangle blas and a tlas over it")
     CHECK(!tlas->is_expired());
 }
 
-TEST("sg vulkan - builds a procedural (aabb) blas")
+INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = vulkan::test::make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
     auto& ctx = *handle;
-    if (!static_cast<vulkan::vulkan_context&>(ctx).is_raytracing_supported())
+    if (!ctx.is_raytracing_supported())
         SKIP("no ray tracing on this device");
 
     float const aabb[6] = {0, 0, 0, 1, 1, 1};
@@ -125,13 +119,10 @@ TEST("sg vulkan - builds a procedural (aabb) blas")
 //
 // The alternating rays are what make the readback meaningful: a backend that wrote a constant, traced against an
 // empty scene, or mixed up the miss and hit groups would all produce a uniform buffer.
-TEST("sg vulkan - traces rays against a tlas")
+INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context_handle const& handle))
 {
-    auto handle = vulkan::test::make_context();
-    if (handle == nullptr)
-        SKIP("no vulkan device");
     auto& ctx = *handle;
-    if (!static_cast<vulkan::vulkan_context&>(ctx).is_raytracing_supported())
+    if (!ctx.is_raytracing_supported())
         SKIP("no ray tracing on this device");
 
     constexpr int k_rays = 64;

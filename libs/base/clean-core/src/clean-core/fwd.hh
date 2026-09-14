@@ -342,13 +342,17 @@ enum class async_error_kind : u8;  // an ordinary error, or a cancellation (thre
 enum class async_step_status : u8; // what one compute step reports back to the poll loop
 enum class async_node_state : u8;  // a node's lifecycle state, moved by CAS
 struct async_error;
-struct alignas(32) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
+struct alignas(64) async_type_ops; // the type-erased node ops descriptor (thread/async_node.hh)
 struct async_node_base;
 namespace impl
 {
 struct async_node_traits;
 }
 struct async_scheduler;
+enum class async_teardown : u8;    // where a homed node's never-resolved frame is destroyed (thread/async_node.hh)
+enum class async_inline_deps : u8; // whether a homed node drives its dependencies inline
+struct async_home_options;
+struct thread_bound_scheduler; // a home one owner thread drains (thread/thread_bound_scheduler.hh)
 struct async_worker_scope;
 struct async_no_worker_scope;
 struct singlethreaded_scheduler;
@@ -358,12 +362,24 @@ namespace impl
 {
 struct thread_pump_entry;
 }
-struct scoped_default_async_scheduler;
+struct scoped_compute_async_scheduler;
+struct scoped_io_async_scheduler;
+struct scoped_async_homes; // owns and installs the compute and io pools (thread/async_thread_pool.hh)
 struct async_ambient_link; // one link of the ambient context chain (thread/async_ambient.hh)
 struct async_ambient_scope;
 struct async_ambient_handle; // a captured chain head, re-installable on another thread
 struct async_ambient_install_scope;
 struct async_context_base;
+template <class T>
+struct async_mutex; // exclusion that parks a waiting async instead of blocking its thread (thread/async_mutex.hh)
+template <class T>
+struct async_shared_mutex;
+template <class T>
+struct async_mutex_guard;
+template <class T>
+struct async_shared_guard;
+struct async_semaphore;
+struct async_semaphore_permit;
 template <class T, class E = async_error>
 struct async_context;
 template <class T, class E = async_error>

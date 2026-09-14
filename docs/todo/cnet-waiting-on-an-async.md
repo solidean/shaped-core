@@ -69,8 +69,8 @@ Three items, roughly in order:
    Free for a console example and not for a windowed one, so the config it carries is the decision rather than the
    macro.
 
-   **The `main_thread` conflict is transient**, not a reason against the macro: it disappears once an async can be
-   guaranteed to run on the main thread, which is wanted anyway.
+   **The `main_thread` conflict is gone in practice**: a coroutine body can pin itself to main with
+   `co_await cc::async_resume_on_main()`, so a windowed async example hops rather than asking for the flag.
 
 None of this blocks clean-net.
 It is recorded here because "why is there no `ASYNC_EXAMPLE`" and "why not just use `async_blocking_get`" are both

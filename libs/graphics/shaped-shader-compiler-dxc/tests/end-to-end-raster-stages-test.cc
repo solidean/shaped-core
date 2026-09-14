@@ -8,7 +8,7 @@
 
 using namespace cc::primitive_defines;
 
-// Geometry- and tessellation-stage raster pipelines, end to end on WARP.
+// Geometry- and tessellation-stage raster pipelines, end to end.
 // Each compiles the extra stage, builds an sg::raster_pipeline that includes it, renders over a cleared target, and reads the target back.
 // That proves the stage actually ran and its output reached the rasterizer.
 // Same rhythm as end-to-end-raster-test.cc's plain vertex+pixel triangle, one stage further down the pipeline.

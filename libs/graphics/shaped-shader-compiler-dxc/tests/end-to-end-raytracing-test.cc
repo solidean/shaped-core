@@ -9,7 +9,7 @@
 
 using namespace cc::primitive_defines;
 
-// Full DXR pipeline path end to end on WARP.
+// Full DXR pipeline path end to end.
 // It compiles a raygen + miss + closest-hit library each, then builds a raytracing pipeline (state object) and shader table.
 // It traces against a one-triangle TLAS and reads back the per-ray result.
 // That proves the whole chain — compile -> reflect -> pipeline -> table -> dispatch_rays -> trace.

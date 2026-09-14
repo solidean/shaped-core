@@ -46,6 +46,7 @@ namespace impl
 /// Created on the first call and shared by every caller after, which is what a *generated* shader needs: a material permutation is
 /// compiled from the render path, which has no library of its own to reach for.
 /// The ACQUISITION is thread-safe — two threads asking at once get one object, not two.
-/// What it hands back is not: the library itself carries the same single-threaded contract the rest of viewer setup does.
+/// What it hands back follows slib's own contract: `acquire` is safe from any thread once every package has been added.
+/// A provider that adds packages must therefore do so before handing the library back, not after.
 [[nodiscard]] cc::result<slib::shader_library*> acquire_shader_library();
 } // namespace sv

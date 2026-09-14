@@ -1,5 +1,6 @@
 #include "fake_compiler.hh"
 
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
@@ -11,10 +12,8 @@
 
 // The last test in this file is the one exception to "no disk, no sleeps" below, and it earns it: nothing else here runs a real directory, a real OS watch and a real thread together.
 // It needs <filesystem> to make an edit the OS can see.
-#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <thread>
 
 // Hot reload with no disk and no sleeps: a memory_filesystem write is the edit, and an unthreaded watcher makes the scan happen exactly when the test says so.
 // The same paths through the watcher run threaded in a real app.
@@ -410,7 +409,7 @@ TEST("slib - a threaded watcher reloads through a real directory", exclusive("sl
     bool reloaded = false;
     for (int waited = 0; waited < 5000 && !reloaded; waited += 5)
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        cc::this_thread_sleep_secs(0.005);
         lib.poll_hot_reload(); // a no-op while the watcher has its own thread; the whole engine without one
         reloaded = source() == "a much longer v2";
     }

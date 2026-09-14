@@ -295,7 +295,7 @@ TEST("sg dx12 - d3d12_layout_from maps the layouts")
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::copy_src) == D3D12_BARRIER_LAYOUT_COPY_SOURCE);
 }
 
-INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers on WARP", (dx12::dx12_context_handle const& handle))
+INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;

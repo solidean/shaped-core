@@ -1,4 +1,5 @@
 #include <babel-data/data/json.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/pgo.hh>
@@ -9,6 +10,7 @@
 #include <nexus/tests/export/junit.hh>
 #include <nexus/tests/export/listing_json.hh>
 #include <nexus/tests/export/pgo_json.hh>
+#include <nexus/tests/export/timings_json.hh>
 #include <nexus/tests/export/xml.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
@@ -321,6 +323,103 @@ TEST("export - perf JSON carries every metric a run recorded", no_scheduler)
     auto const per_op = entry_named(metrics, "per_op");
     CHECK(per_op["value"].as_double() == 0.25);
     CHECK(per_op["higher_is_better"].as_bool(true) == false);
+}
+
+TEST("export - the timings sidecar places every test on the wall clock, in the order it ran", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("first", {}, [] { CHECK(true); });
+    reg.add_declaration("second", {}, [] { CHECK(false); });
+
+    // One at a time in schedule order, so the second test's interval must start where the first one's ended.
+    auto config = nx::test_schedule_config{};
+    config.jobs = 1;
+
+    auto const wall_before = cc::current_time_wall_secs();
+    auto schedule = nx::test_schedule::create(config, reg);
+    auto exec = nx::execute_tests(schedule, config);
+    auto const doc = babel::json::read(nx::write_timings_json("my-suite", exec)).value();
+    auto const wall_after = cc::current_time_wall_secs();
+
+    auto const root = doc.root();
+    CHECK(root["suite"].as_string() == "my-suite");
+    REQUIRE(root["tests"].size() == 2);
+
+    auto const first = entry_named(root["tests"], "first");
+    auto const second = entry_named(root["tests"], "second");
+
+    // Epoch seconds, not steady ones: that is what lets dev.py lay them beside its own spans.
+    // The slack covers the gap between the two clock reads the conversion offset is taken from.
+    CHECK(first["start"].as_double() >= wall_before - 0.01);
+    CHECK(second["end"].as_double() <= wall_after + 0.01);
+
+    CHECK(first["start"].as_double() <= first["end"].as_double());
+    CHECK(first["end"].as_double() <= second["start"].as_double());
+    CHECK(first["thread"].as_double() != 0);
+
+    CHECK(first["failed"].as_bool(true) == false);
+    CHECK(second["failed"].as_bool());
+}
+
+// dev.py files an entry carrying `children` as a container, so the driver's slice and its children's are not summed.
+TEST("export - the timings sidecar marks a driver with its children, and still emits each child", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_invocable_declaration(
+        "child", {}, cc::arg_types_of(cc::signature<void(int)>{}), [](cc::span<nx::typed_value*> in)
+        { nx::impl::invoke_with_values([](int x) { CHECK(x >= 0); }, in, cc::signature<void(int)>{}); });
+    reg.add_declaration("driver", {},
+                        []
+                        {
+                            nx::invoke_tests("a", 1);
+                            nx::invoke_tests("b", 2);
+                        });
+    reg.add_declaration("plain", {}, [] { CHECK(true); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    auto const doc = babel::json::read(nx::write_timings_json("my-suite", exec)).value();
+
+    auto const tests = doc.root()["tests"];
+    REQUIRE(tests.size() == 4);
+
+    auto const driver = entry_named(tests, "driver");
+    REQUIRE(driver.is_valid());
+    CHECK(driver["children"].as_double() == 2);
+
+    auto const plain = entry_named(tests, "plain");
+    REQUIRE(plain.is_valid());
+    CHECK(!plain.has("children"));
+
+    auto const child_a = entry_named(tests, "driver / a / child");
+    auto const child_b = entry_named(tests, "driver / b / child");
+    REQUIRE(child_a.is_valid());
+    REQUIRE(child_b.is_valid());
+    CHECK(!child_a.has("children"));
+
+    // The driver's interval encloses its children's, which is exactly why it cannot be a leaf.
+    CHECK(driver["start"].as_double() <= child_a["start"].as_double());
+    CHECK(child_b["end"].as_double() <= driver["end"].as_double());
+}
+
+TEST("export - junit report carries what the run cost the machine, and only what was measured", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("A", {}, [] { CHECK(true); });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    // An unmeasured field is left out rather than written as a zero dev.py would read as a real reading.
+    auto const unmeasured = nx::write_junit_xml("s", exec);
+    CHECK(!unmeasured.contains("cpu_load="));
+    CHECK(!unmeasured.contains("peak_resident_bytes="));
+
+    auto const measured = nx::write_junit_xml(
+        "s", exec, {.cpu_machine_fraction = 0.25, .cpu_cores_used = 8.0, .peak_resident_bytes = 1 << 20});
+    CHECK(measured.contains("cpu_load=\"0.2500\""));
+    CHECK(measured.contains("cores_used=\"8.00\""));
+    CHECK(measured.contains("peak_resident_bytes=\"1048576\""));
 }
 
 TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)

@@ -39,11 +39,9 @@ auto retried(F&& read) -> decltype(read())
 // What it pins is that the two memory figures are different scales and both coherent, and that an unimplemented query
 // refuses rather than reporting an idle GPU.
 
-TEST("sg dx12 - the adapter reports the memory on the board")
+INVOCABLE_TEST("sg dx12 - the adapter reports the memory on the board", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_hardware_context();
-    if (handle == nullptr)
-        SKIP("no hardware adapter on this machine");
+    REQUIRE(handle != nullptr);
 
     auto const& adapter = handle->adapter();
     REQUIRE(adapter.dedicated_video_memory_bytes.has_value());
@@ -52,11 +50,10 @@ TEST("sg dx12 - the adapter reports the memory on the board")
     CHECK(adapter.dedicated_video_memory_bytes.value() >= 0);
 }
 
-TEST("sg dx12 - the memory budget is what this process may use, not what the board has")
+INVOCABLE_TEST("sg dx12 - the memory budget is what this process may use, not what the board has",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_hardware_context();
-    if (handle == nullptr)
-        SKIP("no hardware adapter on this machine");
+    REQUIRE(handle != nullptr);
 
     auto const memory = handle->query_gpu_memory();
     if (memory.has_error())
@@ -75,9 +72,9 @@ TEST("sg dx12 - the memory budget is what this process may use, not what the boa
         CHECK(memory.value().budget_bytes <= board.value());
 }
 
-TEST("sg dx12 - GPU busy counters are non-negative and named per engine")
+INVOCABLE_TEST("sg dx12 - GPU busy counters are non-negative and named per engine",
+               (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
 
     auto first = retried([&] { return handle->read_gpu_counters(); });
@@ -102,25 +99,19 @@ TEST("sg dx12 - GPU busy counters are non-negative and named per engine")
         CHECK(e.busy_secs >= 0);
 }
 
-TEST("sg dx12 - a sampled GPU load is the busiest engine, in range")
+INVOCABLE_TEST("sg dx12 - a sampled GPU load is the busiest engine, in range", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
 
     if (!sg::gpu_load_sampler::is_supported(*handle))
         SKIP("the GPU Engine performance counters are unavailable here");
 
+    // No wait before sampling: the range and the max-across-engines rule hold over any interval, however short.
     auto sampler = sg::gpu_load_sampler(*handle);
-    cc::this_thread_sleep_secs(0.05);
 
     // A counter that fell because a GPU process exited is an error rather than a load, and each sample re-baselines
     // against the reading that failed — so retrying is what turns that into the load this means to check.
-    auto const load = retried(
-        [&]
-        {
-            cc::this_thread_sleep_secs(0.01);
-            return sampler.sample();
-        });
+    auto const load = retried([&] { return sampler.sample(); });
     REQUIRE(load.has_value());
 
     CHECK(load.value().interval_secs > 0);
@@ -138,17 +129,11 @@ TEST("sg dx12 - a sampled GPU load is the busiest engine, in range")
     CHECK(load.value().total == busiest);
 }
 
-TEST("sg dx12 - a software adapter still answers coherently")
+INVOCABLE_TEST("sg dx12 - the memory query answers coherently on any adapter", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_warp_context();
     REQUIRE(handle != nullptr);
 
     // WARP has no board memory, and the query must say something true rather than crash or invent a budget.
-    auto const& adapter = handle->adapter();
-    CHECK(adapter.is_software);
-    if (adapter.dedicated_video_memory_bytes.has_value())
-        CHECK(adapter.dedicated_video_memory_bytes.value() >= 0);
-
     if (auto const memory = handle->query_gpu_memory(); memory.has_value())
         CHECK(memory.value().current_usage_bytes >= 0);
 }
@@ -157,9 +142,9 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
 {
     // Never swept: the numbers are whatever this machine's GPU is doing, and the point is that a human reads them.
     // A test can assert a budget is positive; only a person notices it is implausible.
-    auto handle = dx12::make_hardware_context();
+    auto handle = dx12::make_fresh_context();
     if (handle == nullptr)
-        SKIP("no hardware adapter on this machine");
+        SKIP("no dx12 adapter on this machine");
 
     auto const& adapter = handle->adapter();
     auto const to_mib = [](i64 bytes) { return double(bytes) / (1024.0 * 1024.0); };
@@ -198,9 +183,10 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
     }
 }
 
+// A context of its own because the stamp is a process-wide recording, which needs exclusive() — and a child runs under its driver's config.
 TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive())
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);
 
     auto listener = cc::rec::recording_listener();

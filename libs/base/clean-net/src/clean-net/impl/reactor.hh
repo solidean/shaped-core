@@ -77,6 +77,9 @@ struct io_operation
     /// connect: where to connect to.
     endpoint peer;
 
+    /// connect: `tcp_options::fail_fast_on_refused`.
+    bool fail_fast_on_refused = false;
+
     /// accept: the connection that arrived, owned by the handler from then on.
     native_socket accepted = k_invalid_socket;
 

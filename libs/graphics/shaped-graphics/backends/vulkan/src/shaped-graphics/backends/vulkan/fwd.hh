@@ -8,6 +8,9 @@ namespace sg::backend::vulkan
 {
 struct vulkan_config; // instance/device creation knobs (see vulkan_context.hh)
 class vulkan_context;
+/// A backend-typed context handle: an sg::context_handle known to point at a vulkan_context.
+/// For code already committed to vulkan, the backend's own tests above all; a caller drives the abstract sg::context_handle.
+using vulkan_context_handle = std::shared_ptr<vulkan_context>;
 enum class vulkan_message_severity;
 class vulkan_command_list;
 class vulkan_buffer;

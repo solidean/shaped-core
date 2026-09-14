@@ -99,6 +99,10 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // Let every test run at full strength rather than narrowed to what a default run can afford.
+    // Read from a test body through nx::is_thorough(); set via --thorough.
+    bool thorough = false;
+
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.
     cc::string junit_xml_file;
@@ -106,6 +110,10 @@ struct nx::test_schedule_config
     // When non-empty, run() writes a perf-metrics JSON sidecar to this path, additionally to the console output.
     // Set via --pgo-json <file>; nx::pgo records the metrics.
     cc::string pgo_json_file;
+
+    // When non-empty, run() writes every test's wall-clock interval and thread to this path.
+    // Set via --timings-json <file>; `dev.py test --profile` turns it into one trace slice per test.
+    cc::string timings_json_file;
 
     // When non-empty, run() writes the benchmark sidecar to this path, additionally to the console output.
     //

@@ -65,7 +65,7 @@ void reactor::submit(io_operation* op)
     // watch for: an unconnected socket is writable, and would complete instantly and wrongly.
     if (op->kind == io_op_kind::connect)
     {
-        auto started = connect_socket(op->socket, op->peer);
+        auto started = connect_socket(op->socket, op->peer, op->fail_fast_on_refused);
         if (started.has_error())
             e.immediate_failure = cc::move(started).error();
     }

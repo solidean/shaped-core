@@ -40,8 +40,9 @@ protected:
         {
         }
 
-        _sys.wait_for_submission(job.token);           // block until the recording list has run on the GPU
-        bool const wanted = job.pin.lock() != nullptr; // future still wants the data?
+        _sys.wait_for_submission(job.token); // block until the recording list has run on the GPU
+        auto const pinned = job.pin.lock();  // held across the copy: the future may drop its destination meanwhile
+        bool const wanted = pinned != nullptr;
         if (wanted)
             job.deferred_cpu_copy();
         if (job.completion)

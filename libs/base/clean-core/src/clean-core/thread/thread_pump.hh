@@ -75,8 +75,8 @@ namespace cc
 /// for it to be signalled.
 /// (declared above cc::thread_pump_registration, which befriends it)
 
-/// Runs one cycle of every registered pump; true if any reported progress or more work.
-/// Safe to call unconditionally: with nothing registered it is one atomic load, which is the normal threaded build.
+/// Runs one cycle of the calling thread's home, if it owns one, and of every registered pump; true if any reported progress or more work.
+/// Safe to call unconditionally: with nothing registered and no home it is a TLS read and one atomic load, which is the normal threaded build.
 bool thread_pump_all();
 
 /// Repeats thread_pump_all() until nothing progresses or `max_ms` of wall-clock elapses; max_ms <= 0 runs a single cycle.
@@ -87,3 +87,10 @@ bool thread_pump_all_for(double max_ms);
 /// For a leak check at the end of a run: a registration outliving its semantic thread is a bug, and a silent one.
 [[nodiscard]] isize registered_thread_pump_count();
 } // namespace cc
+
+namespace cc::impl
+{
+/// thread_pump_all without the calling thread's home: one sweep of the registry.
+/// For cc::pump_main_thread, which pumps the main home itself under its own budget.
+bool thread_pump_registry();
+} // namespace cc::impl

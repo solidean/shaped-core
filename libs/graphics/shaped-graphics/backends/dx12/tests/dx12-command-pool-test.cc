@@ -6,7 +6,7 @@
 // These reach into concrete dx12 types (c._cmd_pool) to assert recycling behaviour the public sg API does not expose — the kind of test that only belongs in a backend suite.
 // See libs/graphics/shaped-graphics/docs/concepts/backends.md.
 // Allocators are epoch-gated, recycled once the epoch retires; lists are not, and are returned at submit.
-// These assert absolute pool counts, so each takes a fresh make_warp_context() rather than the shared one.
+// These assert absolute pool counts, so each takes a fresh make_fresh_context() rather than the shared one.
 
 namespace
 {
@@ -15,7 +15,7 @@ namespace dx12 = sg::backend::dx12;
 
 TEST("sg dx12 - command allocators are recycled across epochs")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -42,7 +42,7 @@ TEST("sg dx12 - command allocators are recycled across epochs")
 
 TEST("sg dx12 - command lists are pooled and reused")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
@@ -67,7 +67,7 @@ TEST("sg dx12 - command lists are pooled and reused")
 
 TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately")
 {
-    auto handle = dx12::make_warp_context();
+    auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 

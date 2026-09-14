@@ -60,3 +60,10 @@ Never add a second flag: two gates that can disagree is a build configuration no
 
 The null backend fails at `try_create` and asserts everywhere else: no `window_system` can exist without a backend, so nothing downstream of it is reachable.
 A window method running there means a failed `try_create` went unchecked — worth an assert rather than a silent no-op.
+
+## GPU tests share their devices and run on any adapter
+
+sr's tests follow sg's [Devices and adapters](../../shaped-graphics/docs/testing.md#devices-and-adapters) rules, and they are rules rather than advice.
+A test binary brings up one context per adapter and invokes its tests against it; a test creates its own context only when the context is its subject.
+The hardware adapter is the default, WARP runs only where there is none or under `--thorough`, and a test passes on either.
+Pinning to an adapter is for a named known bug, never for bytes that depend on the adapter.

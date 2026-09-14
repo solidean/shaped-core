@@ -4,7 +4,7 @@
 
 using namespace cc::primitive_defines;
 
-// Inline buffer transfer on WARP, so it runs on headless CI: upload / download over the inline UPLOAD / READBACK ring buffers.
+// Inline buffer transfer: upload / download over the inline UPLOAD / READBACK ring buffers.
 // See libs/graphics/shaped-graphics/docs/concepts/upload.inline.md and libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 // These tests split upload and download across separate command lists.
 // Same-list upload-then-download of one buffer is equally correct — the list's own access tracking orders it — and tests/transfer/ covers that single-list path.

@@ -40,8 +40,8 @@ bool asset::poll()
 
     _data = imported->data;
 
-    // The one step that could not run on the worker: `material_library` is not thread-safe, so minting what the
-    // importer described happens here, on whichever thread is asking.
+    // Minting runs here, on whichever thread is asking, rather than on the worker.
+    // `material_override` is caller code, and running it on the caller's own thread is what lets it touch caller state without a lock.
     CC_ASSERT(_loader != nullptr, "an asset in flight names the loader whose config finishes it");
     if (auto const lib = _loader->_library(); lib.has_value())
         impl::acquire_asset_materials(_data, imported->definitions, _loader->config(), *lib.value());

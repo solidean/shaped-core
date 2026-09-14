@@ -43,6 +43,8 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `--pgo-benchmarks` | Selects the *pgo_benchmark* bucket (perf benchmarks; see [perf-results.md](../../../../docs/guides/perf-results.md)). Not a Catch2 flag |
 | `--benchmarks` | Selects the *benchmark* bucket (see [benchmarking.md](../../../../docs/guides/benchmarking.md)). Not a Catch2 flag |
 | `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
+| `--timings-json <file>` | Writes each test's wall-clock interval (Unix epoch seconds) and thread to `<file>` (additive), plus a `children` count on a test that dispatched some. Not a Catch2 flag |
+| `--thorough` | Sets `test_schedule_config::thorough`, which a test body reads through `nx::is_thorough()`, and runs the `thorough_only` tests a default run skips (see [test-runtime.md](test-runtime.md)). Not a Catch2 flag |
 | `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
 | `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
@@ -222,6 +224,11 @@ The aggregate `<testsuite>` / `<testsuites>` attributes (`tests`, `failures`, `t
 `parse_junit` / `merge_junit` in [tools/dev/lib/core/logs.py](../../../../tools/dev/lib/core/logs.py) are the readers.
 `assertions` — total checks evaluated — is outside the base JUnit schema but understood by common tooling, and `dev.py` reads it for the check counts it prints.
 `dev.py test` passes `--junit-xml` to every nexus binary and prefers this report over its own synthesized single-case sidecar, so `test_diag` and CI see one result per test.
+
+The `<testsuite>` also carries what the run cost the machine, measured around the tests.
+`cpu_load` is this process's load in [0, 1], where 1 is every core busy; `cores_used` is the same as a core count; `peak_resident_bytes` is the OS's own high-water mark.
+A field the platform could not measure is left out.
+The same numbers print after the pass/fail line of a test run, and not of an example run.
 
 ([export/junit.cc, `write_junit_xml`](../src/nexus/tests/export/junit.cc))
 

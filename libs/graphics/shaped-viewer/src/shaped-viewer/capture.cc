@@ -2,18 +2,8 @@
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/impl/capture_session.hh>
 
-#include <chrono>
-
 namespace sv::impl
 {
-namespace
-{
-[[nodiscard]] double now_seconds()
-{
-    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-} // namespace
-
 void capture_session::note_registered(cc::string_view name)
 {
     for (auto const& n : _registered)
@@ -25,12 +15,12 @@ void capture_session::note_registered(cc::string_view name)
 
 void capture_session::begin()
 {
-    _start_seconds = now_seconds();
+    _start_seconds = _request.clock_seconds();
 }
 
 double capture_session::elapsed_seconds() const
 {
-    return now_seconds() - _start_seconds;
+    return _request.clock_seconds() - _start_seconds;
 }
 
 bool capture_session::is_out_of_time() const

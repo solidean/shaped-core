@@ -1,15 +1,11 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/time.hh>
 #include <clean-core/container/set.hh>
+#include <clean-core/thread/thread.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/impl/reload_watcher.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
-
-// clean-core has no sleep and cc::threaded_actor has no timed wait, so the poll interval is a std::this_thread::sleep_for here.
-// Only the polling fallback needs it: a watched reload parks on the mailbox instead, which shutdown already wakes.
-#include <chrono>
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -27,7 +23,7 @@ bool sleep_unless_stopping(double total_ms, cc::atomic<bool> const& stopping)
             return false;
 
         auto const slice = total_ms - slept < k_slice_ms ? total_ms - slept : k_slice_ms;
-        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(slice));
+        cc::this_thread_sleep_secs(slice / 1000.0);
     }
     return !stopping.load();
 }

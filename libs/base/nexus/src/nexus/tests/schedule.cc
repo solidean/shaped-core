@@ -213,6 +213,7 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         "sweep the example bucket");
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
+    args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
 
     args.group("recording");
@@ -222,6 +223,8 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.group("reports");
     args.arg({"junit-xml"}, config.junit_xml_file, {.desc = "also write a JUnit XML report here", .metavar = "FILE"});
     args.arg({"pgo-json"}, config.pgo_json_file, {.desc = "also write nx::pgo metrics here", .metavar = "FILE"});
+    args.arg({"timings-json"}, config.timings_json_file,
+             {.desc = "also write each test's wall-clock interval and thread here", .metavar = "FILE"});
     args.arg({"benchmark-json"}, config.benchmark_json_file,
              {.desc = "also write the full benchmark results here", .metavar = "FILE"});
     args.arg({"benchmark-rec"}, config.benchmark_rec_file,
@@ -459,16 +462,10 @@ nx::test_schedule nx::test_schedule::create(test_schedule_config const& config, 
         // not a rule about this test — it breaks the other one.
         // Untagged exclusive specifically: a TAGGED one only excludes fellow tag holders, which leaves every other
         // test in the run free to be recording into a recorder this one is about to tear down.
-        // main_thread counts as exclusive here, and every EXAMPLE is main_thread.
-        // It forces scheduler_mode::none, and that phase drives bodies one at a time on the calling thread while the
-        // phases themselves run in sequence — the same "runs beside nothing" guarantee an untagged exclusive() asks
-        // for, arrived at by a different route.
-        // Demanding the spelling as well would make every example that owns the recorder carry a redundant word.
-        auto const runs_alone = decl.test_config.exclusive_global || decl.test_config.main_thread;
-        CC_ASSERT(!decl.test_config.owns_recorder || runs_alone,
-                  "nx::config::owns_recorder requires an untagged nx::config::exclusive() (or nx::main_thread, which "
-                  "an EXAMPLE already is) — the recorder is process-wide, so handing it to one test takes it away "
-                  "from every test running alongside it");
+        // main_thread does not count: it pins the thread and runs beside the shared phase, which is why EXAMPLE bakes exclusive() in.
+        CC_ASSERT(!decl.test_config.owns_recorder || decl.test_config.exclusive_global,
+                  "nx::config::owns_recorder requires an untagged nx::config::exclusive() — the recorder is "
+                  "process-wide, so handing it to one test takes it away from every test running alongside it");
         CC_ASSERT(!decl.test_config.owns_recorder || !decl.test_config.recorded,
                   "nx::config::owns_recorder and nx::config::recorded are mutually exclusive — a test that owns the "
                   "recorder has no run recorder to be bucketed into");

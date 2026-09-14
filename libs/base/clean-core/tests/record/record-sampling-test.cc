@@ -24,11 +24,55 @@ using namespace cc_rec_test;
 
 namespace
 {
-/// Burns wall-clock time so a sampler has something to catch, without spinning a core flat out.
+/// Stays busy until the running sampler has taken `samples` more samples, and returns the seconds that took.
 ///
 /// The mark is not decoration: the sampler only knows the threads the RECORDER knows, and a thread joins that set by
 /// recording something.
 /// A thread that has never recorded is invisible to it — see record/sampling.hh.
+CC_DONT_INLINE f64 busy_until_sampled(u64 samples)
+{
+    CC_RECORD_MARK("busy");
+    return burn_until_sampled(samples);
+}
+
+/// Counts the drained samples of threads the recorder has no stream for.
+struct unknown_sample_counter final : cc::rec::listener
+{
+    isize count = 0;
+
+    void on_chunk(cc::rec::chunk_view const& view) override
+    {
+        for (auto it = view.begin(); it != view.end(); ++it)
+            if ((*it).kind() == cc::rec::event_kind::sample
+                && (*it).field_as_u64("thread_index").value_or(0) == cc::rec::impl::sample_unknown_thread)
+                ++count;
+    }
+};
+
+/// Stays busy until the sampler has caught a thread the recorder never heard of, then for `samples` more samples.
+/// Returns the seconds until that first catch.
+///
+/// Unknown threads are discovered on a wall-clock interval after the sampler starts, so no sample count says one was
+/// reached.
+/// Watching for one means draining mid-run, so the surrounding capture is flushed more than once.
+CC_DONT_INLINE f64 busy_until_unknown_sampled(u64 samples)
+{
+    unknown_sample_counter counter;
+    auto const start = cc::current_time_steady_secs();
+    {
+        scoped_listener const reg(counter);
+        while (counter.count == 0 && cc::current_time_steady_secs() - start < 5.0)
+        {
+            busy_until_sampled(10);
+            cc::rec::flush_blocking();
+        }
+    }
+    auto const discovered_secs = cc::current_time_steady_secs() - start;
+    busy_until_sampled(samples);
+    return discovered_secs;
+}
+
+/// Burns a fixed stretch, for the questions no sample count can end: that something is NOT sampled.
 CC_DONT_INLINE void busy_for_secs(f64 secs)
 {
     CC_RECORD_MARK("busy");
@@ -75,7 +119,7 @@ REC_TEST("record/sampling - a sampler catches the running thread and names where
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const r = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0});
+    auto const r = capture_sampled([] { busy_until_sampled(20); }, {.rate_hz = 2000.0});
 
     auto const samples = count_samples(r);
     REQUIRE(samples > 0);
@@ -107,12 +151,13 @@ REC_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwar
     rec_fixture const fixture(deterministic_config());
 
     cc::rec::recording_listener rl;
+    auto sampled_secs = 0.0;
     {
         scoped_listener const reg(rl);
 
-        cc::rec::start_sampling({.rate_hz = 1000.0});
+        cc::rec::start_sampling({.rate_hz = 2000.0});
         CHECK(cc::rec::is_sampling());
-        busy_for_secs(0.1);
+        sampled_secs = busy_until_sampled(10);
         cc::rec::stop_sampling();
         CHECK(!cc::rec::is_sampling());
 
@@ -122,10 +167,11 @@ REC_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwar
 
     // A second window, with the sampler down.
     // stop_sampling joins the thread, so this cannot race.
+    // Twice as long as the running sampler needed for its samples, so one that survived the stop would show up here.
     cc::rec::recording_listener after_rl;
     {
         scoped_listener const reg(after_rl);
-        busy_for_secs(0.05);
+        busy_for_secs(2 * sampled_secs);
         cc::rec::flush_blocking();
     }
 
@@ -144,10 +190,10 @@ REC_TEST("record/sampling - splicing moves a sample onto the thread it caught")
         []
         {
             CC_RECORD_MARK("before-the-work");
-            busy_for_secs(0.25);
+            busy_until_sampled(20);
             CC_RECORD_MARK("after-the-work");
         },
-        {.rate_hz = 500.0});
+        {.rate_hz = 2000.0});
 
     auto const before = count_samples(r);
     REQUIRE(before > 0);
@@ -178,7 +224,7 @@ REC_TEST("record/sampling - splicing twice changes nothing")
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const r = capture_sampled([] { busy_for_secs(0.2); }, {.rate_hz = 500.0});
+    auto const r = capture_sampled([] { busy_until_sampled(20); }, {.rate_hz = 2000.0});
     REQUIRE(count_samples(r) > 0);
 
     auto const once = r.spliced_samples();
@@ -222,14 +268,14 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
         return depths[depths.size() / 2];
     };
 
-    auto const unbounded = capture_sampled([] { busy_for_secs(0.2); }, {.rate_hz = 500.0, .stop_at_scope = false});
+    auto const unbounded = capture_sampled([] { busy_until_sampled(30); }, {.rate_hz = 2000.0, .stop_at_scope = false});
     auto const bounded = capture_sampled(
         []
         {
             CC_RECORD_SCOPE("sampled-region");
-            busy_for_secs(0.2);
+            busy_until_sampled(30);
         },
-        {.rate_hz = 500.0, .stop_at_scope = true});
+        {.rate_hz = 2000.0, .stop_at_scope = true});
 
     REQUIRE(count_samples(unbounded) > 0);
     REQUIRE(count_samples(bounded) > 0);
@@ -261,7 +307,9 @@ REC_TEST("record/sampling - threads the recorder never heard of are sampled too,
 
     // A process always has threads nobody recorded through — the CRT's, the debugger's, ours before they record.
     // Those are exactly the threads a profiler is looking for, and the recorder cannot see them.
-    auto const with = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = true});
+    auto discovered_secs = 0.0;
+    auto const with = capture_sampled([&] { discovered_secs = busy_until_unknown_sampled(20); },
+                                      {.rate_hz = 2000.0, .include_unknown_threads = true});
     CHECK(unknown_count(with) > 0);
 
     // Every sample carries a native id, whether or not it carries an anchor.
@@ -274,8 +322,9 @@ REC_TEST("record/sampling - threads the recorder never heard of are sampled too,
         });
     CHECK(with_tid == count_samples(with));
 
-    auto const without
-        = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = false});
+    // Longer than the run above needed to catch one, so a sampler ignoring the flag would have caught one here too.
+    auto const without = capture_sampled([&] { busy_for_secs(1.5 * discovered_secs); },
+                                         {.rate_hz = 2000.0, .include_unknown_threads = false});
     CHECK(unknown_count(without) == 0);
 }
 
@@ -286,7 +335,7 @@ REC_TEST("record/sampling - the sampler records its own cadence and cost")
 
     rec_fixture const fixture(deterministic_config());
 
-    auto const r = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0});
+    auto const r = capture_sampled([] { busy_until_sampled(10); }, {.rate_hz = 2000.0});
 
     // The sampler's own lane says when it ran and what each tick cost, which is what lets a reader judge whether a
     // profile is evenly sampled or aliased against a periodic workload.
@@ -319,10 +368,11 @@ REC_TEST("record/sampling - one tick covers every thread, so a rate is a per-thr
 
     // Samples PER TICK, which is the property threads_per_tick actually decides.
     //
-    // Deliberately a ratio rather than two sample totals: each run is a fixed wall-clock window, so on a machine that
-    // is busy or thermally throttled the two windows deliver different numbers of ticks for reasons that have nothing
-    // to do with what is being tested — which made the total-vs-total form fail on a loaded laptop.
+    // Deliberately a ratio rather than two sample totals: each run ends once it has taken its samples, so the totals
+    // are whatever the runs asked for and say nothing about coverage.
     // How many threads ONE tick covers is the same answer however few ticks landed.
+    // The wide run asks for many more, since each of its ticks spends a sample on every thread in the process.
+    // It also waits for the unknown threads to be discovered, since the ticks before that cover only the known ones.
     auto const samples_per_tick = [](cc::rec::recording const& r)
     {
         auto const ticks = r.scopes("record.sample_tick").size();
@@ -334,9 +384,10 @@ REC_TEST("record/sampling - one tick covers every thread, so a rate is a per-thr
     // handful each.
     // Unknown threads on explicitly: the subject here is threads_per_tick, and only one thread in this test records
     // anything, so the recorder's own set gives nothing to divide.
-    auto const wide = capture_sampled([] { busy_for_secs(0.25); }, {.rate_hz = 500.0, .include_unknown_threads = true});
-    auto const narrow = capture_sampled([] { busy_for_secs(0.25); },
-                                        {.rate_hz = 500.0, .threads_per_tick = 1, .include_unknown_threads = true});
+    auto const wide
+        = capture_sampled([] { busy_until_unknown_sampled(200); }, {.rate_hz = 2000.0, .include_unknown_threads = true});
+    auto const narrow = capture_sampled([] { busy_until_sampled(30); },
+                                        {.rate_hz = 2000.0, .threads_per_tick = 1, .include_unknown_threads = true});
 
     auto const wide_counts = per_thread(wide);
 
@@ -362,13 +413,16 @@ TEST("record/sampling - what sampling unknown threads costs",
 
     rec_fixture const fixture(deterministic_config());
 
+    // A fixed window is fine here because nothing is asserted: a shorter one only makes the printed load noisier.
+    auto const window_secs = nx::is_thorough() ? 0.5 : 0.05;
+
     cc::println("");
     cc::println("  unknown   ticks   samples   mean tick us   total tick ms   sampler load");
 
     for (auto const unknown : {false, true})
     {
-        auto const r
-            = capture_sampled([] { busy_for_secs(0.5); }, {.rate_hz = 1000.0, .include_unknown_threads = unknown});
+        auto const r = capture_sampled([&] { busy_for_secs(window_secs); },
+                                       {.rate_hz = 1000.0, .include_unknown_threads = unknown});
 
         auto const ticks = r.scopes("record.sample_tick");
 
@@ -378,7 +432,7 @@ TEST("record/sampling - what sampling unknown threads costs",
 
         cc::println("  {:7}   {:5}   {:7}   {:12.1f}   {:13.2f}   {:11.1f}%", unknown ? "yes" : "no", ticks.size(),
                     count_samples(r), ticks.empty() ? 0.0 : total / f64(ticks.size()) * 1e6, total * 1e3,
-                    total / 0.5 * 100);
+                    total / window_secs * 100);
     }
 }
 
@@ -399,24 +453,24 @@ REC_TEST("record/sampling - the configuration can change while the sampler runs"
     {
         scoped_listener const reg(rl);
         {
-            cc::rec::sampling_scope const sampling({.rate_hz = 500.0, .include_unknown_threads = false});
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0, .include_unknown_threads = false});
             CHECK(!cc::rec::current_sampling_config().include_unknown_threads);
 
-            busy_for_secs(0.1);
+            busy_until_sampled(5);
 
             {
                 // What a checkbox in a profiler window does, and what a test narrows with.
                 // The sampler must not have to be stopped for this: a stop-and-restart would lose every sample taken
                 // between the two, which is exactly the stretch somebody turning a knob is looking at.
-                cc::rec::sampling_override const all_threads({.rate_hz = 500.0, .include_unknown_threads = true});
+                cc::rec::sampling_override const all_threads({.rate_hz = 2000.0, .include_unknown_threads = true});
                 CHECK(cc::rec::current_sampling_config().include_unknown_threads);
 
-                busy_for_secs(0.15);
+                busy_until_unknown_sampled(5);
             }
 
             // Restored, which is what makes it usable around a suspicious region rather than for a whole run.
             CHECK(!cc::rec::current_sampling_config().include_unknown_threads);
-            busy_for_secs(0.1);
+            busy_until_sampled(5);
         }
         cc::rec::flush_blocking();
     }
