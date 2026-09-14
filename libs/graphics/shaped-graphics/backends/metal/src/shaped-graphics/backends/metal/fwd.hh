@@ -21,6 +21,7 @@ struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder tak
 class metal_binding_group;
 class metal_binding_group_layout;
 class metal_pipeline_layout;
+class metal_staging_binding_group;
 class metal_sampler_cache; // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
 class metal_buffer;
 struct metal_buffer_access; // cross-list access tracking for one buffer (see metal_buffer_access.hh)

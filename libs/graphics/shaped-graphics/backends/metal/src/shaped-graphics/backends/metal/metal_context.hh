@@ -77,6 +77,9 @@ public:
     /// Everything this context's GPU work may touch; MTL4 has no useResource, so a resource outside this is not there.
     [[nodiscard]] metal_residency_set& residency() { return _residency; }
 
+    /// MTLSamplerStates for bound sampler values, shared context-wide.
+    [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
+
     /// The rings inline transfers stage through, guarded because a list may record on any thread.
     [[nodiscard]] cc::mutex<metal_staging_ring>& upload_ring() { return _upload_ring; }
     [[nodiscard]] cc::mutex<metal_staging_ring>& download_ring() { return _download_ring; }
@@ -99,6 +102,9 @@ public:
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<metal_pipeline_layout_handle> create_metal_pipeline_layout(
         sg::pipeline_layout_description const& desc,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<staging_binding_group_handle> create_metal_staging_binding_group(
+        sg::binding_group_layout_handle layout,
         sg::lifetime_scope scope);
     [[nodiscard]] cc::result<metal_binding_group_handle> create_metal_binding_group(
         sg::binding_group_layout_handle const& layout,

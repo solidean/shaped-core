@@ -4,7 +4,8 @@
 
 Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
-Staging groups, bindless arrays, pipelines, textures, raster, presentation and async transfer still assert.
+Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
+Pipelines, textures, raster, presentation and async transfer still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -61,6 +62,9 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A buffer holds a GPU address, a texture or sampler an `MTLResourceID`, and an array binding takes `count` consecutive slots.
   That is what SPIRV-Cross emits for a descriptor set, which is the whole reason the layout was chosen.
   A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
+  A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
+  It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
+  They cannot collide, because sg already requires that index to be unique within its group.
 - **A barrier names stages, not resources.**
   `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
   The resource list an sg barrier carries has nowhere to go.

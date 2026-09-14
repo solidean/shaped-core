@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/metal/metal_binding_layout.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
+#include <shaped-graphics/backends/metal/metal_staging_binding_group.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 
 // Building binding group layouts, pipeline layouts and binding groups.
@@ -62,6 +63,36 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
 {
     auto const hash = sg::impl::pipeline_layout_hash(desc);
     return std::make_shared<metal_pipeline_layout const>(hash, desc);
+}
+
+cc::result<sg::staging_binding_group_handle> metal_context::create_metal_staging_binding_group(
+    sg::binding_group_layout_handle layout,
+    sg::lifetime_scope)
+{
+    CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
+    auto const& typed_layout = static_cast<metal_binding_group_layout const&>(*layout);
+
+    auto const bindings = typed_layout.bindings();
+
+    // One offset per binding, in declaration order.
+    // A binding's descriptor sits at its own index, because an argument buffer has a single slot space rather than
+    // dx12's split view and sampler heaps — and sg already guarantees the index is unique within the group.
+    //
+    // A static sampler gets -1: the layout fixes its value, so there is no descriptor here for a setter to reach, and
+    // the mint writes it in from the layout instead.
+    auto offsets = cc::vector<int>::create_defaulted(bindings.size());
+    for (auto i = isize(0); i < bindings.size(); ++i)
+    {
+        auto is_static = false;
+        for (auto const& ns : typed_layout.static_samplers())
+            if (ns.name == bindings[i].name)
+                is_static = true;
+
+        offsets[i] = is_static ? -1 : int(bindings[i].index);
+    }
+
+    return sg::staging_binding_group_handle(std::make_shared<metal_staging_binding_group>(
+        *this, cc::move(layout), cc::move(offsets), typed_layout.argument_slot_count()));
 }
 
 cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group(
@@ -127,6 +158,16 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             if (!sg::accepts(b.type, view))
                 return cc::error(
                     cc::format("binding_group: '{}' — the bound view does not match the binding's type", b.name));
+
+            // A null acceleration structure is the value every ray misses, and a zero slot is what it encodes to.
+            if (auto const* const tlas_view = sg::try_as_tlas_view(view); tlas_view != nullptr)
+            {
+                if (tlas_view->tlas != nullptr)
+                    return cc::error(cc::format("binding_group: '{}' — the metal backend cannot bind an acceleration "
+                                                "structure yet",
+                                                b.name));
+                continue; // the zero already there is the null structure
+            }
 
             auto const* const buffer_view = sg::try_as_buffer_view(view);
             if (buffer_view == nullptr)

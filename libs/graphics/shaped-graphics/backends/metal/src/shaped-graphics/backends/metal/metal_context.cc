@@ -557,9 +557,9 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
     return cc::result<sg::binding_group_handle>(create_metal_binding_group(layout, views, samplers, scope));
 }
 
-cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle,
-                                                                                             lifetime_scope)
+cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                             lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create staging binding groups yet");
+    return create_metal_staging_binding_group(cc::move(layout), scope);
 }
 } // namespace sg::backend::metal

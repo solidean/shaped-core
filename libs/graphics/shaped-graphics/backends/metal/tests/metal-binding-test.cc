@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 
 // The bind path: layouts, and the argument buffer a binding group encodes.
 //
@@ -127,4 +128,39 @@ TEST("sg metal - a binding group refuses an unknown binding name")
     auto const group = ctx->create_metal_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                        sg::lifetime_scope::persistent);
     CHECK(group.has_error());
+}
+
+TEST("sg metal - a staging group snapshots, caches and re-mints")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const b = structured_binding("Data", 0);
+    auto const layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
+    auto const staging = ctx->persistent.create_staging_binding_group(layout);
+    REQUIRE(staging != nullptr);
+
+    auto const first = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
+    auto const second = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
+
+    staging->set_binding("Data", sg::buffer<particle>::from_raw(first).as_readwrite_buffer());
+    auto const a = staging->snapshot();
+    REQUIRE(a != nullptr);
+
+    // Nothing was set since, so the snapshot is the same object rather than an equivalent one — which is what makes an
+    // unchanged frame cost nothing.
+    CHECK(staging->snapshot() == a);
+
+    staging->set_binding("Data", sg::buffer<particle>::from_raw(second).as_readwrite_buffer());
+    auto const c = staging->snapshot();
+    REQUIRE(c != nullptr);
+    CHECK(c != a);
+
+    // Each snapshot keeps the argument buffer it was minted with, so the first still names the first buffer.
+    auto const& mtl_a = static_cast<mtl::metal_binding_group const&>(*a);
+    auto const& mtl_c = static_cast<mtl::metal_binding_group const&>(*c);
+    CHECK(mtl_a.argument_address() != 0);
+    CHECK(mtl_c.argument_address() != 0);
+    CHECK(mtl_a.argument_address() != mtl_c.argument_address());
 }
