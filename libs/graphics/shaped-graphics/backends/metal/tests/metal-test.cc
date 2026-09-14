@@ -125,3 +125,25 @@ TEST("sg metal - an allocator is recycled across epochs")
     ctx->block_until_idle();
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
+
+TEST("sg metal - a heap's buffer requirements keep a bump allocator aligned")
+{
+    auto const ctx = test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const heap = ctx->persistent.create_memory_heap(4 * 1024 * 1024);
+
+    // The invariant sg::context_transient_scope's bump allocator rests on: it advances its head by the reported size
+    // and never re-aligns, so a reported size that is not a multiple of the reported alignment misaligns every
+    // placement after the first.
+    // Metal reports the two independently, so this is the backend's job rather than something the query guarantees.
+    for (auto const size : {1, 3, 16, 17, 100, 256, 257, 4096, 65'537})
+    {
+        auto const reqs = heap->memory_requirements_for_buffer(size, sg::buffer_usage::copy_dst);
+        CHECK(reqs.alignment_in_bytes > 0).context(cc::format("size {}", size));
+        CHECK(reqs.size_in_bytes >= size).context(cc::format("size {}", size));
+        CHECK(reqs.size_in_bytes % reqs.alignment_in_bytes == 0)
+            .context(cc::format("size {} -> {} bytes at alignment {}", size, reqs.size_in_bytes, reqs.alignment_in_bytes));
+    }
+}

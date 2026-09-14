@@ -1,6 +1,7 @@
 #include "metal_context.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -58,6 +59,25 @@ bool metal_context::supports(sg::feature f) const
 
 void metal_context::advance_epoch()
 {
+    // Auto-expire the closing epoch's transient resources before the epoch is packaged.
+    //
+    // The transient bump heap resets its head every epoch, so the next epoch's first allocation aliases these bytes.
+    // A handle held across the advance therefore has to report itself expired rather than name storage that now
+    // belongs to something else.
+    auto const expiring = _transient_expiring.lock(
+        [](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
+        {
+            auto out = cc::move(v);
+            v.clear();
+            return out;
+        });
+
+    // Outside the lock: expire() runs the resource's finalizers, which stage a deferred release and take the epoch
+    // system's own lock.
+    for (auto const& weak : expiring)
+        if (auto const buffer = weak.lock())
+            buffer->expire();
+
     _epochs.advance();
     apply_pending_transient_budget();
 }
@@ -306,9 +326,79 @@ sg::stream_download_handle metal_context::stream_to_sink_from_texture(raw_textur
     SG_METAL_UNIMPLEMENTED("streaming a texture to a sink");
 }
 
-cc::result<sg::raw_buffer_handle> metal_context::try_create_raw_buffer(isize, buffer_usages, allocation_info const&)
+cc::result<sg::raw_buffer_handle> metal_context::try_create_raw_buffer(isize size_in_bytes,
+                                                                       buffer_usages usage,
+                                                                       allocation_info const& alloc)
 {
-    return cc::error("the metal backend cannot create buffers yet");
+    return cc::result<sg::raw_buffer_handle>(create_metal_buffer(size_in_bytes, usage, alloc));
+}
+
+cc::result<metal_buffer_handle> metal_context::create_metal_buffer(isize size_in_bytes,
+                                                                   sg::buffer_usages usage,
+                                                                   sg::allocation_info const& alloc)
+{
+    CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");
+
+    if (is_device_lost())
+        return cc::error("the metal device has been lost");
+
+    auto const scope = autorelease_scope();
+
+    // An empty buffer allocates nothing: Metal refuses a zero length, and with validation armed the attempt aborts
+    // rather than returning null.
+    // A null MTLBuffer is the representation, and size 0 is a legal sg buffer.
+    MTL::Buffer* buffer = nullptr;
+    if (size_in_bytes > 0)
+    {
+        if (alloc.is_placed())
+        {
+            auto const& heap = static_cast<metal_memory_heap const&>(*alloc.heap);
+            buffer = heap.heap()->newBuffer(NS::UInteger(size_in_bytes), k_buffer_options, NS::UInteger(alloc.offset));
+            if (buffer == nullptr)
+                return cc::error("the metal heap refused a placed buffer — check the offset's alignment and room");
+        }
+        else
+        {
+            buffer = _device->newBuffer(NS::UInteger(size_in_bytes), k_buffer_options);
+            if (buffer == nullptr)
+                return cc::error("the metal device refused a buffer allocation");
+        }
+    }
+
+    auto handle = std::make_shared<metal_buffer const>(*this, size_in_bytes, usage, buffer, alloc.heap);
+
+    if (alloc.scope == sg::lifetime_scope::transient)
+        _transient_expiring.lock([&](cc::vector<std::weak_ptr<sg::raw_buffer const>>& v)
+                                 { v.push_back(std::weak_ptr<sg::raw_buffer const>(handle)); });
+
+    return handle;
+}
+
+cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isize size_in_bytes)
+{
+    CC_ASSERT(size_in_bytes > 0, "heap size must be positive");
+
+    if (is_device_lost())
+        return cc::error("the metal device has been lost");
+
+    auto const scope = autorelease_scope();
+
+    auto* const descriptor = MTL::HeapDescriptor::alloc()->init();
+    descriptor->setSize(NS::UInteger(size_in_bytes));
+    descriptor->setStorageMode(MTL::StorageModePrivate);
+    // Placement is the one heap type that lets the caller choose the offset, which is sg's whole model: an external
+    // allocator sub-allocates and the heap only validates and mints.
+    descriptor->setType(MTL::HeapTypePlacement);
+    // Same reasoning as k_buffer_options: sg emits the barriers, so the driver must not infer its own.
+    descriptor->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+
+    auto* const heap = _device->newHeap(descriptor);
+    descriptor->release();
+
+    if (heap == nullptr)
+        return cc::error("the metal device refused a heap allocation");
+
+    return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, heap);
 }
 
 cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture_description const&,
@@ -317,9 +407,9 @@ cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture
     return cc::error("the metal backend cannot create textures yet");
 }
 
-cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize)
+cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes)
 {
-    return cc::error("the metal backend cannot create memory heaps yet");
+    return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
 }
 
 cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_group_layout(cc::span<binding const>,

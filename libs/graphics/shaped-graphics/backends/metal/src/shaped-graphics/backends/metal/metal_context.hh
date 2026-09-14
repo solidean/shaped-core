@@ -1,13 +1,17 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
+#include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_command_list.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
+#include <shaped-graphics/backends/metal/metal_memory_heap.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
@@ -54,6 +58,14 @@ public:
 
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
+
+    /// The backend-typed buffer create, which the sg::context virtual forwards to.
+    [[nodiscard]] cc::result<metal_buffer_handle> create_metal_buffer(isize size_in_bytes,
+                                                                      sg::buffer_usages usage,
+                                                                      sg::allocation_info const& alloc);
+
+    /// The backend-typed heap create, which the sg::context virtual forwards to.
+    [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
@@ -184,6 +196,13 @@ private:
 
     /// Shared with every commit-feedback handler still in flight; detached at shutdown.
     std::shared_ptr<metal_feedback_sink> _feedback;
+
+    /// Transient resources created in the open epoch, expired when it closes.
+    ///
+    /// Weak, because a caller may well have dropped its handle already and nothing here should keep the resource
+    /// alive — the point is only to reach the ones still held, so a handle kept past its epoch reports itself expired
+    /// rather than naming storage the bump heap has already handed to somebody else.
+    cc::mutex<cc::vector<std::weak_ptr<sg::raw_buffer const>>> _transient_expiring;
 };
 
 namespace sg

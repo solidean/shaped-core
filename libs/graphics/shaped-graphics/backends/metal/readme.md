@@ -3,7 +3,8 @@
 `sg::backend::metal` — shaped-graphics on Metal 4, for macOS and iOS.
 
 Early stage.
-The device, the queue, the epoch timelines and the command-list lifecycle are real; every resource, binding and recording seam still asserts.
+The device, the queue, the epoch timelines, the command-list lifecycle, buffers and memory heaps are real.
+Recording, textures, bindings and both transfer paths still assert.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -47,6 +48,14 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4 has no `useResource`; a command buffer names an `MTLResidencySet` instead, which is what a list's touched-resource set becomes.
 - **Host-visible memory is free.**
   `MTLStorageModeShared` on unified memory is exactly the thing whose absence blocked every one of the vulkan backend's transfer paths.
+- **A heap reports a size that is not a multiple of its own alignment.**
+  `heapBufferSizeAndAlign` answers the two questions independently, and for a 1-byte buffer returns a size of 1 at an alignment of 256.
+  D3D12 and Vulkan both round for you.
+  `sg::context_transient_scope`'s bump allocator advances its head by the reported size and never re-aligns, so the backend rounds before reporting.
+  Without that, every placement after the first lands unaligned.
+  `sg metal - a heap's buffer requirements keep a bump allocator aligned` pins it.
+- **Placement works for textures from the start.**
+  A Metal placement heap is not told what it will hold, so there is no buffers-only stage to grow out of the way dx12 has one.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
 

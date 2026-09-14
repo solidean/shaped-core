@@ -56,6 +56,21 @@ namespace sg::backend::metal
 /// An NS::String's UTF-8 bytes as a cc::string; empty for a null string.
 [[nodiscard]] cc::string to_string(NS::String const* string);
 
+/// The resource options every sg buffer is created with.
+///
+/// **Private storage**, because sg exposes no host-visible buffers at all — a host↔device transfer is a globally
+/// managed staging path rather than a mapping on the resource.
+/// On unified memory that costs nothing a caller could observe, and it keeps the resource in whatever layout the GPU
+/// prefers.
+///
+/// **Untracked**, which is the Metal 4 half of the decision and the more consequential one.
+/// Metal's default is to hazard-track a resource for you and insert the synchronization it infers — which is exactly
+/// the work sg's access model already did, from declarations a driver cannot see.
+/// Leaving it on would mean paying for both and letting the driver's conservative answer win.
+/// It is also what makes a barrier the backend emits meaningful rather than advisory.
+inline constexpr MTL::ResourceOptions k_buffer_options
+    = MTL::ResourceStorageModePrivate | MTL::ResourceHazardTrackingModeUntracked;
+
 /// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
 ///
 /// **Call it from `main`, before any Metal call.**

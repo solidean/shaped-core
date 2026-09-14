@@ -8,12 +8,14 @@ project(shaped-graphics-metal LANGUAGES CXX)
 # Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format, lint and PCH
 # tooling — all of which speak only ('.cc', '.hh') — working unchanged. See extern/metal-cpp/dependency.yml.
 add_library(shaped-graphics-metal
+    src/shaped-graphics/backends/metal/metal_buffer.cc
     src/shaped-graphics/backends/metal/metal_common.cc
     src/shaped-graphics/backends/metal/metal_command_list.cc
     src/shaped-graphics/backends/metal/metal_context.cc
     src/shaped-graphics/backends/metal/metal_context.create.cc
     src/shaped-graphics/backends/metal/metal_epoch.cc
     src/shaped-graphics/backends/metal/metal_feedback.cc
+    src/shaped-graphics/backends/metal/metal_memory_heap.cc
 )
 
 target_sources(shaped-graphics-metal
@@ -23,11 +25,13 @@ target_sources(shaped-graphics-metal
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/shaped-graphics/backends/metal/fwd.hh
+    src/shaped-graphics/backends/metal/metal_buffer.hh
     src/shaped-graphics/backends/metal/metal_common.hh
     src/shaped-graphics/backends/metal/metal_command_list.hh
     src/shaped-graphics/backends/metal/metal_context.hh
     src/shaped-graphics/backends/metal/metal_epoch.hh
     src/shaped-graphics/backends/metal/metal_feedback.hh
+    src/shaped-graphics/backends/metal/metal_memory_heap.hh
 )
 
 target_compile_features(shaped-graphics-metal PUBLIC cxx_std_23)
