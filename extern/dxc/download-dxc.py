@@ -14,10 +14,9 @@ dev.py runs it on demand per configure (see tools/dev/lib/pipeline/prereqs.py).
 
 Pinning lives in dependency.yml next to this script: `tag` is the human-readable release, and `pin_hash` (the asset's SHA-256) is the authority,
 so the download is rejected unless it matches.
-Bump tag, version, asset and pin_hash together after vetting a new release.
+`--bump <tag>` rewrites the pin for a new release; vet its notes and licenses before committing.
 
-Upstream names the license member inconsistently across releases, so it is found by pattern rather than by a fixed path.
-Its destination is dependency.yml's `license_files` entry, which is what `dev.py deps licenses` collects.
+Each platform's asset ships a different set of license members, so LICENSE_SOURCES maps them by name onto dependency.yml's `license_files`, which is what `dev.py deps licenses` collects.
 
 Re-running is idempotent: a re-run whose .install/pin.txt already matches pin_hash is a no-op.
 Pass --force to re-download anyway.
@@ -26,6 +25,10 @@ Pass --force to re-download anyway.
 import argparse
 import hashlib
 import io
+import json
+import os
+import re
+import subprocess
 import platform
 import shutil
 import sys
@@ -100,26 +103,107 @@ class Archive:
         return None
 
 
-def license_members(archive: Archive) -> list[str]:
-    """The release's license members, whose names have moved between releases and differ per platform.
+# Which release member each declared `license_files` destination is copied from, by the member's upper-cased stem.
+# Matched by name, never by position: the Windows zip ships LICENSE-MS, LICENSE-MIT and LICENSE-LLVM, the Linux tarball
+# only LICENSE-MS and LICENSE-LLVM, so a positional pairing put the MIT text under the LLVM name on one OS and not the other.
+LICENSE_SOURCES = {
+    "LICENSE.TXT": ("LICENSE-MS", "LICENSE"),
+    "LICENSE-LLVM.TXT": ("LICENSE-LLVM",),
+    "LICENSE-MIT.TXT": ("LICENSE-MIT",),
+}
 
-    The Windows zip ships one; the Linux tarball ships the Microsoft terms and the LLVM ones separately, and both are
-    collected because `dev.py deps licenses` is a `check` gate and a missing one is a real omission.
+
+def license_members(archive: Archive) -> dict[str, str]:
+    """The release's top-level license members, keyed by upper-cased stem.
+
     Anything under a subdirectory is skipped: those belong to bundled headers rather than to DXC itself.
     """
-    out = []
+    out = {}
     for name in archive.names():
-        stem = Path(name).name.upper()
-        depth = len([p for p in Path(name).parts if p not in (".", "")])
-        if stem.startswith("LICENSE") and depth == 1:
-            out.append(name)
-    return sorted(out, key=len)
+        path = Path(name)
+        depth = len([p for p in path.parts if p not in (".", "")])
+        if path.name.upper().startswith("LICENSE") and depth == 1:
+            out[path.stem.upper()] = name
+    return out
+
+
+# The two release assets a pin names, told apart from the PDB zip that ships beside them.
+WINDOWS_ASSET = re.compile(r"^dxc_[\w.-]+\.zip$")
+# Loose on the architecture suffix: upstream has spelled it both x86_64 and x86_x64.
+LINUX_ASSET = re.compile(r"^linux_dxc_[\w.-]+\.tar\.gz$")
+
+
+def github_json(url: str) -> dict:
+    headers = {"User-Agent": "shaped-core-dxc-fetch", "Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        try:
+            token = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            token = ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:  # noqa: S310
+        return json.load(response)
+
+
+def bump(tag: str) -> int:
+    """Point dependency.yml at release `tag`: resolve both assets, hash them, and rewrite the pin fields in place.
+
+    The vetting stays a human's: read the release notes and both assets' license members before committing.
+    """
+    up = deps_manifest.one(DEST)
+    repo = up.repo.removeprefix("https://github.com/").removesuffix(".git")
+    release = github_json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
+    names = [a["name"] for a in release.get("assets", [])]
+
+    picked = {}
+    for key, pattern in (("windows", WINDOWS_ASSET), ("linux", LINUX_ASSET)):
+        matches = [n for n in names if pattern.match(n)]
+        if len(matches) != 1:
+            sys.exit(f"{tag}: expected one {key} asset matching {pattern.pattern}, found {matches or 'none'} in {names}")
+        picked[key] = matches[0]
+
+    manifest = deps_manifest.manifest_path(DEST)
+    text = manifest.read_text(encoding="utf-8")
+    fields = {"version": tag.removeprefix("v"), "tag": tag}
+    for key, asset in picked.items():
+        url = f"{up.repo}/releases/download/{tag}/{asset}"
+        print(f"downloading {asset} ...", flush=True)
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "shaped-core-dxc-fetch"})) as r:  # noqa: S310
+            data = r.read()
+        fields[f"asset_{key}"] = asset
+        fields[f"pin_hash_{key}"] = hashlib.sha256(data).hexdigest()
+
+        # The license members are what a bump must re-read, so name them now rather than after the install.
+        members = license_members(Archive(data, asset))
+        mapped = {s for sources in LICENSE_SOURCES.values() for s in sources}
+        print(f"  licenses: {', '.join(sorted(members)) or 'none'}")
+        for stem in sorted(set(members) - mapped):
+            print(f"  warning: {members[stem]} is new — read it, then add it to LICENSE_SOURCES and license_files",
+                  file=sys.stderr)
+
+    for key, value in fields.items():
+        text, count = re.subn(rf"^(\s+{re.escape(key)}:\s*).*$", rf"\g<1>{value}", text, count=1, flags=re.M)
+        if count != 1:
+            sys.exit(f"{manifest}: no `{key}:` line to rewrite")
+    manifest.write_text(text, encoding="utf-8")
+
+    print(f"\n{manifest.relative_to(DEST.parent.parent).as_posix()} now pins {tag}.")
+    print(f"  read the release notes: {release.get('html_url', '')}")
+    print("  then: `uv run dev.py deps licenses`, `uv run dev.py check --fix`, and commit the manifest with the licenses")
+    return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Download the pinned DXC release binaries.")
     ap.add_argument("--force", action="store_true", help="re-download even if the install is current")
+    ap.add_argument("--bump", metavar="TAG", help="rewrite dependency.yml to pin release TAG (e.g. v1.9.2607), then install it")
     args = ap.parse_args()
+
+    if args.bump:
+        bump(args.bump)
+        args.force = True
 
     up = deps_manifest.one(DEST)
 
@@ -185,14 +269,24 @@ def main() -> int:
         installed = "lib/libdxcompiler.so, include/dxc/"
 
     # The licenses, so `dev.py deps licenses` has something to collect for a binary-only dependency.
-    # A release that ships none is not worth failing a build over, so warn and carry on.
+    # A declared license a platform's asset lacks is a note, and one nobody declared is a warning to read and declare.
     members = license_members(archive)
-    if not members:
-        print(f"warning: {up.asset} ships no LICENSE member — docs/licenses/ will keep its committed copy", file=sys.stderr)
-    for member, declared in zip(members, up.license_files):
-        license_dest = INSTALL.parent / declared
-        license_dest.parent.mkdir(parents=True, exist_ok=True)
-        extract(member, license_dest)
+    used = set()
+    for declared in up.license_files:
+        sources = LICENSE_SOURCES.get(Path(declared).name.upper())
+        if sources is None:
+            sys.exit(f"dependency.yml declares {declared}, which download-dxc.py's LICENSE_SOURCES does not map")
+        stem = next((s for s in sources if s in members), None)
+        if stem is None:
+            # Not every platform's asset ships every license; `dev.py deps licenses` keeps the committed copy then.
+            print(f"note: {up.asset} ships no {' / '.join(sources)} member for {declared}")
+            continue
+        used.add(stem)
+        extract(members[stem], INSTALL.parent / declared)
+    for stem, member in members.items():
+        if stem not in used:
+            print(f"warning: {up.asset} ships {member}, which no license_files entry collects — read it and declare it",
+                  file=sys.stderr)
 
     PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
 

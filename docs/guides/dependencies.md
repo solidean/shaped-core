@@ -165,6 +165,10 @@ It is listed by name under `exceptions` with that reasoning, never approximated 
 
 For a fetched dependency there is nothing to commit but the manifest: the next `dev.py configure` sees the pin no longer matches `.install/pin.txt` and re-fetches.
 
+**DXC has a helper for step 3**, because its pin is two per-OS assets and two SHA-256 hashes that change names between releases.
+`uv run extern/dxc/download-dxc.py --bump v1.9.2607` resolves the release's Windows zip and Linux tarball, hashes both, rewrites those fields in `dependency.yml`, and installs for the host.
+It prints each asset's license members and warns about one `LICENSE_SOURCES` does not map, since a new member is exactly what a bump must read; steps 2, 5 and 6 are still yours.
+
 ## Adding a dependency
 
 Add `extern/<dep>/` with a `dependency.yml`, a `CMakeLists.txt`, and a vendor or fetch script modeled on the closest existing one.
