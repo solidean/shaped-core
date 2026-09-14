@@ -50,32 +50,56 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
 
-## Validation has no callback here, and that is the open problem
+## Validation: no callback exists, so the gate is an abort
 
-This is the sharpest difference from dx12 and vulkan, and the reason `metal-entry.cc` registers a driver with no listener on it.
-
-Both other backends install a callback that fails whichever test provoked a validation message.
+This is the sharpest difference from dx12 and vulkan.
+Both install a callback that fails whichever test provoked a validation message.
 [writing-a-backend](../../docs/writing-a-backend.md) puts wiring one up second on its list of three things to do before any rendering code.
-The reason is that a backend under construction is wrong in exactly the ways a validation layer checks.
+Metal has no such callback, and the design below follows from measuring what it does have rather than from any documentation.
 
-Metal offers no equivalent.
-What it has instead:
+What was measured, on macOS 26.4 with a zero-length `newBuffer` as the provocation:
 
-- **`MTL_DEBUG_LAYER` and `MTL_SHADER_VALIDATION`** are environment variables the framework reads before any of our code runs.
-  The checks they enable log to stderr and abort rather than calling back.
-- **`MTLLogState`** does take a handler (`addLogHandler`).
-  But it carries shader `os_log` output and the framework's own log channel — not, as far as we have established, the validation layer's messages.
-- **`MTL4CommitFeedback`** reports a per-commit `NSError` after the fact, which catches GPU faults rather than API misuse.
+| mechanism | what it delivered |
+|---|---|
+| `MTLLogState::addLogHandler` | **nothing** — 0 calls, layer on or off |
+| `MTL_DEBUG_LAYER=1` | the message, on stderr via NSLog, and to nothing else |
+| `MTL_DEBUG_LAYER_ERROR_MODE=assert` | a failed assertion, so the process aborts |
+| `MTL4CommitFeedback` | fires per commit, carrying an `NSError` or none |
 
-**Establishing which of these actually delivers a validation message, and proving the listener fires on a deliberate violation, is the next piece of work here.**
-A listener nobody has seen fire is indistinguishable from one that is not connected — which is why `metal_config` carries no validation knob and there is no `set_message_callback` yet.
-Half-wiring one would look like an oracle and be none, and that is worse than the gap being visible.
-Until it is settled the tier-2 suite's own assertions are the only oracle, which is weaker than what the other two backends had at the same stage.
+`MTLLogState` is the obvious candidate and is not the channel: it carries shader `os_log` output and the framework's own log, not the validation layer.
+`sg metal - an MTLLogState handler is not the validation channel` pins that, so if Apple ever changes it we find out.
+
+So there is no `set_message_callback` here and `metal_config` carries no validation flag — there is nothing for either to deliver.
+**The gate is the abort instead.**
+`arm_validation_layer()` sets `MTL_DEBUG_LAYER=1` and `MTL_DEBUG_LAYER_ERROR_MODE=assert`, and both test binaries call it from `main` before anything touches Metal.
+That is the only moment that works: the framework reads those variables when it first initializes, and there is no API for them.
+Neither variable is overwritten when already set, so a shell can pick a different mode.
+
+The trade is attribution.
+dx12 and vulkan fail one test and carry on; a metal violation ends the binary, and the log names the test that was running.
+That is coarser, and it is a real oracle rather than none.
+The alternative is the failure mode [testing](../../docs/testing.md) records, where dx12 accumulated roughly 680 unnoticed messages with the suite green throughout.
+
+**The gate is proved rather than assumed.**
+`sg metal - the validation gate aborts on a violation` is `nx::config::disabled`, because passing it means ending the process.
+Run it by name and read the abort as the pass; a run that finishes means the layer is not armed.
+
+### Commit feedback is the one programmatic channel
+
+`MTL4CommitFeedback` reports a failure that arrives after the call that caused it, which is exactly what sg's deferred error channel is for.
+So every commit carries a handler, and an error reaches `ctx.take_pending_errors()`.
+
+Metal's timeout, device-removed and access-revoked codes mean the device itself is gone and mark the context lost; everything else is one command buffer failing.
+
+The handler runs on a dispatch queue at a time nothing here controls, which can be after `shutdown` has returned.
+So it captures a [`metal_feedback_sink`](src/shaped-graphics/backends/metal/metal_feedback.hh) rather than the context, and shutdown detaches it.
+A handler still in flight then does nothing instead of reporting into freed memory.
 
 ## Testing
 
-`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines and command-list lifetime.
+`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, and what Metal reports where.
 Every test builds its own context, because the context is its subject.
+The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 
 The tier-1 API suite (`shaped-graphics-test`) now compiles on macOS for the first time, since `_sg_test_drivers` is non-empty there.
 Its driver is `nx::config::disabled` while the backend is built out — registering builds the per-invocable aliases, so one API test runs against metal by being named exactly:

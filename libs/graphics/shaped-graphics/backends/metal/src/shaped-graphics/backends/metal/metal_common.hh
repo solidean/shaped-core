@@ -56,6 +56,26 @@ namespace sg::backend::metal
 /// An NS::String's UTF-8 bytes as a cc::string; empty for a null string.
 [[nodiscard]] cc::string to_string(NS::String const* string);
 
+/// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
+///
+/// **Call it from `main`, before any Metal call.**
+/// The layer is configured entirely through the environment — there is no API for it — and the framework reads those
+/// variables when it first initializes, so this works by setting them early rather than by asking Metal anything.
+/// Neither variable is overwritten where one is already set, so a developer can pick a different mode from the shell.
+///
+/// **Why a test binary wants the abort.** Metal delivers a validation message to stderr and to nothing else; there is
+/// no callback of the kind the dx12 and vulkan backends install, so a message cannot be attributed to the test that
+/// provoked it or turned into a failed CHECK.
+/// Left at its default the message is a line in a log nobody reads and the suite stays green, which is precisely how
+/// the dx12 backend accumulated roughly 680 unnoticed messages.
+/// `assert` mode instead ends the process, so dev.py reports the binary as failed and the log names the last test that
+/// ran.
+/// Coarser attribution than the other two backends have, and a real gate rather than none.
+///
+/// Never call this from a shipping application: it is a development gate, and the layer costs real time.
+/// See libs/graphics/shaped-graphics/backends/metal/readme.md.
+void arm_validation_layer();
+
 /// The message half of `metal_error`: what `error` said, or a note that it said nothing.
 [[nodiscard]] cc::string describe_error(NS::Error const* error, cc::string_view what);
 

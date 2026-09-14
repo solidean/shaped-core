@@ -21,6 +21,15 @@ metal_context::metal_context(MTL::Device* device,
     _epochs(device, queue, epoch_event, submission_event)
 {
     CC_ASSERT(_device != nullptr && _queue != nullptr, "a metal context needs a device and a queue");
+    _feedback = std::make_shared<metal_feedback_sink>(*this);
+}
+
+void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
+{
+    if (kind == sg::device_error_kind::device_lost)
+        mark_device_lost(cc::string(message));
+    else
+        report_device_error({.kind = kind, .message = cc::string(message)});
 }
 
 metal_context::~metal_context()
@@ -68,8 +77,25 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     auto* const allocator = list.allocator();
     list.release_ownership();
 
+    // Every commit carries a feedback handler, because it is the only channel Metal has for a failure that arrives
+    // after the call that caused it — the validation layer speaks only to stderr.
+    // The handler captures the sink rather than this context: it runs on a dispatch queue at a time nothing here
+    // controls, which can be after shutdown.
+    // See metal_feedback.hh.
+    auto sink = _feedback;
+    auto* const options = MTL4::CommitOptions::alloc()->init();
+    options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
+      auto* const error = feedback->error();
+      if (error == nullptr)
+          return;
+
+      sink->report(device_error_kind_of(NS::UInteger(error->code())), describe_error(error, "a metal command buffer "
+                                                                                            "failed"));
+    });
+
     MTL4::CommandBuffer const* const buffers[] = {buffer};
-    _queue->commit(buffers, 1);
+    _queue->commit(buffers, 1, options);
+    options->release();
 
     auto const token = _epochs.claim_submission_token();
     _epochs.signal_submission(token);
@@ -138,6 +164,9 @@ void metal_context::shutdown()
     // Close the final epoch and drain, so every deferred release runs while the device is still alive.
     advance_epoch();
     block_until_idle();
+
+    // Before the device and the queue: a handler still in flight would otherwise report into a context being torn down.
+    _feedback->detach();
 
     _epochs.shutdown();
 

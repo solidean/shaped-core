@@ -13,6 +13,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_context.cc
     src/shaped-graphics/backends/metal/metal_context.create.cc
     src/shaped-graphics/backends/metal/metal_epoch.cc
+    src/shaped-graphics/backends/metal/metal_feedback.cc
 )
 
 target_sources(shaped-graphics-metal
@@ -26,6 +27,7 @@ target_sources(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_command_list.hh
     src/shaped-graphics/backends/metal/metal_context.hh
     src/shaped-graphics/backends/metal/metal_epoch.hh
+    src/shaped-graphics/backends/metal/metal_feedback.hh
 )
 
 target_compile_features(shaped-graphics-metal PUBLIC cxx_std_23)
@@ -49,6 +51,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-metal-test
         tests/main.cc
         tests/metal-test.cc
+        tests/metal-validation-test.cc
     )
 
     target_link_libraries(shaped-graphics-metal-test PRIVATE shaped-graphics-metal nexus)

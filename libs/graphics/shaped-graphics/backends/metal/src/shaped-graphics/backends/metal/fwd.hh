@@ -14,6 +14,7 @@ class metal_context;
 using metal_context_handle = std::shared_ptr<metal_context>;
 class metal_command_list;
 class metal_epoch_system;
+class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)
 
 // The resource types — metal_buffer, metal_texture, metal_memory_heap — are declared by the milestone that adds them.
 // A handle typedef to a class nobody has written is a promise about a shape that has not been designed yet.

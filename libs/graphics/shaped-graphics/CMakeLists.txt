@@ -273,6 +273,9 @@ if(SC_BUILD_TESTS)
         endif()
         if(APPLE AND TARGET metal-cpp)
             target_sources(shaped-graphics-test PRIVATE tests/backends/metal-entry.cc)
+            # main() arms Metal's validation layer, which is an environment switch read before the framework
+            # initializes — so it cannot be done from the entry driver the way the other backends' config flags are.
+            target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_METAL)
         endif()
     endif()
 

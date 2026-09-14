@@ -49,6 +49,17 @@ So this converts most mistakes from "the image is black" into "this named test f
 A listener nobody has seen fire is indistinguishable from one that is not connected, and "no validation errors" is a claim about the backend only once you know the wiring works.
 Provoke a real violation in a test and check the callback saw it — a zero-size `vkCreateBuffer` is a pure diagnostic with nothing to clean up.
 
+**Your API may not have a callback at all, and the advice still holds — the mechanism changes.**
+Metal has none: its validation messages go to stderr via NSLog and to nothing else.
+`MTLLogState` is the obvious candidate and is not it, which took a measurement rather than a reading — a handler on one sees zero of a violation the layer is loudly reporting on the same line.
+What Metal has instead is an environment switch, `MTL_DEBUG_LAYER=1` plus `MTL_DEBUG_LAYER_ERROR_MODE=assert`, which turns a violation into an abort.
+So the gate there is the process dying rather than a test failing, armed from `main` because the framework reads those variables before any code of yours runs.
+
+Two things generalize from that.
+**Attribution is worth trading away to keep the gate**, since the alternative is the 680-unnoticed-messages outcome rather than a tidier report.
+And **a gate that ends the process cannot live in the suite**, so the proof becomes a `nx::config::disabled` test run by name, where the abort is the pass and a clean finish is the failure.
+See [backends/metal/readme.md](../backends/metal/readme.md).
+
 ### 3. Turn "no device" into SKIP, not into a passing test
 
 A suite that silently passes when it found no device gets more dangerous the more it covers.
@@ -165,6 +176,12 @@ Recorded as each is met, because this is what the next backend most wants to kno
   scoped, so none of it has to be replayed.
   **A frame that transitions its resources before the scope opens never pays this**, which is worth saying in the
   backend's own docs rather than leaving as a surprise.
+
+- **A per-commit error channel maps onto sg's deferred errors, and is worth looking for.**
+  `sg::device_error` and `ctx.take_pending_errors()` exist for failures that arrive after the call that caused them, and were written with WebGPU's promises in mind.
+  Metal's `MTL4CommitFeedback` turns out to be exactly that shape, so the backend gets a real error channel out of a surface that was already there.
+  The catch is lifetime: such a handler runs on a queue you do not control, at a time that can be after `shutdown` returned.
+  Capture a detachable sink rather than the context, and detach it in shutdown.
 
 - **An acceleration structure is an object here and an address there.**
   DXR names a structure by the GPU address of its storage buffer, so dx12's `blas`/`tlas` subclasses hold nothing but

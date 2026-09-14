@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/metal/metal_command_list.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
+#include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh>
@@ -53,6 +54,12 @@ public:
 
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
+
+    /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
+    ///
+    /// Public because the sink is a separate object by necessity — it has to outlive this context — and a friend
+    /// declaration would buy nothing a backend's readability-over-encapsulation stance wants.
+    void report_feedback_error(sg::device_error_kind kind, cc::string_view message);
 
     // The sg::context surface.
     // Everything not listed here is still a stub in metal_context.cc.
@@ -174,6 +181,9 @@ private:
     MTL::Device* _device = nullptr;
     MTL4::CommandQueue* _queue = nullptr;
     metal_epoch_system _epochs;
+
+    /// Shared with every commit-feedback handler still in flight; detached at shutdown.
+    std::shared_ptr<metal_feedback_sink> _feedback;
 };
 
 namespace sg

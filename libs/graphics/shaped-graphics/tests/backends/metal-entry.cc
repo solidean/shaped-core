@@ -16,11 +16,11 @@
 //
 // Take the disabled off once no seam aborts, the way vulkan's came off.
 //
-// There is no validation listener here yet, and that is the gap worth closing next.
-// Metal has no callback of the kind dx12 and vulkan install.
-// Its API and shader validation layers are switched on by the MTL_DEBUG_LAYER / MTL_SHADER_VALIDATION environment variables, and they abort rather than calling back.
-// MTLLogState carries a different channel again.
-// Until that is settled, this driver has no oracle beyond the tests' own assertions.
+// There is no listener installed here, and that is settled rather than pending.
+// Metal has no validation callback of the kind dx12 and vulkan install: its messages go to stderr and nowhere else.
+// The gate is instead armed in main() — see sg::backend::metal::arm_validation_layer — where a violation aborts the
+// binary rather than failing one test.
+// So this driver's oracle is process-wide, and coarser than the other two backends'.
 
 // The same exclusions as the dx12 and vulkan drivers, for the same children: see dx12-entry.cc.
 TEST("sg metal backend", nx::config::disabled, exclusive("slib-shader-library"), exclusive("sg-reload-generation"))

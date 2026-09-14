@@ -1,7 +1,18 @@
 #include "metal_common.hh"
 
+#include <cstdlib> // setenv, the only way to configure Metal's validation layer
+
 namespace sg::backend::metal
 {
+void arm_validation_layer()
+{
+    // `assert` rather than `abort`: Metal parses this value itself and asserts on one it does not know, so `abort`
+    // takes the process down while parsing and never reaches a violation.
+    // The accepted spellings are `ignore`, `nslog` and `assert`.
+    setenv("MTL_DEBUG_LAYER", "1", 0);
+    setenv("MTL_DEBUG_LAYER_ERROR_MODE", "assert", 0);
+}
+
 NS::String* ns_string(cc::string_view text)
 {
     // NSString's UTF-8 initializer wants a NUL-terminated pointer, and a string_view carries no terminator of its own.

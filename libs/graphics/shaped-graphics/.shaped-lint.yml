@@ -42,6 +42,11 @@ rules:
     reason: std::ranges::contiguous_range is what constrains the upload overloads, and cc:: has no range vocabulary
     files: src/shaped-graphics/command_list/upload.hh
 
+  - kind: allow-include
+    value: <cstdlib>
+    reason: setenv, which is the whole of Metal's validation-layer API — the layer is configured through the environment and there is no call to make. See backends/metal/readme.md
+    files: [backends/metal/src/shaped-graphics/backends/metal/metal_common.cc, backends/metal/tests/metal-validation-test.cc]
+
   # =========================================================================================================
   # Waiting on a migration
   # =========================================================================================================
