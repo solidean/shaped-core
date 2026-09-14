@@ -52,6 +52,16 @@ struct library_builder
 
     [[nodiscard]] size_t acquire_library(sg::compiled_shader const& shader)
     {
+        // The blob's ADDRESS is the identity, and that holds because every shader in the description is alive
+        // for the whole call: two distinct live buffers cannot share an address, and two shaders that do share
+        // one are the same blob.
+        //
+        // Empty bytecode is the one thing that would break it, since every empty blob is the same null pointer
+        // and they would merge into one library exporting entry points it does not contain.
+        // That is a compile that failed rather than something to deduplicate, so it is refused here — where the
+        // message can say so — instead of reaching CreateStateObject as a null DXIL library.
+        CC_ASSERT(!shader.bytecode.empty(), "a raytracing shader carries no bytecode, so its compile failed");
+
         void const* const key = shader.bytecode.data();
         for (size_t i = 0; i < size_t(libraries.size()); ++i)
             if (libraries[i].data == key)
