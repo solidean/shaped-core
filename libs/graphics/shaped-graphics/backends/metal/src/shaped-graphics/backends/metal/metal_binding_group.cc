@@ -9,12 +9,14 @@ metal_binding_group::metal_binding_group(metal_context& ctx,
                                          metal_binding_group_layout_handle layout,
                                          MTL::Buffer* arguments,
                                          cc::vector<sg::raw_buffer_handle> bound_buffers,
-                                         cc::vector<sg::raw_texture_handle> bound_textures)
+                                         cc::vector<sg::raw_texture_handle> bound_textures,
+                                         cc::vector<sg::tlas_handle> bound_tlases)
   : _ctx(ctx),
     _layout(cc::move(layout)),
     _arguments(arguments),
     _bound_buffers(cc::move(bound_buffers)),
-    _bound_textures(cc::move(bound_textures))
+    _bound_textures(cc::move(bound_textures)),
+    _bound_tlases(cc::move(bound_tlases))
 {
 }
 

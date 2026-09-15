@@ -10,7 +10,7 @@
 ///
 /// **An argument buffer is a flat array of 8-byte slots**, indexed by `binding.index`, which is what `[[id(n)]]`
 /// addresses in MSL.
-/// A buffer binding holds a GPU address, a texture or sampler binding an `MTLResourceID`.
+/// A buffer binding holds a GPU address, and a texture, sampler or acceleration structure an `MTLResourceID`.
 /// Nothing needs an encoder: the values are written straight into shared memory at creation.
 ///
 /// The group holds every resource it names.
@@ -23,7 +23,8 @@ public:
                         metal_binding_group_layout_handle layout,
                         MTL::Buffer* arguments,
                         cc::vector<sg::raw_buffer_handle> bound_buffers,
-                        cc::vector<sg::raw_texture_handle> bound_textures = {});
+                        cc::vector<sg::raw_texture_handle> bound_textures = {},
+                        cc::vector<sg::tlas_handle> bound_tlases = {});
     ~metal_binding_group() override;
 
     /// The address an argument table binds this group at.
@@ -37,10 +38,14 @@ public:
     /// The textures this group names, held for the same reason the buffers are.
     [[nodiscard]] cc::span<sg::raw_texture_handle const> bound_textures() const { return _bound_textures; }
 
+    /// The acceleration structures this group names — a trace against one declares `accel_read` on it.
+    [[nodiscard]] cc::span<sg::tlas_handle const> bound_tlases() const { return _bound_tlases; }
+
 private:
     metal_context& _ctx;
     metal_binding_group_layout_handle _layout;
     MTL::Buffer* _arguments = nullptr;
     cc::vector<sg::raw_buffer_handle> _bound_buffers;
     cc::vector<sg::raw_texture_handle> _bound_textures;
+    cc::vector<sg::tlas_handle> _bound_tlases;
 };

@@ -50,7 +50,7 @@ rules:
   - kind: allow-include
     value: <mutex>
     reason: callback_mutex needs a lock that is real with SC_THREADS off, because Metal's commit handlers run on a dispatch queue that flag does not reach — and cc::mutex compiles its lock away. The pipeline lock is the same need, for a driver that corrupts its own lock under concurrent compilation. See backends/metal/readme.md
-    files: [backends/metal/src/shaped-graphics/backends/metal/metal_common.hh, backends/metal/src/shaped-graphics/backends/metal/metal_common.cc, backends/metal/src/shaped-graphics/backends/metal/metal_raster_pipeline.cc, backends/metal/src/shaped-graphics/backends/metal/metal_compute_pipeline.cc]
+    files: [backends/metal/src/shaped-graphics/backends/metal/metal_common.hh, backends/metal/src/shaped-graphics/backends/metal/metal_common.cc, backends/metal/src/shaped-graphics/backends/metal/metal_raster_pipeline.cc, backends/metal/src/shaped-graphics/backends/metal/metal_compute_pipeline.cc, backends/metal/src/shaped-graphics/backends/metal/metal_raytracing_pipeline.cc]
 
   # =========================================================================================================
   # Waiting on a migration

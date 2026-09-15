@@ -123,12 +123,29 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
-  The abstract types already carry the stats a refit needs — build and update scratch sizes, flags, the storage handle.
+  The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
   - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
+- **No metal shader toolchain exists.**
+  `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
+  `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.
+  So the metal backend's ray-tracing and compute paths are reachable by a caller who brings their own bytecode and by nobody else.
+  The agreed shape for a fixture is HLSL run through SPIRV-Cross once by hand, with all three artifacts checked in.
+  That matters because the argument-buffer layout was chosen to match what SPIRV-Cross emits, so a hand-written kernel would pin a convention no real pipeline produces.
+  Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today.
+  **The stand-in is `backends/metal/tests/raytrace.metal`**, hand-written and marked temporary in its own comment — regenerate it from HLSL once the toolchain exists.
+
+- **Metal implements refit, compaction and placement natively, and sg exposes none of them.**
+  Recorded here so the eventual surface is designed against three APIs rather than two.
+  `MTL4::ComputeCommandEncoder` carries `refitAccelerationStructure(source, descriptor, destination, scratch)`, with `VertexData` / `PerPrimitiveData` options.
+  Beside it are `copyAndCompactAccelerationStructure` and `writeCompactedAccelerationStructureSize`.
+  `MTL::Device::accelerationStructureSizes` already returns the refit scratch, which is the number `update_scratch_size_in_bytes()` holds a slot for.
+  Placement is `heapAccelerationStructureSizeAndAlign` plus `MTL::Heap::newAccelerationStructure(size, offset)`.
+  All three APIs support refitting in place and into a separate structure, so a refit call would not be a Metal shape the others get bent into.
+
 - **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
   Still open: **local root signatures** and a **state-object cached blob**.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.

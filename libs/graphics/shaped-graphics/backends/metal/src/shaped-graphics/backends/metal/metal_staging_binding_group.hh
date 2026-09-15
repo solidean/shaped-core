@@ -46,6 +46,9 @@ private:
     /// An argument buffer holds raw addresses and keeps nothing alive by itself.
     cc::vector<sg::raw_buffer_handle> _resources;
 
-    /// The texture each slot names, parallel to `_slots` like `_resources`; exactly one of the two is set per slot.
+    /// The texture each slot names, parallel to `_slots` like `_resources`; at most one of the three is set per slot.
     cc::vector<sg::raw_texture_handle> _texture_resources;
+
+    /// The acceleration structure each slot names, parallel to `_slots` like the two above.
+    cc::vector<sg::tlas_handle> _tlas_resources;
 };

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_binding_layout.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
@@ -17,7 +18,8 @@ metal_staging_binding_group::metal_staging_binding_group(metal_context& ctx,
     _ctx(ctx),
     _slots(cc::vector<u64>::create_filled(slot_count, u64(0))),
     _resources(cc::vector<sg::raw_buffer_handle>::create_defaulted(slot_count)),
-    _texture_resources(cc::vector<sg::raw_texture_handle>::create_defaulted(slot_count))
+    _texture_resources(cc::vector<sg::raw_texture_handle>::create_defaulted(slot_count)),
+    _tlas_resources(cc::vector<sg::tlas_handle>::create_defaulted(slot_count))
 {
 }
 
@@ -30,13 +32,16 @@ void metal_staging_binding_group::write_view_descriptors(int first_descriptor,
         auto const slot = isize(first_descriptor) + i;
         CC_ASSERT(slot >= 0 && slot < _slots.size(), "a staging descriptor index is out of the group's range");
 
-        // A null acceleration structure is a VALUE rather than an absence — it is what every ray misses — and in an
-        // argument buffer that value is a zero slot, which is also what a vacant element reads as.
+        // An acceleration structure binds by resource id, exactly as a texture does.
+        // A null one is a VALUE rather than an absence — it is what every ray misses — and in an argument buffer that
+        // value is a zero slot, which is also what a vacant element reads as.
         if (auto const* const tlas_view = sg::try_as_tlas_view(views[i]); tlas_view != nullptr)
         {
-            CC_ASSERT(tlas_view->tlas == nullptr, "the metal backend cannot bind an acceleration structure yet");
-            _slots[slot] = 0;
+            auto const* const mtl_tlas = static_cast<metal_tlas const*>(tlas_view->tlas.get());
+            _slots[slot] = mtl_tlas != nullptr ? mtl_tlas->storage().resource_id()._impl : u64(0);
             _resources[slot] = nullptr;
+            _texture_resources[slot] = nullptr;
+            _tlas_resources[slot] = tlas_view->tlas;
             continue;
         }
 
@@ -131,10 +136,15 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (r != nullptr)
             bound_textures.push_back(r);
 
+    auto bound_tlases = cc::vector<sg::tlas_handle>();
+    for (auto const& r : _tlas_resources)
+        if (r != nullptr)
+            bound_tlases.push_back(r);
+
     _ctx.residency().add(arguments);
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
     return sg::binding_group_handle(std::make_shared<metal_binding_group const>(
-        _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures)));
+        _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures), cc::move(bound_tlases)));
 }
 } // namespace sg::backend::metal

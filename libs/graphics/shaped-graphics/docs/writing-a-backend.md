@@ -183,13 +183,28 @@ Recorded as each is met, because this is what the next backend most wants to kno
   The catch is lifetime: such a handler runs on a queue you do not control, at a time that can be after `shutdown` returned.
   Capture a detachable sink rather than the context, and detach it in shutdown.
 
+- **A shader stage on one API can be the whole program on another.**
+  DXR's raygen shader is an entry point the driver enters and schedules around; Metal has no ray-tracing pipeline at
+  all, so the raygen shader *is* the compute kernel and the miss and closest-hit shaders are functions it chooses to
+  call through a table.
+  The C++ surface maps — one compute pipeline per raygen, sg's index spaces onto Metal's function tables — but the
+  shaders do not, and that is a difference worth stating in the backend's own docs rather than leaving a caller to
+  find.
+  **Check what the target language can express before deciding a table is one object**: MSL's
+  `visible_function_table<T>` is typed by the function signature, so miss, closest-hit and callable functions cannot
+  share a table however convenient one would be.
+
 - **An acceleration structure is an object here and an address there.**
   DXR names a structure by the GPU address of its storage buffer, so dx12's `blas`/`tlas` subclasses hold nothing but
   a typed handle to that buffer.
   Vulkan needs a `VkAccelerationStructureKHR` created over the buffer, with a device address of its own — so the
   subclass owns an object, and the ownership question ("what frees this, and when") appears where dx12 has none.
-  The sg-level policy is untouched: result persistent, scratch transient, and the AS access bits illegal on non-AS
-  buffers.
+  Metal goes further and has no buffer at any point: `MTL::AccelerationStructure` derives from `MTL::Resource` and is
+  named by a `gpuResourceID()`, so the third backend is what showed that "one storage buffer per structure" had been a
+  D3D12 fact wearing a portable name.
+  The sg-level policy is untouched: scratch transient, and the AS access bits illegal on non-AS buffers.
+  **A resource kind your hazard tracking cannot name is the thing to look for early** — here it meant a third declare
+  path beside buffers and textures, which was cheap only because the tracker was already resource-kind agnostic.
 
 - **`used_cached_pipeline()` looked like an sg-surface gap and was not.**
   dx12 answers it precisely because D3D12 fails PSO creation on a blob it cannot use, while Vulkan silently starts

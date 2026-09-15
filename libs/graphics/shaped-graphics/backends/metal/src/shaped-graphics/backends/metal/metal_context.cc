@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -64,9 +65,10 @@ bool metal_context::supports(sg::feature f) const
     switch (f)
     {
     case sg::feature::raytracing:
-        // The device has it; the backend does not yet, and reporting the device's answer would turn a clean skip into
-        // a crash at the first build call.
-        return false;
+        // Every device above this backend's Metal 4 floor can ray trace, so there is nothing to probe.
+        // Acceleration structures build, a tlas binds for an inline RayQuery trace, and the DXR-shaped pipeline path
+        // maps onto a compute pipeline per raygen plus Metal's function tables.
+        return true;
     case sg::feature::headless_present:
         // Always: the chain is emulated with ordinary render targets, so there is no surface extension to be missing.
         return true;
@@ -240,6 +242,8 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
         auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
         mtl_texture.access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
     }
+    for (auto const& touched : list.touched_accels())
+        touched.storage->access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
 
     // Nothing was committed, so the GPU never saw either object and both go back immediately.
     buffer->release();
@@ -278,6 +282,8 @@ void metal_context::finalize_touched_buffers(metal_command_list& list)
         auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
         (void)mtl_texture.access().lock([&](metal_resource_access& a) { return a.finalize(list.slot()); });
     }
+    for (auto const& touched : list.touched_accels())
+        (void)touched.storage->access().lock([&](metal_resource_access& a) { return a.finalize(list.slot()); });
 }
 
 void metal_context::wait_for_streams(metal_command_list& list)
@@ -307,6 +313,8 @@ void metal_context::stamp_touched_resources(metal_command_list& list, sg::submis
         static_cast<metal_buffer const&>(*touched).submission().raise(u64(token));
     for (auto const& touched : list.touched_textures())
         static_cast<metal_texture const&>(*touched).submission().raise(u64(token));
+    for (auto const& touched : list.touched_accels())
+        touched.storage->submission().raise(u64(token));
 }
 
 cc::result<std::unique_ptr<sg::command_list>> metal_context::try_create_command_list()
@@ -688,17 +696,17 @@ cc::result<sg::raster_pipeline_handle> metal_context::try_create_raster_pipeline
 }
 
 cc::result<sg::raytracing_pipeline_handle> metal_context::try_create_raytracing_pipeline(
-    raytracing_pipeline_description const&,
-    lifetime_scope)
+    raytracing_pipeline_description const& desc,
+    lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create ray-tracing pipelines yet");
+    return create_metal_raytracing_pipeline(desc, scope);
 }
 
 cc::result<sg::raytracing_shader_table_handle> metal_context::try_create_raytracing_shader_table(
-    raytracing_shader_table_description const&,
-    lifetime_scope)
+    raytracing_shader_table_description const& desc,
+    lifetime_scope scope)
 {
-    return cc::error("the metal backend cannot create ray-tracing shader tables yet");
+    return create_metal_raytracing_shader_table(desc, scope);
 }
 
 cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(binding_group_layout_handle layout,

@@ -1,5 +1,8 @@
 #pragma once
 
+// metal-cpp's umbrella Metal.hpp does not include this one, and nothing else in the package does either — so the
+// MTL4 acceleration-structure descriptors are unreachable without naming it, unlike every other MTL4 type.
+#include <Metal/MTL4AccelerationStructure.hpp>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
@@ -34,6 +37,14 @@ public:
     /// Idempotent.
     void end_recording();
 
+    /// One acceleration structure a declare named, kept alive for as long as the recording that names it.
+    /// Type-erased owner because sg::blas and sg::tlas share no base, while the tracking lives on the storage both hold.
+    struct accel_declare
+    {
+        std::shared_ptr<void const> owner;
+        metal_accel_storage const* storage = nullptr;
+    };
+
     /// This list's slot in every resource's concurrent access tracking.
     [[nodiscard]] sg::command_list_slot slot() const { return _slot; }
 
@@ -42,6 +53,10 @@ public:
 
     /// The textures this list declared against; the same contract as touched_buffers.
     [[nodiscard]] cc::span<sg::raw_texture_handle const> touched_textures() const { return _touched_textures; }
+
+    /// The acceleration structures this list declared against; the same contract again.
+    /// No transfer ever targets one, so unlike the two above these need no stream wait and no pending-transfer query.
+    [[nodiscard]] cc::span<accel_declare const> touched_accels() const { return _touched_accels; }
 
     /// The copy-outs this list's downloads are waiting on, handed to the submit that will run them.
     /// Moved out, so the list keeps none afterwards.
@@ -145,10 +160,31 @@ private:
     /// A texture carries no layout here, so the two differ only in which list the resource is remembered on.
     void declare_texture(raw_texture_handle const& texture, pipeline_stage_flags stages, access_flags access);
 
+    /// The acceleration-structure twin, for an AS build and for a trace against a bound TLAS.
+    /// `owner` keeps the structure alive and is type-erased because sg::blas and sg::tlas share no base, while the
+    /// tracking itself lives on the storage they both hold.
+    void declare_accel(std::shared_ptr<void const> owner,
+                       metal_accel_storage const& storage,
+                       pipeline_stage_flags stages,
+                       access_flags access);
+
     /// Take ownership of a staging reservation that got a buffer of its own, making it resident and freeing it with
     /// the epoch.
     /// A no-op for a reservation that came out of the ring.
     void adopt_overflow_staging(metal_staging_ring::reservation const& staging);
+
+    /// Size an acceleration structure from its descriptor, mint it, and declare it resident.
+    /// The three sizes come back through the out-params because Metal answers all of them in one query.
+    [[nodiscard]] MTL::AccelerationStructure* build_accel_common(MTL4::AccelerationStructureDescriptor* descriptor,
+                                                                 isize& out_size,
+                                                                 isize& out_build_scratch,
+                                                                 isize& out_update_scratch);
+
+    /// The half a triangle BLAS and a procedural one share, once their geometry descriptors are built.
+    [[nodiscard]] blas_handle build_blas_common(MTL4::PrimitiveAccelerationStructureDescriptor* descriptor,
+                                                cc::span<raw_buffer_handle const> input_buffers,
+                                                accel_build_flags flags,
+                                                int geometry_count);
 
     /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
     /// Called immediately before the op those declares were for.
@@ -182,6 +218,9 @@ private:
     cc::vector<sg::raw_texture_handle> _touched_textures;
     cc::vector<sg::raw_texture_handle> _pending_textures;
 
+    cc::vector<accel_declare> _touched_accels;
+    cc::vector<accel_declare> _pending_accels;
+
     MTL4::ArgumentTable* _argument_table = nullptr;
     MTL4::RenderCommandEncoder* _render_encoder = nullptr;
 
@@ -191,11 +230,17 @@ private:
     /// The pipeline currently bound, for the workgroup size a thread-count dispatch divides by.
     metal_compute_pipeline const* _bound_compute = nullptr;
 
+    /// The ray-tracing pipeline a dispatch_rays must have had its table built for.
+    /// Nothing is bound to an encoder at bind time: which compute state runs is decided by the raygen the dispatch
+    /// names, so this is the check rather than the binding.
+    metal_raytracing_pipeline const* _bound_raytracing = nullptr;
+
     /// Per slot, the buffers the group bound there names — copied at bind time, because a binding_group is handed over
     /// by reference and has no handle to take.
     /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
     cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
     cc::vector<sg::raw_texture_handle> _group_textures[sg::max_binding_groups];
+    cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];
 
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///

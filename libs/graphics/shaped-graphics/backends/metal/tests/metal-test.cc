@@ -33,17 +33,14 @@ TEST("sg metal - a context comes up and describes its adapter")
     CHECK(!ctx->adapter().name.empty());
 }
 
-TEST("sg metal - the ray-tracing answer is the backend's, not the device's")
+TEST("sg metal - ray tracing is reported, and it is the device's answer")
 {
     auto const ctx = test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    // Every Metal 4 device can ray trace, and this backend cannot yet.
-    // Pinned so the gap reads as deliberate rather than as an omission — and so that closing it is a failing test here
-    // rather than something nobody notices.
-    // See libs/graphics/shaped-graphics/docs/writing-a-backend.md.
-    CHECK(!ctx->supports(sg::feature::raytracing));
+    // Every device above this backend's Metal 4 floor can ray trace, so there is nothing to probe and nothing to gate.
+    CHECK(ctx->supports(sg::feature::raytracing));
 
     // Metal has never had a geometry or tessellation stage, so these two are permanent rather than pending.
     CHECK(!ctx->supports(sg::feature::geometry_shader));

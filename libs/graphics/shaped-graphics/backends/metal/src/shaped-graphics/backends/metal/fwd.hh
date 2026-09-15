@@ -37,6 +37,11 @@ class metal_sampler_cache;      // MTLSamplerStates for bound sampler values (se
 class metal_buffer;
 class metal_texture;
 struct metal_resource_access; // cross-list access tracking for one buffer (see metal_resource_access.hh)
+class metal_accel_storage;    // an MTLAccelerationStructure plus its tracking (see metal_acceleration_structure.hh)
+class metal_blas;
+class metal_tlas;
+class metal_raytracing_pipeline;
+class metal_raytracing_shader_table;
 class metal_memory_heap;
 
 /// Backend-typed resource handles.
@@ -49,6 +54,7 @@ using metal_binding_group_layout_handle = std::shared_ptr<metal_binding_group_la
 using metal_pipeline_layout_handle = std::shared_ptr<metal_pipeline_layout const>;
 using metal_compute_pipeline_handle = std::shared_ptr<metal_compute_pipeline>;
 using metal_raster_pipeline_handle = std::shared_ptr<metal_raster_pipeline>;
+using metal_raytracing_pipeline_handle = std::shared_ptr<metal_raytracing_pipeline>;
 
 
 /// The domain every recording site in the Metal backend is attributed to.

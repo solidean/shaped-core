@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_compute_pipeline.hh>
@@ -10,6 +11,8 @@
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_raster_state.hh>
+#include <shaped-graphics/backends/metal/metal_raytracing_pipeline.hh>
+#include <shaped-graphics/backends/metal/metal_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 
@@ -204,9 +207,32 @@ void metal_command_list::adopt_overflow_staging(metal_staging_ring::reservation 
         });
 }
 
+void metal_command_list::declare_accel(std::shared_ptr<void const> owner,
+                                       metal_accel_storage const& storage,
+                                       pipeline_stage_flags stages,
+                                       access_flags access)
+{
+    CC_ASSERT(owner != nullptr, "cannot declare access on a null acceleration structure");
+    CC_ASSERT(storage.accel() != nullptr, "an acceleration structure was used after it expired");
+
+    auto const [newly_pending, newly_recorded] = storage.access().lock(
+        [&](metal_resource_access& a)
+        {
+            a.declare(_slot, stages, access);
+            return cc::pair{a.mark_pending_barrier(_slot), a.mark_recorded(_slot)};
+        });
+
+    if (newly_recorded)
+        _touched_accels.push_back({owner, &storage});
+    if (newly_pending)
+        _pending_accels.push_back({cc::move(owner), &storage});
+
+    _produced_queue_work = true;
+}
+
 void metal_command_list::flush_barriers()
 {
-    if (_pending_buffers.empty() && _pending_textures.empty())
+    if (_pending_buffers.empty() && _pending_textures.empty() && _pending_accels.empty())
         return;
 
     // One MTL4 barrier names stages rather than resources, so every resource's requirement for this op folds into a
@@ -246,8 +272,23 @@ void metal_command_list::flush_barriers()
         visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
     }
 
+    for (auto const& declared : _pending_accels)
+    {
+        auto const barrier = declared.storage->access().lock([&](metal_resource_access& a) { return a.flush(_slot); });
+
+        auto const translated = translate_barrier(barrier);
+        if (!translated.needed)
+            continue;
+
+        any = true;
+        after |= translated.after_stages;
+        before |= translated.before_stages;
+        visibility = MTL4::VisibilityOptions(visibility | translated.visibility);
+    }
+
     _pending_buffers.clear();
     _pending_textures.clear();
+    _pending_accels.clear();
 
     if (!any)
         return;
@@ -536,6 +577,11 @@ void metal_command_list::bind_group_to_table(int group_index, binding_group cons
     slot_textures.clear();
     for (auto const& texture : mtl_group.bound_textures())
         slot_textures.push_back(texture);
+
+    auto& slot_tlases = _group_tlases[group_index];
+    slot_tlases.clear();
+    for (auto const& bound : mtl_group.bound_tlases())
+        slot_tlases.push_back(bound);
 }
 
 void metal_command_list::compute_bind_group(int group_index, binding_group const& group)
@@ -606,6 +652,15 @@ void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
     for (auto const& slot_textures : _group_textures)
         for (auto const& texture : slot_textures)
             declare_texture(texture, stages, sg::access_flag::shader_read | sg::access_flag::shader_write);
+
+    // A bound acceleration structure is read and never written by the work that traces it, which is why this one
+    // declare is narrower than the two above.
+    for (auto const& slot_tlases : _group_tlases)
+        for (auto const& bound : slot_tlases)
+        {
+            auto const& mtl_tlas = static_cast<metal_tlas const&>(*bound);
+            declare_accel(bound, mtl_tlas.storage(), stages, sg::access_flag::accel_read);
+        }
     flush_barriers();
 }
 
@@ -775,42 +830,59 @@ void metal_command_list::raster_draw(draw_config const& config)
                                     NS::UInteger(config.instance_range.size), NS::UInteger(config.instance_range.offset));
 }
 
-bool metal_command_list::raytracing_is_supported() const
+void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pipeline)
 {
-    // Deliberately false while the build and dispatch seams are stubs, and pinned as deliberate by a tier-2 test.
-    // Reporting the device's answer here would turn a clean skip into a crash — see
-    // libs/graphics/shaped-graphics/docs/writing-a-backend.md.
-    return false;
+    // Nothing is bound to an encoder here: which compute pipeline state runs is decided by the raygen shader the
+    // dispatch names, and the table is what resolves it.
+    // So this only records the pipeline a later dispatch_rays must have been built for.
+    _bound_raytracing = static_cast<metal_raytracing_pipeline const*>(&pipeline);
 }
 
-sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<blas_triangles const>, accel_build_flags)
+void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)
 {
-    SG_METAL_UNIMPLEMENTED("building a triangle BLAS");
+    CC_ASSERT(_bound_raytracing != nullptr, "bind a raytracing pipeline before binding its groups");
+    bind_group_to_table(group_index, group);
 }
 
-sg::blas_handle metal_command_list::raytracing_build_blas_aabbs(cc::span<blas_aabbs const>, accel_build_flags)
+void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const& table,
+                                                  raygen_index raygen,
+                                                  int width,
+                                                  int height,
+                                                  int depth)
 {
-    SG_METAL_UNIMPLEMENTED("building a procedural BLAS");
-}
+    CC_ASSERT(_bound_raytracing != nullptr, "no raytracing pipeline is bound");
+    CC_ASSERT(width >= 1 && height >= 1 && depth >= 1, "each dispatch_rays dimension must be >= 1");
 
-sg::tlas_handle metal_command_list::raytracing_build_tlas(cc::span<tlas_instance const>, accel_build_flags)
-{
-    SG_METAL_UNIMPLEMENTED("building a TLAS");
-}
+    auto const& mtl_table = static_cast<metal_raytracing_shader_table const&>(table);
+    CC_ASSERT(mtl_table.pipeline().get() == static_cast<sg::raytracing_pipeline const*>(_bound_raytracing),
+              "this shader table was built for a different raytracing pipeline than the one bound");
 
-void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const&)
-{
-    SG_METAL_UNIMPLEMENTED("binding a ray-tracing pipeline");
-}
+    auto const& binding = mtl_table.binding_for(raygen);
 
-void metal_command_list::raytracing_bind_group(int, binding_group const&)
-{
-    SG_METAL_UNIMPLEMENTED("binding a ray-tracing binding group");
-}
+    // The same declare-then-flush rhythm a dispatch uses, at the raytracing stage — a bound TLAS surfaces as
+    // accel_read through the group's own declare.
+    declare_bound_groups(sg::pipeline_stage_flag::raytracing);
 
-void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&, raygen_index, int, int, int)
-{
-    SG_METAL_UNIMPLEMENTED("dispatching rays");
+    auto* const encoder = compute_encoder();
+    encoder->setComputePipelineState(binding.state);
+    encoder->setArgumentTable(argument_table());
+
+    // The four function tables reach the kernel as the reserved group's argument buffer, above every group a caller
+    // may bind — see sg::reserved_binding_group.
+    argument_table()->setAddress(MTL::GPUAddress(binding.arguments->gpuAddress()),
+                                 NS::UInteger(sg::reserved_binding_group));
+
+    // A raygen kernel is dispatched by thread count rather than by threadgroup: sg's width/height/depth is a ray grid,
+    // and Metal takes the threadgroup shape separately.
+    // sg carries none on this call, so it comes from the pipeline — clamped per axis to the grid, because Metal
+    // rejects a threadgroup larger than the grid in any dimension rather than trimming it.
+    auto const max_threads = isize(binding.state->maxTotalThreadsPerThreadgroup());
+    auto const group_x = cc::min(isize(width), cc::max(isize(1), isize(binding.state->threadExecutionWidth())));
+    auto const group_y = cc::min(isize(height), cc::max(isize(1), max_threads / group_x));
+    auto const group_z = cc::min(isize(depth), cc::max(isize(1), max_threads / (group_x * group_y)));
+
+    encoder->dispatchThreads(MTL::Size(NS::UInteger(width), NS::UInteger(height), NS::UInteger(depth)),
+                             MTL::Size(NS::UInteger(group_x), NS::UInteger(group_y), NS::UInteger(group_z)));
 }
 
 bool metal_command_list::query_timestamps_supported() const

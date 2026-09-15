@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_binding_layout.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
@@ -115,6 +116,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto filled = cc::vector<char>::create_filled(bindings.size(), char(0));
     auto bound_buffers = cc::vector<sg::raw_buffer_handle>();
     auto bound_textures = cc::vector<sg::raw_texture_handle>();
+    auto bound_tlases = cc::vector<sg::tlas_handle>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
     {
@@ -161,14 +163,22 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 return cc::error(
                     cc::format("binding_group: '{}' — the bound view does not match the binding's type", b.name));
 
-            // A null acceleration structure is the value every ray misses, and a zero slot is what it encodes to.
+            // An acceleration structure binds by resource id, exactly as a texture does — MTL::AccelerationStructure
+            // is a resource of its own rather than a buffer, so there is no address to take.
+            // A null one is the value every ray misses, and the zero already in the slot is what it encodes to.
             if (auto const* const tlas_view = sg::try_as_tlas_view(view); tlas_view != nullptr)
             {
-                if (tlas_view->tlas != nullptr)
-                    return cc::error(cc::format("binding_group: '{}' — the metal backend cannot bind an acceleration "
-                                                "structure yet",
-                                                b.name));
-                continue; // the zero already there is the null structure
+                if (tlas_view->tlas == nullptr)
+                    continue;
+
+                auto const& mtl_tlas = static_cast<metal_tlas const&>(*tlas_view->tlas);
+                if (mtl_tlas.storage().accel() == nullptr)
+                    return cc::error(
+                        cc::format("binding_group: '{}' — the bound acceleration structure has expired", b.name));
+
+                slots[slot_of(b, element)] = mtl_tlas.storage().resource_id()._impl;
+                bound_tlases.push_back(tlas_view->tlas);
+                continue;
             }
 
             // A texture binds by resource id rather than by address — an argument buffer slot is the same 8 bytes
@@ -248,7 +258,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
 
     _residency.add(arguments);
 
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
-                                                       cc::move(bound_buffers), cc::move(bound_textures));
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments, cc::move(bound_buffers),
+                                                       cc::move(bound_textures), cc::move(bound_tlases));
 }
 } // namespace sg::backend::metal

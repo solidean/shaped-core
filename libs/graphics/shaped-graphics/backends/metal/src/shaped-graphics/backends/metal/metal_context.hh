@@ -132,6 +132,12 @@ public:
     [[nodiscard]] cc::result<metal_compute_pipeline_handle> create_metal_compute_pipeline(
         sg::compute_pipeline_description const& desc,
         sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<sg::raytracing_pipeline_handle> create_metal_raytracing_pipeline(
+        sg::raytracing_pipeline_description const& desc,
+        sg::lifetime_scope scope);
+    [[nodiscard]] cc::result<sg::raytracing_shader_table_handle> create_metal_raytracing_shader_table(
+        sg::raytracing_shader_table_description const& desc,
+        sg::lifetime_scope scope);
     [[nodiscard]] cc::result<staging_binding_group_handle> create_metal_staging_binding_group(
         sg::binding_group_layout_handle layout,
         sg::lifetime_scope scope);

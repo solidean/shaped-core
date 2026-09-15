@@ -8,6 +8,7 @@ project(shaped-graphics-metal LANGUAGES CXX)
 # Everything is plain C++ over metal-cpp rather than Objective-C++, which is what keeps the repo's format, lint and PCH
 # tooling — all of which speak only ('.cc', '.hh') — working unchanged. See extern/metal-cpp/dependency.yml.
 add_library(shaped-graphics-metal
+    src/shaped-graphics/backends/metal/metal_acceleration_structure.cc
     src/shaped-graphics/backends/metal/metal_barrier.cc
     src/shaped-graphics/backends/metal/metal_binding_create.cc
     src/shaped-graphics/backends/metal/metal_binding_group.cc
@@ -27,6 +28,9 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_feedback.cc
     src/shaped-graphics/backends/metal/metal_memory_heap.cc
     src/shaped-graphics/backends/metal/metal_raster_pipeline.cc
+    src/shaped-graphics/backends/metal/metal_raytracing.cc
+    src/shaped-graphics/backends/metal/metal_raytracing_pipeline.cc
+    src/shaped-graphics/backends/metal/metal_raytracing_shader_table.cc
     src/shaped-graphics/backends/metal/metal_raster_state.cc
     src/shaped-graphics/backends/metal/metal_residency.cc
     src/shaped-graphics/backends/metal/metal_staging_binding_group.cc
@@ -93,6 +97,7 @@ if(SC_BUILD_TESTS)
         tests/metal-compute-test.cc
         tests/metal-present-test.cc
         tests/metal-raster-test.cc
+        tests/metal-raytracing-test.cc
         tests/metal-test.cc
         tests/metal-texture-test.cc
         tests/metal-transfer-test.cc

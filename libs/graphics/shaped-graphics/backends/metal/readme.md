@@ -6,7 +6,7 @@ Early stage.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
 Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, raster draws, and a swapchain presents.
-Async transfer and streaming still assert.
+Async transfer and streaming are real, and so is ray tracing — acceleration structures, a bound TLAS, and the DXR-shaped pipeline path.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
 
@@ -174,8 +174,94 @@ Each of these is a fact about Metal rather than a gap in the backend.
   The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
   `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
   docs/TODO.md records the gap on the backend that still has it.
+- **An acceleration structure is not a buffer.**
+  DXR names one by the GPU virtual address of the buffer the driver built it into, and Vulkan wraps an object around such a buffer.
+  `MTL::AccelerationStructure` derives from `MTL::Resource` and there is no `MTLBuffer` in the caller's hands at any point.
+  So `sg::blas` and `sg::tlas` carry no storage handle at all.
+  The one they used to carry was a D3D12 fact that had leaked into the portable layer.
 - **There is no software device.**
   dx12 has WARP and metal has nothing, so coverage here is developer-machine-only and a host below the floor makes every test `SKIP`.
+
+## Ray tracing: both paths, and a raygen shader that is the kernel
+
+**There is no MTL4 ray-tracing pipeline.**
+DXR hands the driver a set of shaders and lets it schedule them.
+Metal dispatches an ordinary compute kernel that calls `intersector` itself, with function tables supplying what traversal and the kernel call back into.
+So a raygen shader is not something a pipeline dispatches — it **is** the kernel.
+
+Both of sg's paths are real here.
+Inline ray query needed nothing but the bind path.
+`sg::tlas::as_view()` was already portable, and a TLAS binds by `gpuResourceID()` into an argument-buffer slot exactly as a texture does.
+The pipeline path maps as follows.
+
+- **One MTL4 compute pipeline per registered raygen shader**, each dynamically linked with every hit, miss and callable function the description registered.
+- **`raytracing_shader_table` becomes four Metal tables**, and that is a language constraint rather than a preference.
+  MSL's `visible_function_table<T>` is typed by the function signature, so one table cannot hold miss, closest-hit and callable functions.
+  Their signatures differ, and the compiler rejects calling one table two ways.
+  Each of sg's index spaces therefore gets a table of its own, and `miss_index` / `hit_index` / `callable_index` are used verbatim with no base to add.
+- **The tables reach a kernel through `sg::reserved_binding_group`**, as four members of that group's argument buffer:
+  `[[id(0)]]` intersection, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable.
+  The reservation already existed for exactly this, so nothing about what `group_index` means changes.
+  A caller still gets groups 0 to 2.
+  Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
+- **One table set per raygen**, because a function handle is minted from a specific pipeline state and this pipeline has one state per raygen shader.
+- **One `MTL::Library` per registered shader**, so a table may draw its entries from as many separate shader files as it has entries.
+  That is the realistic shape rather than a nicety: `sg::compiled_shader` is single-entry, so a real shader pipeline hands the backend one blob per shader.
+  `sg metal - a shader table is built from two separate libraries` pins it, with the miss function coming from a second metallib whose sentinel value is what says which library ran.
+- **An sg hit group splits across both kinds of table** at the same index.
+  `intersection` and `any_hit` run *during* traversal and belong in the intersection function table.
+  `closest_hit` runs after it and is called by the kernel, so it is a visible function like a miss shader.
+  A triangle group with neither gets `setOpaqueTriangleIntersectionFunction`.
+- **Dynamic linking rather than static.**
+  `raytracing_pipeline_description` already owns every shader, so static would fit.
+  It would also drop the property the handle-to-index split exists for: one pipeline backing several tables with different function sets.
+- **`max_recursion_depth` maps onto `PipelineStageDynamicLinkingDescriptor::setMaxCallStackDepth`, and recursion works.**
+  Apple's documentation for that property says to "change its value if you use recursive functions in your compute pass".
+  It covers indirect calls — visible functions, intersection functions and dynamic libraries.
+  **It defaults to 1**, so a backend that ignored the field would under-declare the stack rather than report anything.
+  The units differ from DXR's, and the mapping is the conservative direction.
+  DXR counts `TraceRay` nesting and this counts indirect-call nesting, and a recursive trace ported here spends at least one indirect call per level.
+  `sg metal - a hit function recurses through its own table to the declared depth` pins it, recursing four levels through a self-referential visible function table.
+  **The one place recursion genuinely cannot go is inside traversal.**
+  An intersection or any-hit function cannot even take an `instance_acceleration_structure` parameter, which the compiler refuses by name.
+- **`dispatch_rays` picks the threadgroup shape**, because sg's call carries none — it is a ray grid.
+  The shape comes from the pipeline's `threadExecutionWidth` and `maxTotalThreadsPerThreadgroup`.
+
+**Every intersection kind is exercised end to end**, by four tests that each dispatch two threads.
+One thread aims at the geometry and one aims past it, so the hit path and the miss path are covered together and cannot be confused.
+A hit reports its distance, a miss reports −1, and a payload nothing wrote stays 0: three distinguishable numbers, so "the wrong function ran" and "no function ran" are different failures.
+
+| test | what it proves |
+|---|---|
+| an inline ray query hits and misses | the portable shape: traversal finds the triangle, and an empty direction reports a miss |
+| dispatch_rays reaches the closest-hit and miss functions | the kernel called both through its visible function tables |
+| an any-hit function rejects a hit during traversal | the any-hit ran: same geometry and same ray as the row above, now non-opaque, reporting a miss |
+| an intersection function describes a procedural primitive | the intersection function produced the distance, which is not the AABB's own entry distance |
+| a hit function recurses through its own table to the declared depth | indirect recursion works, four levels deep |
+| a shader table is built from two separate libraries | table entries may come from different shader files |
+
+The any-hit test is the pair of the one above it rather than a standalone assertion.
+Opaque geometry reports a hit and the identical non-opaque geometry with a rejecting any-hit reports a miss, so nothing but the function could have changed the answer.
+That matters because traversal consults no any-hit function on opaque geometry at all.
+
+Writing them found real defects that compiled cleanly.
+`dispatch_rays` never set the argument table on its encoder, and its threadgroup shape ignored the grid — which Metal rejects rather than trims.
+
+**What sg cannot check, and neither can DXR.**
+On DXR the driver invokes closest-hit and miss; here the kernel must.
+One HLSL raygen plus separate miss and closest-hit entry points becomes one MSL kernel containing the traversal loop and the calls.
+Table *indices* are no less checked than on DXR.
+There `TraceRay`'s `MissShaderIndex` and hit-group offsets are equally raw indices into a table sg built.
+
+What *is* checked, since Metal has no validation-message callback to lean on:
+
+- a `functionHandle` that comes back null — an un-linked or misspelled function — fails the table build rather than becoming a wrong call at trace time;
+- handle ranges are bounds-checked against the pipeline;
+- `max_recursion_depth > 1` is refused with a message naming why.
+
+**It does not make `sv` run on macOS.**
+`sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL; nothing in the tree compiles MSL yet.
+The backend having ray tracing and the viewer working on macOS are separate milestones.
 
 ## Validation: no callback exists, so the gate is an abort
 
@@ -228,6 +314,15 @@ A handler still in flight then does nothing instead of reporting into freed memo
 
 The tier-1 suite has **no compute execution test at all** — it cannot, because bytecode is per-backend by construction — so this tier is the specification for the dispatch path.
 `double_compute.metal` is checked in beside the `double_compute.metallib.h` compiled from it, with the command line in the source's own comment.
+`raytrace.metal` is the ray-tracing fixture, one library with seven entry points.
+Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
+It is what makes the two execution tests the only thing anywhere that traces a ray on metal, since the tier-1 suite cannot.
+
+**That fixture is hand-written, and temporary.**
+The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
+The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
+Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
+`raytrace.metal`'s own comment says so, and [docs/TODO.md](../../docs/TODO.md) carries the gap.
 So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
 Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.
