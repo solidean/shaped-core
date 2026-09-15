@@ -91,6 +91,13 @@ public:
 
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const;
 
+    /// The newest submission token handed out, or `not_submitted` before anything has been submitted.
+    /// `_next_submission` is what the NEXT commit will take, so the newest issued is one below it.
+    [[nodiscard]] sg::submission_token last_issued_submission() const;
+
+    /// The epoch timeline, for a waiter that parks on it directly.
+    [[nodiscard]] MTL::SharedEvent* epoch_timeline() const { return _epoch_event; }
+
     /// The submission timeline itself, for a second queue that has to order itself behind the direct one.
     /// `metal_transfer_system` is the only caller; every other question about it is `is_submission_complete`.
     [[nodiscard]] MTL::SharedEvent* submission_timeline() const { return _submission_event; }

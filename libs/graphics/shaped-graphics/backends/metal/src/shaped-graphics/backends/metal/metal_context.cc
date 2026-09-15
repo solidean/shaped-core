@@ -31,6 +31,10 @@ metal_context::metal_context(MTL::Device* device,
     CC_ASSERT(_device != nullptr && _queue != nullptr, "a metal context needs a device and a queue");
     CC_ASSERT(_compiler != nullptr, "a metal context needs a compiler");
     _feedback = std::make_shared<metal_feedback_sink>(*this);
+
+    // The listener the completion-signal waiter arms its notifications on.
+    // Its default queue is Apple's, which is the point: a handler must run even in a build with no threads of ours.
+    _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 
 void metal_context::create_staging_rings(isize upload_bytes, isize download_bytes)
@@ -355,10 +359,20 @@ void metal_context::shutdown()
     advance_epoch();
     block_until_idle();
 
+    // Fails every completion still outstanding, so nothing parks on a timeline that is about to go.
+    stop_completion_signals();
+
     // Before the device and the queue: a handler still in flight would otherwise report into a context being torn down.
     _feedback->detach();
 
     _epochs.shutdown();
+
+    // After the epoch shutdown drained the queue, so no notification handler is still due to run.
+    if (_completion.listener != nullptr)
+    {
+        _completion.listener->release();
+        _completion.listener = nullptr;
+    }
 
     // After the drain above, so nothing in flight still names these bytes.
     _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
@@ -431,6 +445,80 @@ void metal_context::block_until_transfers_drained()
     spin([&] { return _streams.has_pending(); });
     spin([&] { return _transfers.has_pending(); });
     spin([&] { return _pending_downloads.load(std::memory_order_acquire) > 0; });
+}
+
+bool metal_context::are_transfers_drained() const
+{
+    // block_until_transfers_drained's loop condition, without the loop — the three the drain spins on, in the same
+    // order and for the same reasons.
+    return !_streams.has_pending() && !_transfers.has_pending()
+        && _pending_downloads.load(std::memory_order_acquire) == 0;
+}
+
+sg::submission_token metal_context::last_issued_submission()
+{
+    return _epochs.last_issued_submission();
+}
+
+void metal_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
+{
+    // **Two GPU timelines and a host wake, and Metal cannot wait on several at once.**
+    // Vulkan parks one `vkWaitSemaphores` with WAIT_ANY over all three; `MTL::SharedEvent::waitUntilSignaledValue`
+    // takes a single event, so a waiter built on it would miss whichever of the others fired first.
+    // What Metal has instead is `notifyListener`, which calls back when a timeline reaches a value — so every source
+    // raises one generation under one condition, and the waiter parks on that.
+    auto* const submission_event = _epochs.submission_timeline();
+    auto* const epoch_event = _epochs.epoch_timeline();
+    if (submission_event == nullptr || epoch_event == nullptr || _completion.listener == nullptr)
+        return;
+
+    auto const reached = [&]
+    {
+        return (submission != 0 && submission_event->signaledValue() >= submission)
+            || (epoch != 0 && epoch_event->signaledValue() >= epoch);
+    };
+
+    // Already satisfied, so there is nothing to arm and nothing to park on.
+    if (reached())
+        return;
+
+    // Arm each timeline at most once per target: a notification already pending for this value fires either way, and
+    // re-arming would pile up handlers that outlive the wait.
+    // The completion waiter is this seam's only caller, which is what lets the armed values live without a lock.
+    auto const arm = [this](MTL::SharedEvent* event, u64 value, u64& armed)
+    {
+        if (value == 0 || armed >= value)
+            return;
+        armed = value;
+        event->notifyListener(_completion.listener, value,
+                              [this](MTL::SharedEvent*, u64)
+                              {
+                                  // On a dispatch queue Apple owns, which SC_THREADS=OFF does not reach — so this
+                                  // mutex and condition are the real ones rather than cc::mutex's compiled-away lock.
+                                  auto const guard = std::lock_guard(_completion.mutex);
+                                  ++_completion.generation;
+                                  _completion.condition.notify_all();
+                              });
+    };
+
+    arm(submission_event, submission, _completion.armed_submission);
+    arm(epoch_event, epoch, _completion.armed_epoch);
+
+    // A GPU signal or a host wake, never a timeout.
+    // A spurious return is harmless by contract, so re-checking the timelines beside the generation costs nothing and
+    // closes the window between the check above and the park.
+    auto guard = std::unique_lock(_completion.mutex);
+    _completion.condition.wait(guard, [&] { return _completion.generation > wake_generation || reached(); });
+}
+
+void metal_context::wake_completion_signal(u64 generation)
+{
+    // The host source.
+    // Raised rather than assigned: generations are handed out strictly increasing, and a GPU handler may have raised
+    // it further already.
+    auto const guard = std::lock_guard(_completion.mutex);
+    _completion.generation = cc::max(_completion.generation, generation + 1);
+    _completion.condition.notify_all();
 }
 
 cc::result<sg::swapchain_handle> metal_context::try_create_swapchain(swapchain_description const& desc)
@@ -715,6 +803,33 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
                                                                              lifetime_scope scope)
 {
     return cc::result<sg::binding_group_handle>(create_metal_binding_group(layout, views, samplers, scope));
+}
+
+cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(binding_group_layout_handle layout,
+                                                                             cc::span<slotted_view const> views,
+                                                                             cc::span<named_sampler const> samplers,
+                                                                             lifetime_scope scope)
+{
+    // Resolved to names and handed to the one create, rather than a second write path.
+    // What the slot form saves is a string compare per binding, which is real and small; a second encoder for the
+    // argument buffer would be neither.
+    if (layout == nullptr)
+        return cc::error("binding_group: the description names no layout");
+
+    auto const bindings = layout->bindings();
+    auto named = cc::vector<sg::named_view>();
+    named.reserve(views.size());
+
+    for (auto const& v : views)
+    {
+        auto const slot = isize(u32(v.slot));
+        if (v.slot == sg::binding_slot::invalid || slot >= bindings.size())
+            return cc::error(cc::format("binding_group: slot {} is not a slot of this layout, which has {} bindings",
+                                        slot, bindings.size()));
+        named.push_back({.name = bindings[slot].name, .view = v.view});
+    }
+
+    return cc::result<sg::binding_group_handle>(create_metal_binding_group(layout, named, samplers, scope));
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,

@@ -103,6 +103,7 @@ if(SC_BUILD_TESTS)
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc
     )
+    sc_nexus_binary(shaped-graphics-metal-test KINDS tests)
 
     target_link_libraries(shaped-graphics-metal-test PRIVATE shaped-graphics-metal nexus)
 endif()

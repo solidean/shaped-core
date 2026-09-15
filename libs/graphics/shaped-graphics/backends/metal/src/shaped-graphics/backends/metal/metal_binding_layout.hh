@@ -26,19 +26,12 @@ public:
     metal_binding_group_layout(cc::hash128 structural_hash,
                                cc::vector<sg::binding> bindings,
                                cc::vector<sg::named_sampler> static_samplers)
-      : sg::binding_group_layout(structural_hash, cc::move(bindings)), _static_samplers(cc::move(static_samplers))
+      : sg::binding_group_layout(structural_hash, cc::move(bindings), cc::move(static_samplers))
     {
     }
 
-    /// The samplers the layout fixes, matched to bindings by name.
-    /// A group may not supply one of these; the layout's value is what the argument buffer gets.
-    [[nodiscard]] cc::span<sg::named_sampler const> static_samplers() const { return _static_samplers; }
-
     /// Slots the argument buffer needs: one past the highest index any binding occupies.
     [[nodiscard]] isize argument_slot_count() const;
-
-private:
-    cc::vector<sg::named_sampler> _static_samplers;
 };
 
 /// Metal implementation of sg::pipeline_layout.

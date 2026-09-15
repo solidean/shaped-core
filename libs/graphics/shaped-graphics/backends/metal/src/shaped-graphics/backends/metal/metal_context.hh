@@ -29,6 +29,8 @@
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 
 /// Per-backend creation config for the Metal context.
 ///
@@ -206,6 +208,10 @@ private:
     /// Draining the GPU is not enough on its own: a commit's feedback handler runs on a dispatch queue after the GPU
     /// finished, so a caller that only waited on the epoch fence could observe an unsettled future.
     void block_until_transfers_drained() override;
+    [[nodiscard]] bool are_transfers_drained() const override;
+    [[nodiscard]] submission_token last_issued_submission() override;
+    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
+    void wake_completion_signal(u64 generation) override;
 
     [[nodiscard]] cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc) override;
 
@@ -296,6 +302,10 @@ private:
                                                                             cc::span<named_view const> views,
                                                                             cc::span<named_sampler const> samplers,
                                                                             lifetime_scope scope) override;
+    [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                            cc::span<slotted_view const> views,
+                                                                            cc::span<named_sampler const> samplers,
+                                                                            lifetime_scope scope) override;
     [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
         binding_group_layout_handle layout,
         lifetime_scope scope) override;
@@ -316,6 +326,28 @@ private:
     MTL4::Compiler* _compiler = nullptr;
     cc::mutex<metal_staging_ring> _upload_ring;
     cc::mutex<metal_staging_ring> _download_ring;
+
+    /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.
+    ///
+    /// **A real mutex and condition even with SC_THREADS off.**
+    /// `MTL::SharedEvent::notifyListener` runs its block on a dispatch queue Apple owns, which that flag does not
+    /// reach — the same hole `callback_mutex` exists for.
+    struct completion_signal
+    {
+        std::mutex mutex;
+        std::condition_variable condition;
+        MTL::SharedEventListener* listener = nullptr;
+
+        /// The values each timeline is already armed at, so re-entering the wait re-arms nothing.
+        /// The waiter is the single caller, which is what lets these live outside the mutex.
+        u64 armed_submission = 0;
+        u64 armed_epoch = 0;
+
+        /// Raised by every wake source; the waiter parks until it moves.
+        u64 generation = 0;
+    };
+
+    mutable completion_signal _completion;
 
     /// Download copy-outs committed but not yet run, so block_until_transfers_drained knows when it is done.
     ///

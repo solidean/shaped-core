@@ -3,6 +3,8 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
@@ -117,7 +119,7 @@ TEST("sg metal - pipelines build concurrently from several contexts")
     CHECK(built.load(std::memory_order_acquire) == thread_count);
 }
 
-TEST("sg metal - a rendering scope clears and draws")
+ASYNC_TEST("sg metal - a rendering scope clears and draws")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -147,7 +149,7 @@ TEST("sg metal - a rendering scope clears and draws")
     auto future = cmd->download.bytes_from_texture(target.raw());
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -173,7 +175,7 @@ TEST("sg metal - a rendering scope clears and draws")
                             int(u8(bytes.value()[3]))));
 }
 
-TEST("sg metal - an empty rendering scope opens and closes")
+ASYNC_TEST("sg metal - an empty rendering scope opens and closes")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -196,7 +198,7 @@ TEST("sg metal - an empty rendering scope opens and closes")
         (void)scope;
     }
     ctx->submit_command_list(cc::move(cmd));
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     CHECK(!ctx->is_device_lost());
 }

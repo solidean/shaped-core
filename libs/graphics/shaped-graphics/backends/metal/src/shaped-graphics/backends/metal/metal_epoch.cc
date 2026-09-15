@@ -156,6 +156,13 @@ void metal_epoch_system::signal_submission(sg::submission_token token)
     _queue->signalEvent(_submission_event, u64(token));
 }
 
+sg::submission_token metal_epoch_system::last_issued_submission() const
+{
+    auto const next = _next_submission.load(cc::memory_order_acquire);
+    return next <= u64(sg::submission_token::first) ? sg::submission_token::not_submitted
+                                                    : sg::submission_token(next - 1);
+}
+
 bool metal_epoch_system::is_submission_complete(sg::submission_token token) const
 {
     if (token == sg::submission_token::invalid)
