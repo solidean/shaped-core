@@ -74,6 +74,9 @@ TEST("mesh - decimation holds on every model in the corpus", thorough_only)
 - **Skipped, not left out.** The test is still selected and scheduled, and its body is replaced by a `SKIP("runs only under --thorough")` that passes.
   A filter naming it in a default run therefore reports it green without running it; add `--thorough` to run it.
 - **Prefer narrowing when a narrow version exists.** A test that proves something on a smaller input keeps running on every commit, which is worth more than a skip.
+- **A test that holds the binary still for real time is the prime candidate.**
+  A live sampler, a measured benchmark loop or a hardware-counter pass is `exclusive()` or tagged, so its wall clock is everyone's.
+  Mark those `thorough_only` and leave a cheap test of the same machinery in the default run, as `bench-run-test.cc` and `record-sampling-test.cc` do.
 - **It holds at dispatch too.** An `INVOCABLE_TEST` marked `thorough_only` is skipped by `nx::invoke_tests` in a default run, whatever its driver carries.
 
 **Not yet: a skip is reported as a pass.**
@@ -92,4 +95,5 @@ uv run dev.py test --profile .tmp/dev-profile/test.json --profile-type chrome-tr
 Every test is a slice of the trace, with the thread it ran on — [Profiling a run](../../../../docs/guides/building-and-testing.md#profiling-a-run) says how to read it.
 Check the exclusion first: an `exclusive()` test holds its phase's lock alone, so nothing else in the phase runs while it does.
 Every second one of those takes is a second of the binary's wall clock — [parallel-execution](parallel-execution.md) has the locks.
+The `serial` column of `dev.py test` adds that up per binary: what ran alone, plus the largest tag group.
 A `main_thread` test runs beside the pool, but main-thread bodies share one thread, so a slow one delays the next.

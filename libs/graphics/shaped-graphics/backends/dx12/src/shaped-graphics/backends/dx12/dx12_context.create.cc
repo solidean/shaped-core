@@ -298,6 +298,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // thing anyone looks at when a program is slow to show a window.
     CC_RECORD_SCOPE("sg.context.create");
 
+    // Held across the whole creation, including a failed one destroying its half-built context; see impl/device_lifecycle.hh.
+    sg::impl::device_lifecycle_hold const lifecycle;
+
     using namespace sg::backend::dx12;
 
     // No DXGI_CREATE_FACTORY_DEBUG here, deliberately.

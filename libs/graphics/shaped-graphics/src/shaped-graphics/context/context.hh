@@ -19,6 +19,7 @@
 #include <shaped-graphics/context/device_error.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
+#include <shaped-graphics/context/impl/device_lifecycle.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/context/transient.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -37,6 +38,9 @@
 /// A backend's destructor runs shutdown() for you; call it yourself only to release the device early.
 class sg::context
 {
+    // Declared first, so it is destroyed last: a backend's teardown still releases device resources in the base's members.
+    cc::optional<impl::device_lifecycle_hold> _device_lifecycle_hold;
+
 public:
     virtual ~context();
 
@@ -299,6 +303,14 @@ public:
     [[nodiscard]] bool is_shut_down() const { return _is_shut_down; }
 
 protected:
+    /// Takes the device lifecycle lock until this context is fully destroyed, members included.
+    /// A backend's destructor calls it first; see impl/device_lifecycle.hh for the driver deadlock it exists for.
+    void hold_device_lifecycle_until_destroyed()
+    {
+        if (!_device_lifecycle_hold.has_value())
+            _device_lifecycle_hold.emplace_value();
+    }
+
     /// `accepted_shader_formats` must be non-empty, most-preferred first.
     context(backend_kind backend, thread_model threading, cc::span<shader_format const> accepted_shader_formats);
 

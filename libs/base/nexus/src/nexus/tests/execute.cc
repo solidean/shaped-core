@@ -1640,6 +1640,100 @@ int nx::test_schedule_execution::count_failed_checks() const
     return failed;
 }
 
+nx::test_serial_time nx::test_schedule_execution::serial_time() const
+{
+    struct group
+    {
+        cc::string_view name;
+        double seconds = 0;
+    };
+    struct phase_span
+    {
+        nx::config::scheduler_mode mode;
+        nx::config::ambient_mode ambient;
+        int threads = 0;
+        double start = 0;
+        double end = 0;
+    };
+
+    auto result = nx::test_serial_time();
+    auto groups = cc::vector<group>();
+    auto spans = cc::vector<phase_span>();
+
+    auto const add_to_group = [&](cc::string_view name, double seconds)
+    {
+        for (auto& g : groups)
+            if (g.name == name)
+            {
+                g.seconds += seconds;
+                return;
+            }
+        groups.push_back({.name = name, .seconds = seconds});
+    };
+
+    // Top-level executions only: a dispatched child runs inside its driver's interval and under its driver's locks.
+    for (auto const& exec : executions)
+    {
+        if (exec.started_at_steady_s <= 0 || exec.finished_at_steady_s < exec.started_at_steady_s)
+            continue;
+        CC_ASSERT(exec.instance.declaration != nullptr, "instances must be valid");
+        auto const& cfg = exec.instance.declaration->test_config;
+
+        // A span rather than a sum: an own_pool phase overlaps its own tests.
+        if (cfg.scheduler != nx::config::scheduler_mode::shared)
+        {
+            auto* span = static_cast<phase_span*>(nullptr);
+            for (auto& s : spans)
+                if (s.mode == cfg.scheduler && s.ambient == cfg.ambient && s.threads == cfg.scheduler_threads)
+                    span = &s;
+            if (span == nullptr)
+            {
+                spans.push_back({.mode = cfg.scheduler,
+                                 .ambient = cfg.ambient,
+                                 .threads = cfg.scheduler_threads,
+                                 .start = exec.started_at_steady_s,
+                                 .end = exec.finished_at_steady_s});
+                continue;
+            }
+            span->start = cc::min(span->start, exec.started_at_steady_s);
+            span->end = cc::max(span->end, exec.finished_at_steady_s);
+            continue;
+        }
+
+        auto const seconds = exec.finished_at_steady_s - exec.started_at_steady_s;
+        if (cfg.exclusive_global)
+        {
+            result.alone_s += seconds;
+            continue;
+        }
+
+        // An async body gives the main thread back at every suspend, so only a synchronous one holds it for its whole interval.
+        if (cfg.main_thread && !exec.instance.declaration->is_async())
+            add_to_group("main_thread", seconds);
+        auto const tag_count = cc::min(cfg.exclusion_tag_count, nx::config::max_exclusion_tags);
+        for (auto t = 0; t < tag_count; ++t)
+        {
+            // A tag repeated on one test is still one lock.
+            auto const tag = cc::string_view(cfg.exclusion_tags[t]);
+            auto repeated = false;
+            for (auto u = 0; u < t; ++u)
+                repeated |= cc::string_view(cfg.exclusion_tags[u]) == tag;
+            if (!repeated)
+                add_to_group(tag, seconds);
+        }
+    }
+
+    for (auto const& s : spans)
+        result.alone_s += s.end - s.start;
+    for (auto const& g : groups)
+        if (g.seconds > result.largest_group_s)
+        {
+            result.largest_group = g.name;
+            result.largest_group_s = g.seconds;
+        }
+    return result;
+}
+
 void nx::impl::run_test_body(nx::test_execution& execution,
                              nx::test_schedule_config const& config,
                              cc::function_ref<void()> body,
@@ -2101,14 +2195,19 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         // Exclusion is LOCKS, taken by the node before its body and released when it resolves.
         // Every test holds the phase's shared lock, exclusive() holds it alone, and each tag is a mutex of its own.
         // Tags are taken in name order after the global lock, one at a time, which is what rules out a lock-order deadlock between two multi-tag tests.
-        // Holders are served in arrival order, so -jN no longer fixes their order; -j1 still runs everything in schedule order.
+        // Holders are served in arrival order, so -jN no longer fixes their order; -j1 still runs each batch in schedule order.
         // Declared ahead of the nodes, which must all have released before the locks go away.
+        //
+        // exclusive() tests run as a second batch, once every other test of the phase has finished.
+        // Interleaved, each one would split the phase into waves as long as their slowest test.
+        // The lock is writer-preferring, so a waiting exclusive() holds back every test arriving after it.
         phase_locks locks;
         main_body_queue main_bodies;
         auto phase_has_main_thread = false;
 
-        cc::vector<cc::shared_async<cc::unit>> test_nodes;
-        test_nodes.reserve(phase.indices.size());
+        cc::vector<cc::shared_async<cc::unit>> shared_nodes;
+        cc::vector<cc::shared_async<cc::unit>> exclusive_nodes;
+        shared_nodes.reserve(phase.indices.size());
 
         for (auto const i : phase.indices)
         {
@@ -2211,12 +2310,12 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                         cc::unit{}); // terminal: nothing may follow it, and the locks go with the frame
                 });
 
-            test_nodes.push_back(cc::move(node));
+            (test_config.exclusive_global ? exclusive_nodes : shared_nodes).push_back(cc::move(node));
         }
 
         if (jobs <= 1)
         {
-            // Serial: drive one node at a time, so the run order IS the schedule order.
+            // Serial: drive one node at a time, so the run order IS the schedule order within each batch.
             // Not a fan-out join with an st scheduler — a join picks whichever pending dependency it likes, and a chain of edges
             // would drive the whole schedule depth-first past the inline depth cap.
             //
@@ -2224,23 +2323,11 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             // blocked on it would run other tests, bodies and all, nested inside itself.
             cc::singlethreaded_scheduler driver;
             cc::async_worker_scope const scope(driver);
-            for (auto const& node : test_nodes)
-                drive_serially(driver, *node);
+            for (auto const* const batch : {&shared_nodes, &exclusive_nodes})
+                for (auto const& node : *batch)
+                    drive_serially(driver, *node);
             continue;
         }
-
-        // Parallel: one join requiring every test node, driven on a pool.
-        // Requires everything again on each poll rather than assuming a wake means all-ready — idempotent, and it costs one pass over a vector we already hold.
-        auto const join = cc::make_async_lazy<cc::unit>(
-            [nodes = cc::move(test_nodes)](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-            {
-                auto all_ready = true;
-                for (auto const& n : nodes)
-                    all_ready = actx.require(n) && all_ready; // never short-circuit: every dependency must be registered
-                if (!all_ready)
-                    return actx.wait_for_dependencies();
-                return actx.resolve_to_value(cc::unit{});
-            });
 
         // One fewer worker than the job count: the thread driving here participates as one, or runs main_thread bodies.
         // It is the phase's ambient scheduler too, so a body's own async work belongs to the pool already running it —
@@ -2248,31 +2335,52 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         cc::async_thread_pool pool(jobs - 1);
         scoped_ambient_override const overridden(&pool);
 
-        if (!phase_has_main_thread)
+        for (auto* const batch : {&shared_nodes, &exclusive_nodes})
         {
-            (void)cc::async_blocking_get_on(pool, join);
-            continue;
-        }
+            if (batch->empty())
+                continue;
 
-        // The run thread as a main loop: it runs handed-over main_thread bodies and pumps the main thread, and the pool runs the rest.
-        // A main_thread body therefore runs at loop level, where its own waits still service the main home.
-        join->schedule_on(pool);
-        auto& main_home = cc::main_thread_scheduler();
-        // The main thread's loop drives pumps, which is what a main_thread async test awaiting an unthreaded component
-        // relies on; a handed-over body wakes the main home too.
-        auto parker = cc::impl::async_parker(*join, &main_home, true);
-        while (!join->is_ready())
-        {
-            if (main_bodies.run_one(config))
+            // Parallel: one join requiring every node of the batch, driven on the pool.
+            // Requires everything again on each poll rather than assuming a wake means all-ready — idempotent, and it costs one pass over a vector we already hold.
+            auto const join = cc::make_async_lazy<cc::unit>(
+                [nodes = cc::move(*batch)](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+                {
+                    auto all_ready = true;
+                    for (auto const& n : nodes)
+                        all_ready
+                            = actx.require(n) && all_ready; // never short-circuit: every dependency must be registered
+                    if (!all_ready)
+                        return actx.wait_for_dependencies();
+                    return actx.resolve_to_value(cc::unit{});
+                });
+
+            if (!phase_has_main_thread)
+            {
+                (void)cc::async_blocking_get_on(pool, join);
                 continue;
-            if (cc::pump_main_thread())
-                continue;
+            }
+
+            // The run thread as a main loop: it runs handed-over main_thread bodies and pumps the main thread, and the pool runs the rest.
+            // A main_thread body therefore runs at loop level, where its own waits still service the main home.
+            join->schedule_on(pool);
+            auto& main_home = cc::main_thread_scheduler();
+            // The main thread's loop drives pumps, which is what a main_thread async test awaiting an unthreaded component
+            // relies on; a handed-over body wakes the main home too.
+            auto parker = cc::impl::async_parker(*join, &main_home, true);
+            while (!join->is_ready())
+            {
+                if (main_bodies.run_one(config))
+                    continue;
+                if (cc::pump_main_thread())
+                    continue;
 #if !CC_HAS_THREADS
-            // This thread is the only one there is, and it just found nothing to run: whatever the join waits on can never arrive.
-            CC_ASSERT(false, "a main_thread phase cannot progress: every test still pending waits on something no pump "
-                             "will run");
+                // This thread is the only one there is, and it just found nothing to run: whatever the join waits on can never arrive.
+                CC_ASSERT(false,
+                          "a main_thread phase cannot progress: every test still pending waits on something no pump "
+                          "will run");
 #endif
-            parker.park();
+                parker.park();
+            }
         }
     }
 

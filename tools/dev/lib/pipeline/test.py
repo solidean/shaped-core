@@ -108,6 +108,10 @@ def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> No
         extra = {"binary": binary, "preset": preset, "thread": t.get("thread"), "failed": t.get("failed", False)}
         if children > 0:
             extra["children"] = children
+        # What serializes the test, so a slice in the trace says why nothing ran beside it.
+        for key in ("exclusive", "main_thread", "tags", "phase"):
+            if key in t:
+                extra[key] = t[key]
         jobs.append(profile.Job(
             name=t["name"], type="testcase-driver" if children > 0 else "testcase",
             start=float(t["start"]), end=float(t["end"]), extra=extra, container=children > 0,
@@ -278,6 +282,9 @@ def test(
                             "cpu_load": summary.cpu_load,
                             "cores_used": summary.cores_used,
                             "peak_resident_bytes": summary.peak_resident_bytes,
+                            "serial_s": summary.serial_s,
+                            "serial_group": summary.serial_group,
+                            "serial_group_s": summary.serial_group_s,
                         }
                         if summary
                         else None

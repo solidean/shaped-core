@@ -12,6 +12,7 @@ namespace nx
 /// "thread" is the cc::current_thread_id() counter the body started on, and a test that never started is omitted.
 /// "children" is present only on a test that dispatched children, and counts its direct ones.
 /// Such an entry's interval encloses its children's, so a consumer summing durations must treat it as a container, not a leaf.
+/// What serializes a test is present only where it does: "exclusive", "main_thread", "tags", and "phase" for a test outside the shared phase.
 /// `dev.py test --profile` consumes it to draw each test as its own slice of the run's trace.
 cc::string write_timings_json(cc::string_view suite_name, test_schedule_execution const& execution);
 } // namespace nx

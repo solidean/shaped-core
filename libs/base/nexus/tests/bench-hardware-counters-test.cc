@@ -33,7 +33,7 @@ void run_workload(u64 iterations)
 }
 } // namespace
 
-TEST("nexus bench - hardware counters query and measure", exclusive("nx-hw-counters"))
+TEST("nexus bench - hardware counters query and measure", exclusive("nx-hw-counters"), thorough_only)
 {
     using nx::bench::hw_counter;
 
@@ -103,7 +103,7 @@ TEST("nexus bench - list hardware counters", nx::config::manual)
     nx::bench::print_hw_counters();
 }
 
-TEST("nexus bench - an explicit counter set is honored and the body runs once", exclusive("nx-hw-counters"))
+TEST("nexus bench - an explicit counter set is honored and the body runs once", exclusive("nx-hw-counters"), thorough_only)
 {
     using nx::bench::hw_counter;
 
@@ -118,7 +118,7 @@ TEST("nexus bench - an explicit counter set is honored and the body runs once", 
     CHECK(m.samples[1].id == hw_counter::instructions_retired);
 }
 
-TEST("nexus bench - measure_all gathers every available counter across passes", exclusive("nx-hw-counters"))
+TEST("nexus bench - measure_all gathers every available counter across passes", exclusive("nx-hw-counters"), thorough_only)
 {
     using nx::bench::hw_counter;
 

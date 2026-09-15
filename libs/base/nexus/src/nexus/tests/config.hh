@@ -218,7 +218,8 @@ constexpr struct
 
 // No two tests holding `tag` run at the same time; with no tag, this test runs alone, concurrent with nothing.
 // Expressed as locks the test node takes before its body: one async mutex per tag, and a phase-wide shared lock that this holds exclusively.
-// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs each phase in schedule order.
+// Holders are served in arrival order, so under -jN they run in no fixed order; -j1 still runs each batch in schedule order.
+// An untagged exclusive() runs after every other test of its phase, so it never splits the phase into waves.
 // Repeat it to hold several tags — they are taken in name order, which keeps two multi-tag tests from deadlocking.
 constexpr auto exclusive(char const* tag = nullptr)
 {

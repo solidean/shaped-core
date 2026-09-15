@@ -10,7 +10,6 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 
 
 namespace sg::backend::vulkan
@@ -393,9 +392,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 {
     using namespace sg::backend::vulkan;
 
-    // Excludes every ray-tracing pipeline build in the process for the duration; see vulkan_driver_lock.hh.
+    // Excludes every other device creation and teardown, and every ray-tracing driver call, in the process for the
+    // duration; see shaped-graphics/context/impl/device_lifecycle.hh.
     // Held across instance AND device creation, since the deadlock is against either.
-    scoped_device_lifecycle const driver_guard;
+    sg::impl::device_lifecycle_hold const lifecycle;
 
     // Validation is best-effort: enabled only when both the layer and VK_EXT_debug_utils are present.
     bool const enable_validation

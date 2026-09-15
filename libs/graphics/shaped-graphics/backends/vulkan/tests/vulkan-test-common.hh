@@ -31,7 +31,7 @@ inline void fail_on_validation_messages(vulkan_context& ctx)
 /// A fresh context with validation, sync validation and the fail-on-validation listener, or nullptr on a host with no Vulkan device.
 ///
 /// The caller takes `exclusive("vulkan-device")`.
-/// Device creation and teardown are serialized process-wide (vulkan_driver_lock.hh), and a teardown slows with every other device still alive.
+/// Device creation and teardown are serialized process-wide (shaped-graphics/context/impl/device_lifecycle.hh), and a teardown slows with every other device still alive.
 ///
 /// Synchronization validation is forced on here rather than defaulted, so a caller passing its own config still gets it.
 /// It is the only check that sees a hazard between two submissions.

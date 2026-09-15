@@ -45,15 +45,15 @@ void cache_fixture::reopen(cc::function_ref<void(cache_config&)> configure)
 {
     _cache = nullptr;
 
-    auto config = cache_config{.path = _path, .unthreaded = true};
+    auto config = cache_config{.path = _path, .unthreaded = false};
     config.wall_clock = [clock = _clock] { return clock->now(); };
     config.steady_clock = [clock = _clock] { return clock->now(); };
     config.on_storage_error
         = [reported = _reported](cc::string_view message) { reported->push_back(cc::string(message)); };
 
     // No automatic GC pass unless a test asks for one.
-    // The main loop sweeps the store whenever it has work, so a pass the clock makes due can run between a test's
-    // advance and its own collect_garbage, and take the expiries that call was meant to count.
+    // The actor processes whenever it has work, so a pass the clock makes due can run between a test's advance and
+    // its own collect_garbage, and take the expiries that call was meant to count.
     config.gc_interval_secs = 1e9;
     configure(config);
 
@@ -63,7 +63,7 @@ void cache_fixture::reopen(cc::function_ref<void(cache_config&)> configure)
 
 cc::unique_ptr<blob_cache> cache_fixture::open_second()
 {
-    auto config = cache_config{.path = _path, .unthreaded = true};
+    auto config = cache_config{.path = _path, .unthreaded = false};
     config.wall_clock = [clock = _clock] { return clock->now(); };
     config.steady_clock = [clock = _clock] { return clock->now(); };
 

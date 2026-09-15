@@ -17,6 +17,7 @@ struct recorded_metric;
 struct test_error;
 struct test_execution;
 struct test_schedule_execution;
+struct test_serial_time;
 struct test_run_resources;
 } // namespace nx
 
@@ -128,6 +129,24 @@ struct nx::test_schedule_execution
     [[nodiscard]] int count_failed_tests() const;
     [[nodiscard]] int count_total_checks() const;
     [[nodiscard]] int count_failed_checks() const;
+
+    /// The floor of this run that no scheduling could have overlapped, read off where each top-level test sat and what it held.
+    [[nodiscard]] test_serial_time serial_time() const;
+};
+
+/// How much of a run was serial by declaration rather than by accident — what no --jobs could have shortened.
+struct nx::test_serial_time
+{
+    /// Tests that overlapped nothing: exclusive() in the shared phase, plus the whole span of every other phase.
+    /// Phases run one after another, so a no_scheduler, singlethreaded or own_pool test is alone relative to the shared phase.
+    double alone_s = 0;
+
+    /// The exclusion group whose holders took longest in sum: a tag, or "main_thread", whose bodies share the one run thread.
+    /// Groups exclude only their own holders, so the groups run beside each other and only the largest adds to the floor.
+    cc::string largest_group;
+    double largest_group_s = 0;
+
+    [[nodiscard]] double total_s() const { return alone_s + largest_group_s; }
 };
 
 /// What a run cost the machine, measured around execute_tests by nx::run.

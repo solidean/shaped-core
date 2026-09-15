@@ -3,6 +3,8 @@
 #include <babel-data/data/json.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/common/utility.hh>
+#include <nexus/tests/config.hh>
 
 namespace
 {
@@ -32,6 +34,23 @@ void emit_test(babel::json::array_writer& tests,
         t.write("failed", exec.is_considered_failing());
         if (!exec.nested.empty())
             t.write("children", exec.nested.size());
+
+        auto const& cfg = exec.instance.declaration->test_config;
+        if (cfg.exclusive_global)
+            t.write("exclusive", true);
+        if (cfg.main_thread)
+            t.write("main_thread", true);
+        if (cfg.exclusion_tag_count > 0)
+        {
+            auto tags = t.write_array("tags");
+            for (auto i = 0; i < cc::min(cfg.exclusion_tag_count, nx::config::max_exclusion_tags); ++i)
+                tags.write(cc::string_view(cfg.exclusion_tags[i]));
+        }
+        if (cfg.scheduler == nx::config::scheduler_mode::own_pool)
+            t.write("phase", "own_pool");
+        else if (cfg.scheduler == nx::config::scheduler_mode::none)
+            t.write("phase",
+                    cfg.ambient == nx::config::ambient_mode::single_threaded ? "singlethreaded" : "no_scheduler");
     }
 
     auto const child_prefix = name + " / ";

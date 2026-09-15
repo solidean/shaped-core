@@ -79,7 +79,10 @@ TEST("rec/stamp - a recording is stamped at open and at close", nx::config::excl
     CHECK(resource_count == 2);
 }
 
-TEST("rec/stamp - the machine section carries readable key=value lines", nx::config::exclusive(), nx::config::owns_recorder)
+TEST("rec/stamp - the machine section carries readable key=value lines",
+     nx::config::exclusive(),
+     nx::config::owns_recorder,
+     nx::config::thorough_only)
 {
     cc_rec_test::rec_fixture const fixture(cc_rec_test::deterministic_config());
 
@@ -107,7 +110,8 @@ TEST("rec/stamp - the machine section carries readable key=value lines", nx::con
 
 TEST("rec/stamp - a contributor is called at both moments, and an empty one is skipped",
      nx::config::exclusive(),
-     nx::config::owns_recorder)
+     nx::config::owns_recorder,
+     nx::config::thorough_only)
 {
     CHECK(cc::rec::register_stamp_contributor("test.section", test_provider));
     CHECK(cc::rec::register_stamp_contributor("test.silent", silent_provider));

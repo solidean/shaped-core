@@ -32,7 +32,7 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 
 // Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
-TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, after the rest of its phase
 TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — NO ambient scheduler at all: none bound, none
                                          //     installed. For a test standing up its own, and REQUIRED to nest
                                          //     nx::execute_tests. Touching an async without one asserts.
