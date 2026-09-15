@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_transfer_window_log.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
@@ -132,6 +133,9 @@ private:
 class sg::backend::vulkan::vulkan_download_async_system
 {
 public:
+    /// The last windows this system submitted, one line each, for a validation hazard to be read against.
+    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async download"); }
+
     [[nodiscard]] cc::result<cc::unit> initialize(vulkan_context& ctx, isize window_bytes);
 
     /// The streaming twin of download_buffer: it stamps only the lifetime value, so a later command list waits on
@@ -214,6 +218,8 @@ private:
     /// Window sharing and job selection, identical to the upload side's.
     /// Its `family` rule is what keeps two readbacks of one source in sequence order.
     sg::impl::transfer_scheduler _scheduler;
+
+    vulkan_transfer_window_log _window_log;
 
     /// Monotonic, actor-local, so the scheduler can order within a family.
     u64 _next_sequence = 0;

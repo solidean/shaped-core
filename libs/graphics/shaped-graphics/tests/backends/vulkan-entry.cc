@@ -32,12 +32,17 @@ namespace vulkan = sg::backend::vulkan;
 // The context is the driver's own, so the captured driver is released with it, before the driver ends.
 void fail_on_validation_messages(sg::context_handle const& ctx)
 {
-    static_cast<vulkan::vulkan_context&>(*ctx).set_message_callback(
-        [driver = nx::capture_current_test()](vulkan::vulkan_message_severity severity, cc::string_view message)
+    auto& vk = static_cast<vulkan::vulkan_context&>(*ctx);
+    vk.set_message_callback(
+        [&vk, driver = nx::capture_current_test()](vulkan::vulkan_message_severity severity, cc::string_view message)
         {
-            if (severity <= vulkan::vulkan_message_severity::warning)
-                nx::with_fallback_test(driver,
-                                       [&] { CHECK(false).context(cc::format("vulkan validation: {}", message)); });
+            if (severity > vulkan::vulkan_message_severity::warning)
+                return;
+
+            // A hazard between two copies is only diagnosable with their ranges and order, which the message lacks.
+            auto const windows = message.contains("_AFTER_WRITE") ? vk.describe_recent_transfer_windows() : cc::string();
+            nx::with_fallback_test(
+                driver, [&] { CHECK(false).context(cc::format("vulkan validation: {}\n{}", message, windows)); });
         });
 }
 } // namespace

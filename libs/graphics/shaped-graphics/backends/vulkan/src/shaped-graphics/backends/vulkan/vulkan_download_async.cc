@@ -413,6 +413,20 @@ bool vulkan_download_async_system::run_one_window()
             [&](int&) { return vkQueueSubmit(_ctx->download_queue(), 1, &submit, VK_NULL_HANDLE); });
         CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async download) failed");
 
+        _window_log.note({
+            .window_value = _window_next_value,
+            .slot = slot,
+            .sequence = job.sequence,
+            .destination = job.is_texture ? u64(reinterpret_cast<uintptr_t>(texture->_image))
+                                          : u64(reinterpret_cast<uintptr_t>(source->_buffer)),
+            .is_texture = job.is_texture,
+            .offset = i64(job.src_offset + done - chunk),
+            .bytes = i64(chunk),
+            .wait_token = job.wait_token != sg::submission_token::not_submitted ? u64(job.wait_token) : 0,
+            .cross_wait_value = job.upload_wait.is_pending() ? job.upload_wait.value : 0,
+            .completion_value = signal_count == 2 ? signal_values[1] : 0,
+        });
+
         // Yield before blocking.
         // Where this actor has no thread of its own it runs on whoever swept the pump registry, so blocking here
         // would stall every other cooperative worker along with it — including whatever the copy is waiting on.

@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_transfer_window_log.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/impl/transfer_ambient.hh>
@@ -222,6 +223,9 @@ public:
 
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 
+    /// The last windows this system submitted, one line each, for a validation hazard to be read against.
+    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async upload"); }
+
     // --- actor-facing ------------------------------------------------------------------------------
     // Called only from the copy actor thread, so none of it needs a lock.
 
@@ -314,6 +318,8 @@ private:
 
     /// Which job fills the open window next, and how windows are shared between the two tiers.
     sg::impl::transfer_scheduler _scheduler;
+
+    vulkan_transfer_window_log _window_log;
 
     /// Outstanding uploads, counted from admission to the completion of the window that carried them.
     sg::impl::transfer_drain _drain;

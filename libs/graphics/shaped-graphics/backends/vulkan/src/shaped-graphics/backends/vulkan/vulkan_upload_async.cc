@@ -623,6 +623,20 @@ bool vulkan_upload_async_system::run_one_window()
         = _ctx->queue_guard().lock([&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
     CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
 
+    _window_log.note({
+        .window_value = _window_next_value,
+        .slot = slot,
+        .sequence = job.sequence,
+        .destination = job.is_texture ? u64(reinterpret_cast<uintptr_t>(texture->_image))
+                                      : u64(reinterpret_cast<uintptr_t>(target->_buffer)),
+        .is_texture = job.is_texture,
+        .offset = i64(dst_offset),
+        .bytes = i64(chunk_bytes),
+        .wait_token = job.wait_token != sg::submission_token::not_submitted ? u64(job.wait_token) : 0,
+        .cross_wait_value = job.download_wait.is_pending() ? job.download_wait.value : 0,
+        .completion_value = signal_count == 2 ? signal_values[1] : 0,
+    });
+
     if (job.stream != nullptr)
         job.stream->bytes_done.fetch_add(i64(chunk_bytes), std::memory_order_relaxed);
 
