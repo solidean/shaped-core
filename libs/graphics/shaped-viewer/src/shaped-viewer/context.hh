@@ -51,7 +51,8 @@ namespace impl
 
 /// Completes once the background work started so far against `ctx` has settled, whether it succeeded or failed.
 ///
-/// That is `ctx.backlog`, every shader the viewer's shader library handed out, and the stores the default blob cache queued for them.
+/// It also waits on process-wide work such as shader compiles and cache writes, so it may wait for work another context started.
+/// What it covers beyond that is internal.
 /// Such work outlives the frame that started it, so a loop or a test that must leave nothing running awaits this before it ends.
 /// **Lazy**: start it after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.
 [[nodiscard]] cc::shared_async<cc::unit> background_work(sg::context& ctx);

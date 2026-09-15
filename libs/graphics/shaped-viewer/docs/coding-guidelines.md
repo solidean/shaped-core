@@ -14,6 +14,6 @@ sv's tests follow sg's [Devices and adapters](../../shaped-graphics/docs/testing
 [tests/dx12-entry.cc](../tests/dx12-entry.cc) brings up one context per adapter and invokes every `INVOCABLE_TEST("sv - …", (sg::context_handle const& ctx_h))` against it.
 So a new GPU test is an invocable by default, and `dev.py test "sv - <name>"` still selects it alone, on both adapters.
 The invocables run one after another on that context, so a test leaves nothing behind: no open command list, and no compile it started still running.
-A test that traced ends with `sv_test::drain_ambient_work(ctx)`, which waits out `sv::background_work`: the compiles, pipeline builds and cache stores the frames detached, which no queue shows.
+A test that traced ends with `sv_test::drain_ambient_work(ctx)`, which waits out `sv::background_work`: work the frames detached, which no queue shows.
 A test creates its own context only when the context is its subject, as `sv::set_acquire_context` is.
 The hardware adapter is the default, WARP runs only where there is none or under `--thorough`, and a test passes on either.

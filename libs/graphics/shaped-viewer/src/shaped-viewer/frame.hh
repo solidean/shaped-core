@@ -89,6 +89,7 @@ public:
     [[nodiscard]] isize pending_resource_work() const;
 
     /// `sv::background_work` for the context this viewer draws on.
+    /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.
     /// **Lazy**: start it with `cc::async_start` after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();
 
