@@ -125,6 +125,16 @@ struct sv::quadric_primitive
     [[nodiscard]] tg::vec3f normal_at(tg::pos3f const& p) const;
 };
 
+namespace sv
+{
+// A set's content hash is taken over the raw bytes of its primitives, so a padding hole would feed indeterminate bytes into a
+// cache key — two identical sets could then hash differently and upload twice.
+// Every member is 4-byte aligned and the total is their exact sum, so there is no hole; this is what says so out loud.
+static_assert(sizeof(quadric_primitive) == 12 + 40 + 40 + 24,
+              "quadric_primitive must stay padding-free — see quadric_set::add");
+static_assert(sizeof(quadric3) == 40, "quadric3 must stay padding-free");
+} // namespace sv
+
 /// What a ray hit on a quadric primitive is: how far along, and the outward unit normal there.
 struct sv::quadric_hit
 {
