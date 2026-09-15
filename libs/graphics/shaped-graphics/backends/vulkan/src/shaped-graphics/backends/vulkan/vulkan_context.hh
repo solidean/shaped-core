@@ -128,7 +128,11 @@ public:
     // A lost device makes the drain inside shutdown() throw sg::device_lost_exception, and a destructor reached while
     // that same exception is unwinding would then call std::terminate — turning a recoverable device loss into an
     // abort with no diagnostic, at the exact moment the caller's handler was about to run.
-    ~vulkan_context() override { shutdown_no_throw(); }
+    ~vulkan_context() override
+    {
+        hold_device_lifecycle_until_destroyed();
+        shutdown_no_throw();
+    }
 
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;

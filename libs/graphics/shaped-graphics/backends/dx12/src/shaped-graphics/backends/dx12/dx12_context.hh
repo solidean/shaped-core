@@ -155,7 +155,12 @@ public:
     {
     }
 
-    ~dx12_context() override { shutdown(); } // runs shutdown() before the base dtor asserts it
+    // Runs shutdown() before the base dtor asserts it, under the device lifecycle lock until the members are gone too.
+    ~dx12_context() override
+    {
+        hold_device_lifecycle_until_destroyed();
+        shutdown();
+    }
 
     /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
     /// A build_blas / build_tlas requires a supported device.

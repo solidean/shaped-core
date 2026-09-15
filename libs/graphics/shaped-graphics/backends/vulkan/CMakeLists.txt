@@ -10,7 +10,6 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.cc
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
-    src/shaped-graphics/backends/vulkan/vulkan_driver_lock.cc
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
     src/shaped-graphics/backends/vulkan/vulkan_query.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.queries.cc
@@ -54,7 +53,6 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
-    src/shaped-graphics/backends/vulkan/vulkan_driver_lock.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
     src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh

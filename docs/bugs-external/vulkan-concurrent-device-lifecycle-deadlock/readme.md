@@ -70,12 +70,12 @@ Attach a debugger before the harness kills it if you want the stacks yourself.
 
 The exclusion lives in the library rather than in the test suite, because the constraint is the driver's and applies to any application on this hardware.
 
-`vulkan_driver_lock.hh` holds a process-global `std::shared_mutex` with two guards, and the matrix above is what makes it a reader/writer lock rather than a mutex:
+[device_lifecycle.hh](../../../libs/graphics/shaped-graphics/src/shaped-graphics/context/impl/device_lifecycle.hh) holds a process-global `std::shared_mutex` with two guards, and the matrix above is what makes it a reader/writer lock rather than a mutex:
 concurrent device create/destroy alone is fine, concurrent ray-tracing builds alone are fine, and only the two together hang.
 
-- `scoped_raytracing_build` takes it **shared**, around `vkCreateRayTracingPipelinesKHR`.
+- `sg::impl::raytracing_driver_hold` takes it **shared**, around `vkCreateRayTracingPipelinesKHR`, and around the D3D12 prebuild, build and state-object calls.
   Builds still run in parallel with each other, which is the case that costs wall-clock.
-- `scoped_device_lifecycle` takes it **exclusive**, across instance and device creation in `create_vulkan_context` and across the whole of `vulkan_context::shutdown`.
+- `sg::impl::device_lifecycle_hold` takes it **exclusive**, across context creation and the whole of context teardown, in both backends.
   A process creates a handful of devices, so the exclusive side is nearly free.
 
 Shutdown takes it for the whole teardown rather than around `vkDestroyDevice` alone: the drain above it submits, and a build starting in that window would reopen the hole.
@@ -90,4 +90,5 @@ It removes the deadlock for anything going through sg, and an application reachi
 ## What to check when a new NVIDIA driver lands
 
 Run `run.py`.
-If `churn + raytracing pipelines` reports `ok` across several attempts, the driver is fixed: delete vulkan_driver_lock.hh/.cc and its three call sites, and this directory with them.
+If `churn + raytracing pipelines` reports `ok` across several attempts, the driver is fixed: the Vulkan half of `device_lifecycle.hh` is no longer needed, and this directory with it.
+The lock is shared with dx12 for the same driver's cross-API variant, a Vulkan device destroyed beside D3D12 teardown or a BLAS build, which this repro does not cover.

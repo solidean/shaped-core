@@ -4,7 +4,6 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
@@ -146,10 +145,10 @@ void vulkan_context::shutdown()
     if (_is_shut_down)
         return;
 
-    // The teardown half of the same exclusion the creation path takes; see vulkan_driver_lock.hh.
+    // The teardown half of the exclusion the creation path takes; see shaped-graphics/context/impl/device_lifecycle.hh.
     // Taken for the whole shutdown rather than around vkDestroyDevice alone: the drain above it submits, and a
     // ray-tracing build starting between the drain and the destroy would reopen the window.
-    scoped_device_lifecycle const driver_guard;
+    sg::impl::device_lifecycle_hold const lifecycle;
 
     // Release per-context routine instances first: they may cache epoch/allocator-managed resources
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.

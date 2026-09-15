@@ -3,6 +3,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/dx12/dx12_pipeline_layout.hh>
 #include <shaped-graphics/backends/dx12/dx12_raytracing_pipeline.hh>
+#include <shaped-graphics/context/impl/device_lifecycle.hh>
 
 
 namespace sg::backend::dx12
@@ -235,7 +236,13 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
 
     auto pipeline = std::make_shared<dx12_raytracing_pipeline>();
     pipeline->layout = cc::move(layout);
-    if (HRESULT hr = device5->CreateStateObject(&state_object_desc, IID_PPV_ARGS(&pipeline->state_object)); FAILED(hr))
+    auto hr = HRESULT();
+    {
+        // A ray-tracing driver call; see shaped-graphics/context/impl/device_lifecycle.hh.
+        sg::impl::raytracing_driver_hold const driver_guard;
+        hr = device5->CreateStateObject(&state_object_desc, IID_PPV_ARGS(&pipeline->state_object));
+    }
+    if (FAILED(hr))
         return dx12_error(hr, "ID3D12Device5::CreateStateObject failed");
 
     ComPtr<ID3D12StateObjectProperties> props;

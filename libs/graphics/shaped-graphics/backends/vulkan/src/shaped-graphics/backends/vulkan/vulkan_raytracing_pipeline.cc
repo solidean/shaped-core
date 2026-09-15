@@ -2,9 +2,9 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::memcpy
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/context/impl/device_lifecycle.hh>
 
 namespace sg::backend::vulkan
 {
@@ -195,10 +195,10 @@ cc::result<vulkan_raytracing_pipeline_handle> vulkan_raytracing_pipeline::create
     };
 
     // Shared, so builds still run in parallel with each other; what it excludes is device creation and teardown.
-    // See vulkan_driver_lock.hh for the driver deadlock this exists for.
+    // See shaped-graphics/context/impl/device_lifecycle.hh for the driver deadlock this exists for.
     VkResult r = VK_SUCCESS;
     {
-        scoped_raytracing_build const driver_guard;
+        sg::impl::raytracing_driver_hold const driver_guard;
         r = ctx._raytracing_functions.create_raytracing_pipelines(ctx._device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &info,
                                                                   nullptr, &pipeline->_pipeline);
     }
