@@ -16,6 +16,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [libspng](https://libspng.org) | v0.7.4 | `BSD-2-Clause AND libpng-2.0` | babel-serializer — the PNG codec behind babel::png | [libspng.txt](libspng.txt), [libspng-libpng.txt](libspng-libpng.txt) |
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |
 | [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls) | v3.6.7 | `Apache-2.0` | clean-net — the TLS handshake and record layer behind cnet's TLS connections | [mbedtls.txt](mbedtls.txt) |
+| [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++ | [metal-cpp.txt](metal-cpp.txt) |
 | [mimalloc](https://github.com/microsoft/mimalloc) | v3.3.2 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
 | [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |

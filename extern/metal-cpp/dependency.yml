@@ -1,0 +1,26 @@
+# Pin and license for the upstream vendored here.
+# vendor-metal-cpp.py reads its pin from this file; the copy map and wipe list stay in the script.
+
+upstreams:
+  - name: metal-cpp
+    homepage: https://developer.apple.com/metal/cpp/
+    source: git
+    repo: https://github.com/apple/metal-cpp
+    track: tags
+    tag: release/metal-cpp_macOS26.4_iOS26.4
+    version: macOS26.4
+    digest_algo: git-commit
+    pin_hash: c595afef4a5dc388f4047cd0c69f9e7f9468d9ed
+    license: Apache-2.0
+    license_files: [LICENSE]
+    # metal-cpp tags name an SDK pair rather than a version number, so the default "looks like a version" pattern matches none of them.
+    tag_pattern: ^release/metal-cpp_macOS\d+(\.\d+)*_iOS\d+(\.\d+)*$
+    used_by: shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++
+    notes: |
+      Apple's own header-only C++ interface to Metal, Foundation and QuartzCore, generated from the same headers the Objective-C SDK ships.
+      The alternative was Objective-C++, and what decided it is our tooling rather than the API: format.py, fingerprint.py, crossrefs.py and the PCH tiers all hardcode ('.cc', '.hh'), so a `.mm` source would mean editing the dev driver before writing a line of backend.
+      The pin tracks the installed SDK rather than the newest release, because a wrapper newer than the SDK declares selectors the framework on disk does not export.
+      macOS26.4 is what Xcode 26.4 ships, and it is the first pair carrying the MTL4 headers the backend is built on.
+      Vendored rather than fetched: 1.7 MB of headers, being committed *is* the pin, and it stays out of the prereq chain so a cold or offline macOS checkout needs no network for it.
+      MetalFX is dropped from the copy map — nothing includes it, and sr would be the first consumer if upscaling ever lands.
+      One sorting wart worth knowing: `deps list` keys a tag on the integers in it, so a hypothetical `macOS26` would sort above `macOS26.4`. Harmless while a higher major exists, which is the normal state.

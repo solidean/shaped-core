@@ -728,8 +728,9 @@ cmd.raytracing.is_supported()                    // bool — backend/device supp
 cmd.raytracing.build_blas(span<blas_triangles const>, flags=fast_trace)  // -> blas_handle
 cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> blas_handle  (a blas is triangles OR aabbs)
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
-// blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
+// blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
+// NO storage(): a built structure is a buffer on DXR and a resource of its own on Metal, so the base holds no handle to it.
 //   both backends real (dx12 on WARP).
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```

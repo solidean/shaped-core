@@ -81,6 +81,15 @@ It sweeps until its submission completes and only then falls through to the fenc
   The completion token is assigned together with the `vkQueueSubmit` and timeline-semaphore signal under one lock, so token order equals signal order.
   `advance_epoch` and `shutdown` are externally synchronized.
 
+- **metal** — `multi_threaded`, mirroring dx12.
+  The command-list slot allocator, the residency set, the staging rings and the transfer system's pending map are all mutex-guarded.
+  The submission token is claimed before the commit that signals it.
+  `advance_epoch` and `shutdown` are externally synchronized.
+  One divergence: **pipeline compilation is serialized process-wide**, because concurrent `MTL4Compiler` builds abort inside the driver.
+  That is a lock the other two backends do not need — see [the backend's readme](../../backends/metal/readme.md).
+  A second divergence is invisible from sg's side.
+  Metal's own completion handlers run on a dispatch queue whatever `SC_THREADS` says, so the state they touch is guarded by a lock that does not compile away.
+
 ## See also
 
 - [context](context.md) — the operations this classifies, and which scope each one lives on.

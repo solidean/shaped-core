@@ -122,15 +122,15 @@ struct sg::tlas_instance
 
 /// A bottom-level acceleration structure: an opaque, driver-built index over one mesh's triangles or procedural primitives.
 /// A vocabulary type with no typed wrapper, held via blas_handle.
-/// Abstract: a backend subclasses it and owns the native object, while the single accel_structure_storage buffer and the cheap stats live here.
+/// Abstract: a backend subclasses it and owns the native structure, while the cheap stats live here.
+/// What a built structure *is* differs per backend — a buffer on DXR, an object of its own on Metal — so the base holds no handle to it.
 /// Built through cmd.raytracing.build_blas, and the returned handle is persistent — valid across epochs.
 class sg::blas : public std::enable_shared_from_this<blas>
 {
 public:
     virtual ~blas();
 
-    /// The single opaque accel_structure_storage buffer holding the built structure.
-    [[nodiscard]] raw_buffer_handle storage() const { return _storage; }
+    /// Bytes the built structure occupies.
     [[nodiscard]] isize size_in_bytes() const { return _size_in_bytes; }
 
     /// Scratch this structure needed at build time, and separately at update / refit time.
@@ -158,18 +158,16 @@ public:
     }
 
 protected:
-    blas(raw_buffer_handle storage,
-         isize size_in_bytes,
+    blas(isize size_in_bytes,
          isize build_scratch_size_in_bytes,
          isize update_scratch_size_in_bytes,
          accel_build_flags build_flags,
          int geometry_count);
 
-    /// Backend hook run once from expire().
-    /// The default expires the storage buffer, releasing its GPU memory; a backend may override to also drop native objects it holds.
-    virtual void on_expired() const;
+    /// Backend hook run once from expire(), which is where the native structure and whatever backs it are released.
+    /// Empty here: what a built structure *is* differs per backend, so the base owns none of it.
+    virtual void on_expired() const {}
 
-    raw_buffer_handle _storage;
     isize _size_in_bytes = 0;
     isize _build_scratch_size_in_bytes = 0;
     isize _update_scratch_size_in_bytes = 0;
@@ -181,7 +179,7 @@ protected:
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.
 /// This is what a ray tracer traces against.
-/// A vocabulary type held via tlas_handle, and abstract like blas, with the storage and stats here.
+/// A vocabulary type held via tlas_handle, and abstract like blas, with the stats here and the native structure in the subclass.
 /// Built through cmd.raytracing.build_tlas, and the returned handle is persistent — valid across epochs.
 /// A tlas keeps every referenced blas alive.
 class sg::tlas : public std::enable_shared_from_this<tlas>
@@ -189,7 +187,6 @@ class sg::tlas : public std::enable_shared_from_this<tlas>
 public:
     virtual ~tlas();
 
-    [[nodiscard]] raw_buffer_handle storage() const { return _storage; }
     [[nodiscard]] isize size_in_bytes() const { return _size_in_bytes; }
     [[nodiscard]] isize build_scratch_size_in_bytes() const { return _build_scratch_size_in_bytes; }
     [[nodiscard]] isize update_scratch_size_in_bytes() const { return _update_scratch_size_in_bytes; }
@@ -199,7 +196,7 @@ public:
 
     /// A shader-bindable view of this TLAS — HLSL `RaytracingAccelerationStructure`.
     /// Pass it into a binding_group like any other view; the view carries this tlas, which each backend binds its own way.
-    /// A dispatch that binds it declares `accel_read` on the tlas storage.
+    /// A dispatch that binds it declares `accel_read` on the tlas.
     [[nodiscard]] tlas_view as_view() const { return tlas_view{.tlas = shared_from_this()}; }
 
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
@@ -212,17 +209,15 @@ public:
     }
 
 protected:
-    tlas(raw_buffer_handle storage,
-         isize size_in_bytes,
+    tlas(isize size_in_bytes,
          isize build_scratch_size_in_bytes,
          isize update_scratch_size_in_bytes,
          accel_build_flags build_flags,
          int instance_count,
          cc::vector<blas_handle> referenced_blases);
 
-    virtual void on_expired() const;
+    virtual void on_expired() const {}
 
-    raw_buffer_handle _storage;
     isize _size_in_bytes = 0;
     isize _build_scratch_size_in_bytes = 0;
     isize _update_scratch_size_in_bytes = 0;
