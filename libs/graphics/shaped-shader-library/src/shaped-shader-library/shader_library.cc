@@ -324,4 +324,5 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
 
     desc.source = cc::move(rewritten.value());
     outcome.shader = compiler->compile(desc);
+    _backlog.track(outcome.shader);
 }

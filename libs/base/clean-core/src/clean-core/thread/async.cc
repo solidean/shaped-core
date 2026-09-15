@@ -247,9 +247,10 @@ cc::async_scheduler& cc::io_scheduler()
 
 void cc::impl::async_drive_until_ready(async_node_base& root)
 {
-    auto& scheduler = cc::ambient_async_scheduler();
+    // Ready first: a resolved node needs no scheduler, and one may already be gone, as during static destruction.
     if (root.is_ready())
         return;
+    auto& scheduler = cc::ambient_async_scheduler();
 
     // Built once for the whole drive: its latch on the root outlives any one park.
     auto* const home = cc::impl::async_tls().home;

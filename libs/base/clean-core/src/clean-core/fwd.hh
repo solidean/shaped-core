@@ -380,6 +380,7 @@ template <class T>
 struct async_shared_guard;
 struct async_semaphore;
 struct async_semaphore_permit;
+struct async_backlog; // work a component detached, kept so it can be waited for (thread/async_backlog.hh)
 template <class T, class E = async_error>
 struct async_context;
 template <class T, class E = async_error>

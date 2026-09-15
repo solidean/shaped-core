@@ -7,8 +7,8 @@
 using namespace cc::primitive_defines;
 
 // A load is whatever this machine happens to be doing, so nothing here asserts a number.
-// What it pins is that a ratio is a ratio, that the counters really are monotone, and that the first sample is honest
-// about covering the sampler's lifetime rather than reporting a value it cannot have.
+// What it pins is that a ratio is a ratio, that the counters climb, and that the first sample is honest about covering
+// the sampler's lifetime rather than reporting a value it cannot have.
 
 namespace
 {
@@ -26,7 +26,10 @@ void spend_secs(f64 secs)
 }
 } // namespace
 
-TEST("cc system_metrics - cpu counters are monotone across two readings")
+// Not "monotone across two readings": Windows' per-core totals step backwards by whole 1/64 s ticks under load, which
+// made that version fail on a busy machine.
+// So this asserts only what holds everywhere — each counter is seen to climb within a handful of readings.
+TEST("cc system_metrics - cpu counters climb across readings")
 {
     auto first = cc::read_cpu_counters();
     if (first.has_error())
@@ -37,23 +40,39 @@ TEST("cc system_metrics - cpu counters are monotone across two readings")
     }
 
     CHECK(cc::is_metric_supported(cc::metric::cpu_load));
-    cc::this_thread_sleep_secs(0.02);
 
-    auto second = cc::read_cpu_counters();
-    REQUIRE(second.has_value());
+    auto const baseline = first.value();
+    auto total_climbed = false;
+    auto core_climbed = cc::vector<bool>::create_filled(baseline.per_core.size(), false);
 
-    auto const& a = first.value();
-    auto const& b = second.value();
+    // Ten readings a tick apart, stopping as soon as everything has climbed, which is usually the second.
+    auto previous = baseline;
+    for (auto reading = 0; reading < 10; ++reading)
+    {
+        spend_secs(0.02);
+        auto next = cc::read_cpu_counters();
+        REQUIRE(next.has_value());
 
-    CHECK(b.total.user_secs >= a.total.user_secs);
-    CHECK(b.total.system_secs >= a.total.system_secs);
-    CHECK(b.total.idle_secs >= a.total.idle_secs);
-    CHECK(b.total.total_secs() >= a.total.total_secs());
+        // The core count does not change under a running process, so every reading describes the same machine.
+        REQUIRE(next.value().per_core.size() == baseline.per_core.size());
 
-    // The core count does not change under a running process, so the two readings describe the same machine.
-    CHECK(a.per_core.size() == b.per_core.size());
-    for (isize i = 0; i < a.per_core.size(); ++i)
-        CHECK(b.per_core[i].total_secs() >= a.per_core[i].total_secs());
+        total_climbed = total_climbed || next.value().total.total_secs() > previous.total.total_secs();
+        auto all_climbed = total_climbed;
+        for (isize i = 0; i < baseline.per_core.size(); ++i)
+        {
+            core_climbed[i]
+                = core_climbed[i] || next.value().per_core[i].total_secs() > previous.per_core[i].total_secs();
+            all_climbed = all_climbed && core_climbed[i];
+        }
+
+        previous = next.value();
+        if (all_climbed)
+            break;
+    }
+
+    CHECK(total_climbed);
+    for (isize i = 0; i < baseline.per_core.size(); ++i)
+        CHECK(core_climbed[i]);
 }
 
 TEST("cc system_metrics - a sampled load is a ratio, and says what it covers")

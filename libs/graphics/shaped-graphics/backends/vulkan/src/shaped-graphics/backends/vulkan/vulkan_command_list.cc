@@ -116,12 +116,16 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // Gathered per *timeline* rather than merged into one value, because a completion value only means anything on
     // the group that issued it — see vulkan_completion_group.
     // Deduplicated by keeping the highest value per group, since one list may touch several buffers sharing none.
+    //
+    // A value the timeline has already reached is still waited on.
+    // The host reading the counter is not synchronization the validation layer can see, so skipping it reports this
+    // list's read of a buffer the transfer queue wrote as READ_RACING_WRITE — and a satisfied wait costs nothing.
     cc::vector<VkSemaphore> async_waits;
     cc::vector<u64> async_wait_values;
     auto const add_async_wait = [&](vulkan_completion_group_handle const& group, u64 value)
     {
-        if (group == nullptr || value == 0 || group->has_reached(value))
-            return; // already satisfied, so not worth a wait entry
+        if (group == nullptr || value == 0)
+            return; // nothing was ever reserved on this timeline
         for (isize i = 0; i < async_waits.size(); ++i)
             if (async_waits[i] == group->timeline)
             {
@@ -139,9 +143,10 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // stream unless promote_to_async has already said the wait is intended.
     auto const add_stream_wait = [&](vulkan_completion_group_handle const& group, u64 value, auto const& resource)
     {
-        if (group == nullptr || value == 0 || group->has_reached(value))
-            return; // already settled, so nothing waits and nothing is worth saying
-        if (resource->claim_stream_wait_warning(value))
+        if (group == nullptr || value == 0)
+            return;
+        // Only a stream still in flight stalls this list, so only that is worth saying; a settled one is still waited on.
+        if (!group->has_reached(value) && resource->claim_stream_wait_warning(value))
             CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the "
                            "whole transfer lands. Wait on the stream handle yourself before using the resource, or "
                            "call promote_to_async on it if the wait is what you want");

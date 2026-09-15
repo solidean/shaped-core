@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -11,7 +13,7 @@
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image.
 // Reaching the end without an assert/exception means every GPU stage succeeded.
-INVOCABLE_TEST("sv - flat-PBR raytraced view (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - flat-PBR raytraced view (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -93,4 +95,6 @@ INVOCABLE_TEST("sv - flat-PBR raytraced view (headless)", (sg::context_handle co
     // Reaching here means the whole flat-PBR pipeline ran (BLAS + TLAS build, DXR dispatch) without a device error.
     CHECK(mesh_rec->triangle_count > 0);
     CHECK(!mesh_rec->is_indexed); // the non-indexed path: a non-indexed BLAS + the stand-in bound as Indices
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

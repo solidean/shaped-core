@@ -60,6 +60,7 @@ c.compile(desc, opts={})                    // -> cc::result<sg::compiled_shader
 ssc::dxc::shader_cache           // thread-safe, hash-keyed get-or-create over compiler::compile
 cache.add_default_in_memory_provider(max=4096) // or add_provider(shared_ptr<key_value_provider<hash128, async_compiled_shader>>)
 cache.compile(desc, opts={})     // -> sg::async_compiled_shader  (same key => SAME node, never recompiled)
+cache.backlog()                  // -> cc::async_backlog const&; every compile this cache started, awaited or not
                            //   key = hash128 over source + entry_point + stage + model + all options + the DXC VERSION
                            //   (the version only matters to the persistent tier — without it a DXC upgrade serves old DXIL)
 cache.set_blob_cache(&c)         // persistent 2nd tier: encoded compiled shaders surviving across RUNS (bcache::blob_cache*)

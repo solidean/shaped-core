@@ -963,6 +963,15 @@ auto maybe = m.try_lock();                               // cc::optional<guard>;
 cc::async_shared_mutex<T> rw;  auto r = co_await rw.lock_shared();  // or co_await rw.lock(); writer-preferring
 cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
 // FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
+// DETACHED WORK (#include <clean-core/thread/async_backlog.hh>) — what a component started and nobody awaits, kept WEAKLY
+cc::async_backlog backlog;                               // one per component that detaches; immovable
+auto n = backlog.start(compile(desc));                   // async_start + track: THE spelling for fire-and-forget
+backlog.track(promise);                                  // already running / a manual node an actor will push
+co_await cc::async_settled(backlog.settled());           // pinned at the CALL; resolved if nothing pending; rounds; never fails
+cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
+backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
+backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling
+// COLD nodes are neither waited for nor started. A manual node its producer ABANDONS keeps a settled() parked forever.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)

@@ -926,7 +926,7 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
 def write_if_different(path: Path, content: str) -> None:
     """Copy-if-different: an unchanged package must not retrigger the compile that consumes these."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_file() and path.read_text(encoding="utf-8", newline="") == content:
+    if path.is_file() and path.read_bytes() == content.encode("utf-8"):
         return
     path.write_text(content, encoding="utf-8", newline="")
 

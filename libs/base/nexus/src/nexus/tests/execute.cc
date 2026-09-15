@@ -1848,8 +1848,10 @@ struct main_body_queue
     {
         _pending.lock([&](cc::vector<pending>& q)
                       { q.push_back(pending{.execution = execution, .done = cc::move(done)}); });
-        // A no-op homed to main is what wakes the loop wherever it waits: it sleeps on the main home.
-        (void)cc::make_async_scheduled_on_main([] { return cc::unit{}; });
+        // A wake, not a no-op homed to main: a homed node counts against main's homed_node_count until main pumps it,
+        // which a main_thread test running meanwhile would read as its own.
+        // A wake a running body's wait consumes is not lost, since the loop looks for a pending body before it parks.
+        cc::main_thread_scheduler().wake();
     }
 
     /// Runs one pending body on the calling (main) thread; false when none was pending.
@@ -2271,11 +2273,6 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                              "will run");
 #endif
             parker.park();
-        }
-
-        // The wake-ups submit() posted may still be queued, and each carries the context of the test that posted it.
-        while (main_home.pump_cycle())
-        {
         }
     }
 

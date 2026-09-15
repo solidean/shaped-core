@@ -5,8 +5,9 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
-#include <clean-core/thread/async_coroutine.hh> // cc::async_start
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -18,7 +19,7 @@ using namespace cc::primitive_defines;
 //
 // This is what a capture run drives, so what it pins is that the authoring surface cannot tell the difference —
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
-INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -54,9 +55,6 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
     // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
     auto const loop_start = cc::current_time_steady_secs();
 
-    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
-    auto background = cc::shared_async<cc::unit>();
-
     for (auto f : viewer.frames())
     {
         CHECK(f.viewport_size() == size);
@@ -73,7 +71,6 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
 
         accumulated = view.accumulated_frames();
         pending_at_end = f.pending_resource_work();
-        background = f.background_work();
 
         // A headless loop is ended by the body alone: nothing polls, so there is no close button and no quit.
         // Eight frames that TRACED, rather than eight frames: see the note above the deadline.
@@ -84,7 +81,7 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
     }
 
     CHECK(frames_drawn >= 8);
-    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
+    co_await cc::async_settled(sv::background_work(ctx));
 
     // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
@@ -100,7 +97,7 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
 // That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
 // decoding the result back and checking its extent is the assertion that matters here.
 // The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
-INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -142,9 +139,6 @@ INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::
     // An ASYNC_TEST that co_awaits readiness is what replaces all of it.
     auto const loop_start = cc::current_time_steady_secs();
 
-    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
-    auto background = cc::shared_async<cc::unit>();
-
     for (auto f : sv::interactive(ctx, "sv-test/capture"))
     {
         auto view = f.window().view();
@@ -168,15 +162,13 @@ INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::
                          .half_extent_v = tg::vec3f(0, 0, 0.4f),
                          .emission = tg::vec3f(12, 12, 12)});
 
-        background = f.background_work();
-
         ++frames;
         // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
         // A deadline rather than a frame count — see the note at the top of this loop.
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
-    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
+    co_await cc::async_settled(sv::background_work(ctx));
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
     // non-empty, and that is the whole failure being guarded against.
@@ -265,8 +257,8 @@ double g_timeout_test_now = 0.0;
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -302,20 +294,16 @@ INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, 
 
     auto traced_before_timeout = false;
 
-    // WORKAROUND, and the same one sv_test::tick_until carries: the clock is only run out once a frame has traced.
-    // Earlier, the material compiles that frame started would still be in flight when the loop ends, outliving the test.
+    // WORKAROUND, and the same one sv_test::tick_until carries: the clock is only run out once a frame has traced, so
+    // the partial has an image in it.
     // So the loop guard is a deadline on compile latency rather than a frame count.
     auto const loop_start = cc::current_time_steady_secs();
-
-    // Copied every frame while the viewer lives, so the drain after the loop can wait on what the frames started.
-    auto background = cc::shared_async<cc::unit>();
 
     for (auto f : sv::interactive(ctx, "sv-test/capture-timeout", {}, request))
     {
         auto view = f.window().view();
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
         view.add_scene().add_mesh(mesh);
-        background = f.background_work();
 
         // The whole timeout passes within this frame, so the capture gives up as it ends.
         if (view.accumulated_frames() > 0)
@@ -327,7 +315,7 @@ INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
-    CHECK(sv_test::drain_ambient_work(cc::async_start(background)));
+    co_await cc::async_settled(sv::background_work(ctx));
     CHECK(traced_before_timeout);
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.

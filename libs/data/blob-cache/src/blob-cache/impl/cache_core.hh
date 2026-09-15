@@ -4,6 +4,7 @@
 #include <blob-cache/impl/cache_actor.hh>
 #include <blob-cache/impl/singleflight.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 
@@ -24,6 +25,9 @@ struct cache_core
 
     cc::shared_async<cc::unit> opened;
     cc::atomic<bool> is_closed = {false};
+
+    /// The stores acquire queued and nobody awaits.
+    cc::async_backlog backlog;
 
     /// False for a cache built by create_disabled(), which has no actor at all.
     bool has_actor() const { return actor != nullptr; }

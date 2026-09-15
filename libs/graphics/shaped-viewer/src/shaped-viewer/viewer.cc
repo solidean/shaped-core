@@ -340,10 +340,7 @@ isize viewer::pending_resource_work() const
 
 cc::shared_async<cc::unit> viewer::background_work()
 {
-    // Today that is the fallback hit group's compile, which every trace starts whether or not it substitutes anything.
-    // A failed compile is finished work too, so the node settles on the dependency's error as well as on its value.
-    auto const& fallback = _impl->resources.shaders.acquire_fallback().shader;
-    return cc::make_async_lazy([](sg::compiled_shader const&) { return cc::unit{}; }, fallback);
+    return sv::background_work(*_impl->ctx);
 }
 
 void viewer::install_capture(sr::capture_request req)

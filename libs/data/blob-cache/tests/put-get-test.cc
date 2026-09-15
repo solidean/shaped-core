@@ -177,3 +177,21 @@ ASYNC_TEST("bcache verifies content hashes when asked to", main_thread)
     CHECK(blob_text(hit.value().data) == "honest bytes");
     CHECK(f.errors().empty());
 }
+
+// The store an acquire queues is awaited by nobody, so the backlog is the only way to know it landed.
+ASYNC_TEST("bcache acquire's store has been applied once the backlog settles", main_thread)
+{
+    if (!blob_cache::is_storage_available())
+        SKIP("no SQLite backend was compiled in");
+
+    auto f = cache_fixture();
+    (void)co_await f.opened();
+
+    auto const key = key_of("shader", "write-behind");
+    auto const value = co_await f.cache().acquire(key, [] { return make_blob("stored behind"); });
+    CHECK(blob_text(value) == "stored behind");
+
+    co_await cc::async_settled(f.cache().backlog().settled());
+    CHECK(f.cache().backlog().outstanding_count() == 0);
+    CHECK(f.cache().get_stats().puts_stored == 1);
+}

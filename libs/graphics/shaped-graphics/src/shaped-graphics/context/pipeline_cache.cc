@@ -435,7 +435,8 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                                                          this->persistent_key(ctx, key, "pso"));
 
                                       // A coroutine is cold; this tier has always handed back a scheduled node.
-                                      return cc::async_start(cc::move(node));
+                                      // Tracked on the context because nobody has to await it: the build references `ctx`.
+                                      return ctx.backlog.start(cc::move(node));
                                   });
 }
 
@@ -447,7 +448,7 @@ async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, rast
                                  {
                                      // The build frame runs later, possibly on a worker.
                                      // So deep-copy the whole description, which owns its shaders + layout handle, rather than referencing the caller's.
-                                     return cc::make_async_scheduled<raster_pipeline_handle>(
+                                     auto node = cc::make_async_scheduled<raster_pipeline_handle>(
                                          [ctx_ptr = &ctx, d = raster_pipeline_description(desc)](
                                              cc::async_context<raster_pipeline_handle>& actx) -> cc::async_step_status
                                          {
@@ -456,6 +457,8 @@ async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, rast
                                                  return actx.error(cc::move(res.error()));
                                              return actx.success(cc::move(res.value()));
                                          });
+                                     ctx.backlog.track(node);
+                                     return node;
                                  });
 }
 
@@ -469,7 +472,7 @@ async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& c
         {
             // The build frame runs later, possibly on a worker.
             // So deep-copy the whole description, which owns its shader vectors + layout handle, rather than referencing the caller's.
-            return cc::make_async_scheduled<raytracing_pipeline_handle>(
+            auto node = cc::make_async_scheduled<raytracing_pipeline_handle>(
                 [ctx_ptr = &ctx, d = raytracing_pipeline_description(desc)](
                     cc::async_context<raytracing_pipeline_handle>& actx) -> cc::async_step_status
                 {
@@ -478,6 +481,8 @@ async_raytracing_pipeline pipeline_cache::acquire_raytracing_pipeline(context& c
                         return actx.error(cc::move(res.error()));
                     return actx.success(cc::move(res.value()));
                 });
+            ctx.backlog.track(node);
+            return node;
         });
 }
 } // namespace sg

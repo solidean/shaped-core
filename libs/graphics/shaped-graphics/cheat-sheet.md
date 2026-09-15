@@ -776,6 +776,8 @@ ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_ra
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
+ctx.backlog                                                    // cc::async_backlog — every build above is tracked here, awaited or not
+ctx.backlog.start(node);  ctx.backlog.settled()                //   detach work that references ctx HERE; routines.clear() waits for it, a test awaits settled()
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: its groups'
 //   structural hashes + static samplers + inline constants; compute pipeline: shader bytecode+entry+signature + the
 //   pipeline layout's structural hash).
@@ -860,7 +862,7 @@ ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initia
 ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
-ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown
+ctx.routines.clear()                       // void     — waits out ctx.backlog, then drops all (VRAM pressure / context switch); runs automatically on shutdown
 // Per-context: a routine's cached GPU state dies with the context that built it — never stale across contexts.
 
 #include <shaped-graphics/routine/reload_generation.hh>
