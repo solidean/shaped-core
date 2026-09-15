@@ -97,7 +97,8 @@ def _vulkan_headers_check(cxx: str | None) -> tuple[str, bool | None, str]:
 # The first SDK whose validation layer no longer drops a deferred submit batch unvalidated.
 # Older layers report WRITE_RACING_READ between our transfer and direct queues that never happened, which fails the
 # vulkan entry driver at random, since it runs with synchronization validation on.
-_VULKAN_SDK_MIN_SYNCVAL = (1, 4, 357)
+# docs/bugs-external/vulkan-syncval-wait-before-signal-false-race has the diagnosis and the upstream fix.
+_VULKAN_SDK_MIN_SYNCVAL = (1, 4, 350)
 
 
 def _vulkan_sdk_version_check() -> tuple[str, bool | None, str] | None:

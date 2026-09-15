@@ -35,7 +35,8 @@ So each entry carries the answer as something runnable.
 | bug | component | status |
 |---|---|---|
 | [msvc-const-ref-through-type-erased-call](msvc-const-ref-through-type-erased-call/readme.md) | MSVC `cl` 19.51 at `/O2` | filed upstream, quarantined in `function_ref-test.cc` |
-| [vulkan-concurrent-device-lifecycle-deadlock](vulkan-concurrent-device-lifecycle-deadlock/readme.md) | NVIDIA Vulkan driver 591.86 | not yet filed, worked around in the vulkan backend |
+| [vulkan-concurrent-device-lifecycle-deadlock](vulkan-concurrent-device-lifecycle-deadlock/readme.md) | NVIDIA Vulkan driver 591.86 | not yet filed, worked around in shaped-graphics |
+| [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 
 ## Retiring one
 

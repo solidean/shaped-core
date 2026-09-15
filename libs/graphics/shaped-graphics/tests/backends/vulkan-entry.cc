@@ -41,8 +41,8 @@ ASYNC_TEST("sg vulkan backend")
 {
     // Synchronization validation is on for the whole tier-1 sweep: it is the only oracle that sees a hazard between
     // two submissions, which is what the cross-list and cross-queue ordering work is about.
-    // It needs a validation layer from SDK 1.4.357 or newer: older ones drop a deferred submit batch unvalidated and
-    // then report WRITE_RACING_READ between queues that never raced, from whichever transfer thread submits next.
+    // It needs a validation layer from SDK 1.4.350 or newer: older ones report WRITE_RACING_READ between queues that
+    // never raced — docs/bugs-external/vulkan-syncval-wait-before-signal-false-race.
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
