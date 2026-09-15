@@ -181,7 +181,11 @@ ASYNC_INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it
     auto const bytes = co_await back.bytes();
     CHECK(bytes[0] == src[0]);
     CHECK(bytes[8191] == src[8191]);
-    CHECK(stream.is_settled());
+
+    // Awaited rather than read: the upload actor settles the handle on its own cycle, which can come after a list that
+    // waited on the transfer has already delivered.
+    CHECK((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the transfer",
@@ -207,7 +211,11 @@ ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on th
     CHECK(bytes[0] == src[0]);
     CHECK(bytes[8191] == src[8191]);
 
-    CHECK(stream.is_settled()); // still reporting, exactly as before the promotion
+    // Still reporting, exactly as before the promotion.
+    // Awaited rather than read: the upload actor settles the handle on its own cycle, which can come after the readback
+    // that waited on the transfer has already delivered.
+    CHECK((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates the queue",
