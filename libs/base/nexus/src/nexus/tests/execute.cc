@@ -39,6 +39,7 @@
 #include <nexus/tests/section.hh>
 #include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
+#include <nexus/tests/thread_scope.hh>
 
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map has landed, this has not migrated yet
@@ -1469,6 +1470,11 @@ void nx::impl::report_invocation_cycle(nx::test_declaration const* decl)
         .extra_lines = {"an invocable must not (transitively) invoke itself"},
         .expanded = cc::format("invocation cycle: \"{}\" would recurse into itself", name),
     });
+}
+
+bool nx::impl::has_current_test()
+{
+    return current_context() != nullptr;
 }
 
 nx::test_execution* nx::impl::current_execution()
