@@ -8,7 +8,7 @@
 using namespace bcache;
 using namespace bcache::test;
 
-ASYNC_TEST("bcache finds its entries again after a reopen", main_thread)
+ASYNC_TEST("bcache finds its entries again after a reopen")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -35,7 +35,7 @@ ASYNC_TEST("bcache finds its entries again after a reopen", main_thread)
     CHECK(f.errors().empty());
 }
 
-ASYNC_TEST("bcache survives being dropped with work still buffered", main_thread)
+ASYNC_TEST("bcache survives being dropped with work still buffered")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -60,7 +60,7 @@ ASYNC_TEST("bcache survives being dropped with work still buffered", main_thread
         CHECK((co_await f.cache().get(key_of("persist", cc::format("entry-{}", i)))).has_value());
 }
 
-ASYNC_TEST("bcache recreates a file that is not a database and reports nothing to the caller", main_thread)
+ASYNC_TEST("bcache recreates a file that is not a database and reports nothing to the caller")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -95,7 +95,7 @@ ASYNC_TEST("bcache recreates a file that is not a database and reports nothing t
     CHECK(blob_text((co_await f.cache().get(key_of("persist", "after"))).value().data) == "fresh start");
 }
 
-ASYNC_TEST("bcache keeps a hit alive after the cache it came from is gone", main_thread)
+ASYNC_TEST("bcache keeps a hit alive after the cache it came from is gone")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

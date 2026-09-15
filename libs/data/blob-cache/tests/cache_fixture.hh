@@ -15,8 +15,8 @@
 ///   each fixture's ACTOR has one mailbox, so message order is the test's own and a get really does follow the put before it;
 ///   every test is an ASYNC_TEST, awaiting the cache rather than pumping it.
 ///
-/// The actor is threaded, one thread per fixture.
-/// Unthreaded, every fixture's SQLite work ran on the single main loop that sweeps pumps, so the suite's tests queued behind each other there.
+/// The actor is threaded, one thread per fixture, so a test over it needs no main_thread.
+/// Only a test opening an unthreaded store of its own does, since nexus's main loop is what sweeps that store.
 
 namespace bcache::test
 {

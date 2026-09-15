@@ -15,7 +15,7 @@ using namespace bcache::test;
 
 // The one test that runs the cache the way an application does: a real actor thread and a real work-stealing pool.
 //
-// Everything else here is unthreaded so message order is the test's own.
+// Everything else here awaits one fixture's actor from one test body, so message order is the test's own.
 // This exists because that determinism is also what would hide a race, and singleflight is the piece a race would break most quietly — two threads both
 // missing, both computing, and nobody noticing because both answers are correct.
 

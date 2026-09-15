@@ -30,7 +30,7 @@ struct gated_compute
 };
 } // namespace
 
-ASYNC_TEST("bcache acquire computes once and shares the result", main_thread)
+ASYNC_TEST("bcache acquire computes once and shares the result")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -58,7 +58,7 @@ ASYNC_TEST("bcache acquire computes once and shares the result", main_thread)
     CHECK(compute.calls.load() == 1);
 }
 
-ASYNC_TEST("bcache acquire serves a second caller from storage once the first has finished", main_thread)
+ASYNC_TEST("bcache acquire serves a second caller from storage once the first has finished")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -84,7 +84,7 @@ ASYNC_TEST("bcache acquire serves a second caller from storage once the first ha
     CHECK(second.calls.load() == 0); // a hit, so the callback is never even asked for
 }
 
-ASYNC_TEST("bcache acquire runs one compute per distinct key", main_thread)
+ASYNC_TEST("bcache acquire runs one compute per distinct key")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -108,7 +108,7 @@ ASYNC_TEST("bcache acquire runs one compute per distinct key", main_thread)
     CHECK(f.cache().get_stats().singleflight_joins == 0);
 }
 
-ASYNC_TEST("bcache acquire lets a later caller retry after a failed compute", main_thread)
+ASYNC_TEST("bcache acquire lets a later caller retry after a failed compute")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -135,7 +135,7 @@ ASYNC_TEST("bcache acquire lets a later caller retry after a failed compute", ma
     CHECK(blob_text((co_await b)) == "second attempt");
 }
 
-ASYNC_TEST("bcache acquire stores what it computed", main_thread)
+ASYNC_TEST("bcache acquire stores what it computed")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -158,7 +158,7 @@ ASYNC_TEST("bcache acquire stores what it computed", main_thread)
     CHECK(blob_text(hit.value().data) == "persist me");
 }
 
-ASYNC_TEST("bcache acquire takes a plain blocking callback too", main_thread)
+ASYNC_TEST("bcache acquire takes a plain blocking callback too")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -185,7 +185,7 @@ ASYNC_TEST("bcache acquire takes a plain blocking callback too", main_thread)
     CHECK(calls == 1);
 }
 
-ASYNC_TEST("bcache acquire releases a slot without disturbing a successor under the same key", main_thread)
+ASYNC_TEST("bcache acquire releases a slot without disturbing a successor under the same key")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -222,7 +222,7 @@ ASYNC_TEST("bcache acquire releases a slot without disturbing a successor under 
     CHECK(blob_text((co_await c)) == "round two");
 }
 
-ASYNC_TEST("bcache acquire forgets an operation nobody is waiting on any more", main_thread)
+ASYNC_TEST("bcache acquire forgets an operation nobody is waiting on any more")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

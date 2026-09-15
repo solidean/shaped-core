@@ -104,16 +104,22 @@ _VULKAN_SDK_MIN_SYNCVAL = (1, 4, 350)
 def _vulkan_sdk_version_check() -> tuple[str, bool | None, str] | None:
     """Whether $VULKAN_SDK's validation layer is new enough for the synchronization validation the tests turn on.
 
-    The version is read from the install directory's name, which is how every LunarG SDK is laid out.
-    None when there is no SDK or its name carries no version, since then there is nothing to say.
+    The version is read from the install directory's name, after resolving symlinks such as a `latest` one.
+    On Windows VULKAN_SDK names that directory; on Linux and macOS it names a platform subdirectory of it (`1.4.357.1/x86_64`).
+    None when there is no SDK or neither name carries a version, since then there is nothing to say.
     """
     sdk = os.environ.get("VULKAN_SDK")
     if not sdk:
         return None
-    parts = Path(sdk).name.split(".")
-    if len(parts) < 3 or not all(p.isdigit() for p in parts[:3]):
+    resolved = Path(sdk).resolve()
+    version = None
+    for name in (resolved.name, resolved.parent.name):
+        parts = name.split(".")
+        if len(parts) >= 3 and all(p.isdigit() for p in parts[:3]):
+            version = tuple(int(p) for p in parts[:3])
+            break
+    if version is None:
         return None
-    version = tuple(int(p) for p in parts[:3])
     label = "vulkan validation layer"
     shown = ".".join(str(v) for v in version)
     if version >= _VULKAN_SDK_MIN_SYNCVAL:

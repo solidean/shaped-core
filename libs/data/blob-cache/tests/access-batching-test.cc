@@ -12,7 +12,7 @@ using namespace bcache::test;
 // Access times are therefore deferred, deduplicated per entry, quantized to an epoch, and batched — approximate
 // recency rather than exact LRU, which is the whole point: exact would put every reader in contention with every other process's writer for a number nobody reads until a collection runs.
 
-ASYNC_TEST("bcache writes at most one access row per entry per epoch", main_thread)
+ASYNC_TEST("bcache writes at most one access row per entry per epoch")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -44,7 +44,7 @@ ASYNC_TEST("bcache writes at most one access row per entry per epoch", main_thre
     CHECK(f.cache().get_stats().access_rows_written == after_first_epoch + 1);
 }
 
-ASYNC_TEST("bcache writes no access row at all when nothing was read", main_thread)
+ASYNC_TEST("bcache writes no access row at all when nothing was read")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -63,7 +63,7 @@ ASYNC_TEST("bcache writes no access row at all when nothing was read", main_thre
     CHECK(f.cache().get_stats().access_rows_written == 0);
 }
 
-ASYNC_TEST("bcache flushes buffered accesses once the threshold is crossed", main_thread)
+ASYNC_TEST("bcache flushes buffered accesses once the threshold is crossed")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -94,7 +94,7 @@ ASYNC_TEST("bcache flushes buffered accesses once the threshold is crossed", mai
     CHECK(f.cache().get_stats().access_rows_written > 0);
 }
 
-ASYNC_TEST("bcache keeps recency the newest of what two writers recorded", main_thread)
+ASYNC_TEST("bcache keeps recency the newest of what two writers recorded")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -124,7 +124,7 @@ ASYNC_TEST("bcache keeps recency the newest of what two writers recorded", main_
     CHECK(f.cache().get_stats().access_rows_written == 0);
 }
 
-ASYNC_TEST("bcache flushes what it buffered before it closes", main_thread)
+ASYNC_TEST("bcache flushes what it buffered before it closes")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

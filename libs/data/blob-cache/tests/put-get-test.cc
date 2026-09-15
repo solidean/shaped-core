@@ -11,7 +11,7 @@ using namespace cc::primitive_defines;
 using namespace bcache;
 using namespace bcache::test;
 
-ASYNC_TEST("bcache round-trips a blob", main_thread)
+ASYNC_TEST("bcache round-trips a blob")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -31,7 +31,7 @@ ASYNC_TEST("bcache round-trips a blob", main_thread)
     CHECK(f.errors().empty());
 }
 
-ASYNC_TEST("bcache misses on an unknown key, a wrong namespace and a wrong version", main_thread)
+ASYNC_TEST("bcache misses on an unknown key, a wrong namespace and a wrong version")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -50,7 +50,7 @@ ASYNC_TEST("bcache misses on an unknown key, a wrong namespace and a wrong versi
     CHECK((co_await f.cache().get(key_of("shader", "vignette", 1))).has_value());
 }
 
-ASYNC_TEST("bcache stores an empty blob as a hit rather than a miss", main_thread)
+ASYNC_TEST("bcache stores an empty blob as a hit rather than a miss")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -69,7 +69,7 @@ ASYNC_TEST("bcache stores an empty blob as a hit rather than a miss", main_threa
     CHECK(hit.value().data.size() == 0);
 }
 
-ASYNC_TEST("bcache round-trips blobs across the chunk boundary", main_thread)
+ASYNC_TEST("bcache round-trips blobs across the chunk boundary")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -97,7 +97,7 @@ ASYNC_TEST("bcache round-trips blobs across the chunk boundary", main_thread)
     CHECK(f.errors().empty());
 }
 
-ASYNC_TEST("bcache hands back the metadata a put attached", main_thread)
+ASYNC_TEST("bcache hands back the metadata a put attached")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -120,7 +120,7 @@ ASYNC_TEST("bcache hands back the metadata a put attached", main_thread)
     CHECK(hit.value().metadata[1] == byte(2));
 }
 
-ASYNC_TEST("bcache refuses an object over max_object_bytes without touching the file", main_thread)
+ASYNC_TEST("bcache refuses an object over max_object_bytes without touching the file")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -139,7 +139,7 @@ ASYNC_TEST("bcache refuses an object over max_object_bytes without touching the 
     CHECK(f.errors().empty());
 }
 
-ASYNC_TEST("bcache deduplicates identical bytes under different keys", main_thread)
+ASYNC_TEST("bcache deduplicates identical bytes under different keys")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -160,7 +160,7 @@ ASYNC_TEST("bcache deduplicates identical bytes under different keys", main_thre
     CHECK(blob_text((co_await f.cache().get(key_of("b", "two"))).value().data) == "shared payload");
 }
 
-ASYNC_TEST("bcache verifies content hashes when asked to", main_thread)
+ASYNC_TEST("bcache verifies content hashes when asked to")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -179,7 +179,7 @@ ASYNC_TEST("bcache verifies content hashes when asked to", main_thread)
 }
 
 // The store an acquire queues is awaited by nobody, so the backlog is the only way to know it landed.
-ASYNC_TEST("bcache acquire's store has been applied once the backlog settles", main_thread)
+ASYNC_TEST("bcache acquire's store has been applied once the backlog settles")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

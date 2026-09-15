@@ -8,7 +8,7 @@
 using namespace bcache;
 using namespace bcache::test;
 
-ASYNC_TEST("bcache collects down to the target once it is over the limit", main_thread)
+ASYNC_TEST("bcache collects down to the target once it is over the limit")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -36,7 +36,7 @@ ASYNC_TEST("bcache collects down to the target once it is over the limit", main_
     CHECK(stats.stored_bytes <= 20 * 1024);
 }
 
-ASYNC_TEST("bcache evicts the cheap bulky cold entry before the dear little hot one", main_thread)
+ASYNC_TEST("bcache evicts the cheap bulky cold entry before the dear little hot one")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -66,7 +66,7 @@ ASYNC_TEST("bcache evicts the cheap bulky cold entry before the dear little hot 
     CHECK(f.cache().get_stats().stored_bytes <= 6 * 1024);
 }
 
-ASYNC_TEST("bcache treats an unrecorded compute cost as unknown rather than free", main_thread)
+ASYNC_TEST("bcache treats an unrecorded compute cost as unknown rather than free")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -95,7 +95,7 @@ ASYNC_TEST("bcache treats an unrecorded compute cost as unknown rather than free
     CHECK(!(co_await f.cache().get(known_cheap)).has_value());
 }
 
-ASYNC_TEST("bcache tells a declared cost of zero apart from no declared cost", main_thread)
+ASYNC_TEST("bcache tells a declared cost of zero apart from no declared cost")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -125,7 +125,7 @@ ASYNC_TEST("bcache tells a declared cost of zero apart from no declared cost", m
     CHECK(!(co_await f.cache().get(declared_free)).has_value());
 }
 
-ASYNC_TEST("bcache frees nothing until the last entry naming an object is gone", main_thread)
+ASYNC_TEST("bcache frees nothing until the last entry naming an object is gone")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -160,7 +160,7 @@ ASYNC_TEST("bcache frees nothing until the last entry naming an object is gone",
     CHECK(f.cache().get_stats().stored_bytes == 0);
 }
 
-ASYNC_TEST("bcache enforces a max entry count as well as a byte ceiling", main_thread)
+ASYNC_TEST("bcache enforces a max entry count as well as a byte ceiling")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -181,7 +181,7 @@ ASYNC_TEST("bcache enforces a max entry count as well as a byte ceiling", main_t
     CHECK(f.cache().get_stats().entry_count <= 4);
 }
 
-ASYNC_TEST("bcache leaves a cache under its limits untouched", main_thread)
+ASYNC_TEST("bcache leaves a cache under its limits untouched")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -202,7 +202,7 @@ ASYNC_TEST("bcache leaves a cache under its limits untouched", main_thread)
     CHECK((co_await f.cache().get(key_of("calm", "b"))).has_value());
 }
 
-ASYNC_TEST("bcache set_limits takes effect on the next pass", main_thread)
+ASYNC_TEST("bcache set_limits takes effect on the next pass")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -224,7 +224,7 @@ ASYNC_TEST("bcache set_limits takes effect on the next pass", main_thread)
     CHECK(f.cache().get_stats().stored_bytes <= 4 * 1024);
 }
 
-ASYNC_TEST("bcache reports a file size larger than the payload it accounts for", main_thread)
+ASYNC_TEST("bcache reports a file size larger than the payload it accounts for")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
