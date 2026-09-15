@@ -11,7 +11,8 @@
 // These are the door out of that: capture on the test's thread, install on the other one.
 //
 // Nothing here is needed for work driven by cc::async, which is already attributed.
-// Note also what this does NOT buy: sections stay owned by the test's own thread.
+// Note also what this does NOT buy: in a TEST, opening sections stays with the test's own thread.
+// Checks reported here are filed under the section whose pass is running.
 // And a REQUIRE here records a failure instead of aborting, since nothing would catch the throw.
 
 /// Attribute everything the calling thread reports to a captured test, for this scope.
