@@ -92,4 +92,5 @@ uv run dev.py test --profile .tmp/dev-profile/test.json --profile-type chrome-tr
 Every test is a slice of the trace, with the thread it ran on — [Profiling a run](../../../../docs/guides/building-and-testing.md#profiling-a-run) says how to read it.
 Check the exclusion first: an `exclusive()` test holds its phase's lock alone, so nothing else in the phase runs while it does.
 Every second one of those takes is a second of the binary's wall clock — [parallel-execution](parallel-execution.md) has the locks.
+The `serial` column of `dev.py test` adds that up per binary: what ran alone, plus the largest tag group.
 A `main_thread` test runs beside the pool, but main-thread bodies share one thread, so a slow one delays the next.

@@ -128,6 +128,9 @@ def _print_test_table(records: list[dict]) -> None:
     The load is what nexus measured around its own tests, so a binary spending its time serialized reads as a low
     percentage — which is the question this table is for.
     Wall time is the step's, so it includes process startup the load does not cover.
+
+    `serial` is the share of that wall time no --jobs could shorten: tests running alone, plus the largest exclusion group, which `group` names.
+    A binary with a low load and a low serial share is waiting on something undeclared rather than on its own exclusions.
     """
     if not records:
         return
@@ -137,19 +140,24 @@ def _print_test_table(records: list[dict]) -> None:
     rows = sorted(records, key=lambda r: -r["duration_s"])
     width = max(len("binary"), *(len(label(r)) for r in rows))
 
-    def cells(r: dict) -> tuple[str, str, str, str, str]:
+    def cells(r: dict) -> tuple[str, str, str, str, str, str, str]:
         junit = r["junit"] or {}
         load = junit.get("cpu_load")
         cores = junit.get("cores_used")
+        serial = junit.get("serial_s")
+        group = junit.get("serial_group")
         return (fmt_dur(r["duration_s"]), str(junit.get("tests", "-")),
                 f"{load * 100:.0f}%" if load is not None else "-",
                 f"{cores:.1f}" if cores is not None else "-",
-                _fmt_bytes(junit.get("peak_resident_bytes")))
+                _fmt_bytes(junit.get("peak_resident_bytes")),
+                f"{serial / r['duration_s'] * 100:.0f}%" if serial is not None and r["duration_s"] > 0 else "-",
+                f"{group} {fmt_dur(junit['serial_group_s'])}" if group else "")
 
-    ui.write_line(console.dim(f"\n  {'binary':<{width}}  {'wall':>9}  {'tests':>6}  {'cpu':>5}  {'cores':>6}  {'peak ram':>9}"))
+    ui.write_line(console.dim(f"\n  {'binary':<{width}}  {'wall':>9}  {'tests':>6}  {'cpu':>5}  {'cores':>6}  {'peak ram':>9}"
+                              f"  {'serial':>6}  group"))
     for r in rows:
-        wall, tests, load, cores, ram = cells(r)
-        line = f"  {label(r):<{width}}  {wall:>9}  {tests:>6}  {load:>5}  {cores:>6}  {ram:>9}"
+        wall, tests, load, cores, ram, serial, group = cells(r)
+        line = f"  {label(r):<{width}}  {wall:>9}  {tests:>6}  {load:>5}  {cores:>6}  {ram:>9}  {serial:>6}  {group}"
         ui.write_line(line if r["returncode"] == 0 else console.red(line))
 
     # The whole run's load is weighted by each binary's wall time, since binaries run one after another.
@@ -160,10 +168,15 @@ def _print_test_table(records: list[dict]) -> None:
         cores = sum(r["junit"]["cores_used"] * r["duration_s"] for r in measured) / wall
         peaks = [r["junit"]["peak_resident_bytes"] for r in records
                  if r["junit"] and r["junit"].get("peak_resident_bytes") is not None]
+        # Binaries run one after another, so the run's serial share is every binary's serial time over the whole wall.
+        serial_records = [r for r in records if r["junit"] and r["junit"].get("serial_s") is not None]
+        serial_wall = sum(r["duration_s"] for r in serial_records)
+        serial = (f"{sum(r['junit']['serial_s'] for r in serial_records) / serial_wall * 100:.0f}%"
+                  if serial_wall > 0 else "-")
         ui.write_line(console.dim(
             f"  {'total':<{width}}  {fmt_dur(sum(r['duration_s'] for r in records)):>9}  "
             f"{sum(r['junit']['tests'] for r in records if r['junit']):>6}  {load * 100:>4.0f}%  {cores:>6.1f}  "
-            f"{_fmt_bytes(max(peaks) if peaks else None):>9}"))
+            f"{_fmt_bytes(max(peaks) if peaks else None):>9}  {serial:>6}"))
 
 
 def summarize_tests(records: list[dict], presets: list[Preset], root: Path, *, table: bool = True) -> bool:

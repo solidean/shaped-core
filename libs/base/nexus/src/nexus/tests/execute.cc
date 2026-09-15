@@ -1640,6 +1640,100 @@ int nx::test_schedule_execution::count_failed_checks() const
     return failed;
 }
 
+nx::test_serial_time nx::test_schedule_execution::serial_time() const
+{
+    struct group
+    {
+        cc::string_view name;
+        double seconds = 0;
+    };
+    struct phase_span
+    {
+        nx::config::scheduler_mode mode;
+        nx::config::ambient_mode ambient;
+        int threads = 0;
+        double start = 0;
+        double end = 0;
+    };
+
+    auto result = nx::test_serial_time();
+    auto groups = cc::vector<group>();
+    auto spans = cc::vector<phase_span>();
+
+    auto const add_to_group = [&](cc::string_view name, double seconds)
+    {
+        for (auto& g : groups)
+            if (g.name == name)
+            {
+                g.seconds += seconds;
+                return;
+            }
+        groups.push_back({.name = name, .seconds = seconds});
+    };
+
+    // Top-level executions only: a dispatched child runs inside its driver's interval and under its driver's locks.
+    for (auto const& exec : executions)
+    {
+        if (exec.started_at_steady_s <= 0 || exec.finished_at_steady_s < exec.started_at_steady_s)
+            continue;
+        CC_ASSERT(exec.instance.declaration != nullptr, "instances must be valid");
+        auto const& cfg = exec.instance.declaration->test_config;
+
+        // A span rather than a sum: an own_pool phase overlaps its own tests.
+        if (cfg.scheduler != nx::config::scheduler_mode::shared)
+        {
+            auto* span = static_cast<phase_span*>(nullptr);
+            for (auto& s : spans)
+                if (s.mode == cfg.scheduler && s.ambient == cfg.ambient && s.threads == cfg.scheduler_threads)
+                    span = &s;
+            if (span == nullptr)
+            {
+                spans.push_back({.mode = cfg.scheduler,
+                                 .ambient = cfg.ambient,
+                                 .threads = cfg.scheduler_threads,
+                                 .start = exec.started_at_steady_s,
+                                 .end = exec.finished_at_steady_s});
+                continue;
+            }
+            span->start = cc::min(span->start, exec.started_at_steady_s);
+            span->end = cc::max(span->end, exec.finished_at_steady_s);
+            continue;
+        }
+
+        auto const seconds = exec.finished_at_steady_s - exec.started_at_steady_s;
+        if (cfg.exclusive_global)
+        {
+            result.alone_s += seconds;
+            continue;
+        }
+
+        // An async body gives the main thread back at every suspend, so only a synchronous one holds it for its whole interval.
+        if (cfg.main_thread && !exec.instance.declaration->is_async())
+            add_to_group("main_thread", seconds);
+        auto const tag_count = cc::min(cfg.exclusion_tag_count, nx::config::max_exclusion_tags);
+        for (auto t = 0; t < tag_count; ++t)
+        {
+            // A tag repeated on one test is still one lock.
+            auto const tag = cc::string_view(cfg.exclusion_tags[t]);
+            auto repeated = false;
+            for (auto u = 0; u < t; ++u)
+                repeated |= cc::string_view(cfg.exclusion_tags[u]) == tag;
+            if (!repeated)
+                add_to_group(tag, seconds);
+        }
+    }
+
+    for (auto const& s : spans)
+        result.alone_s += s.end - s.start;
+    for (auto const& g : groups)
+        if (g.seconds > result.largest_group_s)
+        {
+            result.largest_group = g.name;
+            result.largest_group_s = g.seconds;
+        }
+    return result;
+}
+
 void nx::impl::run_test_body(nx::test_execution& execution,
                              nx::test_schedule_config const& config,
                              cc::function_ref<void()> body,
