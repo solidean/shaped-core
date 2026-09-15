@@ -967,7 +967,7 @@ cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-lin
 cc::async_backlog backlog;                               // one per component that detaches; immovable
 auto n = backlog.start(compile(desc));                   // async_start + track: THE spelling for fire-and-forget
 backlog.track(promise);                                  // already running / a manual node an actor will push
-co_await cc::async_settled(backlog.settled());           // lazy; rounds until nothing started is pending; never fails
+co_await cc::async_settled(backlog.settled());           // pinned at the CALL; resolved if nothing pending; rounds; never fails
 cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
 backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
 backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling

@@ -56,7 +56,8 @@ struct cc::async_backlog
 
     /// An async resolving once every tracked node that has started has settled, including work tracked while it waits.
     ///
-    /// Lazy like every other spelling: awaiting it is what starts the wait.
+    /// The first round is taken when this is called, not when it is awaited: nothing pending hands back a resolved node,
+    /// and work started after the call is waited for only if something it pinned tracks it.
     /// It never fails, because a tracked node that failed is settled work rather than a failure of the backlog.
     /// Work that keeps re-arming itself never lets it resolve, so bound the wait where that cannot be ruled out.
     /// The node shares the backlog's state, so it may outlive the backlog itself.

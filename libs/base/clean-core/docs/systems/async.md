@@ -845,6 +845,8 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 - **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
   A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
 - **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.
+  The first round is pinned when `settled()` is called, so a backlog with nothing pending hands back a resolved node, which blocking on needs no scheduler.
+  Work started after that call is not waited for unless something already pinned tracks it, so take `settled()` after the work it should cover.
   It resolves once a sweep finds nothing, never fails, and its node shares the backlog's state, so it may outlive the backlog.
   Work that keeps re-arming itself never lets it resolve, so a caller that cannot rule that out bounds its wait.
 - **Several backlogs settle together** through the static `settled(span)`, in one sweep over all of them.

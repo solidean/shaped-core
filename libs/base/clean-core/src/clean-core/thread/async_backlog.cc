@@ -110,9 +110,21 @@ cc::shared_async<cc::unit> cc::async_backlog::settled(cc::span<async_backlog con
     for (auto const* const backlog : backlogs)
         states.push_back(backlog->_state);
 
+    // The first round is swept here rather than when the node is awaited, so nothing pending hands back a resolved node.
+    // Blocking on that needs no scheduler, which is what lets a teardown with none left call this at all.
+    auto pinned = cc::vector<async_node_ptr>();
+    {
+        auto released = cc::vector<async_node_ptr>();
+        for (auto const& state : states)
+            state->entries.lock([&](impl::async_backlog_entries& entries)
+                                { impl::compact(entries, &pinned, released); });
+    }
+    if (pinned.empty())
+        return cc::make_async_from_value(cc::unit{});
+
     return cc::make_async_lazy<cc::unit>(
         [states = cc::move(states),
-         pinned = cc::vector<async_node_ptr>()](cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
+         pinned = cc::move(pinned)](cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
         {
             while (true)
             {

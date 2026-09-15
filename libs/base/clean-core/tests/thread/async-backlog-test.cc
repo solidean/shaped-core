@@ -15,6 +15,35 @@ ASYNC_TEST("async backlog - an empty backlog settles at once")
     CHECK(backlog.outstanding_count() == 0);
 }
 
+// Resolved rather than lazy, so a teardown with no scheduler left can still block on it.
+TEST("async backlog - nothing pending hands back an already-resolved node")
+{
+    cc::async_backlog backlog;
+    CHECK(backlog.settled()->is_ready());
+
+    // Settled and cold entries are not pending either.
+    auto const lazy = cc::make_async_lazy([] { return 1; });
+    backlog.track(lazy);
+    auto const done = cc::make_async_manual<int>();
+    backlog.track(done);
+    done->push_value(2);
+    CHECK(backlog.settled()->is_ready());
+}
+
+// The first round is pinned at the call: work started afterwards is not part of it.
+TEST("async backlog - work tracked after settled() was taken is not waited for")
+{
+    cc::async_backlog backlog;
+    auto const settled = backlog.settled();
+
+    auto const later = cc::make_async_manual<int>();
+    backlog.track(later);
+
+    CHECK(settled->is_ready());
+    CHECK(!later->is_ready());
+    later->push_value(0);
+}
+
 ASYNC_TEST("async backlog - settled waits for a tracked node to settle")
 {
     cc::async_backlog backlog;
