@@ -307,4 +307,6 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);
     CHECK(slot->texture.raw() != nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

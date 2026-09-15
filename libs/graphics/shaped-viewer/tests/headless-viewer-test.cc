@@ -6,7 +6,8 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh> // cc::async_start
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -18,7 +19,7 @@ using namespace cc::primitive_defines;
 //
 // This is what a capture run drives, so what it pins is that the authoring surface cannot tell the difference —
 // same frame, same handles, same `viewport_size` — while nothing ever touches a display.
-INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -80,7 +81,7 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
     }
 
     CHECK(frames_drawn >= 8);
-    CHECK(sv_test::drain_ambient_work(ctx));
+    co_await cc::async_settled(sv::background_work(ctx));
 
     // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
@@ -96,7 +97,7 @@ INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (sg::con
 // That looks exactly like a rendering artifact, which is a far more expensive thing to debug than a short file, so
 // decoding the result back and checking its extent is the assertion that matters here.
 // The capture protocol is process environment, which is why the drivers in dx12-entry.cc carry capture-environment.
-INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -167,7 +168,7 @@ INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop", (sg::
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
-    CHECK(sv_test::drain_ambient_work(ctx));
+    co_await cc::async_settled(sv::background_work(ctx));
 
     // Read it back with a real decoder rather than checking that the file is non-empty: a truncated image is
     // non-empty, and that is the whole failure being guarded against.
@@ -256,8 +257,8 @@ double g_timeout_test_now = 0.0;
 // A half-converged reference picture is exactly the artifact nobody re-checks once it looks plausible, which is what
 // makes this worth a test rather than a comment.
 // The partial is still written, beside it, because looking at what the run managed is how a timeout gets fixed.
-INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, not to it",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -314,7 +315,7 @@ INVOCABLE_TEST("sv - a capture that times out writes beside the requested path, 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 60.0);
     }
 
-    CHECK(sv_test::drain_ambient_work(ctx));
+    co_await cc::async_settled(sv::background_work(ctx));
     CHECK(traced_before_timeout);
 
     // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.

@@ -96,33 +96,6 @@ inline void drive_ambient_work()
     cc::this_thread_yield();
 }
 
-/// Runs async work on this thread until `sv::background_work(ctx)` has settled, so what a test started ends with the test.
-/// False when `timeout_secs` ran out first, which only a broken build reaches.
-///
-/// The GPU tests share one context across the whole driver, so nothing tears it down between them, and work a test left
-/// running is async work the next test inherits.
-/// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, which is why it pumps
-/// rather than blocks.
-/// Call it after the frame loop, never inside a frame: see `sv::background_work`.
-[[nodiscard]] inline bool drain_ambient_work(sg::context& ctx, double timeout_secs = 60.0)
-{
-    CC_RECORD_SCOPE("sv_test.drain_ambient_work");
-
-    auto const settled = cc::async_start(sv::background_work(ctx));
-    auto const start = cc::current_time_steady_secs();
-    while (true)
-    {
-        while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
-        {
-        }
-        if (settled->is_ready())
-            return true;
-        if (cc::current_time_steady_secs() - start >= timeout_secs)
-            return false;
-        cc::this_thread_yield();
-    }
-}
-
 /// Drives `ctx.routines.tick()` until `ready()` holds, or until `timeout_secs` elapses; true when it came up.
 ///
 /// **A workaround, and marked as one.** A routine's shaders and pipelines build on the ambient async scheduler, off
