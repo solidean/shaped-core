@@ -70,7 +70,8 @@ Attach a debugger before the harness kills it if you want the stacks yourself.
 
 The exclusion lives in the library rather than in the test suite, because the constraint is the driver's and applies to any application on this hardware.
 
-[device_lifecycle.hh](../../../libs/graphics/shaped-graphics/src/shaped-graphics/context/impl/device_lifecycle.hh) holds a process-global `std::shared_mutex` with two guards, and the matrix above is what makes it a reader/writer lock rather than a mutex:
+sg's [device_lifecycle.hh](../../../libs/graphics/shaped-graphics/src/shaped-graphics/context/impl/device_lifecycle.hh) holds a process-global `std::shared_mutex` with two guards.
+The matrix above is what makes it a reader/writer lock rather than a mutex:
 concurrent device create/destroy alone is fine, concurrent ray-tracing builds alone are fine, and only the two together hang.
 
 - `sg::impl::raytracing_driver_hold` takes it **shared**, around `vkCreateRayTracingPipelinesKHR`, and around the D3D12 prebuild, build and state-object calls.
