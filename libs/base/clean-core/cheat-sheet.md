@@ -831,6 +831,11 @@ auto reg = cc::register_thread_pump([&] { return step_once(); }); // -> RAII; tr
 cc::thread_pump_all();                    // -> bool; one cycle of every registration. One atomic load when empty
 cc::thread_pump_all_for(4.0);             // loop until idle or 4ms; true == stopped on the budget
 cc::registered_thread_pump_count();       // -> isize; a leak check at the end of a run
+cc::thread_pump_notify();                 // a pump GAINED work from another thread: wakes a loop parked on it (no clock).
+                                          //   An unthreaded actor's post and a registration raise it for you
+// GOTCHA: a thread parked in a POOL never sweeps pumps (threads on). An unthreaded component is driven by the loop that
+//   owns it; a coroutine awaiting one runs homed to main (ASYNC_TEST main_thread) or where a frame loop pumps.
+//   Pool sweeping was tried and races tests' handlers — docs/systems/async.md "Who drives a pump".
 // thread_pump_all also runs the CALLING thread's own home (thread_bound_scheduler), so every wait loop services it.
 cc::pump_main_thread(4.0);                // the event loop's call (thread_bound_scheduler.hh): main home + registry +
                                           //   (threads off) compute/io; false == nothing progressed and the main home is empty
@@ -943,6 +948,7 @@ co_await cc::async_resume_on_main();     // coroutine hop: STICKY rehome (option
 co_await cc::async_resume_on_compute();  // / _io() / async_resume_on(h, opts)
 co_await cc::async_set_home_options({.teardown = cc::async_teardown::at_home}); // never suspends; must be homed
 auto v = co_await cc::async_run_on(cc::compute_scheduler(), [&] { return parse(bytes); }); // child elsewhere, value moved out
+root->try_home_cold(cc::main_thread_scheduler()); // host-side: home a COLD coroutine / _on node; false for a plain frame
 cc::thread_bound_scheduler home;  home.bind_to_current_thread();  home.pump_for(4.0); // a home for a thread you own
 home.drain();                            // end of a loop: runs what is left, incl. deferred at_home teardowns
 // inline_deps: home_default | any | same_home_only — main & io default same_home_only (cold unhomed deps go to compute)
@@ -957,6 +963,15 @@ auto maybe = m.try_lock();                               // cc::optional<guard>;
 cc::async_shared_mutex<T> rw;  auto r = co_await rw.lock_shared();  // or co_await rw.lock(); writer-preferring
 cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
 // FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
+// DETACHED WORK (#include <clean-core/thread/async_backlog.hh>) — what a component started and nobody awaits, kept WEAKLY
+cc::async_backlog backlog;                               // one per component that detaches; immovable
+auto n = backlog.start(compile(desc));                   // async_start + track: THE spelling for fire-and-forget
+backlog.track(promise);                                  // already running / a manual node an actor will push
+co_await cc::async_settled(backlog.settled());           // pinned at the CALL; resolved if nothing pending; rounds; never fails
+cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
+backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
+backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling
+// COLD nodes are neither waited for nor started. A manual node its producer ABANDONS keeps a settled() parked forever.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
 CC_ASYNC_AMBIENT_TAG(my_tag)                          // define once per consumer; address-unique (ICF-safe)

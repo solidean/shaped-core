@@ -24,6 +24,13 @@ sg::compiled_shader make_shader()
         {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
     shader.bindings.push_back(
         {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
+    shader.bindings.push_back({.name = "Albedo",
+                               .group_index = 0,
+                               .space = 0,
+                               .index = 2,
+                               .count = 1,
+                               .type = sg::binding_type::readonly_texture,
+                               .texture_dimension = sg::texture_view_dimension::cube_array});
 
     // Every field the encoder writes has to appear on some binding here, or "round-trips every field" is a claim the
     // test does not actually make — which is how texture_dimension went unencoded without anything noticing.

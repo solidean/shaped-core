@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>          // offsetof
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -129,7 +131,8 @@ float4 main_ps(ds_output input) : SV_Target { return input.color; }
 )";
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a triangle",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -164,7 +167,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     desc.topology = sg::primitive_topology::point_list;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;
@@ -200,11 +203,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);
@@ -220,8 +221,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a trian
     CHECK(corner[3] == 255);
 }
 
-INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch triangle",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -259,7 +260,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch t
     desc.patch_control_points = 3;
     desc.rasterization.cull = sg::cull_mode::none;
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
     constexpr int W = 16;
@@ -299,11 +300,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a patch t
     auto future = cmd->download.bytes_from_texture(tex);
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(W) * isize(H) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(W) * isize(H) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     auto texel = [&](int x, int y) { return px + (isize(y) * W + x) * 4; };
 
     auto const* center = texel(W / 2, H / 2);

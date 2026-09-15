@@ -175,6 +175,7 @@ public:
 
     /// Blocks until every upload handed to the actor has run on the GPU, been cancelled or been dropped.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.
     // _staging / _mapped / _window_bytes are also rebuilt by the actor when a set_window_bytes is applied.

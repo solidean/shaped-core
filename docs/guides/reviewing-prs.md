@@ -83,6 +83,30 @@ Rewriting at build time only is refuted by hot reload, and by a location counter
 Generating from reflection is refuted by the same DXC behaviour that motivates the whole branch.
 Neither was written down, and the recommendation was to write them into the design doc rather than to change any code.
 
+### Written for someone who has not read the diff
+
+**Every entry that argues — the critique above all, then the verdict — is written for a reader who has not opened the branch.**
+The reviewer writes it after reading everything, which is exactly when the branch's vocabulary stops feeling like vocabulary.
+So introduce each mechanism before judging it: the situation as a concrete scenario, then each option as *how it works / pro / con / verdict*, in bullets.
+[design-critique](../../tools/review/docs/entry-types/design-critique.md#introduce-before-you-price) has the shape, and the cold-read check that catches what the author cannot see.
+
+pr-173 is the worked case: a correct critique the maintainer could not follow — "nothing is properly introduced" — and a verdict they found "always hard to read" as paragraphs.
+
+### Two alternatives the maintainer wants on the table
+
+These are not preferences that decide a case.
+They are options the maintainer likes to **see beside the recommendation**, and then weighs per case — so a critique or a design entry that could offer one and does not has left out a candidate.
+
+- **The strict rule that is obviously correct, beside the clever permissive one.**
+  A rule narrow enough to be trivially right, whose later relaxation is purely additive, is a real alternative to a cleverer rule that accepts more today.
+  The async-tests design review is the worked case: letting an async invocable take a lock its driver did not hold was going to need a name-ordering constraint to stay deadlock-free.
+  The maintainer's counter-proposal was "the driver may hold tags, or the child may, never both".
+  It is deadlock-free by the same argument top-level exclusion is, and relaxable later without breaking anything it accepted.
+- **Deleting a legacy spelling, beside accommodating it.**
+  When a new design has to grow a rule only to keep an old spelling working, removing the spelling is an alternative in its own right.
+  The same review spent a round designing how `main_thread` should treat an `ASYNC_TEST` body that returns a raw graph instead of being a coroutine.
+  The maintainer asked whether the spelling was needed at all; it was not, and removing it deleted the question along with the rule.
+
 ## A PR arrives red, and fixing it is the review's job
 
 **The normal flow here is: one contributor writes the branch on the one platform they have, opens the PR while CI is failing, and the review happens next.**
@@ -138,6 +162,11 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
   The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
   What landed was `frame::background_work() -> cc::shared_async<cc::unit>`, which covers the fallback today and grows with the internals while its signature stays put.
   The same holds for a fix a review lands: an accessor added to reach one internal is a finding against the fix.
+  **It binds the doc comment as much as the signature.**
+  pr-174 kept `sv::background_work(ctx)` outcome-only in its type and then listed the three backlogs it settles in the header, the cheat sheet and the guidelines.
+  The maintainer's answer was that exhaustively enumerating internals in public API comments is unnecessary.
+  The line they called exactly the right sentiment: "settles once the background work so far is done, including process-wide compiles and cache writes; what it covers is internal".
+  What survives from such a list is only the fact a caller could be wrong about — there, that the wait is process-wide despite the `ctx` parameter.
 
 Report API shape **in symbols**: signatures, the actual type names, and a few lines of call-site code.
 Prose about an API is much harder to judge than the API.
@@ -318,6 +347,21 @@ The generalization the maintainer drew is worth keeping beside it: **trailer met
 "Seek to the end and read it properly" works only where the frame ends where the stream ends, which a blob embedded in a container never does.
 So the answer was that deflate has no streaming size hint at all, rather than a cleverer way to find one.
 
+### An amortised pass under a lock is profiled, and says what it can cost
+
+Amortised O(1) is an average, and the pass that pays for it is O(n) in one go.
+When that pass runs under a lock other threads take on a hot path, one large instance stalls all of them at once — which a frame shows as a stutter and nothing else attributes.
+
+So a review that recommends such a pass, or finds one, asks for two things beside it.
+A `CC_RECORD_SCOPE_IF` gated on the size, so a large pass shows up in a profile by name while small ones cost nothing.
+And a comment saying the pass can cause stutter in pathological cases, so whoever sees the scope knows what they are looking at.
+Keeping the algorithm simple is still fine; the point is that its worst case is visible rather than solved.
+
+pr-174 is the worked case.
+The review recommended that `cc::async_backlog::track_node` compact its whole ring once it doubles past what last survived, instead of pruning from the front.
+The maintainer accepted it with exactly this condition: larger compactions behind a record scope, and a comment that they may cause frame stutter in pathological situations.
+What landed opens `CC_RECORD_SCOPE_IF(count >= 1024, "cc.async_backlog.compact")`.
+
 ### The `#ifdef` arm this machine does not compile is where the defect is
 
 A platform-guarded helper has two arms and only one is ever parsed.
@@ -335,6 +379,22 @@ One arm called `slib::create_dxc_spirv_compiler()`, and the other called somethi
 
 The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
 That branch had two of them and its PR body named one, which is the ratio to expect.
+
+### A one-for-one migration keeps the old idiom's breadth, and that is where to look
+
+When a change translates a pattern mechanically — blocking into awaiting, one API into its successor — each call site inherits what the old spelling had to do, not what the site needs.
+The translation is correct, so it survives review, and it cements a wait or a check the new API made unnecessary.
+So for each translated idiom, ask what the site actually needs and whether the new API has a narrower spelling for it.
+
+pr-173 is the worked case, twice, and the maintainer caught both rather than the review.
+
+- `ctx->block_until_idle(); future.try_get_data()` became `co_await ctx->idle_completion(); future.try_get_data()` in 144 places.
+  A readback needs only its own bytes, which the future's own completion already signals; the idle wait held every submission, actor and epoch besides.
+  The fix added `future.data()` and awaited that instead.
+- A hand-rolled `await(a)` that pumped until `a->is_ready()` became `co_await cc::async_settled(a); a->value()` everywhere.
+  Only one site inspected the failure; everywhere else a plain `co_await` was shorter and failed by name instead of asserting.
+
+The tell is a new line that reads as ceremony around the value the site wanted.
 
 ### A guarantee only the old implementation gave is not a regression
 

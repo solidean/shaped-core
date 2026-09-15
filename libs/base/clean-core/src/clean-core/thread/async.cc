@@ -3,6 +3,7 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
+#include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
@@ -244,29 +245,17 @@ cc::async_scheduler& cc::io_scheduler()
     return compute_scheduler();
 }
 
-namespace
-{
-/// How long a driver that cannot progress sleeps before asking again.
-///
-/// Only an async awaiting an EXTERNAL push ever gets here — everything a scheduler owns is driven, not polled.
-/// So this trades latency on a path that is already crossing a thread boundary for a driver that costs nothing while it waits.
-constexpr f64 async_external_poll_secs = 0.001;
-
-void async_wait_a_moment()
-{
-    // A thread with a home waits on that home instead: a push to it ends the wait at once, rather than after the interval.
-    if (auto* const home = cc::impl::async_tls().home)
-    {
-        home->wait_for_work(async_external_poll_secs * 1000.0);
-        return;
-    }
-    cc::this_thread_sleep_secs(async_external_poll_secs);
-}
-} // namespace
-
 void cc::impl::async_drive_until_ready(async_node_base& root)
 {
+    // Ready first: a resolved node needs no scheduler, and one may already be gone, as during static destruction.
+    if (root.is_ready())
+        return;
     auto& scheduler = cc::ambient_async_scheduler();
+
+    // Built once for the whole drive: its latch on the root outlives any one park.
+    auto* const home = cc::impl::async_tls().home;
+    // It drives pumps because this thread asked to block: it is the loop, for as long as the wait lasts.
+    auto parker = cc::impl::async_parker(root, home != nullptr && home->is_inside_own_body() ? nullptr : home, true);
 
     while (!root.is_ready())
     {
@@ -281,7 +270,12 @@ void cc::impl::async_drive_until_ready(async_node_base& root)
         if (cc::thread_pump_all())
             continue;
 
-        async_wait_a_moment();
+#if !CC_HAS_THREADS
+        // Nothing else exists to deliver what the root waits on.
+        CC_ASSERT(false, "a blocking drive cannot progress: the graph waits on something no scheduler or pump here "
+                         "will run");
+#endif
+        parker.park();
     }
 }
 
@@ -291,6 +285,11 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
     // Stepping instead keeps the deadline honest, and a bound scheduler still runs its own work while we hold the thread.
     auto& scheduler = cc::ambient_async_scheduler();
     auto const deadline = cc::current_time_steady_secs() + timeout_ms / 1000.0;
+    if (root.is_ready())
+        return true;
+
+    auto* const home = cc::impl::async_tls().home;
+    auto parker = cc::impl::async_parker(root, home != nullptr && home->is_inside_own_body() ? nullptr : home, true);
 
     while (!root.is_ready())
     {
@@ -304,7 +303,8 @@ bool cc::impl::async_drive_until_ready_for(async_node_base& root, i64 timeout_ms
         if (cc::current_time_steady_secs() >= deadline)
             return root.is_ready();
 
-        async_wait_a_moment();
+        // Bounded by the deadline this overload promises its caller, and otherwise woken like any other park.
+        parker.park_for(deadline - cc::current_time_steady_secs());
     }
 
     return true;
@@ -1181,6 +1181,29 @@ bool cc::async_node_base::rehome(async_scheduler& home, async_home_options optio
     if (previous != nullptr)
         previous->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
     return false;
+}
+
+bool cc::async_node_base::try_home_cold(async_scheduler& home, async_home_options options)
+{
+    async_scheduler* previous = nullptr;
+    {
+        lock_scope g(this);
+        auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+        if (async_node_state((w & state_mask) >> state_shift) != async_node_state::cold || !ops()->frame_has_home_word)
+            return false;
+        if ((w & homed_bit) != 0)
+            previous = impl::async_home_of(home_word());
+        home_word() = impl::async_make_home_word(&home, options);
+        _state_and_ops.store(w | homed_bit, cc::memory_order_release);
+    }
+
+    if (previous != &home)
+    {
+        home._homed_nodes.fetch_add(1, cc::memory_order_relaxed);
+        if (previous != nullptr)
+            previous->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
+    }
+    return true;
 }
 
 void cc::async_node_base::set_home_options(async_home_options options)

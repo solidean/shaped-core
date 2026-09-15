@@ -126,6 +126,7 @@ public:
 
     /// Blocks until every job handed to the actor has been delivered, cancelled or dropped.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     /// Runs one cycle of the copy actor on the calling thread; true if there may be more work.
     // Set in initialize, then touched only by the copy actor, which reads them lock-free.

@@ -51,6 +51,22 @@ void test_registry::add_invocable_declaration(cc::string name,
     });
 }
 
+void test_registry::add_async_invocable_declaration(
+    cc::string name,
+    config::cfg test_config,
+    cc::vector<std::type_index> signature,
+    cc::unique_function<void(cc::span<nx::typed_value*>, impl::async_test_sink&)> async_invocable_function,
+    cc::source_location loc)
+{
+    declarations.push_back(test_declaration{
+        .name = cc::move(name),
+        .test_config = test_config,
+        .location = loc,
+        .signature = cc::move(signature),
+        .async_invocable_function = cc::move(async_invocable_function),
+    });
+}
+
 void test_registry::add_alias(test_alias alias)
 {
     aliases.push_back(cc::move(alias));

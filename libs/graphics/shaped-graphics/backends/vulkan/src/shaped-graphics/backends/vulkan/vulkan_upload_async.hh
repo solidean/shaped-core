@@ -211,6 +211,7 @@ public:
 
     /// Blocks until every upload handed to the actor has run on the GPU, been cancelled or been dropped.
     void wait_until_idle() { _drain.wait_until_idle(); }
+    [[nodiscard]] bool is_idle() const { return _drain.is_idle(); }
 
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 
@@ -223,8 +224,8 @@ public:
     /// Picks one job and fills a window with it; returns true when more work may be possible right away.
     [[nodiscard]] bool run_one_window();
 
-    /// Settles every finished transfer whose copies have landed.
-    void settle_finished();
+    /// Settles every finished transfer whose copies have landed; true when it settled any.
+    bool settle_finished();
 
     /// Blocks until the oldest outstanding settlement lands, then settles it; false when there is none.
     ///

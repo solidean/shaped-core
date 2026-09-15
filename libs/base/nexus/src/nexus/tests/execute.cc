@@ -3,12 +3,14 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert-handler.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/record/async_scope.hh>
@@ -20,6 +22,8 @@
 #include <clean-core/thread/async_mutex.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/impl/async_parker.hh>
+#include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
@@ -29,8 +33,11 @@
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/check.hh>
+#include <nexus/tests/entry.hh>
 #include <nexus/tests/impl/test_ambient.hh>
+#include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/section.hh>
+#include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
 
 #include <string>        // std::string: key type for the std::unordered_map below
@@ -44,7 +51,14 @@ using namespace cc::primitive_defines;
 struct nx::impl::async_test_sink
 {
     cc::shared_async<cc::unit> root;
+    cc::shared_async<int> command_root; // an ASYNC_COMMAND's body, whose value is the exit status
 };
+
+namespace
+{
+// Defined beside execute_tests; declared here so a test's context can point at its phase's locks.
+struct phase_locks;
+} // namespace
 
 namespace nx
 {
@@ -143,6 +157,9 @@ struct test_context
     // dispatched child starts matching sections at scope[filter_offset].
     int filter_offset = 0;
 
+    // What nx::test_seed() answers inside this test.
+    u64 seed = 0;
+
     // current stats — the test thread's own, so plain and unsynchronized
     int executed_checks = 0;
     int failed_checks = 0;
@@ -172,6 +189,18 @@ struct test_context
 
     // False for an ASYNC_TEST: the section tree is replay state, and the body of an async test runs exactly once.
     bool allows_sections = true;
+
+    // Set by a SKIP or a failed REQUIRE that ended a poll by throwing.
+    // The async system turns that throw into the node's error, and it propagates up the graph an ASYNC_TEST body awaited.
+    // That error is the abort the check asked for, already recorded, so finish_async_test must not report it again.
+    cc::atomic<bool> aborted_by_check_throw = {false};
+
+    // The exclusion locks of the phase this test runs in, which an async invocation takes a child's tags from.
+    // Null outside a phase that has them: a directly driven phase runs its bodies one at a time, so nothing contends.
+    phase_locks* locks = nullptr;
+
+    // Serializes appends to execution->nested: two async invocations from one body may finish on different threads.
+    cc::mutex<cc::unit> nested_guard;
 
     // Where --verbose trace lines go: the top-level execution's buffer, shared with every context nested under it.
     // Never null while a body runs.
@@ -449,6 +478,18 @@ cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
     auto const* const parent = current_context();
     ctx.verbose_sink = parent != nullptr ? parent->verbose_sink : &execution.verbose_output;
 
+    // Pinned when the declaration says so; otherwise from the name, never the position, so a filtered re-run reproduces it.
+    // A dispatched child derives from its driver's seed and its group, since the same invocable may run under several drivers.
+    auto const& decl = *execution.instance.declaration;
+    auto const name_hash
+        = [](u64 base, cc::string_view text) { return cc::make_hash_of_bytes(cc::as_bytes(text), base); };
+    if (decl.test_config.seed != 0)
+        ctx.seed = u64(decl.test_config.seed);
+    else if (parent != nullptr && !execution.invocation_group.empty())
+        ctx.seed = cc::hash_finalize(name_hash(name_hash(parent->seed, execution.invocation_group), decl.name));
+    else
+        ctx.seed = cc::hash_finalize(name_hash(config.seed, decl.name));
+
     return owned;
 }
 
@@ -618,10 +659,15 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     if (!cc::async_is_polling())
         return; // nothing would catch the throw
 
+    auto const aborts = is_skip || (!result.passed && result.kind == impl::check_kind::require);
+    if (!aborts)
+        return;
+
+    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_test reads this to tell it apart from a real failure.
+    ctx.aborted_by_check_throw.store(true, cc::memory_order_release);
     if (is_skip)
         throw test_skipped{};
-    if (!result.passed && result.kind == impl::check_kind::require)
-        throw test_require_failed{};
+    throw test_require_failed{};
 }
 
 /// Record a check that belongs to no test, and say so on stderr right away.
@@ -714,6 +760,19 @@ struct async_test_state
     nx::test_execution* execution = nullptr;
     nx::test_schedule_config const* config = nullptr;
 
+    // Set for a dispatched async child: the boxed arguments its body receives, the scopes it descends with, and how many path segments are already consumed.
+    // A top-level test leaves all three empty and derives its scopes itself.
+    cc::span<nx::typed_value*> values;
+    cc::span<cc::vector<cc::string> const> section_scopes;
+    int filter_offset = 0;
+    bool is_dispatched = false;
+
+    // The phase's exclusion locks, handed to the test's context for the async invocations its body makes.
+    phase_locks* locks = nullptr;
+
+    // Storage for a top-level test's own scopes: its instance's alias fragments, or the run's -c path as one scope.
+    cc::vector<cc::vector<cc::string>> owned_scopes;
+
     cc::unique_ptr<test_context> ctx;
 
     // The ONE ambient link naming this test, made in the first poll and kept alive here for the rest of the node's life.
@@ -721,6 +780,7 @@ struct async_test_state
     cc::async_ambient_handle ambient;
 
     cc::shared_async<cc::unit> root;
+    cc::shared_async<int> command_root; // set instead of `root` for an ASYNC_COMMAND
     bool started = false;
 
     // The trace this test's recording is bucketed under, minted alongside the ambient link above.
@@ -735,7 +795,9 @@ struct async_test_state
 
 /// Run an ASYNC_TEST body to its return under `ctx`, and take the graph it handed back.
 /// Null if the body threw before producing one.
-cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declaration const& decl)
+nx::impl::async_test_sink run_async_prologue(test_context& ctx,
+                                             nx::test_declaration const& decl,
+                                             cc::span<nx::typed_value*> values)
 {
     auto* const crash_slot = running_test_slot_for_this_thread();
     scoped_running_test const published(crash_slot);
@@ -753,6 +815,8 @@ cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declar
         auto _ = scoped_test_assertion_handler();
         if (decl.test_config.thorough_only && !ctx.config->thorough)
             SKIP("runs only under --thorough");
+        else if (decl.is_invocable())
+            decl.async_invocable_function(values, sink);
         else
             decl.async_function(sink);
     }
@@ -782,7 +846,7 @@ cc::shared_async<cc::unit> run_async_prologue(test_context& ctx, nx::test_declar
             .expanded = "uncaught unknown exception",
         });
     }
-    return cc::move(sink.root);
+    return sink;
 }
 
 /// Fold an async test's outcome into its execution and drop its context.
@@ -792,7 +856,24 @@ void finish_async_test(async_test_state& state)
     auto const& decl = *state.execution->instance.declaration;
 
     // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
-    if (state.root != nullptr)
+    // A SKIP or REQUIRE that ended the graph by throwing has already said what happened, and its error is that abort rather than a second failure.
+    if (state.command_root != nullptr)
+    {
+        if (auto const* const code = state.command_root->try_value(); code != nullptr)
+            state.execution->exit_code = *code;
+        else if (auto const* const err = state.command_root->try_error();
+                 err != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
+            ctx.errors.push_back(test_error{
+                .expr = cc::format("the command's async graph failed: {}",
+                                   err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string()),
+                .location = decl.location,
+                .extra_lines = {},
+                .expanded = "the command resolved to an error instead of an exit status",
+            });
+        state.command_root = {};
+    }
+
+    if (state.root != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
     {
         if (auto const* const err = state.root->try_error(); err != nullptr)
         {
@@ -840,7 +921,19 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         state.started = true;
         state.execution->started_at_steady_s = cc::current_time_steady_secs();
         state.execution->thread = u64(cc::current_thread_id());
-        state.ctx = test_execute_begin(*state.execution, *state.config, {}, /*filter_offset=*/0);
+        if (!state.is_dispatched)
+        {
+            // Resolved exactly as run_scheduled_instance resolves a synchronous test's: the instance's alias fragments, else the run's -c path.
+            if (!state.execution->instance.section_scopes.empty())
+                state.section_scopes = state.execution->instance.section_scopes;
+            else if (!state.config->section_filters.empty())
+            {
+                state.owned_scopes.push_back(state.config->section_filters);
+                state.section_scopes = state.owned_scopes;
+            }
+        }
+        state.ctx = test_execute_begin(*state.execution, *state.config, state.section_scopes, state.filter_offset);
+        state.ctx->locks = state.locks;
         state.ctx->allows_sections = false;
 
         auto const& decl = *state.execution->instance.declaration;
@@ -860,23 +953,96 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
 
-        state.root = run_async_prologue(*state.ctx, decl);
+        {
+            auto sink = run_async_prologue(*state.ctx, decl, state.values);
+            state.root = cc::move(sink.root);
+            state.command_root = cc::move(sink.command_root);
+        }
+
+        // Whichever the body handed back, placed and scheduled the same way.
+        auto* body = static_cast<cc::async_node_base*>(nullptr);
+        if (state.root != nullptr)
+            body = state.root.get();
+        else if (state.command_root != nullptr)
+            body = state.command_root.get();
 
         // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
         // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
         // and it also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
-        if (state.root != nullptr)
+        // Only a coroutine can be placed on a home before it starts, which is what main_thread and the scheduler modes need.
+        // A raw frame is a hot-path tool with no place in a test body, so it is refused outright rather than accepted wherever placement happens not to matter.
+        if (body != nullptr && !body->reserves_home_word())
         {
-            CC_ASSERT(state.root->is_cold(), "an ASYNC_TEST must return a cold graph — see nexus/async-test.hh");
-            state.root->schedule();
+            state.ctx->errors.push_back(test_error{
+                .expr = "an async test body must be a coroutine",
+                .location = decl.location,
+                .extra_lines = {"write the body with co_await / co_return rather than returning a graph built another "
+                                "way",
+                                "e.g.  ASYNC_TEST(\"...\") { auto const v = co_await work(); CHECK(v == 42); }"},
+                .expanded = "the body handed back a graph that is not a coroutine",
+            });
+            state.root = {};
+            state.command_root = {};
+            body = nullptr;
+        }
+
+        if (body != nullptr)
+        {
+            CC_ASSERT(body->is_cold(), "an async test body must hand back its coroutine unstarted");
+
+            // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
+            if (decl.test_config.main_thread)
+            {
+                auto const homed = body->try_home_cold(cc::main_thread_scheduler());
+                CC_ASSERT(homed, "a cold coroutine always takes a home");
+            }
+            body->schedule();
         }
     }
 
     if (state.root != nullptr && !actx.require(state.root))
         return actx.wait_for_dependencies();
+    if (state.command_root != nullptr && !actx.require(state.command_root))
+        return actx.wait_for_dependencies();
 
     finish_async_test(state);
     return actx.resolve_to_value(cc::unit{}); // terminal: nothing may follow it
+}
+
+/// Drive `node` to completion on `driver` from the run thread, one node at a time.
+///
+/// A single-threaded scheduler alone completes only what it can reach, and two things it cannot reach are exactly what an async test waits on.
+/// A segment homed to main runs only when the main home is pumped, and an unthreaded semantic thread delivers only when the pump registry is swept.
+/// So between drives this services both — the main home only on the main thread, which owns it — and parks on the node, the pumps and the home when neither had anything.
+void drive_serially(cc::singlethreaded_scheduler& driver, cc::async_node_base& node)
+{
+    auto const on_main = cc::current_thread_id() == cc::thread_id::main;
+    if (node.is_ready())
+        return;
+
+    // Built once, since its latch on the node outlives any one park.
+    auto* const home = cc::impl::async_tls().home;
+    // It drives pumps: a serial drive is the only loop running here, so a component the test pumps cannot be raced.
+    auto parker = cc::impl::async_parker(node, home != nullptr && home->is_inside_own_body() ? nullptr : home, true);
+
+    while (!node.is_ready())
+    {
+        driver.participate_until_ready(node);
+        if (node.is_ready())
+            break;
+
+        auto const progressed = on_main ? cc::pump_main_thread() : cc::thread_pump_all();
+        if (progressed)
+            continue;
+
+#if !CC_HAS_THREADS
+        // Nothing else exists to deliver what the node waits on.
+        CC_ASSERT(false, "a serially driven test cannot progress: it waits on something no scheduler or pump here will "
+                         "run");
+#endif
+        // Until the node resolves, a pump signals, or the home gets work: never on a clock.
+        parker.park();
+    }
 }
 
 /// Take everything the sink holds, leaving it empty for whatever runs next.
@@ -1014,8 +1180,68 @@ nx::impl::scoped_check_capture::~scoped_check_capture()
 void nx::impl::submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root)
 {
     CC_ASSERT(root != nullptr, "an ASYNC_TEST body must return a valid async");
-    CC_ASSERT(sink.root == nullptr, "an ASYNC_TEST body must hand back exactly one graph");
+    CC_ASSERT(sink.root == nullptr && sink.command_root == nullptr, "an ASYNC_TEST body must hand back exactly one "
+                                                                    "graph");
     sink.root = cc::move(root);
+}
+
+void nx::impl::submit_command_async(async_test_sink& sink, cc::shared_async<int> root)
+{
+    CC_ASSERT(root != nullptr, "an ASYNC_COMMAND body must return a valid async");
+    CC_ASSERT(sink.root == nullptr && sink.command_root == nullptr, "an ASYNC_COMMAND body must hand back exactly one "
+                                                                    "graph");
+    sink.command_root = cc::move(root);
+}
+
+void nx::impl::report_exit_code(int code)
+{
+    auto* const execution = current_execution();
+    CC_ASSERT(execution != nullptr, "a command's exit status is reported from inside its running body");
+    execution->exit_code = code;
+}
+
+int nx::run_command(cc::string_view name, cc::vector<cc::string> args)
+{
+    auto* const parent = impl::current_execution();
+    auto const* const config = impl::current_config();
+    CC_ASSERT(parent != nullptr && config != nullptr, "nx::run_command must be called from within a running test");
+
+    auto const* registry = impl::active_registry();
+    if (registry == nullptr)
+        registry = &get_static_test_registry();
+
+    auto const* command = static_cast<test_declaration const*>(nullptr);
+    for (auto const& decl : registry->declarations)
+        if (decl.test_config.bucket == config::test_bucket::command && cc::string_view(decl.name) == name)
+            command = &decl;
+    CC_ASSERTS(command != nullptr, cc::format("nx::run_command: this binary holds no COMMAND named \"{}\"", name));
+    CC_ASSERTS(!command->is_async(),
+               cc::format("nx::run_command: \"{}\" is an ASYNC_COMMAND, which a synchronous call cannot run", name));
+
+    if (auto const* const slot = impl::current_slot_declaration(); slot != nullptr)
+    {
+        auto const unhonoured = impl::find_unhonoured_dispatch_config(command->test_config, slot->test_config);
+        CC_ASSERTS(unhonoured.empty(), cc::format("nx::run_command: \"{}\" declares {}, but \"{}\" does not hold it — "
+                                                  "a command runs in "
+                                                  "the schedule slot of the test that runs it, so add {} there",
+                                                  name, unhonoured, slot->name, unhonoured));
+    }
+
+    test_execution child;
+    child.instance.declaration = command;
+    child.instance.registry = registry;
+    child.instance.args = cc::move(args);
+    child.instance.rebuild_arg_views();
+    child.invocation_group = "run_command";
+
+    impl::run_test_body(child, *config, [&] { command->function(); }, {}, impl::current_filter_consumed() + 2);
+
+    auto code = child.exit_code.value_or(0);
+    if (child.is_considered_failing() && code == 0)
+        code = 1;
+
+    parent->nested.push_back(cc::move(child));
+    return code;
 }
 
 nx::test_registry const* nx::impl::active_registry()
@@ -1622,8 +1848,10 @@ struct main_body_queue
     {
         _pending.lock([&](cc::vector<pending>& q)
                       { q.push_back(pending{.execution = execution, .done = cc::move(done)}); });
-        // A no-op homed to main is what wakes the loop wherever it waits: it sleeps on the main home.
-        (void)cc::make_async_scheduled_on_main([] { return cc::unit{}; });
+        // A wake, not a no-op homed to main: a homed node counts against main's homed_node_count until main pumps it,
+        // which a main_thread test running meanwhile would read as its own.
+        // A wake a running body's wait consumes is not lost, since the loop looks for a pending body before it parks.
+        cc::main_thread_scheduler().wake();
     }
 
     /// Runs one pending body on the calling (main) thread; false when none was pending.
@@ -1663,15 +1891,22 @@ struct phase_locks
     };
 
     cc::async_shared_mutex<cc::unit> global;
-    cc::vector<cc::unique_ptr<tag_lock>> tags;
+
+    // Looked up from any thread, since an async invocation takes a child's tags while the phase runs.
+    // Each lock is boxed, so a reference handed out stays valid as the list grows.
+    cc::mutex<cc::vector<cc::unique_ptr<tag_lock>>> tags;
 
     cc::async_mutex<cc::unit>& for_tag(cc::string_view tag)
     {
-        for (auto const& t : tags)
-            if (t->tag == tag)
-                return t->mutex;
-        tags.push_back(cc::make_unique<tag_lock>(tag));
-        return tags.back()->mutex;
+        return *tags.lock(
+            [&](cc::vector<cc::unique_ptr<tag_lock>>& all) -> cc::async_mutex<cc::unit>*
+            {
+                for (auto const& t : all)
+                    if (t->tag == tag)
+                        return &t->mutex;
+                all.push_back(cc::make_unique<tag_lock>(tag));
+                return &all.back()->mutex;
+            });
     }
 };
 } // namespace
@@ -1707,12 +1942,6 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   "nx::main_thread cannot be combined with own_pool: a private pool's worker is never the main "
                   "thread. BENCHMARK bakes main_thread in, so a benchmark of thread scaling has to be a plain TEST "
                   "with nx::config::benchmark instead");
-        CC_ASSERT(!instance.declaration->is_async(), "an ASYNC_TEST cannot use nx::main_thread: the graph it returns "
-                                                     "is driven by the phase's scheduler, not by the thread the body "
-                                                     "started on (allowing it is in libs/base/nexus/docs/TODO.md). "
-                                                     "BENCHMARK bakes "
-                                                     "main_thread in, so an async benchmark has to be a plain "
-                                                     "ASYNC_TEST with nx::config::benchmark instead");
     }
     CC_ASSERT(!any_main_thread || cc::current_thread_id() == cc::thread_id::main,
               "a test asked for nx::main_thread, but execute_tests is not running on the main thread; a binary running "
@@ -1738,15 +1967,27 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     };
     cc::vector<run_phase> phases;
 
+    // The order tests are handed to their phases in: the schedule's, or shuffled by the run seed.
+    // Slots stay indexed by schedule position, so the report order never changes with it.
+    auto run_order = cc::vector<isize>();
+    run_order.reserve(schedule.instances.size());
     for (isize i = 0; i < schedule.instances.size(); ++i)
+        run_order.push_back(i);
+    if (config.shuffle)
+    {
+        auto rng = cc::random(config.seed);
+        rng.shuffle(run_order);
+    }
+
+    for (auto const i : run_order)
     {
         auto const& instance = schedule.instances[i];
         CC_ASSERT(instance.declaration != nullptr, "instances must be valid");
         CC_ASSERT(instance.declaration->function.is_valid() || instance.declaration->is_async(),
                   "ordinary instances must have a nullary or an async body");
         CC_ASSERT(!instance.declaration->is_async()
-                      || instance.declaration->test_config.scheduler != nx::config::scheduler_mode::none,
-                  "an ASYNC_TEST cannot use no_scheduler: nothing would drive the graph it returns");
+                      || instance.declaration->test_config.ambient != nx::config::ambient_mode::none,
+                  "an async test cannot use no_scheduler: nothing would drive its body");
         auto& execution = result.executions[i];
         execution.instance = instance;
 
@@ -1799,7 +2040,24 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             auto const run_bodies = [&]
             {
                 for (auto const i : phase.indices)
-                    run_scheduled_instance(result.executions[i], config);
+                {
+                    auto& execution = result.executions[i];
+                    if (!execution.instance.declaration->is_async())
+                    {
+                        run_scheduled_instance(execution, config);
+                        continue;
+                    }
+
+                    // Only singlethreaded reaches here: the scheduler bound below is the one that drives the body, inline and in order.
+                    auto* const bound = cc::async_scheduler::current_or_null();
+                    CC_ASSERT(bound != nullptr, "an async test in a directly driven phase needs the phase's bound "
+                                                "scheduler");
+                    auto state = async_test_state{.execution = &execution, .config = &config};
+                    auto const wrapper = cc::make_async_lazy<cc::unit>(
+                        [&state](cc::async_context<cc::unit>& actx) -> cc::async_step_status
+                        { return step_async_test(state, actx); });
+                    drive_serially(static_cast<cc::singlethreaded_scheduler&>(*bound), *wrapper);
+                }
             };
 
             switch (phase.ambient)
@@ -1925,7 +2183,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                     {
                         if (async_state == nullptr)
                             async_state = cc::make_unique<async_test_state>(
-                                async_test_state{.execution = execution, .config = &config});
+                                async_test_state{.execution = execution, .config = &config, .locks = &locks});
                         return step_async_test(*async_state, actx);
                     }
 
@@ -1967,7 +2225,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             cc::singlethreaded_scheduler driver;
             cc::async_worker_scope const scope(driver);
             for (auto const& node : test_nodes)
-                (void)cc::async_blocking_get_on(driver, node);
+                drive_serially(driver, *node);
             continue;
         }
 
@@ -2000,6 +2258,9 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
         // A main_thread body therefore runs at loop level, where its own waits still service the main home.
         join->schedule_on(pool);
         auto& main_home = cc::main_thread_scheduler();
+        // The main thread's loop drives pumps, which is what a main_thread async test awaiting an unthreaded component
+        // relies on; a handed-over body wakes the main home too.
+        auto parker = cc::impl::async_parker(*join, &main_home, true);
         while (!join->is_ready())
         {
             if (main_bodies.run_one(config))
@@ -2011,12 +2272,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
             CC_ASSERT(false, "a main_thread phase cannot progress: every test still pending waits on something no pump "
                              "will run");
 #endif
-            main_home.wait_for_work(1.0);
-        }
-
-        // The wake-ups submit() posted may still be queued, and each carries the context of the test that posted it.
-        while (main_home.pump_cycle())
-        {
+            parker.park();
         }
     }
 
@@ -2041,4 +2297,243 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
                   leaked);
 
     return result;
+}
+
+namespace
+{
+/// Whether any test on the ambient chain here — the scheduled test, or an invocable dispatched below it — declares an exclusion tag.
+/// A declared tag on that chain is a held one.
+/// The scheduled test took its tags before its body, a synchronously dispatched child's are its driver's, and an asynchronously dispatched child took its own.
+bool chain_holds_exclusion_tags()
+{
+    for (auto const* l = static_cast<cc::async_ambient_link const*>(cc::async_current_ambient()); l != nullptr;
+         l = l->parent)
+    {
+        if (l->tag != nx::impl::test_ambient_tag())
+            continue;
+        auto const* const ctx = reinterpret_cast<nx::test_context const*>(l->value);
+        if (ctx != nullptr && ctx->execution != nullptr
+            && ctx->execution->instance.declaration->test_config.exclusion_tag_count > 0)
+            return true;
+    }
+    return false;
+}
+
+/// Run one invoked child: wait for a concurrency permit when there is a cap, take the child's exclusion tags from the
+/// phase in name order, then await the child itself.
+/// A coroutine with pointer parameters rather than a lambda, so everything it names lives in its own frame.
+cc::shared_async<cc::unit> run_invoked_child(cc::shared_async<cc::unit> child,
+                                             nx::config::cfg const* child_config,
+                                             phase_locks* locks,
+                                             cc::async_semaphore* permits)
+{
+    auto permit = cc::optional<cc::async_semaphore_permit>();
+    if (permits != nullptr)
+        permit = co_await permits->acquire();
+
+    auto held = cc::vector<cc::async_mutex_guard<cc::unit>>();
+    if (locks != nullptr && child_config->exclusion_tag_count > 0)
+    {
+        auto names = cc::vector<cc::string_view>();
+        for (auto t = 0; t < child_config->exclusion_tag_count && t < nx::config::max_exclusion_tags; ++t)
+        {
+            auto const tag = cc::string_view(child_config->exclusion_tags[t]);
+            auto seen = false;
+            for (auto const& n : names)
+                seen |= n == tag;
+            if (!seen)
+                names.push_back(tag);
+        }
+        cc::sort(names); // the same order a top-level test takes them in, which is what keeps acquisition acyclic
+        for (auto const& name : names)
+            held.push_back(co_await locks->for_tag(name).lock());
+    }
+
+    co_await child;
+}
+
+/// What one child of an async invocation needs for as long as it runs.
+struct planned_child
+{
+    nx::test_declaration const* decl = nullptr;
+    cc::vector<cc::vector<cc::string>> scopes;
+};
+} // namespace
+
+cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::string name,
+                                                                          cc::vector<std::type_index> signature,
+                                                                          cc::vector<nx::typed_value> boxes,
+                                                                          bool in_parallel,
+                                                                          isize max_concurrent)
+{
+    // Everything below runs on first poll, which inherits the awaiting body's ambient — so this is the driver's context.
+    auto* const parent_ctx = current_context();
+    CC_ASSERT(parent_ctx != nullptr && parent_ctx->execution != nullptr, "nx::async_invoke_tests_* must be awaited "
+                                                                         "from inside a running test");
+    CC_ASSERT(!parent_ctx->allows_sections, "nx::async_invoke_tests_* must be awaited from an async test body; a "
+                                            "synchronous body uses nx::invoke_tests");
+
+    auto result = invocation_result{};
+    auto* const parent = parent_ctx->execution;
+    auto const& config = *parent_ctx->config;
+
+    // The boxes live in this frame until the last child resolves, which is what lets a child take them by const&.
+    auto values = cc::vector<nx::typed_value*>();
+    values.reserve(boxes.size());
+    for (auto& b : boxes)
+        values.push_back(&b);
+
+    int const consumed = current_filter_consumed();
+    auto const scopes = current_section_scopes();
+    auto const permits_segment = [](cc::span<cc::string const> sc, int idx, cc::string_view seg)
+    { return idx >= int(sc.size()) || cc::string_view(sc[idx]) == seg; };
+
+    if (!scopes.empty())
+    {
+        auto any_group = false;
+        for (auto const& sc : scopes)
+            any_group |= permits_segment(sc, consumed, name);
+        if (!any_group)
+            co_return result;
+    }
+
+    auto const* registry = active_registry();
+    if (registry == nullptr)
+        registry = &get_static_test_registry();
+
+    auto matches = cc::vector<test_declaration const*>();
+    for (auto const& decl : registry->declarations)
+        if (decl.is_invocable() && signatures_equal(decl.signature, signature))
+            matches.push_back(&decl);
+    cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
+                                     [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
+                                     [](test_declaration const* d) { return d->location.line(); }));
+
+    // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.
+    if (config.shuffle)
+    {
+        auto rng = cc::random(parent_ctx->seed);
+        rng.shuffle(matches);
+    }
+
+    // -j1 is the reproducible mode, so a parallel invocation runs its children one at a time there too.
+    in_parallel = in_parallel && config.jobs != 1;
+
+    auto const* const slot = current_slot_declaration();
+    auto const chain_holds_tags = chain_holds_exclusion_tags();
+    auto* const locks = [&]() -> phase_locks*
+    {
+        for (auto const* l = static_cast<cc::async_ambient_link const*>(cc::async_current_ambient()); l != nullptr;
+             l = l->parent)
+        {
+            if (l->tag != test_ambient_tag())
+                continue;
+            auto* const ctx = reinterpret_cast<test_context*>(l->value);
+            if (ctx != nullptr && ctx->locks != nullptr)
+                return ctx->locks;
+        }
+        return nullptr;
+    }();
+
+    auto plan = cc::vector<planned_child>();
+    for (auto const* decl : matches)
+    {
+        ++result.matched;
+
+        auto child_scopes = cc::vector<cc::vector<cc::string>>();
+        if (!scopes.empty())
+        {
+            for (auto const& sc : scopes)
+                if (permits_segment(sc, consumed, name) && permits_segment(sc, consumed + 1, decl->name))
+                    child_scopes.push_back(sc);
+            if (child_scopes.empty())
+                continue;
+        }
+
+        if (is_declaration_active(decl))
+        {
+            report_invocation_cycle(decl);
+            continue;
+        }
+
+        if (slot != nullptr)
+        {
+            auto const why = find_unhonoured_async_dispatch_config(decl->test_config, slot->test_config,
+                                                                   chain_holds_tags, in_parallel);
+            CC_ASSERTS(why.empty(), cc::format("nx::async_invoke_tests_{}: \"{}\" declares {} — it runs under \"{}\"",
+                                               in_parallel ? "in_parallel" : "in_sequence", decl->name, why, slot->name));
+        }
+
+        plan.push_back(planned_child{.decl = decl, .scopes = cc::move(child_scopes)});
+    }
+
+    // Pre-sized and never resized while a child runs, so the execution each context points at stays where it is.
+    auto executions = cc::vector<test_execution>();
+    executions.resize_to_defaulted(plan.size());
+
+    auto runs = cc::vector<cc::shared_async<cc::unit>>();
+    runs.reserve(plan.size());
+    auto permits = cc::unique_ptr<cc::async_semaphore>();
+    if (in_parallel && max_concurrent > 0)
+        permits = cc::make_unique<cc::async_semaphore>(max_concurrent);
+
+    for (isize i = 0; i < plan.size(); ++i)
+    {
+        auto& child = plan[i];
+        auto& execution = executions[i];
+        execution.instance.declaration = child.decl;
+        execution.instance.registry = registry;
+        execution.invocation_group = name;
+
+        auto node = cc::shared_async<cc::unit>();
+        if (child.decl->is_async())
+        {
+            // The same node an ASYNC_TEST gets, so the child's asks — main_thread included — are honoured the same way.
+            auto state = cc::make_unique<async_test_state>(async_test_state{
+                .execution = &execution,
+                .config = &config,
+                .values = values,
+                .section_scopes = child.scopes,
+                .filter_offset = consumed + 2,
+                .is_dispatched = true,
+                .locks = locks,
+            });
+            node = cc::make_async_lazy<cc::unit>([state = cc::move(state)](cc::async_context<cc::unit>& actx) mutable
+                                                 { return step_async_test(*state, actx); });
+        }
+        else
+        {
+            // A synchronous child runs start to finish in one poll, on main when it asks for main.
+            auto const run = [&execution, &config, &child, consumed, vals = cc::span<nx::typed_value*>(values)]
+            {
+                cc::async_no_worker_scope const unbound; // as for any test body: what it schedules is its own business
+                run_test_body(
+                    execution, config, [&] { child.decl->invocable_function(vals); }, child.scopes, consumed + 2);
+                return cc::unit{};
+            };
+            node = child.decl->test_config.main_thread ? cc::make_async_lazy_on_main(run) : cc::make_async_lazy(run);
+        }
+
+        runs.push_back(run_invoked_child(cc::move(node), &child.decl->test_config, locks, permits.get()));
+        if (!in_parallel)
+            co_await runs.back();
+    }
+
+    if (in_parallel && !runs.empty())
+        co_await cc::async_all(cc::span<cc::shared_async<cc::unit> const>(runs));
+
+    result.executed = int(plan.size());
+    parent_ctx->nested_guard.lock([&](cc::unit&) { parent->nested.push_back_range(cc::move(executions)); });
+    co_return result;
+}
+
+u64 nx::test_seed()
+{
+    auto const* const ctx = current_context();
+    return ctx != nullptr ? ctx->seed : 0;
+}
+
+cc::random nx::test_random()
+{
+    return cc::random(nx::test_seed());
 }

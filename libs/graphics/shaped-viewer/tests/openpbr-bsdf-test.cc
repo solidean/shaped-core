@@ -3,6 +3,8 @@
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -148,20 +150,20 @@ struct probe_result
 ///
 /// Everything is built inline rather than behind a routine: nothing a viewer runs dispatches this shader, so a routine
 /// would put test-only machinery in the library.
-cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
+cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
     auto const shader = sv_test::shaders::bsdf_probe.compute.BsdfProbe->acquire(ctx);
-    (void)cc::try_async_blocking_get(shader);
+    co_await cc::async_settled(shader);
     if (shader->has_error())
         FAIL(cc::format("the BSDF probe shader did not compile:\n{}", shader->try_error()->underlying().to_string()));
 
     auto const* const compiled = shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout(compiled->bindings);
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe_bindings>();
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
-    auto const built = cc::async_blocking_get(pipeline);
+    auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
 
     auto const item_count = cases.size() * blocks_per_case;
@@ -176,24 +178,19 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
         item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     auto const group = ctx.transient.create_binding_group(
-        group_layout, {{.name = "Cases", .view = case_buffer.as_readonly_buffer()},
-                       {.name = "Results", .view = result_buffer.as_readwrite_buffer()}});
+        group_layout, sv_test::shaders::probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
+                                                       .Results = result_buffer.as_readwrite_buffer()});
 
     cmd->compute.bind_pipeline(*built);
-    cmd->compute.bind_group(0, *group);
+    cmd->compute.bind<sv_test::shaders::probe_bindings>(*group);
     cmd->compute.dispatch_threads(item_count);
 
     auto readback = cmd->download.data_from_buffer(result_buffer);
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
-    ctx.block_until_idle();
-    // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
-    ctx.block_until_idle();
-    auto const delivered = readback.try_get_data();
-    REQUIRE(delivered.has_value());
 
-    auto const items = delivered.value();
+    auto const items = co_await readback.data();
     REQUIRE(items.size() == item_count);
 
     auto out = cc::vector<probe_result>();
@@ -207,11 +204,11 @@ cc::vector<probe_result> run_probe_chunk(sg::context& ctx, cc::span<probe_case c
     for (auto& r : out)
         r.mean = r.mean / cc::max(r.samples, 1.0f);
 
-    return out;
+    co_return out;
 }
 
 /// Dispatches every case, in chunks small enough that no single dispatch runs long enough to be killed.
-cc::vector<probe_result> run_probe(sg::context& ctx, cc::span<probe_case const> cases)
+cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<probe_case const> cases)
 {
     auto out = cc::vector<probe_result>();
     out.reserve(cases.size());
@@ -219,10 +216,11 @@ cc::vector<probe_result> run_probe(sg::context& ctx, cc::span<probe_case const> 
     for (auto begin = isize(0); begin < cases.size(); begin += cases_per_dispatch)
     {
         auto const count = cc::min(cases_per_dispatch, cases.size() - begin);
-        for (auto const& r : run_probe_chunk(ctx, cases.subspan({.offset = begin, .size = count})))
+        auto const chunk = co_await run_probe_chunk(ctx, cases.subspan({.offset = begin, .size = count}));
+        for (auto const& r : chunk)
             out.push_back(r);
     }
-    return out;
+    co_return out;
 }
 
 /// The surfaces every estimator is run against, each a lobe or a combination the closure has to get right on its own.
@@ -418,11 +416,11 @@ constexpr tg::vec3f probe_directions[] = {
 };
 } // namespace
 
-INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_h))
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
-    // The binary dies through `__fastfail` inside `ctx.block_until_idle()`, after a trivial dispatch whose
+    // The binary dies through `__fastfail` inside the wait for idle, after a trivial dispatch whose
     // command list also recorded an inline readback.
     // Not an assertion and not a lost device: both were instrumented and neither fires, and a fastfail bypasses the SEH
     // filter and the SIGABRT handler nexus installs — which is why it arrived as an exit code with no output at all.
@@ -448,7 +446,7 @@ INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_
         echo.s.specular_roughness = 0.375f;
         echo.s.geometry_tangent_frame = tg::vec4f(0, 0, 0, 0.625f);
 
-        auto const r = run_probe(ctx, cc::span<probe_case const>(&echo, 1));
+        auto const r = co_await run_probe(ctx, cc::span<probe_case const>(&echo, 1));
         REQUIRE(r.size() == 1);
         CHECK(r[0].mean[0] == 0.125f).context("base_color.x, the first float3 in the struct");
         CHECK(r[0].mean[1] == 0.375f).context("specular_roughness, past two float3s");
@@ -468,7 +466,7 @@ INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_
                                  .exiting = ns.exiting ? 1u : 0u,
                                  .s = ns.s});
 
-    auto const results = run_probe(ctx, cases);
+    auto const results = co_await run_probe(ctx, cases);
     REQUIRE(results.size() == cases.size());
 
     auto const modes_per_direction = 4;
@@ -595,7 +593,7 @@ INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_
             tint_cases.push_back(
                 {.wo = wo, .mode = probe_mode::transmitted, .samples = samples_per_block, .seed = 11u, .s = tinted->s});
 
-        auto const tint_results = run_probe(ctx, tint_cases);
+        auto const tint_results = co_await run_probe(ctx, tint_cases);
         REQUIRE(tint_results.size() == tint_cases.size());
 
         for (auto di = isize(0); di < tint_results.size(); ++di)

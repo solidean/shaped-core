@@ -252,7 +252,8 @@ TEST("module table - this process's modules are enumerable and contain its own c
     CHECK(found);
 }
 
-TEST("symbolize - a recorded module table resolves addresses this process did not produce", nx::config::exclusive("dbghelp"))
+TEST("symbolize - a recorded module table resolves addresses this process did not produce",
+     nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available() || !cc::module_enumeration_available() || !cc::stack_capture_available())
         SKIP("no symbolization or no module enumeration on this platform");
@@ -320,7 +321,8 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     CHECK(info.to_string() == "ghost.exe+0x123");
 }
 
-TEST("symbolize - a module on an unreachable path resolves without waiting for the network", nx::config::exclusive("dbghelp"))
+TEST("symbolize - a module on an unreachable path resolves without waiting for the network",
+     nx::config::exclusive("dbghelp"))
 {
     if (!cc::symbolizer::is_available())
         SKIP("no symbolization on this platform");

@@ -14,6 +14,9 @@
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See dx12-compute-test.cc.
 #include "double_compute.dxil.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // Exercises the optional cached-PSO path, on whichever adapter the driver brought up.
@@ -45,10 +48,10 @@ sg::compiled_shader make_double_shader()
 }
 
 // Dispatch `pipeline` over `count` threads, reading back Output[i] and checking it equals i*2.
-void check_doubles(sg::context& ctx,
-                   sg::compute_pipeline const& pipeline,
-                   sg::binding_group_layout_handle const& group_layout,
-                   int count)
+cc::shared_async<cc::unit> check_doubles(sg::context& ctx,
+                                         sg::compute_pipeline const& pipeline,
+                                         sg::binding_group_layout_handle const& group_layout,
+                                         int count)
 {
     auto buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                                 sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
@@ -68,20 +71,19 @@ void check_doubles(sg::context& ctx,
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
+    co_return;
 }
 } // namespace
 
-INVOCABLE_TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg cached PSO - round-trips a blob and the seeded pipeline still dispatches",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -107,7 +109,7 @@ INVOCABLE_TEST("sg cached PSO - round-trips a blob and the seeded pipeline still
         = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout, .cached_pipeline = blob});
     REQUIRE(seeded != nullptr);
     CHECK(seeded->used_cached_pipeline()); // the driver accepted its own blob
-    check_doubles(ctx, *seeded, group_layout, 256);
+    co_await check_doubles(ctx, *seeded, group_layout, 256);
 }
 
 namespace
@@ -229,7 +231,8 @@ INVOCABLE_TEST("sg reports which adapter it is running on", (dx12::dx12_context_
     CHECK(adapter.vendor_id != 0);
 }
 
-INVOCABLE_TEST("sg cached PSO - a garbage blob degrades to a fresh build", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg cached PSO - a garbage blob degrades to a fresh build",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -253,11 +256,11 @@ INVOCABLE_TEST("sg cached PSO - a garbage blob degrades to a fresh build", (dx12
 
     // A rejected blob is exactly what a persistent cache needs to hear: its entry has gone stale.
     CHECK(!res.value()->used_cached_pipeline());
-    check_doubles(ctx, *res.value(), group_layout, 256);
+    co_await check_doubles(ctx, *res.value(), group_layout, 256);
 }
 
-INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
@@ -280,5 +283,5 @@ INVOCABLE_TEST("sg cached PSO - the blob is not part of the built-in cache key",
     CHECK(a.get() == b.get());
 
     // One node, and a real PSO build on the ambient scheduler — finished here rather than left running past the test.
-    (void)cc::try_async_blocking_get(a);
+    co_await cc::async_settled(a);
 }

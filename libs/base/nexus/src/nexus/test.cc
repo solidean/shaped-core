@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/entry.hh>
 #include <nexus/tests/registry.hh>
 
 
@@ -8,10 +9,33 @@ void nx::impl::register_test(char const* name, config::cfg test_config, void (*f
     nx::get_static_test_registry().add_declaration(name, test_config, fn, loc);
 }
 
+void nx::impl::register_command(char const* name, config::cfg test_config, int (*fn)(), cc::source_location loc)
+{
+    nx::get_static_test_registry().add_declaration(name, test_config, [fn] { nx::impl::report_exit_code(fn()); }, loc);
+}
+
 void nx::impl::register_async_test(char const* name,
                                    config::cfg test_config,
                                    cc::unique_function<void(async_test_sink&)> fn,
                                    cc::source_location loc)
+{
+    nx::get_static_test_registry().add_async_declaration(name, test_config, cc::move(fn), loc);
+}
+
+void nx::impl::register_async_invocable_test(char const* name,
+                                             config::cfg test_config,
+                                             cc::vector<std::type_index> signature,
+                                             cc::unique_function<void(cc::span<nx::typed_value*>, async_test_sink&)> fn,
+                                             cc::source_location loc)
+{
+    nx::get_static_test_registry().add_async_invocable_declaration(name, test_config, cc::move(signature), cc::move(fn),
+                                                                   loc);
+}
+
+void nx::impl::register_async_command(char const* name,
+                                      config::cfg test_config,
+                                      cc::unique_function<void(async_test_sink&)> fn,
+                                      cc::source_location loc)
 {
     nx::get_static_test_registry().add_async_declaration(name, test_config, cc::move(fn), loc);
 }

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import Preset, Target
+from ..project.targets import carries_tests
 from ..toolchain import jsruntime as jsr
 from .eligibility import _suggest, query_listing
 
@@ -79,7 +80,7 @@ def collect_benchmarks(
     `binary_names` narrows which targets are probed (that is what `--target` does); None probes them all.
     A binary that cannot answer the query contributes nothing — not an error, it just holds no benchmarks we can see.
     """
-    selected = [t for t in targets if t.kind == "EXECUTABLE" and t.name.endswith("-test")]
+    selected = [t for t in targets if carries_tests(t)]
     if binary_names is not None:
         wanted = set(binary_names)
         selected = [t for t in selected if t.name in wanted]

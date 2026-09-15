@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
 
 /// What makes these tests deterministic rather than timed.
@@ -12,11 +13,11 @@
 ///
 ///   the CLOCKS are injected, so a TTL elapses because the test said so and never because a machine was slow;
 ///   the ACTOR is unthreaded, so message order is the test's own and a get really does follow the put before it;
-///   the async graph is driven by a scheduler bound to THIS thread, so waking a parked frame needs no pool.
+///   every test is an ASYNC_TEST with main_thread, awaiting the cache rather than pumping it.
 ///
 /// The third is the one that is easy to get wrong.
-/// Completing a node schedules whatever was parked on it, and scheduling routes to the current worker or to the installed compute scheduler — with neither, it asserts.
-/// Binding a singlethreaded_scheduler here gives the whole graph, actor included, somewhere to run.
+/// An unthreaded store runs only when the loop that owns it sweeps, and in a test run that loop is nexus's on the main
+/// thread — so a test pumping the store itself from a pool thread races that loop for the store's replies.
 
 namespace bcache::test
 {
@@ -53,60 +54,34 @@ public:
     [[nodiscard]] fake_clock& clock() { return *_clock; }
     [[nodiscard]] cc::string_view path() const { return _path; }
 
-    /// Every storage error the cache reported, in order.
+    /// Every storage error the caches this fixture opened have reported so far, in order.
     /// Empty is the normal case.
-    [[nodiscard]] cc::span<cc::string const> errors() const { return _errors; }
+    [[nodiscard]] cc::span<cc::string const> errors() const { return *_reported; }
 
     /// Closes and reopens over the same file, which is how the durability tests get a second process' worth of separation without spawning one.
     void reopen(cc::function_ref<void(cache_config&)> configure = [](cache_config&) {});
 
     /// Opens a SECOND cache over the same file: two connections, which is the multi-writer property without a second process.
-    ///
-    /// The returned cache is registered with this fixture, so drive_until pumps it too — an unthreaded actor
-    /// nobody pumps simply never services its mailbox, and every wait on it would time out.
     [[nodiscard]] cc::unique_ptr<blob_cache> open_second();
 
-    /// Drives the actor and the async graph until `node` resolves.
-    /// FAILs rather than spinning forever, so a pipeline that can never complete is a failing test and not a hang.
-    template <class T>
-    T settle(cc::shared_async<T> const& node)
-    {
-        this->drive_until([&] { return node->is_ready(); });
-        return this->take(node);
-    }
+    /// Settles once the cache has finished opening, whether it opened or degraded — what the old synchronous open waited for.
+    [[nodiscard]] cc::shared_async<cc::unit> opened() const { return settle_quietly(_cache->opened()); }
 
-    /// settle() for a node whose value is not wanted.
-    template <class T>
-    void settle_only(cc::shared_async<T> const& node)
-    {
-        this->drive_until([&] { return node->is_ready(); });
-    }
-
-    /// Pumps the actor and the scheduler until `done`, or fails the test.
-    void drive_until(cc::function_ref<bool()> done);
-
-    /// Drives until nothing moves, without requiring anything to finish — for "nothing further happened" checks.
-    /// Quiescence rather than a cycle count: a sibling test sweeping the same registry can hold this store's pump, and
-    /// a skipped cycle is not one this store got.
-    void idle();
+    /// Settles once the store has handled every message sent to it so far, since a flush is answered in mailbox order.
+    /// For "nothing further happened" checks, and for the fire-and-forget store an acquire queues before it resolves.
+    [[nodiscard]] cc::shared_async<cc::unit> idle() const { return _cache->flush(); }
 
 private:
-    template <class T>
-    T take(cc::shared_async<T> const& node)
+    // A parameter rather than a capture, so the node lives in the coroutine frame.
+    static cc::shared_async<cc::unit> settle_quietly(cc::shared_async<cc::unit> node)
     {
-        if (auto const* v = node->try_value())
-            return *v;
-        return T();
+        co_await cc::async_settled(node);
     }
-
-    struct driver;
 
     cc::string _path;
     std::shared_ptr<fake_clock> _clock;
     std::shared_ptr<cc::vector<cc::string>> _reported;
-    cc::vector<cc::string> _errors;
     cc::unique_ptr<blob_cache> _cache;
-    cc::unique_ptr<driver> _driver;
 };
 
 namespace bcache::test
@@ -121,4 +96,13 @@ namespace bcache::test
 [[nodiscard]] cc::string blob_text(blob const& b);
 
 [[nodiscard]] cache_key key_of(cc::string_view space, cc::string_view key, i32 version = 1);
+
+/// The value a settled node holds, or a default-constructed T when it settled on its error channel.
+template <class T>
+[[nodiscard]] T value_or_default(cc::shared_async<T> const& node)
+{
+    if (auto const* v = node->try_value())
+        return *v;
+    return T();
+}
 } // namespace bcache::test

@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -25,7 +27,8 @@ sg::texture_description target_desc(sg::texture_usages usage, sg::pixel_format f
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to)", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to)",
+                     (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -46,11 +49,9 @@ INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to)", (d
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(N) * 4);
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(N) * 4);
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 255 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -58,7 +59,7 @@ INVOCABLE_TEST("sg dx12 - clear render target fills every texel (render_to)", (d
     CHECK(ok);
 }
 
-INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -77,11 +78,9 @@ INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx12_con
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == isize(N) * isize(sizeof(float)));
-    auto const* depth = reinterpret_cast<float const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == isize(N) * isize(sizeof(float)));
+    auto const* depth = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (depth[i] != 0.5f)
@@ -89,7 +88,8 @@ INVOCABLE_TEST("sg dx12 - clear depth target fills every texel", (dx12::dx12_con
     CHECK(ok);
 }
 
-INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scope", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scope",
+                     (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -110,10 +110,8 @@ INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scope", (d
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 255 || px[i * 4 + 2] != 0 || px[i * 4 + 3] != 255)
@@ -121,7 +119,7 @@ INVOCABLE_TEST("sg dx12 - clear render target via the explicit manual scope", (d
     CHECK(ok);
 }
 
-INVOCABLE_TEST("sg dx12 - discard render target records and executes", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - discard render target records and executes", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -141,12 +139,11 @@ INVOCABLE_TEST("sg dx12 - discard render target records and executes", (dx12::dx
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    CHECK(bytes.has_value());
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == isize(W) * isize(H) * 4);
 }
 
-INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -171,10 +168,8 @@ INVOCABLE_TEST("sg dx12 - clear with an explicit viewport and scissor", (dx12::d
     auto future = cmd->download.bytes_from_texture(tex);
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    auto const* px = reinterpret_cast<u8 const*>(bytes.value().data());
+    auto const bytes = co_await future.bytes();
+    auto const* px = reinterpret_cast<u8 const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
         if (px[i * 4 + 0] != 0 || px[i * 4 + 1] != 0 || px[i * 4 + 2] != 255 || px[i * 4 + 3] != 255)

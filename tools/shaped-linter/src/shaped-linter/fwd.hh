@@ -32,6 +32,7 @@ struct lint_config;
 struct config_resolver;
 enum class config_value_kind : u8;
 enum class include_verdict : u8;
+enum class directive_subject : u8;
 
 // parse/
 struct node;

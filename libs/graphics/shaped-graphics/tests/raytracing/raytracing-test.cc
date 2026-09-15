@@ -1,4 +1,6 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
@@ -39,7 +41,7 @@ sg::raw_buffer_handle make_triangle_vertices(sg::context_handle const& ctx)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!raytracing_supported(ctx))
@@ -74,7 +76,7 @@ INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle con
 
     // Persistent: the handles outlive the epoch that built them.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(!blas->is_expired());
     CHECK(!tlas->is_expired());
 }

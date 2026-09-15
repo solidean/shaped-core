@@ -1,11 +1,14 @@
 #include "dx12-test-common.hh"
 
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
 // Embedded DXIL for double_compute.hlsl (Output[i] = i*2). See that file for the dxc command.
 #include "double_compute.dxil.h"
+
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -40,7 +43,7 @@ sg::compiled_shader make_double_shader()
 }
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::dx12_context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::dx12_context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -57,8 +60,8 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     // Bind the output buffer's read-write structured view to "Output".
@@ -81,13 +84,11 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
     auto future = down->download.data_from_buffer<u32>(buf, 0, count);
     ctx->submit_command_list(cc::move(down));
 
-    ctx->block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(count));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
     bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data.value()[i] != u32(i) * 2)
+        if (data[i] != u32(i) * 2)
             ok = false;
     CHECK(ok);
 }
@@ -96,7 +97,7 @@ INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (dx12::d
 // The transient descriptor region is a deliberately tiny 32 slots, so 40 iterations wrap the ring several times.
 // Proves the transient descriptor ring and transient buffer heap reclaim end-to-end on the GPU: no exhaustion, and every epoch's result is correct (Output[i] == i*2).
 // The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
-TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
+ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 {
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
     REQUIRE(ctx_r.has_value());
@@ -110,8 +111,8 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
     REQUIRE(group_layout != nullptr);
     auto pipeline_layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
     REQUIRE(pipeline_layout != nullptr);
-    auto pipeline = cc::async_blocking_get(ctx->cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout}));
+    auto pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
     for (int e = 0; e < 40; ++e)
@@ -136,7 +137,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         auto future = down->download.data_from_buffer<u32>(buf, 0, count);
         ctx->submit_command_list(cc::move(down));
 
-        ctx->block_until_idle();
+        co_await ctx->idle_completion();
         auto const data = future.try_get_data();
         REQUIRE(data.has_value());
         bool ok = true;
@@ -154,7 +155,7 @@ TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 // Each group takes 1 descriptor; 50 iterations far exceed the region, so the group's range must be
 // returned to the free list (epoch-deferred) and reused — a bump allocator would exhaust after 4. The
 // hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
-TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
+ASYNC_TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
 {
     // 4 persistent slots
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
@@ -175,7 +176,7 @@ TEST("sg dx12 - persistent binding groups free and reuse their descriptor range"
         REQUIRE(group != nullptr); // never exhausts: released ranges are reclaimed
         group.reset();             // drop -> schedules the range's deferred free
         ctx->advance_epoch();
-        ctx->block_until_idle(); // retire -> the finalizer returns it to the free list
+        co_await ctx->idle_completion(); // retire -> the finalizer returns it to the free list
     }
     CHECK(true);
 }

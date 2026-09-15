@@ -9,6 +9,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
@@ -146,6 +147,10 @@ public:
     /// Deduplicated, async layout / pipeline cache: `ctx.cached.acquire_compute_pipeline(...)`.
     context_cached_scope cached;
 
+    /// Work started against this context that nobody has to await — pipeline builds, or what a routine kicks off on the frame path.
+    /// Such work references the context, so `routines.clear()` waits for it, and a test awaits `ctx.backlog.settled()` before it ends.
+    cc::async_backlog backlog;
+
     /// Per-context render-routine registry (see routine_registry / render_routine).
     /// Routines are reached by type through `sg::render_routine::acquire_exclusive(cmd)`, or `acquire(cmd)` to only read.
     /// Touch this to `prewarm<...>()` before opening a list, or to `evict<R>()` / `clear()` cached routine GPU state early.
@@ -244,13 +249,25 @@ public:
     /// Settles when `e`'s GPU work has finished — how a caller learns an epoch is done without waiting for it.
     ///
     /// An epoch already retired hands back a node that is ready, so a caller never has to special-case the past.
-    /// It settles on a `process_completed_epochs` sweep, which every advance and every wait runs, so a frame loop
-    /// publishes these without doing anything extra.
+    /// It settles from the backend's own GPU signal, so nobody has to sweep or wait for it to arrive.
+    /// Without threads there is no thread to take that signal, and a sweep of the pumps settles it instead.
+    /// Settles as an error once the device is lost, or when the context shuts down first.
     [[nodiscard]] cc::shared_async<cc::unit const> epoch_completion(epoch e);
 
     /// Settles when the command list behind `token` has finished executing — the async form of is_submission_complete.
     /// `not_submitted` never settles, matching what the poll reports.
     [[nodiscard]] cc::shared_async<cc::unit const> submission_completion(submission_token token);
+
+    /// Settles once the GPU is idle AND every sg actor has drained — `block_until_idle` as an async, with the same three
+    /// conditions in the same order.
+    ///
+    /// **Nobody has to pump, poll or advance for it to settle**: GPU progress arrives through the backend's fence and
+    /// timeline signals, and the transfer actors report their own drain.
+    /// Without threads, whatever sweeps the pumps settles it, since no thread is left to wait on the GPU.
+    /// It retires epochs in its own segments, so it is awaited under `process_completed_epochs`' rule: never while
+    /// another thread advances the epoch.
+    /// Cold, like every coroutine; settles as an error once the device is lost, or when the context shuts down first.
+    [[nodiscard]] cc::shared_async<cc::unit> idle_completion();
 
     /// Blocks until the GPU is idle AND every sg actor has drained.
     ///
@@ -294,26 +311,58 @@ protected:
     void set_adapter_info(adapter_info info);
 
 private:
-    /// One outstanding completion async: the epoch or submission it is waiting on, and the node to push.
+    /// What an outstanding completion async waits for.
+    enum class completion_kind : u8
+    {
+        epoch,
+        submission,
+        transfers_drained, // no target: every transfer actor has delivered what it was given
+    };
+
+    /// One outstanding completion async: what it is waiting on, and the node to push.
     ///
     /// Kept only until it settles, so a frame loop that never asks for one pays nothing, and one that does pays a
-    /// vector entry until the sweep that retires it.
+    /// vector entry until the signal that settles it.
     struct pending_completion
     {
         u64 target = 0;
-        bool is_submission = false;
+        completion_kind kind = completion_kind::epoch;
         cc::shared_async<cc::unit> node;
     };
 
-    /// Hand back the node for `target`, minting one on a miss.
-    /// Already-settled targets never reach here — the public entry points answer those with a ready node.
-    [[nodiscard]] cc::shared_async<cc::unit const> completion_for(u64 target, bool is_submission);
+    /// Everything that makes the completion asyncs settle on their own: the signal waiter, or the pump without threads.
+    /// Defined in context.cc, so this header pulls in no thread type.
+    struct completion_signals;
 
-    /// Push every node whose target the GPU has now passed.
+    /// Hand back the node for `target`, minting one on a miss and making sure something will signal it.
+    /// Already-settled targets never reach here — the public entry points answer those with a ready node.
+    [[nodiscard]] cc::shared_async<cc::unit const> completion_for(u64 target, completion_kind kind);
+
+    /// Settles when no transfer actor holds outstanding work; one of `idle_completion`'s three steps.
+    [[nodiscard]] cc::shared_async<cc::unit const> transfers_drained_completion();
+
+    /// Push every node whose condition now holds, or fail every node once the device is lost.
+    /// Safe from any thread, a transfer actor's included.
     /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
     void settle_due_completions();
 
+    /// Start the waiter thread, or register the pump without threads, the first time a completion needs signalling.
+    /// Called under the pending lock.
+    void ensure_completion_signals(cc::vector<pending_completion> const& pending);
+
+    /// Nudge a waiter already parked on older targets, so it re-arms for the one just added.
+    void wake_completion_signals();
+
+    /// The waiter thread's body: arm the lowest outstanding targets, park on them, settle, repeat.
+    void run_completion_signal_waiter();
+
+    /// The pump's body without threads: settle what is due, let siblings run, and park on the GPU only when nothing else can.
+    bool pump_completion_signals();
+
+    friend void impl::notify_transfer_drained(context& ctx);
+
     cc::mutex<cc::vector<pending_completion>> _pending_completions;
+    std::unique_ptr<completion_signals> _completion_signals;
 
 protected:
     // Reached by the lifetime scopes (`ctx.persistent.create_raw_buffer(...)`), which funnel here as friends.
@@ -355,6 +404,29 @@ protected:
     /// Pumping is not enough to observe it — an actor with a thread of its own reports no pumpable work while it is
     /// still busy — so a backend waits on its own outstanding-copy accounting here.
     virtual void block_until_transfers_drained() = 0;
+
+    /// Whether every transfer actor has delivered what it was given — block_until_transfers_drained as a poll.
+    /// Each drain it reads must report reaching zero through `impl::notify_transfer_drained`.
+    [[nodiscard]] virtual bool are_transfers_drained() const = 0;
+
+    /// The newest submission token handed out, or `not_submitted` when nothing has been submitted yet.
+    [[nodiscard]] virtual submission_token last_issued_submission() = 0;
+
+    /// Parks until the submission timeline reaches `submission`, the epoch timeline reaches `epoch`, or
+    /// `wake_completion_signal` is given a generation past `wake_generation` — whichever comes first.
+    ///
+    /// **A GPU signal or a host wake, never a timeout.**
+    /// A zero target is not waited on, and a spurious return is harmless: the caller re-checks everything.
+    /// The completion signal waiter is its only caller, so it may keep per-waiter arming state without a lock.
+    virtual void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) = 0;
+
+    /// Wakes a waiter parked in `wait_for_completion_signal`; generations are handed out strictly increasing.
+    /// Called only when a new target is lower than what the waiter is armed for, so at most once per such target.
+    virtual void wake_completion_signal(u64 generation) = 0;
+
+    /// Stops the signal waiter and fails every completion still outstanding, so no dependent parks forever.
+    /// A backend calls it in shutdown after its final drain, while its fences still exist; idempotent.
+    void stop_completion_signals();
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
     /// Failure must be device loss, in which case mark_device_lost is called, or an internal bug.
@@ -566,6 +638,14 @@ protected:
     /// `samplers` supplies one dynamic sampler per non-static sampler binding.
     [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                                     cc::span<named_view const> views,
+                                                                                    cc::span<named_sampler const> samplers,
+                                                                                    lifetime_scope scope) = 0;
+
+    /// The same, keyed by layout slot rather than by binding name.
+    /// A slot is a position in the layout's `bindings()`, so a caller holding one is expected to know it is
+    /// talking to the layout it got it from — see sg::slotted_view.
+    [[nodiscard]] virtual cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
+                                                                                    cc::span<slotted_view const> views,
                                                                                     cc::span<named_sampler const> samplers,
                                                                                     lifetime_scope scope) = 0;
 

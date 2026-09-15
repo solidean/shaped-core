@@ -1,6 +1,8 @@
 #include "cache_fixture.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -34,7 +36,7 @@ TEST("bcache create_disabled answers every read as a miss and drops every write"
     CHECK(!cc::thread_pump_all());
 }
 
-TEST("bcache acquire returns the computed value with no storage at all", singlethreaded)
+ASYNC_TEST("bcache acquire returns the computed value with no storage at all", singlethreaded)
 {
     auto cache = blob_cache::create_disabled();
     auto const key = key_of("disabled", "computed");
@@ -47,7 +49,7 @@ TEST("bcache acquire returns the computed value with no storage at all", singlet
     };
 
     auto const a = cache->acquire(key, compute);
-    CHECK(blob_text(cc::async_blocking_get(a)) == "computed anyway");
+    CHECK(blob_text(co_await a) == "computed anyway");
     CHECK(calls == 1);
 
     // Singleflight is pure in-process machinery, so it works with no storage behind it — a second concurrent caller still shares one compute.
@@ -57,14 +59,15 @@ TEST("bcache acquire returns the computed value with no storage at all", singlet
     auto const c = cache->acquire(key, compute);
     CHECK(b.get() == c.get());
     CHECK(cache->get_stats().singleflight_joins == 1);
-    CHECK(blob_text(cc::async_blocking_get(b)) == "computed anyway");
-    CHECK(blob_text(cc::async_blocking_get(c)) == "computed anyway");
+    CHECK(blob_text(co_await b) == "computed anyway");
+    CHECK(blob_text(co_await c) == "computed anyway");
 
     // Every acquire recomputes, because nothing is ever stored — degraded, not wrong.
     CHECK(calls == 2);
 }
 
-TEST("bcache opens degraded when its directory does not exist")
+// main_thread for the reason default-cache-test.cc gives: the store is unthreaded, and the main loop is what drives it.
+ASYNC_TEST("bcache opens degraded when its directory does not exist", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -77,8 +80,7 @@ TEST("bcache opens degraded when its directory does not exist")
     config.on_storage_error = [&](cc::string_view m) { reported.push_back(cc::string(m)); };
 
     auto cache = blob_cache::create(cc::move(config));
-    while (!cache->opened()->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(cache->opened());
 
     CHECK(cache->opened()->has_error()); // the one place the reason is available, for a log line
     CHECK(!cache->get_stats().is_backed_by_storage);
@@ -86,23 +88,22 @@ TEST("bcache opens degraded when its directory does not exist")
 
     auto const key = key_of("degraded", "entry");
     auto const put = cache->put(key, make_blob("dropped"));
-    while (!put->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(put);
     CHECK(put->try_value()->status == put_status::unavailable);
 
     auto const got = cache->get(key);
-    while (!got->is_ready())
-        (void)cc::thread_pump_all();
+    co_await cc::async_settled(got);
     CHECK(!got->try_value()->has_value());
 }
 
-TEST("bcache acquire keeps a computed value a failing put could not store")
+ASYNC_TEST("bcache acquire keeps a computed value a failing put could not store", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     // The invariant that matters most: a successful computation never becomes a failure because caching it failed.
     auto f = cache_fixture([](cache_config& c) { c.limits.max_object_bytes = 4; });
+    (void)co_await f.opened();
     auto const key = key_of("degraded", "too-big");
 
     auto calls = 0;
@@ -112,23 +113,25 @@ TEST("bcache acquire keeps a computed value a failing put could not store")
         return make_blob("far larger than four bytes");
     };
 
-    CHECK(blob_text(f.settle(f.cache().acquire(key, compute))) == "far larger than four bytes");
+    CHECK(blob_text((co_await f.cache().acquire(key, compute))) == "far larger than four bytes");
     CHECK(calls == 1);
 
-    f.idle();
-    CHECK(!f.settle(f.cache().get(key)).has_value()); // nothing was stored, as the limit demanded
+    (void)co_await f.idle();
+    CHECK(!(co_await f.cache().get(key)).has_value()); // nothing was stored, as the limit demanded
 
     // And it stays that way rather than becoming an error on the next attempt.
-    CHECK(blob_text(f.settle(f.cache().acquire(key, compute))) == "far larger than four bytes");
+    CHECK(blob_text((co_await f.cache().acquire(key, compute))) == "far larger than four bytes");
     CHECK(calls == 2);
 }
 
-TEST("bcache reports a compute failure and nothing else through acquire")
+ASYNC_TEST("bcache reports a compute failure and nothing else through acquire", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("degraded", "failing");
 
     auto const a = f.cache().acquire(key,
@@ -138,22 +141,24 @@ TEST("bcache reports a compute failure and nothing else through acquire")
                                              cc::any_error(cc::string("the computation itself failed"))));
                                      });
 
-    f.drive_until([&] { return a->is_ready(); });
+    co_await cc::async_settled(a);
     CHECK(a->has_error());
 
     // Nothing was stored, so the key is untouched and a later caller starts clean.
-    f.idle();
-    CHECK(!f.settle(f.cache().get(key)).has_value());
+    (void)co_await f.idle();
+    CHECK(!(co_await f.cache().get(key)).has_value());
 }
 
-TEST("bcache answers after close without hanging or crashing")
+ASYNC_TEST("bcache answers after close without hanging or crashing", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("closed", "entry");
-    f.settle_only(f.cache().put(key, make_blob("before close")));
+    (void)co_await f.cache().put(key, make_blob("before close"));
 
     f.cache().close();
     CHECK(f.cache().is_closed());

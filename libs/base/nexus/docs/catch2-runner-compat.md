@@ -137,6 +137,10 @@ Two compat modes are activated based on which flags are present, in `create_from
 
 ## Discovery mode
 
+**`--list-tests` and `--reporter` select tests on their own.**
+A nexus binary runs its default app or command unless a line selects tests, and TestMate never passes `--tests`.
+So both flags count as that selector, and the IDE integration needs nothing new.
+
 TestMate calls the binary with `--list-tests --reporter xml [filters]` to enumerate tests.
 Nexus responds with a `<MatchingTests>` document listing every scheduled test, after applying any name filters:
 

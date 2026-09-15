@@ -1,5 +1,7 @@
 #include "vulkan-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
@@ -19,7 +21,7 @@ namespace
 namespace vulkan = sg::backend::vulkan;
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - a timestamp pair measures real work", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a timestamp pair measures real work", (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -44,9 +46,9 @@ INVOCABLE_TEST("sg vulkan - a timestamp pair measures real work", (vulkan::vulka
     auto const t1 = cmd->query.record_gpu_timestamp();
     ctx.submit_command_list(cc::move(cmd));
 
-    ctx.block_until_idle();
+    co_await t0.completion();
+    co_await t1.completion();
     auto const s0 = t0.try_get_seconds();
-    ctx.block_until_idle();
     auto const s1 = t1.try_get_seconds();
     REQUIRE(s0.has_value());
     REQUIRE(s1.has_value());
@@ -58,7 +60,8 @@ INVOCABLE_TEST("sg vulkan - a timestamp pair measures real work", (vulkan::vulka
     CHECK(elapsed < 1.0);
 }
 
-INVOCABLE_TEST("sg vulkan - a timestamp records inside a rendering scope", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a timestamp records inside a rendering scope",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
 
@@ -86,6 +89,5 @@ INVOCABLE_TEST("sg vulkan - a timestamp records inside a rendering scope", (vulk
     ctx.submit_command_list(cc::move(cmd));
 
     CHECK(inside.is_valid());
-    ctx.block_until_idle();
-    CHECK(inside.try_get_ticks().has_value());
+    (void)co_await inside.ticks();
 }

@@ -2,6 +2,8 @@
 
 #include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 
@@ -93,7 +95,7 @@ TEST("sg vulkan - software-preferred context", exclusive("vulkan-device"))
     exercise_context(*ctx);
 }
 
-INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
@@ -103,13 +105,13 @@ INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_h
     CHECK(u64(c.completed_epoch()) < before); // the current epoch is still open
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(u64(c.current_epoch()) == before + 1);
     CHECK(u64(c.completed_epoch()) >= before); // the epoch that was current is now done
 }
 
-INVOCABLE_TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - deferred deletion runs finalizers only after the owning epoch retires",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
@@ -124,11 +126,12 @@ INVOCABLE_TEST("sg vulkan - deferred deletion runs finalizers only after the own
     CHECK(!finalized);
 
     c.advance_epoch();
-    c.block_until_idle(); // closes + drains the epoch the buffer died in
+    co_await c.idle_completion(); // closes + drains the epoch the buffer died in
     CHECK(finalized);
 }
 
-INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
@@ -138,7 +141,7 @@ INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs", (vulkan::
     // The shared context has pooled lists before this test, so the counts are relative to where it starts.
     // Draining returns every in-flight pool, and a dropped list returns its pool at once, so at least one is free.
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     auto seed = c.create_vulkan_command_list();
     REQUIRE(seed.has_value());
     c.drop_vulkan_command_list(cc::move(seed.value()));
@@ -153,7 +156,7 @@ INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs", (vulkan::
     CHECK(free_count() == pooled - 1); // still in flight — captured by the current epoch
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(free_count() == pooled); // reset and returned to the free set on retire
 
     // And the pool it gave back is taken again by the next list.
@@ -162,11 +165,11 @@ INVOCABLE_TEST("sg vulkan - command pools are recycled across epochs", (vulkan::
     CHECK(free_count() == pooled - 1);
     c.submit_vulkan_command_list(cc::move(cmd2.value()));
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(free_count() == pooled);
 }
 
-INVOCABLE_TEST("sg vulkan - submission token reports completion", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - submission token reports completion", (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
@@ -175,7 +178,7 @@ INVOCABLE_TEST("sg vulkan - submission token reports completion", (vulkan::vulka
     auto const token = c.submit_vulkan_command_list(cc::move(cmd.value()));
 
     c.advance_epoch();
-    c.block_until_idle(); // forces the GPU to catch up
+    co_await c.idle_completion(); // forces the GPU to catch up
     CHECK(c.is_submission_complete(token));
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
@@ -210,14 +213,14 @@ INVOCABLE_TEST("sg vulkan - the command list reports the device's ray-tracing an
     c.drop_vulkan_command_list(cc::move(cmd.value()));
 }
 
-INVOCABLE_TEST("sg vulkan - an installed message callback receives validation messages",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - an installed message callback receives validation messages",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
     // The shared context carries the fail-the-test listener, so a recording one replaces it until this test returns.
     // set_message_callback is not synchronized against a message raised on another thread, so the swap happens idle.
-    c.block_until_idle();
+    co_await c.idle_completion();
     CC_DEFER
     {
         vulkan::test::fail_on_validation_messages(c);
@@ -245,13 +248,13 @@ INVOCABLE_TEST("sg vulkan - an installed message callback receives validation me
     CHECK(seen == 1);
 }
 
-INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed callback",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed callback",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
     // The provoked message would fail the test through the shared listener, so a counting one replaces it until return.
-    c.block_until_idle();
+    co_await c.idle_completion();
     CC_DEFER
     {
         vulkan::test::fail_on_validation_messages(c);
@@ -281,8 +284,8 @@ INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed callback",
         CHECK(seen > 0);
 }
 
-INVOCABLE_TEST("sg vulkan - an inline upload records, submits and reclaims its staging",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - an inline upload records, submits and reclaims its staging",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
@@ -302,12 +305,12 @@ INVOCABLE_TEST("sg vulkan - an inline upload records, submits and reclaims its s
     // command buffer would fail the test rather than pass silently.
     // Byte correctness needs a readback, which is what the download path adds.
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(!c.is_device_lost());
 }
 
 // Owns its context: upload_ring_bytes is a creation knob, and the ring has to be far smaller than the default.
-TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
+ASYNC_TEST("sg vulkan - staging survives more uploads than the ring holds at once", exclusive("vulkan-device"))
 {
     // Exercises the reclaim path: with a ring far smaller than the total uploaded, reserve has to block on an
     // in-flight epoch and reuse the space it frees.
@@ -331,12 +334,12 @@ TEST("sg vulkan - staging survives more uploads than the ring holds at once", ex
     }
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(!c.is_device_lost());
 }
 
-INVOCABLE_TEST("sg vulkan - a texture round-trips through the staging rings",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a texture round-trips through the staging rings",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
     auto& base = static_cast<sg::context&>(c);
@@ -363,20 +366,18 @@ INVOCABLE_TEST("sg vulkan - a texture round-trips through the staging rings",
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    base.block_until_idle();
-    auto const read = future.try_get_bytes();
-    REQUIRE(read.has_value());
-    REQUIRE(read.value().size() == 256);
+    auto const read = co_await future.bytes();
+    REQUIRE(read.size() == 256);
 
     bool matched = true;
     for (int i = 0; i < 256; ++i)
-        if (read.value()[i] != byte(i))
+        if (read[i] != byte(i))
             matched = false;
     CHECK(matched);
 }
 
-INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block size",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block size",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     // BC formats store whole 4x4 blocks, so an 8x8 BC1 subresource is 4 blocks of 8 bytes rather than 8x8 texels.
     // Getting the staging size or its offset alignment wrong here is a validation error rather than a wrong image,
@@ -401,10 +402,8 @@ INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block size"
     auto future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{});
     base.submit_command_list(cc::move(cmd));
 
-    base.block_until_idle();
-    auto const read = future.try_get_bytes();
-    REQUIRE(read.has_value());
-    CHECK(read.value().size() == 32);
+    auto const read = co_await future.bytes();
+    CHECK(read.size() == 32);
 }
 
 INVOCABLE_TEST("sg vulkan - the device reports descriptor buffer properties",
@@ -460,8 +459,8 @@ INVOCABLE_TEST("sg vulkan - the descriptor heap allocates, frees and coalesces",
     CHECK(heap.device_address() != 0);
 }
 
-INVOCABLE_TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch",
-               (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
     auto& heap = c._descriptor_heap;
@@ -475,7 +474,7 @@ INVOCABLE_TEST("sg vulkan - transient descriptor ranges are reclaimed per epoch"
     CHECK(first.transient);
 
     c.advance_epoch();
-    c.block_until_idle();
+    co_await c.idle_completion();
 
     auto const second = heap.allocate_transient(1024);
     REQUIRE(!second.is_empty());

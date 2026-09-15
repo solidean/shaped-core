@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>          // offsetof
 #include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -171,7 +173,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - ctx.cached dedups raster pipelines and keys ev
     differs("a per-instance vertex slot", [](auto& d) { d.vertex_input.slots[0].per_instance = true; });
 }
 
-INVOCABLE_TEST("ssc::dxc + dx12 - the cached PSO blob is not part of the raster key", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - the cached PSO blob is not part of the raster key",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -206,7 +209,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - the cached PSO blob is not part of the raster 
 
     auto const plain = ctx.cached.acquire_raster_pipeline(describe());
     REQUIRE(plain != nullptr);
-    sg::raster_pipeline_handle const built = cc::async_blocking_get(plain);
+    sg::raster_pipeline_handle const built = co_await plain;
     REQUIRE(built != nullptr);
 
     // The blob only accelerates a build, so feeding one back must hit the same entry rather than splitting it.

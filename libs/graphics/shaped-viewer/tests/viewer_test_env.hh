@@ -13,6 +13,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-viewer/context.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/scene/mesh.hh>
@@ -95,36 +96,6 @@ inline void drive_ambient_work()
     cc::this_thread_yield();
 }
 
-/// Runs async work on this thread until none is queued and `started` has settled, so what a test started ends with the test.
-/// False when `timeout_secs` ran out first, which only a broken build reaches.
-///
-/// The GPU tests share one context across the whole driver, so nothing tears it down between them.
-/// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, and a compile left
-/// unfinished is async work the next test inherits.
-///
-/// **Queued work alone is not enough.** With threads, a trace starts the fallback's compile on a pool worker, where no queue shows it.
-/// So a test that traced passes what it started as `started`: `frame::background_work()` for a viewer loop, copied while the viewer lives,
-/// or `material_shader_cache::acquire_fallback().shader` for a test holding its own resource manager.
-/// A node nobody started is not waited for, since nothing would ever finish it.
-template <class T>
-[[nodiscard]] inline bool drain_ambient_work(cc::shared_async<T> const& started, double timeout_secs = 60.0)
-{
-    CC_RECORD_SCOPE("sv_test.drain_ambient_work");
-
-    auto const start = cc::current_time_steady_secs();
-    while (true)
-    {
-        while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
-        {
-        }
-        if (started == nullptr || started->is_cold() || started->is_ready())
-            return true;
-        if (cc::current_time_steady_secs() - start >= timeout_secs)
-            return false;
-        cc::this_thread_yield();
-    }
-}
-
 /// Drives `ctx.routines.tick()` until `ready()` holds, or until `timeout_secs` elapses; true when it came up.
 ///
 /// **A workaround, and marked as one.** A routine's shaders and pipelines build on the ambient async scheduler, off
@@ -133,8 +104,8 @@ template <class T>
 /// the machine's rather than the code's.
 ///
 /// The real answer is an `ASYNC_TEST` that simply `co_await`s readiness.
-/// That needs main-thread affinity for `cc::async`, which clean-core does not have yet -- it is recorded in
-/// libs/graphics/shaped-graphics/docs/TODO.md under the ASYNC_TEST migration.
+/// The tests are async now; readiness itself is not yet an async, which libs/graphics/shaped-graphics/docs/TODO.md
+/// records under "Readiness as an async".
 /// Every sv test that needs a routine up goes through here until then, so the places to revisit are exactly this
 /// function's callers.
 template <class F>
@@ -164,8 +135,7 @@ template <class F>
 ///
 /// Each iteration ticks, records, submits, advances and drains — a real frame — so whatever the previous one started
 /// has somewhere to land.
-/// Replaced by an ASYNC_TEST that co_awaits readiness once cc::async has main-thread affinity; see
-/// libs/graphics/shaped-graphics/docs/TODO.md.
+/// Replaced by one await once readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
 template <class F>
 [[nodiscard]] bool frames_until_executed(sg::context& ctx, F&& body, double timeout_secs = 60.0)
 {
@@ -290,6 +260,39 @@ inline sv::mesh as_mesh(cc::string name, cc::span<tg::pos3f const> positions, cc
             .geometry = sv::triangle_geometry::create_from_positions(positions),
             .attributes = pbr_face_attributes(materials),
             .material = sv::default_material(shared_material_library())};
+}
+
+/// The same geometry, shaded through a TEXTURE rather than through per-face colours.
+///
+/// This is the only shape of scene that reaches the path tracer's sampler group: a permutation declares a sampler
+/// only when its material samples something, and that sampler group is a third `binding_group_layout` the routine
+/// builds and a third slot in its pipeline layout.
+/// Every other scene here is untextured, so without this the whole of that path is unreached.
+///
+/// `base_color` is bound as a texture INSTEAD of as a per-face attribute, so nothing fills the same slot twice.
+inline sv::mesh as_textured_mesh(cc::string name, cc::span<tg::pos3f const> positions)
+{
+    // One uv per vertex.
+    // The values decide what the sample reads, and nothing here checks the pixels, so they only have to exist.
+    auto uvs = cc::array<tg::vec2f>::create_defaulted(positions.size());
+    for (auto i = isize(0); i < uvs.size(); ++i)
+        uvs[i] = tg::vec2f(f32(i % 2), f32((i / 2) % 2));
+
+    auto attributes = cc::vector<sv::mesh_attribute>();
+    attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+
+    auto mesh = sv::mesh{.name = cc::move(name),
+                         .geometry = sv::triangle_geometry::create_from_positions(positions),
+                         .attributes = cc::move(attributes),
+                         .material = sv::default_material(shared_material_library())};
+
+    // A 2x2 opaque white texture: enough to mint an id and a sampler, and neutral enough that the image is the
+    // one the untextured sibling produces.
+    auto pixels = cc::array<byte>::create_filled(2 * 2 * 4, byte(255));
+    mesh.textures.push_back(
+        {.name = "base_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 2)}});
+    return mesh;
 }
 
 /// The same, over indexed geometry — triangle order follows the index buffer, so the per-face attributes still line up.

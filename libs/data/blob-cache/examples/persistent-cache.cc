@@ -1,8 +1,3 @@
-// TODO(nexus): an ASYNC_EXAMPLE, so the body IS an async<unit> and awaits the cache directly.
-// Everything here is async underneath, and the example has to say so twice: once by relying on the installed compute scheduler, and once by blocking_get on every call.
-// Both are scaffolding around the demonstration rather than part of it.
-// ASYNC_TEST already carries the shape (nexus/async-test.hh); the example bucket wants the same.
-
 #include <blob-cache/blob_cache.hh>
 #include <blob-cache/keys.hh>
 #include <clean-core/common/utility.hh>
@@ -10,8 +5,8 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
-#include <clean-core/thread/async_thread_pool.hh>
-#include <nexus/test.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 
 using namespace cc::primitive_defines;
 
@@ -32,12 +27,12 @@ cc::string blob_text(bcache::blob const& b)
 }
 } // namespace
 
-EXAMPLE("blob-cache/persistent-cache")
+ASYNC_EXAMPLE("blob-cache/persistent-cache")
 {
     if (!bcache::blob_cache::is_storage_available())
     {
         cc::println("no SQLite backend was compiled in — the cache would miss on everything");
-        return;
+        co_return;
     }
 
     // A fixed path, deliberately not cleaned up: run this example twice and the second run is a hit.
@@ -58,18 +53,20 @@ EXAMPLE("blob-cache/persistent-cache")
 
     // acquire is lookup, singleflight and store in one call: the callback runs only on a real miss,
     // and concurrent callers for the same key join one pipeline instead of each computing their own.
-    auto const value = cc::async_blocking_get(cache->acquire(key,
-                                                             [&]
-                                                             {
-                                                                 computed = true;
-                                                                 return expensive_derivation("teapot");
-                                                             }));
+    auto const acquired = cache->acquire(key,
+                                         [&]
+                                         {
+                                             computed = true;
+                                             return expensive_derivation("teapot");
+                                         });
+    auto const value = co_await acquired;
 
     cc::println("value: {}", blob_text(value));
     cc::println("this run {}", computed ? "computed it" : "read it from the cache");
 
     // Asking again in the same process never reaches storage at all.
-    auto const again = cc::async_blocking_get(cache->acquire(key, [&] { return expensive_derivation("teapot"); }));
+    auto const reacquired = cache->acquire(key, [&] { return expensive_derivation("teapot"); });
+    auto const again = co_await reacquired;
     cc::println("second acquire returns the same bytes: {}", blob_text(again) == blob_text(value));
 
     auto const stats = cache->get_stats();

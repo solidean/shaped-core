@@ -91,6 +91,10 @@ Three properties of the table are each load-bearing:
 The terminal step releases the slot *before* resolving.
 Resolving wakes dependents synchronously, and a dependent that immediately re-acquires the key must find the slot gone rather than joining an operation that is already over.
 
+The store is queued before the pipeline resolves, and nobody awaits it: a failure to store must never reach the value handed back.
+So the store's promise is tracked in the cache's `cc::async_backlog`, which is how a test or a shutdown waits until nothing it caused is still being written.
+It is tracked only once the actor accepted the message, since a rejected one is never answered.
+
 Cross-process singleflight is deliberately absent — the closing section says what that costs.
 
 ## Data model

@@ -179,7 +179,7 @@ sg::async_compiled_shader shader_cache::compile(shader_description const& desc, 
                                   = compile_shader(desc, options, this->resolve_blob_cache(), this->persistent_key(key));
 
                               // A coroutine is cold; this tier has always handed back a scheduled node.
-                              return cc::async_start(cc::move(node));
+                              return _backlog.start(cc::move(node));
                           });
 }
 } // namespace ssc::dxc

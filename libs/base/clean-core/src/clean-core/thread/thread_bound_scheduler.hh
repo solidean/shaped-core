@@ -44,6 +44,9 @@ struct cc::thread_bound_scheduler final : async_scheduler
     [[nodiscard]] bool is_bound() const { return _owner != thread_id::invalid; }
     [[nodiscard]] bool is_owner_thread() const;
 
+    /// Whether the calling thread is inside one of this home's own bodies, whose queue a wait there may not run.
+    [[nodiscard]] bool is_inside_own_body() const { return _body_depth > 0 && is_owner_thread(); }
+
     // async_scheduler seam
 public:
     /// A node reaches a thread home through submit; enqueue is only ever called for UNHOMED work scheduled while this
@@ -83,6 +86,14 @@ public:
     /// For the owner's own wait loops, which then pump.
     void wait_for_work(double max_ms);
 
+    /// Blocks until something is submitted or wake() is called; returns at once when either already happened.
+    /// For a blocking drive that registered its own reasons to be woken — see cc::impl::async_parker.
+    /// `max_secs` < 0 waits without limit, which is every caller but a deadline-bounded one.
+    void wait_for_work_or_wake(double max_secs = -1);
+
+    /// Ends the owner's wait_for_work_or_wake, now or at its next call; from any thread.
+    void wake();
+
     // internal
 private:
     friend struct async_thread_pool;
@@ -121,6 +132,9 @@ private:
 
     /// The pool the owner is parked in as a participant, or null — read, woken and cleared only under _mutex.
     cc::atomic<async_thread_pool*> _parked_in = {nullptr};
+
+    /// Set by wake(), consumed by the next wait_for_work_or_wake; under _mutex.
+    bool _wake_requested = false;
 #endif
 };
 

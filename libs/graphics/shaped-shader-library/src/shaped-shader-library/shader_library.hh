@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
@@ -179,6 +180,10 @@ public:
 
     void note_reload();
 
+    /// Every shader this library handed out, from any compiler, so a caller can wait until none is still compiling.
+    /// A node a compiler returned cold counts once something starts it.
+    [[nodiscard]] cc::async_backlog const& backlog() const { return _backlog; }
+
     /// Tells the watcher an asset's dependency set moved, so it can seed the new paths and re-arm its watches.
     /// A first acquire records what a shader is built from on a consumer thread, which the watcher would otherwise never hear about.
     /// Cheap and safe to over-call.
@@ -197,7 +202,7 @@ private:
     /// The package that owns `virtual_path`. Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
 
-    /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, compile.
+    /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.
     /// The two differ only in where the text came from and what its includes are searched against, so everything after that is here.
     /// `package_root` is empty for a source belonging to no package, which simply drops one search root.
     void _compile_text(compile_outcome& outcome,
@@ -219,6 +224,9 @@ private:
     cc::vector<shader_asset_handle> _assets;
 
     cc::vector<package_entry> _packages;
+
+    /// Mutable because compiling is const, and tracking what it handed out changes nothing a caller can observe.
+    mutable cc::async_backlog _backlog;
 
     /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a filesystem notification comes in through.
     /// Both are shared because the actor owns the impl and only hands it back once it has stopped.

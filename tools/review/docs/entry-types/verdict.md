@@ -39,6 +39,17 @@ Saying both is the point.
   "This is the right shape, do not churn it" tells it what to leave alone.
 - **Hedging.** If the answer is "yes with two conditions", say the two conditions.
 
+## Bullets, not paragraphs
+
+**Each question above is a bold lead and a few bullets, one point per bullet.**
+The verdict is the entry most likely to become a wall of text, because it is the one that is allowed to be long.
+Length is fine; density is not.
+pr-173's verdict was five paragraphs of two to four sentences, and the maintainer's note on it was:
+
+```raw
+the wall of text in this type of entry is always hard for me to read. I think we should encourage a bullet point heavy style here
+```
+
 ## Shape
 
 Numbered `980`, immediately before the generated coverage entry.

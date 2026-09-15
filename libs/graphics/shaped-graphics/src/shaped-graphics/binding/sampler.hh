@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/error/optional.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// Backend-neutral texture **sampler** description: how a shader reads a texture — filtering, addressing, LOD, optional depth comparison.
@@ -77,4 +78,14 @@ struct sg::sampler
     sampler_border_color border_color = sampler_border_color::transparent_black;
 
     [[nodiscard]] bool operator==(sampler const&) const = default;
+};
+
+/// A binding name paired with a sampler state.
+/// As a `create_binding_group_layout` argument it declares a *static* sampler, baked into the pipeline layout's root signature.
+/// As a `create_binding_group` argument it supplies a *dynamic* sampler for a sampler binding of that name.
+/// Same value type either way.
+struct sg::named_sampler
+{
+    cc::string name;
+    sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
 };

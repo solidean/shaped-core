@@ -39,15 +39,20 @@ struct nx::test_declaration
     // `function` is left invalid; nexus/async-test.hh is the only thing that fills this in.
     cc::unique_function<void(impl::async_test_sink&)> async_function;
 
-    [[nodiscard]] bool is_async() const { return async_function.is_valid(); }
-
     // Invocable tests (INVOCABLE_TEST): `signature` is the decayed argument-type list, the invoke_tests join key.
     // `invocable_function` runs the body with args sourced from typed_value slots, and `function` is left invalid.
     // These are inert: a sweep never schedules them, and they run only when a driver calls nx::invoke_tests with a matching signature.
     cc::vector<std::type_index> signature;
     cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function;
 
+    // ASYNC_INVOCABLE_TEST bodies: an invocable whose body hands the graph it wants awaited to the sink.
+    // Matched by `signature` exactly like a synchronous invocable; `invocable_function` is left invalid.
+    cc::unique_function<void(cc::span<nx::typed_value*>, impl::async_test_sink&)> async_invocable_function;
+
     [[nodiscard]] bool is_invocable() const { return !signature.empty(); }
+
+    // Whether the body is a coroutine nexus awaits: an ASYNC_TEST, or an ASYNC_INVOCABLE_TEST.
+    [[nodiscard]] bool is_async() const { return async_function.is_valid() || async_invocable_function.is_valid(); }
 };
 
 // One runnable target an alias expands to: a driver test, plus the section path that scopes into it.
@@ -90,6 +95,13 @@ struct nx::test_registry
                                    cc::vector<std::type_index> signature,
                                    cc::unique_function<void(cc::span<nx::typed_value*>)> invocable_function,
                                    cc::source_location loc = cc::source_location::current());
+
+    void add_async_invocable_declaration(
+        cc::string name,
+        config::cfg test_config,
+        cc::vector<std::type_index> signature,
+        cc::unique_function<void(cc::span<nx::typed_value*>, impl::async_test_sink&)> async_invocable_function,
+        cc::source_location loc = cc::source_location::current());
 
     void add_alias(test_alias alias);
 };

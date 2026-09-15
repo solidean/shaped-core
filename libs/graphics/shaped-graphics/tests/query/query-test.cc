@@ -1,3 +1,5 @@
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -8,7 +10,7 @@
 // Gated on is_supported(), so it also asserts the unsupported path — an invalid query, with record still callable.
 // Runs against every available backend (see tests/context/context-test.cc for the mechanism).
 
-INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -22,7 +24,7 @@ INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_han
         CHECK(!t.is_valid());
         CHECK(!t.is_ready());
         ctx->drop_command_list(cc::move(cmd));
-        return;
+        co_return;
     }
 
     auto t0 = cmd->query.record_gpu_timestamp();
@@ -33,13 +35,9 @@ INVOCABLE_TEST("sg - gpu timestamps round-trip when supported", (sg::context_han
 
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
-    auto const tick0 = t0.try_get_ticks();
-    ctx->block_until_idle();
-    auto const tick1 = t1.try_get_ticks();
-    REQUIRE(tick0.has_value());
-    REQUIRE(tick1.has_value());
-    CHECK(tick1.value() >= tick0.value()); // non-decreasing on a single queue
+    auto const tick0 = co_await t0.ticks();
+    auto const tick1 = co_await t1.ticks();
+    CHECK(tick1 >= tick0); // non-decreasing on a single queue
 
     REQUIRE(t1.is_ready());
     CHECK(t1.try_get_seconds().has_value());

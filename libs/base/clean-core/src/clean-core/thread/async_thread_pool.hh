@@ -94,6 +94,7 @@ public:
     ///
     /// The caller PARTICIPATES: it borrows a pool slot and runs the graph itself rather than handing it over, so a small graph never leaves this thread.
     /// It parks on the root only once there is nothing left for it to run, which is why it returns ready even for a graph finished by an external push.
+    /// With threads it never sweeps the thread-pump registry, so a graph that waits on an unthreaded component needs that component's own loop to run it.
     /// Legal from inside a worker — cc::async_blocking_get bridges sync and async code, and a nested drive keeps that thread working rather than idle.
     /// Without threads the caller is not merely a participant but the only one, and runs the whole graph inline.
     void participate_until_ready(async_node_base& root) override;

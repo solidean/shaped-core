@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import Preset, Target
+from ..project.targets import carries_examples
 from ..toolchain import jsruntime as jsr
 from .eligibility import _suggest, query_listing
 
@@ -53,8 +54,8 @@ def capture_directory(preset: Preset, example_name: str, shot: str = "") -> Path
 
 
 def is_example_target(target: Target) -> bool:
-    """Project convention: example executables are named '*-example'."""
-    return target.kind == "EXECUTABLE" and target.name.endswith("-example")
+    """A nexus binary carrying examples, as the build's nexus-binaries.json records it."""
+    return carries_examples(target)
 
 
 def _artifact_stamp(artifact: Path | None) -> list | None:

@@ -1,4 +1,5 @@
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
@@ -10,8 +11,8 @@
 //   - hardware: the real GPU, and the default; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
-// A child runs under its driver's config, so the drivers carry the exclusion tags the children need.
-// The children stand up a slib::shader_library, a process-wide singleton, and the imgui ones an sr::imgui_context, which is another.
+// The drivers hold no exclusion tags: the async invocation takes each child's own around its run, and a driver holding them too would be refused.
+// So a child that stands up a slib::shader_library, or an sr::imgui_context, carries that tag itself.
 // Children under one driver run one after another on the same context, so each must leave it as it found it.
 
 namespace
@@ -38,25 +39,34 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-TEST("sr dx12 - warp", exclusive("slib-shader-library"), exclusive("sr-imgui-context"))
+ASYNC_TEST("sr dx12 - warp")
 {
     // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
     if (!nx::is_thorough() && dx12::has_hardware_adapter())
         SKIP("the hardware adapter covers the default run; WARP runs under --thorough");
 
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = dx12::dx12_adapter::warp});
+    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp});
     if (ctx.has_error())
         SKIP("no dx12 WARP device");
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("warp", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
     }
 }
 
-TEST("sr dx12 - hardware", exclusive("slib-shader-library"), exclusive("sr-imgui-context"))
+ASYNC_TEST("sr dx12 - hardware")
 {
-    auto ctx = sg::create_dx12_context({.enable_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
+    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
@@ -65,7 +75,16 @@ TEST("sr dx12 - hardware", exclusive("slib-shader-library"), exclusive("sr-imgui
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("hardware", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
+
+        // A device reset during our own tests is a defect, not an environment quirk to tolerate.
+        // Checking once here rather than per-test is what makes it unmissable: the loss flag is sticky, so the
+        // run fails whichever invocable lost the device.
+        // The poll is what makes it reliable -- a reset nothing has submitted against yet is invisible to the flag.
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
     }
 }
 

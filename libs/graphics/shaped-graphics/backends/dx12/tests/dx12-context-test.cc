@@ -82,12 +82,16 @@ TEST("sg dx12 - SC_DX12_ADAPTER=warp hides the hardware adapter from every reque
 
     CHECK(!dx12::has_hardware_adapter());
 
+    // Both ask for the debug layer, like every other context in this binary.
+    // The process's first device decides whether the layer can ever be activated, and this test may run first.
     // An explicit hardware request is refused too, and the error names the pin as the reason.
-    auto const hardware = sg::create_dx12_context({.adapter = dx12::dx12_adapter::hardware});
+    auto const hardware
+        = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
     REQUIRE(hardware.has_error());
     CHECK(hardware.error().to_string().contains("SC_DX12_ADAPTER"));
 
-    auto const fallback = sg::create_dx12_context({.adapter = dx12::dx12_adapter::hardware_or_warp});
+    auto const fallback
+        = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware_or_warp});
     REQUIRE(fallback.has_value());
     CHECK(fallback.value()->adapter().is_software);
 }

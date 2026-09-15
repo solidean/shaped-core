@@ -4,7 +4,9 @@
 #include <clean-core/algorithm/sort_async.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -26,6 +28,7 @@ using namespace sort_test;
 namespace
 {
 /// Drives the graph to completion on the run's ambient scheduler, which is the inline path under -DSC_THREADS=OFF.
+/// Only for the tests with a SECTION, which cannot be async; every other test awaits its sort.
 void drive(cc::shared_async<cc::unit> const& root)
 {
     (void)cc::async_blocking_get(root);
@@ -69,7 +72,7 @@ TEST("sort_async - lands on exactly what cc::sort produces")
     }
 }
 
-TEST("sort_async - sorts a large random range, checked without reference to cc::sort")
+ASYNC_TEST("sort_async - sorts a large random range, checked without reference to cc::sort")
 {
     cc::random rng(52);
     isize const n = 50000;
@@ -77,25 +80,25 @@ TEST("sort_async - sorts a large random range, checked without reference to cc::
     auto const original = make_pattern(pattern::random, n, rng);
     auto values = original;
 
-    drive(cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(64)));
+    co_await cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(64));
 
     CHECK(cc::is_sorted(values));
     CHECK(is_permutation_of(original, values));
 }
 
-TEST("sort_async - the shipped default cutoff spawns nothing and still sorts")
+ASYNC_TEST("sort_async - the shipped default cutoff spawns nothing and still sorts")
 {
     cc::random rng(53);
     auto const original = make_pattern(pattern::random, 1000, rng);
 
     auto values = original;
-    drive(cc::sort_async(values));
+    co_await cc::sort_async(values);
 
     CHECK(cc::is_sorted(values));
     CHECK(is_permutation_of(original, values));
 }
 
-TEST("sort_async - a wide element type, which takes the non-blockwise partition")
+ASYNC_TEST("sort_async - a wide element type, which takes the non-blockwise partition")
 {
     cc::random rng(54);
     isize const n = 5000;
@@ -108,8 +111,8 @@ TEST("sort_async - a wide element type, which takes the non-blockwise partition"
     auto expected = values;
     cc::sort(expected, [](wide const& a, wide const& b) { return a.key < b.key; });
 
-    drive(cc::sort_async_ex(
-        0, n, cc::as_index_swap_range(values), [](wide const& a, wide const& b) { return a.key < b.key; }, isize(16)));
+    co_await cc::sort_async_ex(
+        0, n, cc::as_index_swap_range(values), [](wide const& a, wide const& b) { return a.key < b.key; }, isize(16));
 
     for (isize i = 0; i < n; ++i)
         CHECK(values[i].key == expected[i].key);
@@ -139,7 +142,7 @@ TEST("sort_async - a by-value comparator survives the copy into every task")
     }
 }
 
-TEST("sort_async - composes as a dependency of other async work")
+ASYNC_TEST("sort_async - composes as a dependency of other async work")
 {
     cc::random rng(56);
     isize const n = 5000;
@@ -152,10 +155,10 @@ TEST("sort_async - composes as a dependency of other async work")
     // the dependency is unwrapped to its plain value before the continuation runs, hence the cc::unit parameter
     auto const checked = cc::make_async_lazy([&values](cc::unit) { return cc::is_sorted(values) ? 1 : 0; }, sorted);
 
-    CHECK(cc::async_blocking_get(checked) == 1);
+    CHECK(co_await checked == 1);
 }
 
-TEST("sort_async - two disjoint sorts in one graph")
+ASYNC_TEST("sort_async - two disjoint sorts in one graph")
 {
     cc::random rng(57);
     isize const n = 4000;
@@ -168,10 +171,10 @@ TEST("sort_async - two disjoint sorts in one graph")
     auto const both = cc::make_async_lazy(
         [&a, &b](cc::unit, cc::unit) { return (cc::is_sorted(a) && cc::is_sorted(b)) ? 1 : 0; }, sa, sb);
 
-    CHECK(cc::async_blocking_get(both) == 1);
+    CHECK(co_await both == 1);
 }
 
-TEST("sort_async - completes inline on a singlethreaded scheduler", nx::config::singlethreaded)
+ASYNC_TEST("sort_async - completes inline on a singlethreaded scheduler", nx::config::singlethreaded)
 {
     cc::random rng(58);
     isize const n = 3000;
@@ -180,13 +183,13 @@ TEST("sort_async - completes inline on a singlethreaded scheduler", nx::config::
     auto values = original;
 
     auto const sorted = cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(16));
-    cc::async_blocking_get(sorted);
+    co_await sorted;
 
     CHECK(cc::is_sorted(values));
     CHECK(is_permutation_of(original, values));
 }
 
-TEST("sort_async - keeps parallel ranges in step through the seam")
+ASYNC_TEST("sort_async - keeps parallel ranges in step through the seam")
 {
     cc::random rng(59);
     isize const n = 6000;
@@ -196,7 +199,7 @@ TEST("sort_async - keeps parallel ranges in step through the seam")
     for (isize i = 0; i < n; ++i)
         tags[i] = keys[i]; // the tag mirrors its key, so any drift shows up as a mismatch
 
-    drive(cc::sort_async_ex(0, n, cc::as_index_swap_range_multi(keys, tags), cc::default_less{}, isize(32)));
+    co_await cc::sort_async_ex(0, n, cc::as_index_swap_range_multi(keys, tags), cc::default_less{}, isize(32));
 
     CHECK(cc::is_sorted(keys));
     for (isize i = 0; i < n; ++i)

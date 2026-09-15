@@ -8,6 +8,9 @@
 // See that file for the dxc command.
 #include "raytrace.spirv.h"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+
 using namespace cc::primitive_defines;
 
 // Acceleration-structure builds against a real device.
@@ -37,7 +40,8 @@ sg::raw_buffer_handle make_triangle_vertices(sg::context& ctx)
 }
 } // namespace
 
-INVOCABLE_TEST("sg vulkan - builds a triangle blas and a tlas over it", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - builds a triangle blas and a tlas over it",
+                     (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
     if (!ctx.is_raytracing_supported())
@@ -78,12 +82,12 @@ INVOCABLE_TEST("sg vulkan - builds a triangle blas and a tlas over it", (vulkan:
     // Persistent: the handles outlive the epoch that built them, and the validation listener is what says the builds
     // themselves were well-formed.
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     CHECK(!blas->is_expired());
     CHECK(!tlas->is_expired());
 }
 
-INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
     if (!ctx.is_raytracing_supported())
@@ -110,7 +114,7 @@ INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vulkan_co
     CHECK(blas->size_in_bytes() > 0);
     CHECK(blas->geometry_count() == 1);
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     CHECK(!blas->is_expired());
 }
 
@@ -119,7 +123,7 @@ INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vulkan_co
 //
 // The alternating rays are what make the readback meaningful: a backend that wrote a constant, traced against an
 // empty scene, or mixed up the miss and hit groups would all produce a uniform buffer.
-INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context_handle const& handle))
 {
     auto& ctx = *handle;
     if (!ctx.is_raytracing_supported())
@@ -199,14 +203,12 @@ INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_context
     auto future = down->download.data_from_buffer<u32>(output, 0, k_rays);
     ctx.submit_command_list(cc::move(down));
 
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == isize(k_rays));
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(k_rays));
 
     bool alternating = true;
     for (int i = 0; i < k_rays; ++i)
-        if (data.value()[i] != u32(i % 2 == 0 ? 1 : 0))
+        if (data[i] != u32(i % 2 == 0 ? 1 : 0))
             alternating = false;
     CHECK(alternating);
 }

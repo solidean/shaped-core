@@ -98,6 +98,7 @@ if(SC_BUILD_TESTS)
         tests/rules/lint_corpus.cc
         tests/rules/corpus-test.cc
     )
+    sc_nexus_binary(shaped-linter-test KINDS tests)
 
     # babel-data is a test-only dependency: the corpus files are markdown, and babel::markdown reads them.
     # babel-data rather than babel-serializer, because markdown is all this needs and the lower library is

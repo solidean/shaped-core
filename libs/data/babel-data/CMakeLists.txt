@@ -65,6 +65,7 @@ if(SC_BUILD_TESTS)
         tests/data/json-test.cc
         tests/data/markdown-test.cc
     )
+    sc_nexus_binary(babel-data-test KINDS tests)
 
     target_link_libraries(babel-data-test
         PRIVATE

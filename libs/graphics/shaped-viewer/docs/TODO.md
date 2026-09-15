@@ -101,6 +101,10 @@ What is left is narrower than it was:
   So `sv::shader_library` registers both compilers and a vulkan context still resolves nothing it can build a pipeline from.
   Emitting them from the generator makes the generated half portable; the `.hlsli` library is the larger half, and a genuinely portable shader language is the larger answer still.
 
+  **And the material sampler group has to be bound there.**
+  On DX12 a static sampler is a root-signature entry, so `pathtrace_routine` builds that group's layout and binds nothing at its slot.
+  Vulkan writes a static sampler into the group's own descriptor set instead, so the same scene needs the group created and bound — a difference the dx12-only path has never had to notice.
+
 - **slib has no named-HLSL-fragment asset kind.**
   A material type's `shader` is a fragment, not a compilable shader, so the builtins carry theirs as string literals in `material/builtin_material_types.cc`.
   Moving them under `shaders/` once slib can declare a fragment gets editor support and hot reload.
@@ -481,6 +485,14 @@ What follows is everything else the importer left behind.
 - Multi-window compositing (multi-view within one window is done; the window system is one-per-process, so this needs shared ownership across viewers).
 - Plan the RTX / ray-tracing path against the shaped-graphics backend capabilities as they land.
 - Grow the [cheat-sheet](../cheat-sheet.md) + [structure](structure.md) as the renderer takes shape.
+
+- **The path tracer cannot use a generated group struct for its own bindings, only the pass's addresses.**
+  Its group layout is scene-dependent: a material permutation is generated and compiled at runtime, so the trace's
+  own group is built from merged reflection and `pt_common.hlsli` registers no `path:binding:namespace` entry.
+  What would close it is a generated struct for a permutation at all: the group is assembled at runtime, so
+  there is no annotated namespace for the generator to have emitted one from.
+  The permutation's own samplers no longer block it: they are declared through the pass, in a group of their own.
+
 - **`mesh_is_indexed` still rides in `frame_constants_gpu`**, for `pbr_raytrace_routine` alone.
   The path tracer reads it per instance now, out of `instance_gpu`, and its own frame block no longer carries it.
   The flat routine keeps the global `Vertices` / `Indices` / `Materials` bindings `shaders/mesh.hlsli` declares, which is the reason the flag is still per frame there.

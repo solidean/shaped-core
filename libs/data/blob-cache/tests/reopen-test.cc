@@ -1,24 +1,30 @@
 #include "cache_fixture.hh"
 
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
 using namespace bcache::test;
 
-TEST("bcache finds its entries again after a reopen")
+ASYNC_TEST("bcache finds its entries again after a reopen", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
+
+    (void)co_await f.opened();
     auto const key = key_of("persist", "entry");
 
-    f.settle_only(f.cache().put(key, make_blob_of_size(8192, 4), {.compute_time_secs = 12.5}));
+    (void)co_await f.cache().put(key, make_blob_of_size(8192, 4), {.compute_time_secs = 12.5});
 
     f.reopen();
 
-    auto const hit = f.settle(f.cache().get(key));
+    (void)co_await f.opened();
+
+    auto const hit = co_await f.cache().get(key);
     REQUIRE(hit.has_value());
     CHECK(hit.value().data.size() == 8192);
     CHECK(hit.value().data[100] == make_blob_of_size(8192, 4)[100]);
@@ -29,35 +35,40 @@ TEST("bcache finds its entries again after a reopen")
     CHECK(f.errors().empty());
 }
 
-TEST("bcache survives being dropped with work still buffered")
+ASYNC_TEST("bcache survives being dropped with work still buffered", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture([](cache_config& c) { c.access_epoch_secs = 10; });
 
+    (void)co_await f.opened();
+
     for (auto i = 0; i < 4; ++i)
-        f.settle_only(f.cache().put(key_of("persist", cc::format("entry-{}", i)), make_blob("payload")));
+        (void)co_await f.cache().put(key_of("persist", cc::format("entry-{}", i)), make_blob("payload"));
 
     f.clock().advance(100);
     for (auto i = 0; i < 4; ++i)
-        f.settle_only(f.cache().get(key_of("persist", cc::format("entry-{}", i))));
+        (void)co_await f.cache().get(key_of("persist", cc::format("entry-{}", i)));
 
     // No flush, no close — just a reopen, which is the closest a test gets to the process being killed here.
     f.reopen();
+    (void)co_await f.opened();
 
     // Committed entries are intact; only recency could have been lost, and losing that is harmless by design.
     for (auto i = 0; i < 4; ++i)
-        CHECK(f.settle(f.cache().get(key_of("persist", cc::format("entry-{}", i)))).has_value());
+        CHECK((co_await f.cache().get(key_of("persist", cc::format("entry-{}", i)))).has_value());
 }
 
-TEST("bcache recreates a file that is not a database and reports nothing to the caller")
+ASYNC_TEST("bcache recreates a file that is not a database and reports nothing to the caller", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
 
     auto f = cache_fixture();
-    f.settle_only(f.cache().put(key_of("persist", "before"), make_blob("gone after this")));
+
+    (void)co_await f.opened();
+    (void)co_await f.cache().put(key_of("persist", "before"), make_blob("gone after this"));
     f.cache().close();
 
     // Garbage where a database was.
@@ -73,16 +84,18 @@ TEST("bcache recreates a file that is not a database and reports nothing to the 
 
     f.reopen();
 
+    (void)co_await f.opened();
+
     // Behaves as an empty cache, and nothing about that reached the caller as a failure.
-    CHECK(!f.settle(f.cache().get(key_of("persist", "before"))).has_value());
+    CHECK(!(co_await f.cache().get(key_of("persist", "before"))).has_value());
     CHECK(f.cache().get_stats().is_backed_by_storage);
     CHECK(f.cache().opened()->has_value());
 
-    CHECK(f.settle(f.cache().put(key_of("persist", "after"), make_blob("fresh start"))).status == put_status::stored);
-    CHECK(blob_text(f.settle(f.cache().get(key_of("persist", "after"))).value().data) == "fresh start");
+    CHECK((co_await f.cache().put(key_of("persist", "after"), make_blob("fresh start"))).status == put_status::stored);
+    CHECK(blob_text((co_await f.cache().get(key_of("persist", "after"))).value().data) == "fresh start");
 }
 
-TEST("bcache keeps a hit alive after the cache it came from is gone")
+ASYNC_TEST("bcache keeps a hit alive after the cache it came from is gone", main_thread)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -90,10 +103,11 @@ TEST("bcache keeps a hit alive after the cache it came from is gone")
     // The blob is a pin over its own buffer, owned by whoever holds it and by nobody else — which is what lets a
     // caller keep using a value while the cache that produced it is torn down around it.
     auto f = cache_fixture();
+    (void)co_await f.opened();
     auto const key = key_of("lifetime", "entry");
 
-    f.settle_only(f.cache().put(key, make_blob("outlives the cache")));
-    auto const hit = f.settle(f.cache().get(key));
+    (void)co_await f.cache().put(key, make_blob("outlives the cache"));
+    auto const hit = co_await f.cache().get(key);
     REQUIRE(hit.has_value());
 
     f.cache().close();

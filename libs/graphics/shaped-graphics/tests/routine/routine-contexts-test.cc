@@ -46,7 +46,7 @@ protected:
 sg::context_handle make_context()
 {
     auto ctx = sg::create_dx12_context(
-        {.enable_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     return ctx.has_value() ? ctx.value() : nullptr;
 }
 } // namespace

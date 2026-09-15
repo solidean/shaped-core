@@ -99,6 +99,13 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // The run seed every test's seed derives from, and whether this run shuffles its order by it.
+    // A real run draws the seed from the clock unless --seed pins it, prints it first, and shuffles both the schedule and every invocation's children.
+    // A hand-built config keeps schedule and match order, for the same reason `jobs` defaults to 1 here.
+    // A test's seed is derived from its NAME rather than its position, so re-running one test by name with the same seed hands it the seed it had in the full run.
+    u64 seed = 0;
+    bool shuffle = false;
+
     // Let every test run at full strength rather than narrowed to what a default run can afford.
     // Read from a test body through nx::is_thorough(); set via --thorough.
     bool thorough = false;

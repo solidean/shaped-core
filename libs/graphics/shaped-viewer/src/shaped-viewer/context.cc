@@ -1,6 +1,13 @@
+#include <blob-cache/blob_cache.hh>
+#include <blob-cache/default_cache.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/vector.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/context.hh>
+#include <shaped-viewer/shader_library.hh>
 
 #if SV_HAS_DEFAULT_BACKEND
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -65,5 +72,16 @@ cc::result<sg::context_handle> acquire_viewer_context()
             ctx = r.value();
             return ctx;
         });
+}
+
+cc::shared_async<cc::unit> background_work(sg::context& ctx)
+{
+    // Upstream first, which is the order settled() needs: pipeline builds and compiles queue their cache stores before they resolve.
+    auto backlogs = cc::vector<cc::async_backlog const*>();
+    backlogs.push_back(&ctx.backlog);
+    if (auto const library = acquire_shader_library(); library.has_value())
+        backlogs.push_back(&library.value()->backlog());
+    backlogs.push_back(&bcache::default_cache().backlog());
+    return cc::async_backlog::settled(backlogs);
 }
 } // namespace sv

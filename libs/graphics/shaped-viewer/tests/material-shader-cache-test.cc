@@ -11,6 +11,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
@@ -80,7 +82,7 @@ void require_compiled(sv::material_permutation const& p)
 }
 } // namespace
 
-TEST("sv::material_shader_cache - the fallback stands in for a permutation that did not compile")
+ASYNC_TEST("sv::material_shader_cache - the fallback stands in for a permutation that did not compile")
 {
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
@@ -118,7 +120,7 @@ TEST("sv::material_shader_cache - the fallback stands in for a permutation that 
     auto const id = lib.acquire(sv::material::create("broken", broken, {}));
 
     auto const& bad = cache.acquire(sv::resolve_material(lib, id, make_mesh()));
-    (void)cc::try_async_blocking_get(bad.shader);
+    co_await cc::async_settled(bad.shader);
     CHECK(bad.shader->has_error());
     CHECK(bad.shader->try_value() == nullptr);
 

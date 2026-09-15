@@ -27,7 +27,9 @@ rules:
   - kind: allow-include
     value: [<mutex>, <condition_variable>]
     reason: a thread home's owner parks with a deadline and is woken by a submit under the same mutex, and cc::mutex::wait has no deadline
-    files: src/clean-core/thread/thread_bound_scheduler.hh
+    files:
+      - src/clean-core/thread/thread_bound_scheduler.hh
+      - src/clean-core/thread/async_parker.cc
 
   - kind: allow-include
     value: <ctime>
@@ -429,3 +431,34 @@ rules:
     value: <algorithm>
     reason: std::sort is the baseline cc::sort is measured against, which is the whole point of this file
     files: tests/benchmarks/sort-benchmark.cc
+
+  # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: the blocking getters, the pool's drive and the pump registry are these files' subject
+    files:
+      - tests/thread/async-test.cc
+      - tests/thread/async-pool-test.cc
+      - tests/thread/async-home-test.cc
+      - tests/thread/thread_pump-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: the test drives a scheduler of its own, or a SECTION body that cannot await
+    files:
+      - tests/thread/async-coroutine-test.cc
+      - tests/thread/async-mutex-test.cc
+      - tests/algorithm/sort-async-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: a thread-bound ambient scope is what is checked, and it cannot span a co_await
+    files:
+      - tests/thread/async-ambient-test.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: the wait runs inside a recording capture callback, which is synchronous
+    files:
+      - tests/record/record-async-scope-test.cc
+      - tests/record/record-trace-test.cc

@@ -27,6 +27,40 @@ This is the working behind it.
 When a review has both, the verdict should point here rather than asserting "this is the right answer" on its own
 authority — that sentence is exactly the one a reader cannot check.
 
+## Introduce before you price
+
+**The critique is read by someone who has not read the diff, so every mechanism is explained before it is judged.**
+It is the entry most tempting to write for yourself, because by the time it is written the reviewer knows every mechanism in the branch.
+A list of alternatives named in the branch's own vocabulary is then a set of verdicts on things the reader has not been shown.
+
+Each decision the entry covers gets the same shape:
+
+- **The situation**, first, as a concrete scenario in plain words: what a caller is trying to do, and why something has to be decided.
+  "A test uploads four numbers, submits, and must not read the result until the GPU has run it" beats "completion settling".
+- **Each option**, as *how it works / pro / con / verdict*, in that order and every time.
+  *How it works* says what would actually happen, in a sentence or three a reader can picture, and what a caller would write under it.
+  An option whose mechanism is only named is not yet an option the reader can weigh.
+- **Every symbol and term is introduced where it is first used**, or once in `context/repo` as a short list of the words the sections lean on.
+  A bare entry id (`030`) never carries a sentence on its own; say what it found.
+- **Bullets over paragraphs**, with one point per bullet; a sub-bullet where a point has parts.
+
+The `context/*` tiers of a critique teach the mechanisms being compared, not the change as a whole.
+
+**Then check it with a reader who has nothing else.**
+Before the round is handed over, give a subagent only the entry text — no diff, no repository.
+Ask it to list every term it had to guess, and, per option, whether it could explain how the option works and why the verdict follows.
+Fix what it names and ask again; two passes is normal.
+
+pr-173 is the worked case.
+Its first critique named six alternatives in the branch's vocabulary — "settle on the retire sweep", "a push seam", "parked pool threads sweep" — and the maintainer's answer was:
+
+```raw
+I have a hard time understanding anything on this entry because nothing is properly introduced. the entry assumes you already know all the context and the two little context sentences dont really help. read this entry again and think if someone can understand what you wrote here without deep diving into the actual pr changes.
+```
+
+The rewrite added a situation per decision and a *how it works* per option.
+Its first cold read still found undefined terms (*epoch*, *pump*, what `main_thread` is) and options without a *how it works* line; the second pass closed those.
+
 ## How it is laid out
 
 **One `## prose` block per alternative, and the pricing as priced bullets — never as flowing prose.**

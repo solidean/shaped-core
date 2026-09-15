@@ -89,11 +89,13 @@ add_library(clean-core
     src/clean-core/thread/thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/thread_pump.cc
+    src/clean-core/thread/async_parker.cc
     src/clean-core/thread/async.cc
     src/clean-core/thread/async_ambient.cc
     src/clean-core/thread/async_thread_pool.cc
     src/clean-core/thread/thread_bound_scheduler.cc
     src/clean-core/thread/async_mutex.cc
+    src/clean-core/thread/async_backlog.cc
     src/clean-core/streams/span_stream.cc
     src/clean-core/streams/growing_stream.cc
     src/clean-core/streams/file_stream.cc
@@ -269,6 +271,7 @@ target_sources(clean-core
     src/clean-core/thread/async_thread_pool.hh
     src/clean-core/thread/thread_bound_scheduler.hh
     src/clean-core/thread/async_mutex.hh
+    src/clean-core/thread/async_backlog.hh
 
     src/clean-core/streams/stream_flush.hh
     src/clean-core/streams/stream.hh
@@ -597,6 +600,7 @@ if(SC_BUILD_TESTS)
 
         tests/thread/async-test.cc
         tests/thread/async-ambient-test.cc
+        tests/thread/async-backlog-test.cc
         tests/thread/async-coroutine-test.cc
         tests/thread/async-home-test.cc
         tests/thread/async-mutex-test.cc
@@ -608,6 +612,7 @@ if(SC_BUILD_TESTS)
         tests/thread/thread_pump-test.cc
         tests/thread/threaded_actor-test.cc
     )
+    sc_nexus_binary(clean-core-test KINDS tests)
 
     target_link_libraries(clean-core-test
         PRIVATE

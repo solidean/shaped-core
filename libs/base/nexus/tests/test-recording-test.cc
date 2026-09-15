@@ -188,16 +188,11 @@ ASYNC_TEST("test recording - owns_recorder hands an async test the whole singlet
            nx::config::exclusive(),
            nx::config::owns_recorder)
 {
-    return cc::make_async_lazy<cc::unit>(
-        [](cc::async_context<cc::unit>& actx) -> cc::async_step_status
-        {
-            // The same contract as the sync test above, and the one that used to be silently skipped.
-            CHECK(!cc::rec::is_initialized());
+    // The same contract as the sync test above, and the one that used to be silently skipped.
+    CHECK(!cc::rec::is_initialized());
 
-            cc::rec::initialize();
-            CHECK(cc::rec::is_initialized());
-            cc::rec::shutdown();
-
-            return actx.resolve_to_value(cc::unit{});
-        });
+    cc::rec::initialize();
+    CHECK(cc::rec::is_initialized());
+    cc::rec::shutdown();
+    co_return;
 }

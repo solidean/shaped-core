@@ -67,7 +67,7 @@ material system (material/)              [in progress]  material_type (signature
                                                         So two materials differing only in constants share one shader; only a texture sample forces a second.
                                                         CPU-side and complete
 material shader generation               [in progress]  generate_material_shader turns a resolved_material into HLSL plus the parameter layout that source reads.
-                                                        Emits only the bindless tables the permutation touches (names and spaces from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
+                                                        Emits every budgeted bindless table (bindless_declarations from bindless_tables.hh), one SamplerState per distinct sampler, and one initializer per attribute — a parameter-block load, a barycentric interpolation, or a uv sample.
                                                         The type's fragment then runs verbatim over those locals; shaders/material_runtime.hlsli is the hand-authored half it is written against.
                                                         Compiled through slib::shader_library::compile_source
 material data on the GPU                 [in progress]  attribute_manager uploads any mesh_attribute to a byte-address buffer keyed on its own hash, which is what makes the mesh_attribute rank of the chain reachable at all.

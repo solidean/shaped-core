@@ -1,6 +1,7 @@
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
 
@@ -35,8 +36,8 @@ void fail_on_validation_messages(sg::context_handle const& ctx)
 }
 } // namespace
 
-// The same exclusions as the dx12 drivers, for the same children: see dx12-entry.cc.
-TEST("sg vulkan backend", exclusive("slib-shader-library"), exclusive("sg-reload-generation"))
+// No exclusion tags, for the reason dx12-entry.cc gives.
+ASYNC_TEST("sg vulkan backend")
 {
     // Synchronization validation is on for the whole tier-1 sweep: it is the only oracle that sees a hazard between
     // two submissions, which is what the cross-list and cross-queue ordering work is about.
@@ -46,7 +47,14 @@ TEST("sg vulkan backend", exclusive("slib-shader-library"), exclusive("sg-reload
     else
     {
         fail_on_validation_messages(ctx.value());
-        nx::invoke_tests("vulkan", ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
+
+        // A device loss during our own tests is a defect, not an environment quirk to tolerate.
+        // Vulkan has no equivalent of dx12's poll, so this sees only a loss some operation already noticed --
+        // which every submitting test does.
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
     }
 }
 

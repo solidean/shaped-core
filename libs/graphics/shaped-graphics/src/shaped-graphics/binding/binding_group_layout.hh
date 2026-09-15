@@ -5,6 +5,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// The frozen schema of one bindable resource group/set: built from a shader's `binding`s, composed into a pipeline_layout, and instantiated by binding_groups.
@@ -43,14 +44,28 @@ public:
     /// Present means this layout may only ever be bound at that one slot, which every backend's `bind_group` checks.
     [[nodiscard]] cc::optional<u32> group_index() const { return _group_index; }
 
+    /// The static samplers baked into this schema, by the binding name each was given at creation.
+    ///
+    /// Kept because a caller creating a group against this layout has to know which of its own gathered samplers
+    /// the layout already owns: dx12 refuses a static sampler supplied per group, so one passed anyway is an
+    /// error rather than a duplicate.
+    /// Part of the structural hash, so two layouts differing only here are different layouts.
+    [[nodiscard]] cc::span<named_sampler const> static_samplers() const { return _static_samplers; }
+
 protected:
-    /// `structural_hash` must come from sg::impl::binding_group_layout_hash over the creation arguments, and `bindings` must be the span it hashed.
-    binding_group_layout(cc::hash128 structural_hash, cc::vector<binding> bindings)
-      : _structural_hash(structural_hash), _bindings(cc::move(bindings)), _group_index(group_index_of(_bindings))
+    /// `structural_hash` must come from sg::impl::binding_group_layout_hash over the creation arguments, and `bindings` and `static_samplers` must be what it hashed.
+    binding_group_layout(cc::hash128 structural_hash,
+                         cc::vector<binding> bindings,
+                         cc::vector<named_sampler> static_samplers)
+      : _structural_hash(structural_hash),
+        _bindings(cc::move(bindings)),
+        _group_index(group_index_of(_bindings)),
+        _static_samplers(cc::move(static_samplers))
     {
     }
 
     cc::hash128 _structural_hash;
     cc::vector<binding> _bindings;
     cc::optional<u32> _group_index;
+    cc::vector<named_sampler> _static_samplers;
 };

@@ -132,3 +132,17 @@ rules:
   - kind: deny-include
     value: [<Windows.h>, <windows.h>]
     reason: use clean-core/platform/win32_sanitized.hh — it defines NOMINMAX, brackets the `byte` typedef and is safe to include on any platform
+
+  # =========================================================================================================
+  # Blocking waits in tests
+  # =========================================================================================================
+  # A test awaits: ASYNC_TEST, ASYNC_INVOCABLE_TEST, and ctx.idle_completion() for the GPU.
+  # A blocking wait holds a worker the run needs, and can run other tests nested on its stack.
+  # A library allows one by file where the wait itself is the subject, or where a loop the test owns is the point.
+
+  - kind: deny-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: await it instead — make the test an ASYNC_TEST and co_await the node, or ctx.idle_completion() for the GPU
+    files:
+      - libs/*/*/tests/**
+      - libs/*/*/backends/*/tests/**

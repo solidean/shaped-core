@@ -54,9 +54,12 @@ f.is_valid()                        // bool — backed by a real download (vs de
 f.is_ready()                        // bool — NON-BLOCKING poll; true once SETTLED, by delivery OR by cancellation
 f.try_get_bytes()                   // -> cc::optional<cc::pinned_data<cc::byte const>>  (polls; nullopt unless delivered)
 f.completion()                      // -> cc::shared_async<cc::unit const> — depend on it to chain WITHOUT blocking
+co_await f.bytes()                  // -> the bytes once they land; the node FAILS on cancel. Await AFTER submitting the list
 sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::optional<cc::pinned_data<T const>>
+                                    //   co_await df.data() -> cc::pinned_data<T const>; fails on a ragged byte count too
 sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
+// to WAIT for one download, co_await f.bytes() / df.data() — not idle_completion(), which waits for everything else too
 // to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
 // sg REQUIRES an installed ambient async scheduler (cc::install_compute_async_scheduler, or a nexus run's)
@@ -103,6 +106,7 @@ sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
+                                                   //   the reason carries DRED's breadcrumbs + page fault when dx12_config::enable_dred was set BEFORE device creation
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
 ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)
@@ -176,7 +180,11 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { enable_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
+//   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
+//   it must be activated before the process's FIRST device: a later activation is refused, because performing it
+//   resets the adapter on some NVIDIA drivers (DXGI_ERROR_DEVICE_RESET on a healthy GPU). ask on the first context.
 // create errors on environment failure (no adapter, device refused); misuse asserts
 ```
 
@@ -214,9 +222,13 @@ ctx.in_flight_epoch_count()             // int — epochs advanced past but not 
 ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
 
 // Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
-// and asking twice for the same target hands back the SAME node. They settle on a retire sweep.
+// and asking twice for the same target hands back the SAME node. They settle on the backend's own GPU signal —
+// nobody sweeps, advances or waits for them — and as an error once the device is lost or the context shuts down.
+// Threads off: no waiter exists, so a pump sweep settles them, parking only on work the GPU already has.
 ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
+co_await ctx.idle_completion();         // block_until_idle, awaited: submissions, actors, epochs. COLD; retires as it goes,
+                                        //   so never await it while another thread advances the epoch
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 
 ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
@@ -260,7 +272,7 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
 // no advance_epoch is needed for that, and advancing does not force it either: the readback actor is what delivers.
-//   future.completion() is the non-blocking answer, ctx.block_until_idle() the blocking one.
+//   co_await future.data() is the async answer, ctx.block_until_idle() the blocking one.
 //   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
@@ -304,6 +316,7 @@ t.is_ready()                    // bool — NON-BLOCKING poll; true once the tic
 t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (polls); only DIFFERENCES are meaningful
 t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
 t.completion()                  // -> cc::shared_async<cc::unit const> — settles when the tick lands
+co_await t.ticks()              // -> cc::u64 once it lands; fails if the readback is cancelled
 // to block: ctx.block_until_idle(), then t.try_get_ticks() / t.try_get_seconds()
 // normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
@@ -588,6 +601,8 @@ sg::bound_view             // one raw_view (stored inline, `.view = tex.as_reado
                             //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
                             //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
                             //   consumers read both arms via .span() / .size()
+sg::slotted_view            // { binding_slot slot; bound_view view }  — the same input keyed by SLOT (a position in layout->bindings()), for generated code that already knows it
+                            //   `{}` is ambiguous under the two overloads: pass `cc::span<sg::named_view const>()` to mean "no views"
 sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int (3) — group slots a CALLER gets (== cmd.compute.bind_group's `group_index`); same on every backend
@@ -607,13 +622,25 @@ ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
-layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its staging slot index
+// both scopes take span<slotted_view const> as well — same validation, no name lookup; a slot naming a sampler or past the end is an error, never a wrong bind
+// a GENERATED group struct (slib's binding pass) is taken directly, against a layout acquired from its declarations:
+sg::declared_binding_group   // concept in binding/binding_group.hh — { group_index; declared_bindings(); declared_samplers(); gather() }
+ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
+ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
+ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+ctx.persistent.create_binding_group(layout, G{...})             // which scope you call IS the lifetime
+                                    // a sampler G gathers that `layout` declares static is dropped, so the
+                                    // samplers overload above pairs with this
+scope.bind<G>(group)                                            // binds at G::group_index; on raster / compute / raytracing scopes
+layout->bindings()          // -> span<binding const> — the reflected bindings the schema was built from, in declaration order; a binding's position IS its binding_slot
+layout->static_samplers()   // -> span<named_sampler const> — the ones baked in at creation; part of the structural identity, and what create_binding_group(layout, G{...}) drops from what G gathered
 
 // staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.
 #include <shaped-graphics/binding/staging_binding_group.hh>
 ctx.persistent.create_staging_binding_group(group_layout)  // -> staging_binding_group_handle = shared_ptr<staging_binding_group> (MUTABLE handle); persistent only (+ try_ twin)
-sg::binding_slot            // enum class : u32 — opaque binding identity; NOT a descriptor position, it indexes an internal table (heap, first descriptor, element count)
+sg::binding_slot            // enum class : u32 — a position in layout->bindings(); NOT a descriptor position (dx12 splits views and samplers into two tables and remaps)
                             //   that indirection is where every set is resolved and bounds-checked; `invalid` is what an unknown name resolves to
+                            //   meaningful only for the layout it came from — a foreign slot is in range, wrong and silent, where a wrong NAME is an error message
 sbg->slot_of(name)                    // -> binding_slot  THE name lookup, done ONCE; invalid if the layout has no binding of that name
 sbg->is_array(slot) / array_size(slot) // -> bool / int — the binding's shape, which decides the setter family and bounds every element index (1 for a scalar)
 // the setters NAME the shape and never infer it — a scalar rejects the array family and vice versa; an element index is always an argument, never chosen for you
@@ -750,6 +777,8 @@ ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_ra
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping
+ctx.backlog                                                    // cc::async_backlog — every build above is tracked here, awaited or not
+ctx.backlog.start(node);  ctx.backlog.settled()                //   detach work that references ctx HERE; routines.clear() waits for it, a test awaits settled()
 // keys = hash128 over the logical args (group layout: bindings + static samplers; pipeline layout: its groups'
 //   structural hashes + static samplers + inline constants; compute pipeline: shader bytecode+entry+signature + the
 //   pipeline layout's structural hash).
@@ -834,7 +863,7 @@ ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initia
 ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
-ctx.routines.clear()                       // void     — drop all (VRAM pressure / context switch); runs automatically on shutdown
+ctx.routines.clear()                       // void     — waits out ctx.backlog, then drops all (VRAM pressure / context switch); runs automatically on shutdown
 // Per-context: a routine's cached GPU state dies with the context that built it — never stale across contexts.
 
 #include <shaped-graphics/routine/reload_generation.hh>

@@ -1,3 +1,5 @@
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
@@ -29,8 +31,8 @@ constexpr auto mip_usage
 /// a shape for the first time declines that frame and draws on the next.
 /// An app absorbs that; a test asserting on the first call cannot, so it names the variants up front — which couples
 /// this test to a choice the code under test makes.
-/// It goes away with the ASYNC_TEST migration, where this becomes a co_await on readiness; see
-/// libs/graphics/shaped-graphics/docs/TODO.md.
+/// It goes away once a routine's readiness is an async, where this becomes a co_await on it;
+/// see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
 void prewarm_every_variant(sg::context& ctx)
 {
     for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)
@@ -39,7 +41,9 @@ void prewarm_every_variant(sg::context& ctx)
 }
 } // namespace
 
-INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -95,7 +99,7 @@ INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::cont
     ctx.submit_command_list(cc::move(cmd));
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 }
 
 namespace
@@ -115,17 +119,14 @@ namespace
     return values;
 }
 
-/// Blocks until `future`'s readback has landed, then takes the red channel of every texel.
+/// Waits until `future`'s readback has landed, then takes the red channel of every texel.
 ///
 /// Inline (`cmd.download`) rather than async: an async readback runs on the copy queue, and the mip levels this
 /// reads are left in the layouts the generating dispatch put them in rather than in the common one that queue expects.
-[[nodiscard]] cc::vector<u8> read_back(sg::context& ctx, sg::bytes_future const& future)
+[[nodiscard]] cc::shared_async<cc::vector<u8>> read_back(sg::bytes_future const& future)
 {
-    ctx.block_until_idle();
-    auto const data = future.try_get_bytes();
-    if (!data.has_value())
-        return {};
-    return red_channel(data.value().span());
+    auto const data = co_await future.bytes();
+    co_return red_channel(data.span());
 }
 
 /// Whether every entry of `values` is `expected`, and there is at least one.
@@ -144,7 +145,9 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 
 // The shapes rather than the sizes are what this covers: a cube and a 1D array both index their slice on an axis a
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
-INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -191,7 +194,7 @@ INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex_1d_array) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Every generated level of every slice, read back in one list.
     auto dl = ctx.create_command_list();
@@ -205,23 +208,30 @@ INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::
                 dl->download.bytes_from_texture(tex_1d_array.raw(), {.mip_level = level, .array_layer = slice}));
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
 
     // Averaging equal texels reproduces them exactly, so every generated level of a face is that face's own value —
     // and a face the dispatch never covered still holds the sentinel.
     auto next = isize(0);
     for (auto face = 0; face < 6; ++face)
         for (auto level = 1; level < 3; ++level)
-            CHECK(all_equal(read_back(ctx, futures[next++]), face_value(face)));
+        {
+            auto const face_texels = co_await read_back(futures[next++]);
+            CHECK(all_equal(face_texels, face_value(face)));
+        }
 
     for (auto slice = 0; slice < 3; ++slice)
         for (auto level = 1; level < 3; ++level)
-            CHECK(all_equal(read_back(ctx, futures[next++]), face_value(slice)));
+        {
+            auto const slice_texels = co_await read_back(futures[next++]);
+            CHECK(all_equal(slice_texels, face_value(slice)));
+        }
 }
 
 // An odd extent is where the halving rule stops being obvious: the second tap clamps to the level's edge rather
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
-INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -249,24 +259,23 @@ INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const level_1_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 1});
     auto const level_2_future = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
 
     // Level 1 averages each pair of the base level; level 2 has one texel left over three, so its second tap
     // clamps to the level's last texel and the third is dropped.
-    auto const level_1 = read_back(ctx, level_1_future);
+    auto const level_1 = co_await read_back(level_1_future);
     REQUIRE(level_1.size() == 3);
     CHECK(level_1[0] == 4);  // (0 + 8) / 2
     CHECK(level_1[1] == 20); // (16 + 24) / 2
     CHECK(level_1[2] == 36); // (32 + 40) / 2
 
-    auto const level_2 = read_back(ctx, level_2_future);
+    auto const level_2 = co_await read_back(level_2_future);
     REQUIRE(level_2.size() == 1);
     CHECK(level_2[0] == 12); // (4 + 20) / 2
 }

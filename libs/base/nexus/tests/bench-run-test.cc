@@ -1,9 +1,11 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/string/print.hh>
+#include <nexus/async-test.hh>
 #include <nexus/bench/calibration.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/bench/run.hh>
+#include <nexus/bench/run_async.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
 
@@ -461,4 +463,27 @@ TEST("bench - a pause around expensive setup is not warned about", nx::config::e
     // This is: measured work this size dwarfs a pause pair on a machine whose clock is cheap, and does not on one
     // whose clock is not — so what the test pins is the rule, not the verdict.
     CHECK((r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr) == pause_warning_is_earned(r));
+}
+
+ASYNC_TEST("bench - run_async awaits one iteration per sample, after its warmup", nx::config::exclusive("bench"))
+{
+    auto cfg = quick();
+    cfg.warmup_iterations = 3;
+
+    auto started = 0; // every iteration is awaited before the next starts, so a plain int is enough
+    auto const r = co_await nx::bench::run_async("counted", cfg,
+                                                 [&started]
+                                                 {
+                                                     ++started;
+                                                     return cc::make_async_lazy([] { return 1; });
+                                                 });
+
+    CHECK(r.name == "counted");
+    CHECK(r.warmup_iterations == 3);
+    CHECK(r.batch_size == 1);
+    CHECK(isize(r.samples.size()) == r.measured_iterations);
+    CHECK(r.measured_iterations >= cfg.min_samples);
+    CHECK(r.measured_iterations <= cfg.max_samples);
+    CHECK(started == r.warmup_iterations + r.measured_iterations);
+    CHECK(r.counters.empty()); // no counter pass: an iteration is a graph, and a pass would be another run of it
 }

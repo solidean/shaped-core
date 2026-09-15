@@ -584,6 +584,7 @@ private:
 cc::result<cc::unit> dx12_download_async_system::initialize(isize window_bytes)
 {
     CC_ASSERT(window_bytes > 0, "async download staging window must be positive");
+    _drain.notify_on_drained(&_ctx);
     window_bytes = round_window(window_bytes); // keep every window's base 512-aligned for texture readbacks
 
     D3D12_COMMAND_QUEUE_DESC copy_queue_desc = {};

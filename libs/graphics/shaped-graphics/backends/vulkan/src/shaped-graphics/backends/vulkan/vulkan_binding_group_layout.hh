@@ -30,11 +30,12 @@ public:
     vulkan_binding_group_layout(vulkan_context& ctx,
                                 cc::hash128 structural_hash,
                                 cc::vector<sg::binding> bindings,
+                                cc::vector<sg::named_sampler> static_samplers,
                                 VkDescriptorSetLayout layout,
                                 cc::vector<VkSampler> slot_samplers,
                                 isize size_in_bytes,
                                 cc::vector<isize> binding_offsets)
-      : sg::binding_group_layout(structural_hash, cc::move(bindings)),
+      : sg::binding_group_layout(structural_hash, cc::move(bindings), cc::move(static_samplers)),
         _ctx(ctx),
         _layout(layout),
         _slot_samplers(cc::move(slot_samplers)),

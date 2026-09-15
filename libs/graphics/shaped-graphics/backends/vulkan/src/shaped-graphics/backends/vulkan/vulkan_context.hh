@@ -44,7 +44,11 @@ struct sg::backend::vulkan::vulkan_config
     /// Enable the Khronos validation layer plus a debug messenger for its messages.
     /// Messages reach set_message_callback when one is installed, and the recording log otherwise — not stderr directly.
     /// Best-effort — skipped if the layer / VK_EXT_debug_utils isn't installed.
-    /// The analogue of dx12_config::enable_debug_layer, and off by default for the same reason: it costs real time.
+    /// Off by default for the same reason as dx12_config::activate_global_debug_layer: it costs real time.
+    /// The machinery underneath is NOT the same, though, and the naming difference is the tell.
+    /// Vulkan attaches validation to the VkInstance this context creates, so it really is per-context: `false` here means
+    /// this context is unvalidated whatever any other context did, and a later context can validate without touching this one.
+    /// D3D12 has only a process-wide switch, which is why its flag is named for activating something global.
     bool enable_validation_layers = false;
 
     /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
@@ -426,6 +430,18 @@ public:
     {
         return cc::result<sg::binding_group_handle>(create_vulkan_binding_group(layout, views, samplers, scope));
     }
+
+    [[nodiscard]] cc::result<sg::binding_group_handle> try_create_binding_group(sg::binding_group_layout_handle layout,
+                                                                                cc::span<sg::slotted_view const> views,
+                                                                                cc::span<sg::named_sampler const> samplers,
+                                                                                sg::lifetime_scope scope) override
+    {
+        CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+        auto vk_layout = std::dynamic_pointer_cast<vulkan_binding_group_layout const>(layout);
+        CC_ASSERT(vk_layout != nullptr, "binding_group_layout is not a vulkan one");
+        return cc::result<sg::binding_group_handle>(
+            vulkan_binding_group::create(*this, vk_layout, views, samplers, scope));
+    }
     [[nodiscard]] cc::result<vulkan_staging_binding_group_handle> create_vulkan_staging_binding_group(
         sg::binding_group_layout_handle const& layout,
         sg::lifetime_scope scope);
@@ -582,6 +598,10 @@ public:
     void block_until_transfers_drained() override;
     void wait_for_epoch(sg::epoch e) override;
     void wait_for_next_inflight_epoch() override;
+    [[nodiscard]] bool are_transfers_drained() const override;
+    [[nodiscard]] sg::submission_token last_issued_submission() override;
+    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
+    void wake_completion_signal(u64 generation) override;
 
     // The inline ring budgets.
     // Recorded here and applied at the next advance_epoch, never synchronously.
@@ -715,6 +735,10 @@ public:
     // Both are VK_SEMAPHORE_TYPE_TIMELINE, so completion is a counter read rather than a host event.
     VkSemaphore _epoch_timeline = VK_NULL_HANDLE;
     VkSemaphore _submission_timeline = VK_NULL_HANDLE;
+
+    // Raised from the host to wake the completion signal waiter, which parks on it beside the two above.
+    // Vulkan has no host event for a timeline, so a third timeline is how a wait on one gets interrupted.
+    VkSemaphore _completion_wake_timeline = VK_NULL_HANDLE;
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

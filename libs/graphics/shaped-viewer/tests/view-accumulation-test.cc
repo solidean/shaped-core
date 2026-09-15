@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -12,6 +14,10 @@ using namespace cc::primitive_defines;
 //
 // Each section uses its own view_id: sections share the enclosing setup rather than re-running it, so a shared id would
 // carry one section's accumulation into the next.
+//
+// TODO: an ASYNC_INVOCABLE_TEST ending in `co_await cc::async_settled(sv::background_work(ctx))`, like every other test
+// that traces, once nexus supports SECTION in an async body (libs/base/nexus/docs/TODO.md).
+// Until then it cannot wait, and what its traces detached outlives it.
 INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
@@ -196,7 +202,7 @@ INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::contex
 // It gets its own test because the two paths keep their own bookkeeping: `execute` above resolves the one slot it
 // needs itself, while the plan path resolves every view's slots up front and traces them afterwards.
 // A regression in one is invisible from the other, and this one is the path that matters.
-INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -251,7 +257,8 @@ INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::
 
     auto store = sv::view_store{};
 
-    auto const frame = [&](u64 index)
+    // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
+    auto const frame = [&](u64 index) -> cc::shared_async<cc::unit>
     {
         auto cmd = ctx.create_command_list();
         resources.advance_to(ctx.current_epoch());
@@ -267,7 +274,7 @@ INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::
         // The frame's own outcome is what says it did not, and it is checked above rather than read off the routine.
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        co_await ctx.idle_completion();
     };
 
     // Warmed first, for the same reason as the test above: the counted frames must all be frames that dispatched.
@@ -289,7 +296,7 @@ INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::
     // The counter stayed pinned at 1 while every other check in the suite went on passing.
     for (auto i = u64(1); i <= 4; ++i)
     {
-        frame(i);
+        co_await frame(i);
         CHECK(store.accumulated_frames(traced_id) == u32(i));
     }
 
@@ -304,4 +311,6 @@ INVOCABLE_TEST("sv - a view accumulates across frames down the plan path", (sg::
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);
     CHECK(slot->texture.raw() != nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

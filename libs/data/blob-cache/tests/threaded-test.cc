@@ -5,7 +5,9 @@
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace bcache;
@@ -17,7 +19,7 @@ using namespace bcache::test;
 // This exists because that determinism is also what would hide a race, and singleflight is the piece a race would break most quietly — two threads both
 // missing, both computing, and nobody noticing because both answers are correct.
 
-TEST("bcache singleflights across threads", exclusive())
+ASYNC_TEST("bcache singleflights across threads", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -39,7 +41,7 @@ TEST("bcache singleflights across threads", exclusive())
 
     {
         auto cache = blob_cache::create({.path = path});
-        (void)cc::async_blocking_get(cache->opened());
+        (void)co_await cache->opened();
 
         auto const expected = [](int k) { return cc::format("value-for-key-{}", k); };
 
@@ -57,7 +59,7 @@ TEST("bcache singleflights across threads", exclusive())
 
             for (auto i = isize(0); i < pending.size(); ++i)
             {
-                auto const value = cc::async_blocking_get(pending[i]);
+                auto const value = co_await pending[i];
                 // The value must be the one belonging to ITS key: a table that mixed two operations up would show here as one key quietly answering with another's bytes.
                 CHECK(blob_text(value) == expected(int(i % key_count)));
             }
@@ -78,7 +80,7 @@ TEST("bcache singleflights across threads", exclusive())
     cc::remove_file(cc::format("{}-shm", path));
 }
 
-TEST("bcache serves concurrent readers from a real actor thread", exclusive())
+ASYNC_TEST("bcache serves concurrent readers from a real actor thread", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -94,10 +96,10 @@ TEST("bcache serves concurrent readers from a real actor thread", exclusive())
 
     {
         auto cache = blob_cache::create({.path = path});
-        (void)cc::async_blocking_get(cache->opened());
+        (void)co_await cache->opened();
 
         auto const key = key_of("threaded", "read-me");
-        auto const stored = cc::async_blocking_get(cache->put(key, make_blob_of_size(64 * 1024, 9)));
+        auto const stored = co_await cache->put(key, make_blob_of_size(64 * 1024, 9));
         CHECK(stored.status == put_status::stored);
 
         auto reads = cc::vector<cc::shared_async<cc::optional<cache_hit>>>();
@@ -106,13 +108,13 @@ TEST("bcache serves concurrent readers from a real actor thread", exclusive())
 
         for (auto const& r : reads)
         {
-            auto const hit = cc::async_blocking_get(r);
+            auto const hit = co_await r;
             REQUIRE(hit.has_value());
             CHECK(hit.value().data.size() == 64 * 1024);
         }
 
         // Every hit noted an access, and the actor batched them rather than writing 64 rows.
-        (void)cc::async_blocking_get(cache->flush());
+        (void)co_await cache->flush();
         CHECK(cache->get_stats().hits == 64);
         CHECK(cache->get_stats().access_rows_written <= 1);
     }

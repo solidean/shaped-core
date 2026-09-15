@@ -1,6 +1,8 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/thread/async.hh> // cc::async_blocking_get
+#include <clean-core/thread/async.hh> // cc::shared_async
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -80,8 +82,8 @@ sg::compiled_shader compile_rt(ssc::dxc::compiler& comp, sg::shader_stage stage,
 }
 } // namespace
 
-INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays",
-               (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via dispatch_rays",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -120,7 +122,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     REQUIRE(tlas != nullptr);
     ctx.submit_command_list(cc::move(build));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     // Compile the three ray-tracing shaders (each its own single-entry DXIL library).
     auto raygen = compile_rt(comp.value(), sg::shader_stage::raygen, "RayGen", raygen_hlsl);
@@ -151,7 +153,7 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     hs.closest_hit = cc::move(closest_hit);
     auto const hit_h = rpd.add_hit_shader(cc::move(hs));
 
-    auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raytracing_pipeline(rpd));
+    auto pipeline = co_await ctx.cached.acquire_raytracing_pipeline(rpd);
     REQUIRE(pipeline != nullptr);
 
     // Build the shader table: one record per section, in the order TraceRay addresses them.
@@ -183,11 +185,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - raytracing pipeline traces a triangle via disp
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 2);
     ctx.submit_command_list(cc::move(down));
-    ctx.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
+    auto const data = co_await future.data();
     cc::vector<u32> result;
-    for (auto const v : data.value())
+    for (auto const v : data)
         result.push_back(v);
     REQUIRE(result.size() == 2);
 

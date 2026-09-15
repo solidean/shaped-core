@@ -21,6 +21,10 @@ cc::string_view bucket_name(nx::config::test_bucket bucket)
         return "benchmark";
     case nx::config::test_bucket::example:
         return "example";
+    case nx::config::test_bucket::app:
+        return "app";
+    case nx::config::test_bucket::command:
+        return "command";
     }
     return "unknown";
 }

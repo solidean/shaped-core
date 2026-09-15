@@ -23,7 +23,14 @@ enum class scl::include_verdict : scl::u8
     unblessed,
 };
 
-/// One `allow-include` / `deny-include` entry, as the file spelled it.
+/// What an entry is about: an include spelling, or a blocking wait called from the files it names.
+enum class scl::directive_subject : scl::u8
+{
+    include,       // allow-include / deny-include: `values` are include spellings
+    blocking_wait, // allow-blocking-wait / deny-blocking-wait: `values` are the names of blocking calls
+};
+
+/// One `allow-include` / `deny-include` / `allow-blocking-wait` / `deny-blocking-wait` entry, as the file spelled it.
 ///
 /// `values` are lowercased include spellings (`<atomic>`), each a glob in its own right, so `<d3d12*.h>`
 /// covers a family.
@@ -33,6 +40,7 @@ enum class scl::include_verdict : scl::u8
 /// An entry whose `files` is empty applies to every file under `base_dir`.
 struct scl::include_directive
 {
+    directive_subject subject = directive_subject::include;
     bool allow = false;
     cc::vector<cc::string> values;
     cc::string reason;
@@ -64,12 +72,28 @@ struct scl::lint_config
     /// Empty when there was none.
     cc::string nearest_config_path;
 
-    bool checks_includes() const { return !include_directives.empty(); }
+    bool checks_includes() const { return any_directive_about(directive_subject::include); }
+
+    /// Whether any config above this file said something about blocking waits; the rule stays silent otherwise.
+    bool checks_blocking_waits() const { return any_directive_about(directive_subject::blocking_wait); }
+
+    bool any_directive_about(directive_subject subject) const
+    {
+        for (auto const& d : include_directives)
+            if (d.subject == subject)
+                return true;
+        return false;
+    }
 
     /// Decide one include for one file.
     /// `file_path` must already be normalized (see `cc::glob_normalize_path`); `include` is the spelling as written,
     /// brackets included (`<atomic>`), and is lowercased here.
     include_decision classify_include(cc::string_view file_path, cc::string_view include) const;
+
+    /// Decide one call of a blocking wait named `name` in one file.
+    /// The last matching entry decides; with none matching the verdict is `unblessed`, which the rule treats as allowed —
+    /// unlike an include, a call is only a finding where a config denied it.
+    include_decision classify_blocking_wait(cc::string_view file_path, cc::string_view name) const;
 };
 
 namespace scl

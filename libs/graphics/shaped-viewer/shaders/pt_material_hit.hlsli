@@ -1,7 +1,6 @@
 #pragma once
 
 #include "pt_common.hlsli"
-#include "background.hlsli" // background_radiance (the SH environment probe)
 
 // The path tracer's closest-hit, as the tail of a GENERATED material permutation.
 //
@@ -19,12 +18,6 @@
 // it only has to accumulate.
 
 /// The acceleration structure the shadow rays are traced against.
-/// The global root signature covers every stage, so this is the same `t0` the raygen declares.
-RaytracingAccelerationStructure scene : register(t0);
-
-/// The per-item table, indexed by `InstanceID()` — mirrors `sv::instance_gpu`.
-/// An ordinary binding rather than a bindless one: there is exactly one table, and what varies per instance is what it *points* at.
-StructuredBuffer<sv::instance> Instances : register(t1, space0);
 
 struct PtAttributes
 {
@@ -62,7 +55,7 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
     ray.Direction = dir;
     ray.TMin = 1e-3;
     ray.TMax = dist;
-    TraceRay(scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 1, 0, 1, ray, sp);
+    TraceRay(pt_bindings::scene, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER, 0xFF, 1, 0, 1, ray, sp);
 
     return sp.visible < 0.5;
 }
@@ -79,6 +72,8 @@ float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, f
     // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
     float s = pt_rand(rng) * 2.0 - 1.0;
     float t = pt_rand(rng) * 2.0 - 1.0;
+    AreaLight light = pt_bindings::frame.light;
+
     float3 lp = light.center + s * light.u + t * light.v;
 
     float3 to_light = lp - p;
@@ -136,7 +131,7 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
     float w = pt_mis_weight(PT_ENV_PDF, sv::bsdf_pdf(bsdf, wo_local, wi_local));
 
-    return background_radiance(wi) * f * (wi_local.z / PT_ENV_PDF) * w;
+    return background_radiance(pt_bindings::background.sh, wi) * f * (wi_local.z / PT_ENV_PDF) * w;
 }
 
 /// The cutout test, run at every intersection a non-opaque instance reports.
@@ -158,7 +153,7 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
 /// one, and neither of them touches the payload — so this is the entire difference between the two.
 bool pt_cutout_rejects(PtAttributes attribs)
 {
-    sv::instance inst = Instances[InstanceID()];
+    sv::instance inst = pt_bindings::Instances[InstanceID()];
     ByteAddressBuffer index_buffer = gBindlessBuffers[NonUniformResourceIndex(inst.indices)];
     sv::shading_context ctx = sv::make_context(inst, index_buffer, PrimitiveIndex(), attribs.bary);
 
@@ -170,7 +165,8 @@ bool pt_cutout_rejects(PtAttributes attribs)
     // The instance is in the hash as well as the primitive: without it two instances sharing one geometry draw the SAME `u`
     // at the same primitive in the same pixel, so stacked identical alpha-tested cards cut out identically instead of
     // independently.
-    uint h = pt_hash(px.x + px.y * 65536u + rng_seed * 9781u + PrimitiveIndex() * 2654435761u + InstanceID() * 2246822519u);
+    uint h = pt_hash(px.x + px.y * 65536u + pt_bindings::frame.rng_seed * 9781u + PrimitiveIndex() * 2654435761u
+                     + InstanceID() * 2246822519u);
     float u = float(h) * (1.0 / 4294967296.0);
 
     return surface.geometry_opacity < u;
@@ -195,7 +191,7 @@ void PtShadowAnyHit(inout ShadowPayload payload, in PtAttributes attribs)
 [shader("closesthit")]
 void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
 {
-    sv::instance inst = Instances[InstanceID()];
+    sv::instance inst = pt_bindings::Instances[InstanceID()];
     ByteAddressBuffer index_buffer = gBindlessBuffers[NonUniformResourceIndex(inst.indices)];
     sv::shading_context ctx = sv::make_context(inst, index_buffer, PrimitiveIndex(), attribs.bary);
 

@@ -1,3 +1,5 @@
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
@@ -42,18 +44,19 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
     return out;
 }
 
-/// The red channel of the first texel of a tightly-packed rgba8 readback, or -1 when nothing landed.
-[[nodiscard]] int first_red(sg::context& ctx, sg::bytes_future const& future)
+/// The red channel of the first texel of a tightly-packed rgba8 readback, or -1 when the readback is empty.
+[[nodiscard]] cc::shared_async<int> first_red(sg::bytes_future const& future)
 {
-    ctx.block_until_idle();
-    auto const data = future.try_get_bytes();
-    if (!data.has_value() || data.value().span().empty())
-        return -1;
-    return int(u8(data.value().span()[0]));
+    auto const data = co_await future.bytes();
+    if (data.span().empty())
+        co_return -1;
+    co_return int(u8(data.span()[0]));
 }
 } // namespace
 
-INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -84,7 +87,7 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear spac
     // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
     // is what registers one — so a caller meeting a format for the first time declines that frame.
     // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
-    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
     (void)ctx.routines.tick_until_idle();
@@ -99,17 +102,16 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear spac
     REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex_unorm) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const srgb_future = dl->download.bytes_from_texture(tex_srgb.raw(), {.mip_level = 1});
     auto const unorm_future = dl->download.bytes_from_texture(tex_unorm.raw(), {.mip_level = 1});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
 
-    auto const srgb_value = first_red(ctx, srgb_future);
-    auto const unorm_value = first_red(ctx, unorm_future);
+    auto const srgb_value = co_await first_red(srgb_future);
+    auto const unorm_value = co_await first_red(unorm_future);
 
     // The two answers to "average 0 and 255", and the whole reason the sRGB one goes through a render target.
     //
@@ -128,7 +130,9 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear spac
 
 // A chain deeper than one level, and one generated from partway down.
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
-INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
@@ -154,7 +158,7 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::c
     // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
     // is what registers one — so a caller meeting a format for the first time declines that frame.
     // An app absorbs that; a test asserting on the first call cannot, so it names the formats up front.
-    // It goes away with the ASYNC_TEST migration; see libs/graphics/shaped-graphics/docs/TODO.md.
+    // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
     (void)ctx.routines.tick_until_idle();
@@ -168,17 +172,18 @@ INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::c
     REQUIRE(sr::raster_box_filter_mipmap_routine::execute(*up, tex, 2) == sg::routine_outcome::executed);
     ctx.submit_command_list(cc::move(up));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
 
     auto dl = ctx.create_command_list();
     auto const level_2 = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 2});
     auto const level_3 = dl->download.bytes_from_texture(tex.raw(), {.mip_level = 3});
     ctx.submit_command_list(cc::move(dl));
     ctx.advance_epoch();
-    ctx.block_until_idle();
 
     // Averaging equal texels reproduces them exactly whatever space the average is taken in, so both generated
     // levels carry the supplied value — a level chained off the one before it, not off the base.
-    CHECK(first_red(ctx, level_2) == int(supplied));
-    CHECK(first_red(ctx, level_3) == int(supplied));
+    auto const level_2_red = co_await first_red(level_2);
+    auto const level_3_red = co_await first_red(level_3);
+    CHECK(level_2_red == int(supplied));
+    CHECK(level_3_red == int(supplied));
 }

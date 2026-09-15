@@ -101,6 +101,18 @@ cc::shared_async<int> hop_and_record(cc::async_scheduler& home,
     after.store(thread_id_now());
     co_return a + b;
 }
+
+/// hop_and_record without the hop: whoever runs it decides where it lives.
+cc::shared_async<int> record_without_hop(cc::async_thread_pool& pool, cc::atomic<u64>& before, cc::atomic<u64>& after)
+{
+    before.store(thread_id_now());
+    auto const first = slow_on_pool(pool, 20);
+    auto const second = slow_on_pool(pool, 22);
+    auto const a = co_await first;
+    auto const b = co_await second;
+    after.store(thread_id_now());
+    co_return a + b;
+}
 #endif
 } // namespace
 
@@ -639,6 +651,28 @@ TEST("async home - an owner that finds every participant slot taken still runs t
     CHECK(completed.load() == 100);
 }
 
+TEST("async home - a cold coroutine homed from outside runs every segment on that home",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+    home_thread h;
+
+    cc::atomic<u64> before = {0};
+    cc::atomic<u64> after = {0};
+    {
+        auto const root = record_without_hop(pool, before, after);
+        REQUIRE(root->try_home_cold(*h.home));
+        CHECK(h.home->homed_node_count() == 1);
+        CHECK(cc::async_blocking_get(root) == 42);
+    }
+
+    CHECK(before.load() == h.id.load()); // the first line, which a wrapper posting to the home would also place
+    CHECK(after.load() == h.id.load());  // and the segment after two pool wakes, which only a home places
+    CHECK(h.home->homed_node_count() == 0);
+}
+
 #endif // CC_HAS_THREADS
 
 // ---- the main home: these run in every threading mode ----
@@ -743,6 +777,76 @@ TEST("async home - pump_main_thread checks its budget between items, not between
     }
     for (auto const& n : nodes)
         CHECK(n->is_ready());
+}
+
+TEST("async home - try_home_cold homes only a cold node whose frame reserved a home word", nx::config::singlethreaded)
+{
+    cc::singlethreaded_scheduler home; // declared first: a home must outlive every node homed to it
+
+    auto const plain = cc::make_async_lazy([] { return 1; });
+    CHECK(!plain->try_home_cold(home)); // a plain frame has no word to write
+
+    auto const manual = cc::make_async_manual<int>();
+    CHECK(!manual->try_home_cold(home)); // frameless
+
+    auto const started = []() -> cc::shared_async<int> { co_return 3; }();
+    CHECK(cc::async_blocking_get(started) == 3);
+    CHECK(!started->try_home_cold(home)); // no longer cold
+
+    CHECK(home.homed_node_count() == 0); // a refusal counts nothing against the home
+
+    {
+        auto const cold = []() -> cc::shared_async<int> { co_return 4; }();
+        CHECK(cold->try_home_cold(home));
+        CHECK(home.homed_node_count() == 1);
+    }
+    CHECK(home.homed_node_count() == 0); // dropped cold, and released from its home
+}
+
+TEST("async home - try_home_cold moves a cold factory node to another home", nx::config::no_scheduler)
+{
+    cc::singlethreaded_scheduler first;
+    cc::singlethreaded_scheduler second;
+
+    auto const node = cc::make_async_lazy_on(first, [] { return 7; });
+    CHECK(first.homed_node_count() == 1);
+
+    REQUIRE(node->try_home_cold(second));
+    CHECK(first.homed_node_count() == 0);
+    CHECK(second.homed_node_count() == 1);
+
+    node->schedule(); // submits to its home, whichever scheduler this thread has
+    first.drain();
+    CHECK(!node->is_ready());
+    second.drain();
+    REQUIRE(node->is_ready());
+    CHECK(node->value() == 7);
+    CHECK(second.homed_node_count() == 0);
+}
+
+TEST("async home - a cold coroutine homed to main from outside completes through pump_main_thread",
+     nx::config::main_thread)
+{
+    cc::atomic<u64> ran_on = {0};
+    auto const body = [&ran_on]() -> cc::shared_async<int> // named: a coroutine lambda's captures live in the closure
+    {
+        ran_on.store(thread_id_now());
+        co_return 5;
+    };
+    {
+        auto const root = body();
+        REQUIRE(root->try_home_cold(cc::main_thread_scheduler()));
+        root->schedule();
+
+        auto const deadline = cc::current_time_steady_secs() + 10.0;
+        while (!root->is_ready() && cc::current_time_steady_secs() < deadline)
+            (void)cc::pump_main_thread(1.0);
+
+        REQUIRE(root->is_ready());
+        CHECK(root->value() == 5);
+    }
+    CHECK(ran_on.load() == u64(cc::thread_id::main));
+    CHECK(cc::main_thread_scheduler().homed_node_count() == 0);
 }
 
 TEST("async home - a node homed to a singlethreaded scheduler runs when that scheduler is drained unbound",

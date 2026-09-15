@@ -9,8 +9,10 @@
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/config.hh>
+#include <nexus/tests/entry.hh>
 #include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/section.hh>
+#include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
 #include <nexus/tests/typed_invoke.hh>
 #include <nexus/tests/typed_value.hh>
@@ -21,12 +23,28 @@ namespace nx::impl
 {
 void register_test(char const* name, config::cfg test_config, void (*fn)(), cc::source_location loc);
 
+// Registers a COMMAND: `fn` is the body, and what it returns is the exit status its run reports.
+void register_command(char const* name, config::cfg test_config, int (*fn)(), cc::source_location loc);
+
 // Registers an ASYNC_TEST body: `fn` runs the body and deposits the graph it wants awaited in the sink.
 // Declared here rather than in nexus/async-test.hh so this header names no async type at all — that header carries the macro.
 void register_async_test(char const* name,
                          config::cfg test_config,
                          cc::unique_function<void(async_test_sink&)> fn,
                          cc::source_location loc);
+
+// Registers an ASYNC_COMMAND: `fn` runs the body and deposits the graph whose value is the exit status.
+void register_async_command(char const* name,
+                            config::cfg test_config,
+                            cc::unique_function<void(async_test_sink&)> fn,
+                            cc::source_location loc);
+
+// Registers an ASYNC_INVOCABLE_TEST: `fn` runs the body with args sourced from typed_value slots and deposits its graph in the sink.
+void register_async_invocable_test(char const* name,
+                                   config::cfg test_config,
+                                   cc::vector<std::type_index> signature,
+                                   cc::unique_function<void(cc::span<nx::typed_value*>, async_test_sink&)> fn,
+                                   cc::source_location loc);
 
 // Registers an invocable (inert) test.
 // `signature` is the decayed argument-type join key, and `fn` runs the body with args sourced from typed_value slots.
@@ -81,10 +99,9 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 //   `benchmark`    the bucket, plus `exclusive_global` so nothing else runs alongside and shares the machine
 //   `main_thread`  the body runs on the thread nx::run was entered on
 //
-// **main_thread rules out two combinations**, and both assert rather than misbehaving quietly:
-// `own_pool` (a private pool's worker is never the main thread) and an async body.
-// So a benchmark of thread scaling or of async code needs a macro of its own, which does not exist yet — declare it as
-// a plain TEST with nx::config::benchmark and no main_thread until it does.
+// **main_thread rules out `own_pool`**, and asserts rather than misbehaving quietly: a private pool's worker is never the
+// main thread, so a benchmark of thread scaling is a plain TEST with nx::config::benchmark.
+// A benchmark with an async body is ASYNC_BENCHMARK, in nexus/async-test.hh.
 #define BENCHMARK(name, ...) NX_IMPL_TEST(name, __COUNTER__, benchmark, main_thread __VA_OPT__(, ) __VA_ARGS__)
 
 // An example: a runnable demonstration of an API in practice, in the example bucket.
@@ -100,6 +117,41 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 // The run still installs an ambient async scheduler, so an example may use asyncs without standing up a pool of its own —
 // `no_scheduler` is the trailing config item for the example that wants to install one itself.
 #define EXAMPLE(name, ...) NX_IMPL_TEST(name, __COUNTER__, example, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
+
+// An app: a program in this binary that runs until it is closed — a viewer, a dev server, an editor.
+// `main_thread` and `exclusive()` are baked in, as for EXAMPLE, because a program owns the process while it runs.
+// It is never swept by a test run: it runs by name (`<binary> <name> [args...]`), under --apps, or as the default.
+// Its command line is nx::test_args().
+//
+//   APP("viewer", default_entry) { run_viewer(nx::test_args()); }
+#define APP(name, ...) NX_IMPL_TEST(name, __COUNTER__, app, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
+
+#define NX_IMPL_COMMAND(name, unique_id, ...)                                               \
+    static int CC_MACRO_JOIN(_nx_command_fn_, unique_id)();                                 \
+    static const bool CC_MACRO_JOIN(_nx_command_reg_, unique_id)                            \
+        = (::nx::impl::register_command(                                                    \
+               name,                                                                        \
+               []()                                                                         \
+               {                                                                            \
+                   using namespace nx::config;                                              \
+                   return ::nx::impl::merge_config(__VA_ARGS__);                            \
+               }(),                                                                         \
+               &CC_MACRO_JOIN(_nx_command_fn_, unique_id), cc::source_location::current()), \
+           true);                                                                           \
+    static int CC_MACRO_JOIN(_nx_command_fn_, unique_id)()
+
+// A command: a program in this binary that does one job and exits — a linter, a converter, a code generator.
+// **The body returns the process exit status**, and a failed CHECK turns a zero into a failure.
+// `main_thread` and `exclusive()` are baked in; it runs by name, under --commands, or as the default, with its
+// command line in nx::test_args(), and a test runs one through nx::run_command.
+//
+//   COMMAND("lint", default_entry)
+//   {
+//       auto const findings = lint(nx::test_args());
+//       return findings.empty() ? 0 : 2;
+//   }
+#define COMMAND(name, ...) \
+    NX_IMPL_COMMAND(name, __COUNTER__, command, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
 
 // An invocable test: an inert test body taking arguments, run only when a driver calls nx::invoke_tests with a matching (decayed) argument signature.
 // That is the parametrized / data-driven / generator pattern, and libs/base/nexus/docs/invocable-tests.md has the full mechanism.

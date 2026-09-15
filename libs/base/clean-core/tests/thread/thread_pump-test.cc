@@ -1,8 +1,15 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <nexus/test.hh>
+
+#if CC_HAS_THREADS
+#include <thread>
+#endif
 
 // The registry is what a threadless build's blocking waits rely on, so the invariants pinned here are the ones a
 // deadlock would violate: a sweep reaches everybody, it never re-enters a pump, and a registration that dies stops
@@ -262,3 +269,85 @@ TEST("cc::threaded_actor - shutdown deregisters, so a later sweep never touches 
     auto const impl = actor->take_impl<counting_actor>();
     CHECK(impl->seen.empty());
 }
+
+// Without threads a pool's drive is the only loop there is, so it sweeps the pump its graph waits on.
+#if !CC_HAS_THREADS
+TEST("cc::thread_pump_all - without threads, a pool's drive sweeps the pump its graph waits on", main_thread, exclusive())
+{
+    cc::async_thread_pool pool(2);
+    auto const delivered = cc::make_async_manual<int>();
+
+    auto const pump = cc::register_thread_pump(
+        [&]
+        {
+            if (delivered->is_ready())
+                return false;
+            delivered->push_value(41);
+            return true;
+        });
+
+    auto const root = cc::make_async_lazy([](int v) { return v + 1; }, delivered);
+    CHECK(cc::async_blocking_get_on(pool, root) == 42);
+}
+#endif
+
+#if CC_HAS_THREADS
+// With threads, a thread parked in a pool never runs a pump, however long it waits.
+// An unthreaded component belongs to the loop that drives it; a parked pool thread running it would hand its handlers to
+// whichever unrelated wait happened to be parked, racing that loop.
+TEST("cc::thread_pump_all - a thread parked in a pool never runs a pump", main_thread, exclusive())
+{
+    cc::async_thread_pool pool(2);
+    auto const delivered = cc::make_async_manual<int>();
+
+    auto swept = cc::atomic<int>{0};
+    auto const pump = cc::register_thread_pump(
+        [&]
+        {
+            swept.fetch_add(1);
+            return false;
+        });
+
+    // Delivered from a thread of its own, and announced, so a pool that swept on a pump signal would have its chance.
+    auto poster = std::thread(
+        [&]
+        {
+            cc::thread_pump_notify();
+            delivered->push_value(41);
+        });
+
+    auto const root = cc::make_async_lazy([](int v) { return v + 1; }, delivered);
+    CHECK(cc::async_blocking_get_on(pool, root) == 42);
+    poster.join();
+    CHECK(swept.load() == 0);
+}
+
+// A blocking drive on a scheduler without threads is the loop, so it drives the pump, and a post wakes it rather than a clock.
+TEST("cc::threaded_actor - a post to an unthreaded actor wakes a blocking drive waiting on its reply",
+     main_thread,
+     exclusive())
+{
+    struct echo
+    {
+        int value = 0;
+        cc::shared_async<int> reply;
+    };
+    struct echo_actor final : cc::threaded_actor_impl<echo>
+    {
+        void on_message(echo msg) override { static_cast<cc::async<int>&>(*msg.reply).push_value(msg.value + 1); }
+    };
+
+    auto actor = cc::make_threaded_actor<echo_actor>();
+    actor->start(cc::threaded_actor_mode::unthreaded);
+
+    auto const reply = cc::make_async_manual<int>();
+    auto poster = std::thread([&] { (void)actor->enqueue_message(echo{.value = 41, .reply = reply}); });
+
+    auto driver = cc::singlethreaded_scheduler();
+    auto const scope = cc::async_worker_scope(driver);
+    auto const root = cc::make_async_lazy([](int v) { return v; }, reply);
+    CHECK(cc::async_blocking_get(root) == 42);
+    poster.join();
+    actor->shutdown();
+}
+#endif

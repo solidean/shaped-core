@@ -171,9 +171,12 @@ sc_add_shader_package(
         layout.hlsl:fragment:border_ps
         layout.hlsl:fragment:view_ps
         layout.hlsl:fragment:wipe_ps
+        layout.hlsl:binding:layout_bindings
+        layout.hlsl:constants:constants
         pathtrace.hlsl:raygen:PathTraceRayGen
         pt_hit.hlsl:miss:PtMiss
         pt_hit.hlsl:miss:PtShadowMiss
+        common.hlsli:binding:flat_bindings
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
@@ -201,7 +204,9 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
+        tests/shader-package-test.cc
     )
+    sc_nexus_binary(shaped-viewer-test KINDS tests)
 
     target_link_libraries(shaped-viewer-test
         PRIVATE
@@ -246,6 +251,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 bsdf_probe.hlsl:compute:BsdfProbe
+                bsdf_probe.hlsl:binding:probe_bindings
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 

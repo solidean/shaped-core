@@ -89,6 +89,7 @@ if(SC_BUILD_TESTS)
         tests/report/trace_formatter-test.cc
         tests/report/trace_stats-test.cc
     )
+    sc_nexus_binary(instruction-tracer-test KINDS tests)
 
     target_link_libraries(instruction-tracer-test PRIVATE instruction-tracer-core nexus)
 

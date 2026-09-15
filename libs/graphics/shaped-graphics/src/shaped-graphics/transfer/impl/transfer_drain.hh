@@ -38,6 +38,10 @@ public:
         return token(this, [](void* self) { static_cast<transfer_drain*>(self)->finish(); });
     }
 
+    /// Tells `ctx` each time the count reaches zero, from whichever thread dropped the last token.
+    /// Set before the first start(); the context outlives every transfer system that holds a drain.
+    void notify_on_drained(sg::context* ctx) { _on_drained = ctx; }
+
     /// Whether nothing is in flight right now.
     [[nodiscard]] bool is_idle() const { return _outstanding.load(cc::memory_order_acquire) == 0; }
 
@@ -74,8 +78,13 @@ private:
 #if CC_HAS_THREADS
             _outstanding.notify_all();
 #endif
+            // A hint rather than proof of idleness — the count can rise again at once — so the context re-checks every
+            // drain before it settles anything.
+            if (_on_drained != nullptr)
+                impl::notify_transfer_drained(*_on_drained);
         }
     }
 
     cc::atomic<isize> _outstanding = 0;
+    sg::context* _on_drained = nullptr;
 };

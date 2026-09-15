@@ -17,15 +17,25 @@ namespace
 {
 /// Whether `b` is one of the manager's bindless tables rather than a binding of the trace's own.
 ///
-/// A generated closest-hit declares the tables it touches, in sv's spaces, so they come back through reflection like
-/// anything else — and they must not: the manager owns that schema, binds it as its own group, and a permutation
-/// declaring three of the eight tables would otherwise produce a group layout that is a subset of it.
+/// A generated closest-hit declares every budgeted table, so they come back through reflection like anything
+/// else — and they must not: the manager owns that schema and binds it as its own group.
 [[nodiscard]] bool is_bindless_table(sg::binding const& b)
 {
     for (auto i = u32(0); i < u32(bindless_table::count_); ++i)
         if (b.name == name_of(bindless_table(i)))
             return true;
     return false;
+}
+
+/// Whether `b` is one of a material permutation's own samplers rather than a binding of the trace's own.
+///
+/// A permutation declares them in a group of its own (see `sv::material_sampler_group`), so they reflect back
+/// like anything else and belong in that group's layout rather than merged into the trace's.
+/// Matched by name for the same reason a bindless table is: the name is what the generator wrote and what
+/// `collect_samplers` carries the state under.
+[[nodiscard]] bool is_material_sampler(sg::binding const& b)
+{
+    return b.type == sg::binding_type::sampler && cc::string_view(b.name).starts_with("sv_sampler_");
 }
 
 /// Where one permutation's compiles stand.
@@ -38,29 +48,24 @@ enum class permutation_state
 
 /// One node's state, scheduling it if nobody has yet.
 ///
-/// The cache hands back COLD nodes, so polling alone would watch one that never starts.
+/// The cache may hand back COLD nodes, so polling alone would watch one that never starts.
 /// Started rather than driven: this runs on the frame path, where a compile must not be waited for -- async_start
 /// hands it to the ambient scheduler and the trace picks it up a frame or two later.
-///
-/// Anything started is appended to `started`, because a node kicked off here belongs to no phase: the tick cannot
-/// collect it, readiness never covers it, and it holds the context until it settles.
-/// drain_detached_work is what waits for them, and that list is the only record there is.
-[[nodiscard]] permutation_state state_of_node(sg::async_compiled_shader const& node,
-                                              cc::vector<sg::async_compiled_shader>& started)
+/// Nothing here has to remember it: the shader library tracked the node when it handed it out, and counts it once started.
+[[nodiscard]] permutation_state state_of_node(sg::async_compiled_shader const& node)
 {
     if (node->try_value() != nullptr)
         return permutation_state::ready;
     if (node->is_ready())
         return permutation_state::failed; // settled with no value
     (void)cc::async_start(node);
-    started.push_back(node);
     return permutation_state::pending;
 }
 
 /// Whether `p` has everything a hit group needs, without waiting for any of it.
-[[nodiscard]] permutation_state state_of(material_permutation const* p, cc::vector<sg::async_compiled_shader>& started)
+[[nodiscard]] permutation_state state_of(material_permutation const* p)
 {
-    auto const primary = state_of_node(p->shader, started);
+    auto const primary = state_of_node(p->shader);
     if (primary != permutation_state::ready)
         return primary;
 
@@ -68,10 +73,10 @@ enum class permutation_state
         return permutation_state::ready;
 
     // The cutout test, twice, because the two rays that reach it carry different payloads.
-    auto const any = state_of_node(p->any_hit, started);
+    auto const any = state_of_node(p->any_hit);
     if (any != permutation_state::ready)
         return any;
-    return state_of_node(p->shadow_any_hit, started);
+    return state_of_node(p->shadow_any_hit);
 }
 
 /// The static samplers `hit_groups` declare, by the generated name each register carries.
@@ -130,52 +135,17 @@ cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
-void pathtrace_routine::record_started(cc::vector<sg::async_compiled_shader> started)
-{
-    if (started.empty())
-        return;
-    _started_on_frame_path.lock(
-        [&](cc::vector<sg::async_compiled_shader>& all)
-        {
-            for (auto& n : started)
-                all.push_back(cc::move(n));
-        });
-}
-
-void pathtrace_routine::drain_detached_work()
-{
-    // Taken out under the lock and waited on outside it: a node settling can run arbitrary continuations, and holding
-    // the routine's own list across that is how a shutdown deadlocks.
-    auto pending = _started_on_frame_path.lock(
-        [](cc::vector<sg::async_compiled_shader>& all)
-        {
-            auto out = cc::move(all);
-            all = {};
-            return out;
-        });
-
-    // Settled rather than valued: a compile that FAILED is as drained as one that succeeded, and this is teardown —
-    // there is nobody left to report a verdict to.
-    for (auto const& node : pending)
-        if (node != nullptr)
-            (void)cc::try_async_blocking_get(node);
-}
-
 pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx, pt_trace_desc const& d)
 {
     CC_ASSERT(d.bindless != nullptr, "a path trace binds the manager's bindless tables");
 
     // Started here, and whether or not a substitution ends up needing it.
     //
-    // It is a cold node like every other permutation, and one nobody starts is async work that never happens — so the
-    // fallback would never become available and every trace missing a real permutation would decline forever.
+    // It may be a cold node like every other permutation, and one nobody starts is async work that never happens — so
+    // the fallback would never become available and every trace missing a real permutation would decline forever.
     // Before the early-out below for the same reason.
-    // Collected locally and appended once, so the guarded list is touched a single time per trace rather than per
-    // permutation — this is the frame path.
-    auto started = cc::vector<sg::async_compiled_shader>();
-
     auto const* const fallback
-        = d.fallback != nullptr && state_of(d.fallback, started) == permutation_state::ready ? d.fallback : nullptr;
+        = d.fallback != nullptr && state_of(d.fallback) == permutation_state::ready ? d.fallback : nullptr;
 
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
@@ -193,20 +163,16 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        if (state_of(p, started) != permutation_state::ready)
+        if (state_of(p) != permutation_state::ready)
             p = fallback; // still compiling, or a material that does not build
 
         if (p == nullptr)
-        {
-            record_started(cc::move(started)); // even a trace that gives up here started compiles that must be waited for
             return nullptr; // nothing compiled and nothing to stand in for it — trace no-ops, as it always did
-        }
         groups.push_back(p);
     }
 
     // The hit groups in order plus the schema the second group is bound through: the two things a pipeline is built
     // from that a caller can vary between traces.
-    record_started(cc::move(started));
 
     auto key_bytes = cc::vector<cc::hash128>();
     key_bytes.reserve(groups.size() + 1);
@@ -272,19 +238,51 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         if (h != nullptr)
             stages.push_back(h->bindings);
 
+    // Three groups come out of one merge, and each is owned somewhere else: the manager owns its tables, a
+    // permutation owns its samplers, and what is left is the trace's own.
     auto merged = sg::merge_bindings(stages);
     auto own = cc::vector<sg::binding>();
+    auto sampler_bindings = cc::vector<sg::binding>();
     for (auto& b : merged)
-        if (!is_bindless_table(b))
+    {
+        if (is_bindless_table(b))
+            continue;
+        if (is_material_sampler(b))
+            sampler_bindings.push_back(cc::move(b));
+        else
             own.push_back(cc::move(b));
+    }
 
     auto const samplers = collect_samplers(groups);
 
     auto variant = pipeline_variant{};
-    variant.group_layout = ctx.cached.acquire_binding_group_layout(own, samplers);
+    variant.group_layout = ctx.cached.acquire_binding_group_layout(own);
+
+    // The permutation's samplers are static, so on DX12 this layout contributes root-signature entries and no
+    // descriptor table at all — which is why nothing ever binds a group at this slot.
+    //
+    // That is a DX12 statement rather than a general one.
+    // Vulkan writes a static sampler into the group's own descriptor set (vulkan_binding_group.cc), so a vulkan
+    // path tracer has to create and bind this group like any other.
+    // See libs/graphics/shaped-viewer/docs/TODO.md's sv-on-vulkan entry.
+    //
+    // A scene whose materials sample nothing declares none, and then there is no third group either.
+    auto const sampler_layout = sampler_bindings.empty()
+                                  ? sg::binding_group_layout_handle()
+                                  : ctx.cached.acquire_binding_group_layout(sampler_bindings, samplers);
+
     // Not a member: the pipeline holds it to keep the root signature alive.
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {variant.group_layout, d.bindless->layout()}});
+    auto groups_for_layout = cc::small_vector<sg::binding_group_layout_handle, sg::max_binding_groups>();
+    groups_for_layout.push_back(variant.group_layout);
+    groups_for_layout.push_back(d.bindless->layout());
+    if (sampler_layout != nullptr)
+    {
+        CC_ASSERT(groups_for_layout.size() == sv::material_sampler_group, "the sampler group's slot is its declared "
+                                                                          "group number");
+        groups_for_layout.push_back(sampler_layout);
+    }
+
+    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups_for_layout)});
 
     // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, five
     // float3 results, and bsdf_pdf + hit_t = 26 lanes.
@@ -379,7 +377,7 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
                                 {.name = "Output", .view = d.output.as_readwrite_view()},
-                                {.name = "FrameConstants", .view = d.frame.as_uniform_buffer()},
+                                {.name = "frame", .view = d.frame.as_uniform_buffer()},
                                 {.name = "background", .view = d.background.as_uniform_buffer()},
                                 {.name = "Instances", .view = d.instance_table.as_readonly_buffer()}});
 

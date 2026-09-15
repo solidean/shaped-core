@@ -1,4 +1,6 @@
 #include <clean-core/fwd.hh> // cc::u64
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -25,7 +27,7 @@ INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (s
 // If it did, a later advance_epoch would wrongly trip its "every list must be submitted or dropped before advancing" assert.
 // That is exactly how the fuzz's shared context got polluted across replays and reported a false [mk_trace, advance] failure.
 // Letting a list leave scope auto-drops it, clearing the count, and prints one warning to stderr — expected here.
-INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -37,7 +39,7 @@ INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg:
 
     // The open-list count is back to zero, so this must not assert "open lists before advancing".
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     // ...and the context is still fully usable afterwards.
     auto next = ctx->create_command_list();
@@ -45,7 +47,7 @@ INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg:
     ctx->drop_command_list(cc::move(next));
 }
 
-INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -57,11 +59,11 @@ INVOCABLE_TEST("sg - a submitted list completes after the GPU drains", (sg::cont
     CHECK(!ctx->is_submission_complete(sg::submission_token::not_submitted));
 
     ctx->advance_epoch();
-    ctx->block_until_idle(); // fully drain: the token's work is now finished
+    co_await ctx->idle_completion(); // fully drain: the token's work is now finished
     CHECK(ctx->is_submission_complete(token));
 }
 
-INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -77,7 +79,7 @@ INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::context_han
     CHECK(u64(second) > u64(first));
 
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(ctx->is_submission_complete(first));
     CHECK(ctx->is_submission_complete(second));
 }

@@ -59,9 +59,11 @@ enum class cc::metric : cc::u8
     memory_usage,
 };
 
-/// Monotone CPU time in seconds, as the OS has accumulated it since boot.
+/// CPU time in seconds, as the OS has accumulated it since boot.
 ///
-/// These only ever climb, which is what makes them differenceable.
+/// They climb over time, which is what makes them differenceable, but two close readings are NOT guaranteed to be ordered.
+/// Windows' per-core totals have been seen to step back by several 1/64 s ticks between readings under load, so a
+/// difference can be negative; `cpu_load_sampler` clamps for exactly that reason.
 /// The ratio everyone actually wants is `cc::cpu_load_sampler`'s job; this is the primitive under it, published because
 /// a ratio has thrown away the seconds and somebody always wants them back.
 struct cc::cpu_counters
@@ -172,7 +174,7 @@ struct cc::memory_usage
 
 namespace cc
 {
-/// The raw monotone CPU counters, for a caller that wants to difference them itself.
+/// The raw CPU counters, for a caller that wants to difference them itself — and clamp, since a difference can be negative.
 [[nodiscard]] cc::result<cc::cpu_counter_set, cc::query_error> read_cpu_counters();
 
 /// Physical memory in use, right now.

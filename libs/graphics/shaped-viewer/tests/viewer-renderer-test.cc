@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -45,7 +47,8 @@ namespace
 // The debug layer validates the transitions from three UAV writes to three sampled reads for us.
 //
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the whole frame recorded and ran.
-INVOCABLE_TEST("sv - viewer renderer places every view in its own rect (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - viewer renderer places every view in its own rect (headless)",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -126,11 +129,14 @@ INVOCABLE_TEST("sv - viewer renderer places every view in its own rect (headless
     // Every view resolved against the same two resources, so nothing was uploaded per view.
     CHECK(resources.meshes.count() == 1);
     CHECK(resources.instance_count() == 1);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // No views at all: the pass still opens, so the output's clear lands and the target is defined.
 // This is the path an authored-nothing frame takes, and it must not be a silent skip that leaves stale contents.
-INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (headless)",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -155,12 +161,14 @@ INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (headles
                                            }));
 
     CHECK(true); // the pass opened and closed with no draws, so the begin-op ran
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // A GUI drawn over the frame is a *second* pass on the same target, not a share of viewer_renderer's.
 // Every trace has to be recorded before any pass opens, so the frame's pass cannot be handed in from outside.
 // `preserved()` is what keeps the rendered frame underneath; the overlay here is a plain blit standing in for imgui.
-INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -234,6 +242,8 @@ INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headless)", 
         }));
 
     CHECK(true); // frame pass + overlay pass recorded onto one command list without a device / barrier error
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // Nesting, end to end: a view whose layer is a layout tree holding two further views, composited up to the output.
@@ -241,7 +251,7 @@ INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headless)", 
 // This is the case the flat model could not express at all — the middle view renders into its own texture, and the
 // output samples that rather than the leaves.
 // Three view textures plus the output, and one dispatch group ahead of every pass, whatever the depth.
-INVOCABLE_TEST("sv - viewer renderer composites a nested layout (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - viewer renderer composites a nested layout (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -351,6 +361,8 @@ INVOCABLE_TEST("sv - viewer renderer composites a nested layout (headless)", (sg
     // Two traces and three passes on one command list, with the debug layer validating every transition from a UAV
     // write to a sampled read and from a render target to a sampled read.
     CHECK(resources.meshes.count() == 1);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The context is a process-wide resource, so acquiring it twice must not build two devices.
@@ -366,7 +378,10 @@ TEST("sv - the rendering context is created once and shared")
         [&builds]
         {
             ++builds;
-            return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+            // The debug layer, because this is usually the binary's FIRST device and the layer is process-wide:
+            // a later context asking for it would be refused, the whole suite running unvalidated behind it.
+            return sg::create_dx12_context(
+                {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
         });
 
     auto const first = sv::acquire_viewer_context();

@@ -9,7 +9,7 @@ A backend subclasses it — `sg::backend::dx12::dx12_context`, `sg::backend::vul
 ```cpp
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-auto ctx = sg::create_dx12_context({.enable_debug_layer = true}).value();  // -> cc::result<sg::context_handle>
+auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true}).value();  // -> cc::result<sg::context_handle>
 ```
 
 `sg::context_handle` is `std::shared_ptr<sg::context>`.
@@ -100,6 +100,16 @@ Three tiers, and which tier applies is a property of the failure rather than of 
 Device loss has one trap worth stating plainly: **on the `try_*` surface it arrives as an ordinary, unclassified `cc::error`.**
 Only the throwing façades classify it into `sg::device_lost_exception`.
 So a caller that polls `try_create_*` in a retry loop must check `is_device_lost()` itself, or it will retry forever against a dead device.
+
+**What the loss reason says is up to DRED.**
+A removed device reports an HRESULT and nothing else, and `DXGI_ERROR_DEVICE_HUNG` names no work anyone could go and look at.
+dx12's `dx12_config::enable_dred` turns on the runtime's Device Removed Extended Data.
+`device_loss_reason()` then carries the command list that did not finish, the operation it stopped at, and the allocation a faulting address landed in.
+
+It is off by default because auto-breadcrumbs cost a write per command-list operation.
+And it must be armed **before** the device is created: the runtime decides then whether to keep the bookkeeping at all.
+A clean removal reports nothing, which is deliberate.
+Only a list with an incomplete breadcrumb is printed, so a real hang is not buried under the history of the lists that were fine.
 
 ## What is documented elsewhere
 

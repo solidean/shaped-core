@@ -146,7 +146,57 @@ An invocable with no alias and no invocation is still an orphan, which is the wi
 shaped-graphics' vulkan backend was the worked case, through the whole of its build-out.
 [`vulkan-entry.cc`](../../../graphics/shaped-graphics/tests/backends/vulkan-entry.cc) records what the toggle bought and when it came off.
 
+## Async invocables
+
+`ASYNC_INVOCABLE_TEST` is an invocable whose body is a coroutine, from `nexus/async-test.hh`.
+It is matched by the same decayed signature, so one invocation reaches sync and async invocables alike.
+
+```cpp
+#include <nexus/async-test.hh>
+
+ASYNC_INVOCABLE_TEST("sg stream - an upload settles", (sg::context_handle const& h))
+{
+    auto stream = h->stream.bytes_to_buffer(buf, data);
+    co_await stream.completion();
+    CHECK(stream.is_complete());
+}
+
+ASYNC_TEST("sg dx12 hardware backend")
+{
+    auto ctx = make_context();
+    co_await nx::async_invoke_tests_in_sequence("dx12-hw", ctx);
+}
+```
+
+**Two ways to invoke from an async body**, both cold `cc::shared_async<nx::invocation_result>`:
+
+- `nx::async_invoke_tests_in_sequence(name, args...)` awaits each child in turn, in match order.
+- `nx::async_invoke_tests_in_parallel(name, [{.max_concurrent = n},] args...)` starts every child, then awaits them all.
+  Reports keep match order however the children finished, and under `-j1` the children run one at a time.
+
+**The synchronous `nx::invoke_tests` refuses a set containing an async invocable**, and checks the matched set before `-c` scoping.
+A driver that ran its sync children and silently skipped its async ones whenever a filter selected only sync ones would be wrong in a way nothing reports.
+
+**Parameters stay by value or `const&`.**
+The invocation's frame owns the boxed arguments until every child has resolved, so a child reading its `const&` after a suspend reads a live box.
+That makes it the one caller for which clean-core's by-value rule for coroutine parameters does not apply.
+
+**An async invocation arranges a child's asks rather than requiring the driver to hold them:**
+
+- **`main_thread`** — an async child is homed to main; a sync child runs its body on main.
+- **`exclusive(tag)`** — taken from the phase around the child, in name order.
+  **The invoking chain may hold tags, or the child may, never both.**
+  A tagged child under a chain that already holds a tag is refused at dispatch, because taking a tag while holding another is the out-of-order acquisition that deadlocks against a test holding both.
+  Children sharing a tag take turns through the phase's lock for it, parallel or not.
+- **`exclusive()`** — still needs an `exclusive()` driver, since the driver holds the phase lock shared, and is refused in a parallel invocation.
+- **`singlethreaded`, `no_scheduler`, `own_pool(n)`** — the driver declares the same mode, as for a synchronous child.
+
+The never-both rule is the strict form on purpose.
+Accepting a child tag the chain already holds, or ordering acquisition by name, are the relaxations it leaves open, and neither breaks anything it accepts.
+
 ## Scheduling asks belong to the driver
+
+This section is the **synchronous** `nx::invoke_tests`; an async invocation arranges most of these itself, above.
 
 A dispatched child creates no node in the schedule: it runs inside the body of the test that dispatched it, on that test's thread, beside whatever that test runs beside.
 So a scheduling ask on an `INVOCABLE_TEST` can only be honoured by the scheduled test it is reached from — the driver, or an alias expanding to it.
@@ -184,13 +234,6 @@ An instantiation cannot be type-erased across a TU that does not see the templat
 The **planned** shape registers one concrete value-parametrized declaration per type in a list, each then driven by `nx::invoke_tests` like any other.
 Declaration and instantiation stay separable there, so long type lists can live apart from the body.
 Value parametrization, this document, is the part that composes across the registry **today**.
-
-## Not yet
-
-- **Async invocables honouring their own asks.**
-  Today a child runs on its driver's thread, which is why its scheduling asks are the driver's to hold.
-  Once async tests can migrate between threads, an async invocable could be scheduled apart from its parent and honour `exclusive`, `main_thread` and the scheduler modes itself.
-  The dispatch assert would then apply to synchronous children only.
 
 ## Gotchas
 

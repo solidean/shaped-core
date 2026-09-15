@@ -1,5 +1,7 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -14,7 +16,7 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -37,18 +39,16 @@ INVOCABLE_TEST("sg dx12 - buffer upload then download round-trips", (dx12::dx12_
     c.submit_command_list(cc::move(down));
 
     // Ready after the submitted list finishes on the GPU — no advance_epoch needed.
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 256);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
     bool matches = true;
     for (int i = 0; i < 256; ++i)
-        if (bytes.value()[i] != byte(i))
+        if (bytes[i] != byte(i))
             matches = false;
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -68,12 +68,10 @@ INVOCABLE_TEST("sg dx12 - typed upload/download convenience", (dx12::dx12_contex
     auto future = down->download.data_from_buffer<int>(buf, 0, 4);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 5);
-    CHECK(data.value()[3] == 8);
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 4);
+    CHECK(data[0] == 5);
+    CHECK(data[3] == 8);
 }
 
 INVOCABLE_TEST("sg dx12 - empty transfers", (dx12::dx12_context_handle const& handle))
@@ -96,7 +94,7 @@ INVOCABLE_TEST("sg dx12 - empty transfers", (dx12::dx12_context_handle const& ha
     c.submit_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -118,18 +116,17 @@ INVOCABLE_TEST("sg dx12 - partial download with offset", (dx12::dx12_context_han
     auto future = down->download.bytes_from_buffer(buf, 64, 64);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    REQUIRE(bytes.value().size() == 64);
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 64);
     bool matches = true;
     for (int i = 0; i < 64; ++i)
-        if (bytes.value()[i] != byte(64 + i))
+        if (bytes[i] != byte(64 + i))
             matches = false;
     CHECK(matches);
 }
 
-INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -156,18 +153,16 @@ INVOCABLE_TEST("sg dx12 - multiple uploads in one list, last writer wins", (dx12
     auto future = down->download.bytes_from_buffer(buf, 0, 16);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
+    auto const bytes = co_await future.bytes();
     bool all_second = true;
     for (int i = 0; i < 16; ++i)
-        if (bytes.value()[i] != byte(0xBB))
+        if (bytes[i] != byte(0xBB))
             all_second = false;
     CHECK(all_second);
 }
 
-INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims ring space",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims ring space",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -193,21 +188,19 @@ INVOCABLE_TEST("sg dx12 - dropping a download future is safe and reclaims ring s
     }
 
     c.advance_epoch();
-    c.block_until_idle(); // let the GPU + actor settle
+    co_await c.idle_completion(); // let the GPU + actor settle
 
     auto down2 = c.create_command_list();
     REQUIRE(down2 != nullptr);
     auto future = down2->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down2));
 
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value().size() == 256);
-    CHECK(bytes.value()[100] == byte(100));
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes.size() == 256);
+    CHECK(bytes[100] == byte(100));
 }
 
-INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -231,12 +224,10 @@ INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_con
         auto future = down->download.bytes_from_buffer(buf, 0, 1024);
         c.submit_command_list(cc::move(down));
 
-        c.block_until_idle();
-        auto const bytes = future.try_get_bytes();
-        REQUIRE(bytes.has_value());
+        auto const bytes = co_await future.bytes();
         bool matches = true;
         for (int i = 0; i < 1024; ++i)
-            if (bytes.value()[i] != byte((i + e) & 0xFF))
+            if (bytes[i] != byte((i + e) & 0xFF))
                 matches = false;
         CHECK(matches);
 
@@ -249,8 +240,8 @@ INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx12_con
 // The actor copies in submission order, which then does not match ring-allocation order.
 // A per-submission free watermark would reclaim the first-allocated window while the other list still holds it.
 // Epoch-granular reclaim must keep both windows pinned, and both futures must read back intact.
-INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation order",
-               (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation order",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -286,19 +277,15 @@ INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation orde
     c.submit_command_list(cc::move(list_b));
     c.submit_command_list(cc::move(list_a));
 
-    c.block_until_idle();
-    auto const bytes_a = future_a.try_get_bytes();
-    c.block_until_idle();
-    auto const bytes_b = future_b.try_get_bytes();
-    REQUIRE(bytes_a.has_value());
-    REQUIRE(bytes_b.has_value());
+    auto const bytes_a = co_await future_a.bytes();
+    auto const bytes_b = co_await future_b.bytes();
     bool ok_a = true;
     bool ok_b = true;
     for (int i = 0; i < 128; ++i)
     {
-        if (bytes_a.value()[i] != byte(0xA0 + (i & 0xF)))
+        if (bytes_a[i] != byte(0xA0 + (i & 0xF)))
             ok_a = false;
-        if (bytes_b.value()[i] != byte(0xB0 + (i & 0xF)))
+        if (bytes_b[i] != byte(0xB0 + (i & 0xF)))
             ok_b = false;
     }
     CHECK(ok_a);
@@ -308,7 +295,8 @@ INVOCABLE_TEST("sg dx12 - interleaved downloads submitted out of allocation orde
 // Dropping (never submitting) a list with a pending download cancels its future: it never becomes
 // ready, wait fails instead of blocking forever, and the ring space it reserved is reclaimed with the
 // epoch so later downloads still succeed.
-INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads",
+                     (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -335,11 +323,11 @@ INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx1
     // without blocking — the drop pushed cc::async_error::make_cancelled() on its completion.
     CHECK(cancelled.is_ready());
     CHECK(!cancelled.try_get_bytes().has_value());
-    c.block_until_idle();
+    co_await c.idle_completion();
     CHECK(!cancelled.try_get_bytes().has_value()); // cancelled: fails, does not block
 
     c.advance_epoch();
-    c.block_until_idle(); // reclaims the dropped list's ring span with its epoch
+    co_await c.idle_completion(); // reclaims the dropped list's ring span with its epoch
 
     // The ring is free again: a fresh download round-trips.
     auto down = c.create_command_list();
@@ -347,8 +335,6 @@ INVOCABLE_TEST("sg dx12 - dropping a recording list cancels its downloads", (dx1
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     c.submit_command_list(cc::move(down));
 
-    c.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    REQUIRE(bytes.has_value());
-    CHECK(bytes.value()[100] == byte(100));
+    auto const bytes = co_await future.bytes();
+    CHECK(bytes[100] == byte(100));
 }

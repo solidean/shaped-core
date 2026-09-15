@@ -1,5 +1,8 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/fwd.hh>            // cc::u64: epoch is an enum over u64
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_pump.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -48,18 +51,18 @@ INVOCABLE_TEST("sg - accepts at least one shader format", (sg::context_handle co
     }
 }
 
-INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - advances an epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     auto const before = ctx->current_epoch();
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(u64(ctx->current_epoch()) > u64(before));
     CHECK(u64(ctx->completed_epoch()) >= u64(before)); // the epoch we started in is now done
 }
 
-INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -69,7 +72,7 @@ INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg::conte
     {
         auto const closing = ctx->current_epoch();
         ctx->advance_epoch();
-        ctx->block_until_idle(); // fully drain the GPU
+        co_await ctx->idle_completion(); // fully drain the GPU
         CHECK(u64(ctx->current_epoch()) > u64(closing));
         CHECK(u64(ctx->completed_epoch()) >= u64(closing));
         CHECK(u64(ctx->completed_epoch()) < u64(ctx->current_epoch()));
@@ -118,7 +121,7 @@ INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle con
 //
 // The point of each is that a caller can learn a thing has finished WITHOUT a thread stopping, which is the whole
 // reason the blocking family is going away: a browser cannot stop a thread at all.
-INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -136,12 +139,12 @@ INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::contex
 
     // Closing it and draining settles that node — nothing waited on the epoch directly.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     ctx->process_completed_epochs();
     CHECK(pending->is_ready());
 }
 
-INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
@@ -158,19 +161,19 @@ INVOCABLE_TEST("sg - a submission's completion is readable as an async", (sg::co
     auto const done = ctx->submission_completion(token);
     REQUIRE(done != nullptr);
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(ctx->is_submission_complete(token));
     CHECK(done->is_ready());
 }
 
 // The non-blocking throttle: the same pipelining bound advance_epoch expresses by waiting, expressed as a decision.
-INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     // Drained, so nothing is in flight and any budget admits an advance.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     CHECK(ctx->in_flight_epoch_count() == 0);
 
     auto const before = ctx->current_epoch();
@@ -184,7 +187,7 @@ INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::contex
     if (!ctx->try_advance_epoch(0))
         CHECK(ctx->current_epoch() == at_budget);
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 }
 
 // block_until_idle is the only blocking spelling left, and it has to mean more than "the GPU is idle": the readback
@@ -214,4 +217,102 @@ INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg:
     REQUIRE(data.value().size() == 4);
     CHECK(data.value()[0] == 1);
     CHECK(data.value()[3] == 4);
+}
+
+// The completion asyncs settle from the backend's own GPU signals and the actors' own drain reports.
+// Each test below awaits one with nothing else in the body that sweeps, advances or waits — so one that only settled
+// on a sweep would hang here rather than pass.
+ASYNC_INVOCABLE_TEST("sg - an epoch's completion settles with nobody sweeping", (sg::context_handle ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const pending = ctx->epoch_completion(ctx->current_epoch());
+    ctx->advance_epoch();
+    co_await pending;
+    CHECK(pending->has_value());
+}
+
+// A frame loop sweeps the pumps before it advances.
+// Threads off, the completions' pump runs in that sweep, and the epoch it could wait on is not closed until the advance
+// that follows — so a sweep that parked on it would never return.
+INVOCABLE_TEST("sg - a sweep with an open epoch's completion outstanding returns", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const pending = ctx->epoch_completion(ctx->current_epoch());
+    (void)cc::thread_pump_all();
+    CHECK(!pending->is_ready());
+
+    ctx->advance_epoch();
+    ctx->process_completed_epochs();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a submission's completion settles with nobody sweeping", (sg::context_handle ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto const token = ctx->submit_command_list(cc::move(cmd));
+
+    auto const done = ctx->submission_completion(token);
+    co_await done;
+    CHECK(ctx->is_submission_complete(token));
+}
+
+ASYNC_INVOCABLE_TEST("sg - idle_completion with nothing outstanding settles", (sg::context_handle ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    co_await ctx->idle_completion();
+    CHECK(ctx->in_flight_epoch_count() == 0);
+}
+
+// block_until_idle's guarantee, awaited: the readback actor has delivered, and every closed epoch has retired.
+ASYNC_INVOCABLE_TEST("sg - idle_completion drains the actors, not just the GPU", (sg::context_handle ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const src = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+
+    auto cmd = ctx->create_command_list();
+    u32 const values[] = {1, 2, 3, 4};
+    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
+    auto const future = cmd->download.data_from_buffer(src);
+    (void)ctx->submit_command_list(cc::move(cmd));
+    ctx->advance_epoch();
+
+    co_await ctx->idle_completion();
+
+    CHECK(ctx->in_flight_epoch_count() == 0);
+    REQUIRE(future.is_ready());
+    auto const data = future.try_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == 4);
+    CHECK(data.value()[0] == 1);
+    CHECK(data.value()[3] == 4);
+}
+
+// An async upload is delivered once the transfer queue has run its copy, not once it was submitted there.
+ASYNC_INVOCABLE_TEST("sg - idle_completion waits for an async upload's copy to land", (sg::context_handle ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const dst = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto values = cc::vector<u32>{5, 6, 7, 8};
+    ctx->upload.data_to_buffer(dst, cc::pinned_data<u32 const>(cc::make_pinned_data(cc::move(values))));
+    co_await ctx->idle_completion();
+
+    auto cmd = ctx->create_command_list();
+    auto const future = cmd->download.data_from_buffer(dst);
+    (void)ctx->submit_command_list(cc::move(cmd));
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+
+    REQUIRE(future.is_ready());
+    auto const data = future.try_get_data();
+    REQUIRE(data.has_value());
+    REQUIRE(data.value().size() == 4);
+    CHECK(data.value()[0] == 5);
+    CHECK(data.value()[3] == 8);
 }

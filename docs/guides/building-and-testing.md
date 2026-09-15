@@ -103,6 +103,32 @@ Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the f
 A rate is a different question from a cause, and this answers the cause.
 When you do want the rate, loop it in the shell and count — but expect to lose the logs of all but the last failure.
 
+## What a nexus binary does on its own
+
+**It does not run its tests unless the line selects them.**
+`dev.py test` passes `--tests`, so nothing changes through dev.py.
+A binary run with nothing selected runs its `default_entry` app or command, or prints an overview of what it holds — its commands, apps, examples and benchmarks by name, its tests by count.
+A substring filter given without `--tests` is an error that names `--tests` as the fix.
+
+dev.py tells nexus binaries apart by the `nexus-binaries.json` manifest configure writes beside the build, not by a `-test` or `-example` suffix.
+**A new test target needs `sc_nexus_binary(<target> KINDS tests)` after its `add_executable`.**
+dev.py refuses a `*-test` or `*-example` executable the manifest does not name, rather than silently never running it.
+`dev.py run` refuses a binary that holds only tests or examples, and runs one registered as a `tool` even when it carries tests too.
+
+## Reproducing an order: `--seed N`
+
+Every nexus run shuffles its tests and each invocation's children, and prints the seed it drew as its first line: `nexus: run seed N (reproduce with --seed N)`.
+The same line appears beside the failure summary, and the JUnit report carries it as a `seed` property.
+
+```bash
+uv run dev.py test shaped-graphics-vulkan-test --seed 12002409740908782128
+```
+
+**A failure that reproduces with its seed and not without it is an order dependency**, which is what the shuffle exists to surface.
+One that reproduces at `-jN` but not at `--jobs 1` with the same seed is a concurrency one.
+A test's own seed derives from the run seed and its name, so re-running a single test by name with `--seed` reproduces what it saw in the full run.
+[parallel-execution](../../libs/base/nexus/docs/parallel-execution.md#the-run-seed) has the rules.
+
 ## Presets
 
 Presets live in [CMakePresets.json](../../CMakePresets.json), one per platform × compiler × build type (MSVC / Clang / GCC across Windows / Linux / macOS / Android NDK / Emscripten).
@@ -394,6 +420,13 @@ A comment reference is either a bare path ending in `.md` or a markdown link, wh
 Its scope is `libs/`, `docs/`, `tools/`, `.claude/` and the root meta files.
 These rot silently, because a moved file breaks links in *other*, untouched files, so the scan is always full-repo and `--all` does not affect it.
 It reports each offender as `file:line: reason`.
+
+**`shader-grammar` builds a target even under `--no-test`.**
+It is the one gate that is not purely static.
+The binding pass exists twice — in C++ for the runtime rewriter, in Python for the package generator — and one shared corpus is what keeps the two agreeing.
+Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
+So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
+It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
 It builds and runs the suite across five build variants:

@@ -301,33 +301,8 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         elapsed += secs;
         wall_elapsed += last_batch_wall_secs;
 
-        auto const samples = isize(r.samples.size());
-
-        // The effort floor is MEASURED time, since precision is what it buys; the cap is wall time, since the run's cost is.
-        auto const capped = samples >= cfg.max_samples || wall_elapsed >= cfg.max_time_secs;
-        auto const effort_met = samples >= cfg.min_samples && elapsed >= cfg.min_time_secs;
-
-        // Only ever evaluated where the loop could actually stop, since a full sort per sample would otherwise be the
-        // most expensive thing in the run.
-        if (effort_met || capped)
-        {
-            auto const s = bench::compute_statistics(r.samples);
-            auto const precise = !s.ci_is_bound && s.relative_error() <= cfg.target_relative_error;
-
-            // Convergence is a statement about the ANSWER, not about how the loop ended.
-            // A run that hit a cap having already reached the target precision has converged, and reporting otherwise
-            // would turn a config whose caps cannot satisfy min_time_secs into a permanent false alarm.
-            if (precise && effort_met)
-            {
-                r.converged = true;
-                break;
-            }
-            if (capped)
-            {
-                r.converged = precise;
-                break;
-            }
-        }
+        if (impl::sampling_should_stop(r, cfg, elapsed, wall_elapsed))
+            break;
     }
 
     r.measured_seconds = elapsed;
@@ -431,18 +406,6 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
         });
     }
 
-    if (!r.converged)
-    {
-        r.warnings.push_back({
-            .kind = warning_kind::did_not_converge,
-            .severity = warning_severity::warning,
-            .detail = cc::format("stopped at {} samples over {:.2f} s ({:.2f} s measured) with a relative error of "
-                                 "{:.1f}%, short of the {:.1f}% asked for",
-                                 r.samples.size(), wall_elapsed, elapsed, r.time.relative_error() * 100,
-                                 cfg.target_relative_error * 100),
-        });
-    }
-
     if (state.used_pause && cfg.warn_on_pause && cal.clock_pair_secs > 0 && r.time.median > 0
         && cal.clock_pair_secs > r.time.median * paused_warn_fraction)
     {
@@ -452,6 +415,56 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
             .detail = cc::format("a pause/resume pair costs about {:.1f} ns here, against {:.1f} ns measured per "
                                  "iteration — move the setup out of the loop, or take the void(isize) form",
                                  cal.clock_pair_secs * 1e9, r.time.median * 1e9),
+        });
+    }
+
+    impl::finish_sampled_result(r, cfg, wall_elapsed);
+    return r;
+}
+
+bool nx::bench::impl::sampling_should_stop(result& r, run_config const& cfg, f64 measured_secs, f64 wall_secs)
+{
+    auto const samples = isize(r.samples.size());
+
+    // The effort floor is MEASURED time, since precision is what it buys; the cap is wall time, since the run's cost is.
+    auto const capped = samples >= cfg.max_samples || wall_secs >= cfg.max_time_secs;
+    auto const effort_met = samples >= cfg.min_samples && measured_secs >= cfg.min_time_secs;
+
+    // Only ever evaluated where the loop could actually stop, since a full sort per sample would otherwise be the
+    // most expensive thing in the run.
+    if (!effort_met && !capped)
+        return false;
+
+    auto const s = bench::compute_statistics(r.samples);
+    auto const precise = !s.ci_is_bound && s.relative_error() <= cfg.target_relative_error;
+
+    // Convergence is a statement about the ANSWER, not about how the loop ended.
+    // A run that hit a cap having already reached the target precision has converged, and reporting otherwise
+    // would turn a config whose caps cannot satisfy min_time_secs into a permanent false alarm.
+    if (precise && effort_met)
+    {
+        r.converged = true;
+        return true;
+    }
+    if (capped)
+    {
+        r.converged = precise;
+        return true;
+    }
+    return false;
+}
+
+void nx::bench::impl::finish_sampled_result(result& r, run_config const& cfg, f64 wall_secs)
+{
+    if (!r.converged)
+    {
+        r.warnings.push_back({
+            .kind = warning_kind::did_not_converge,
+            .severity = warning_severity::warning,
+            .detail = cc::format("stopped at {} samples over {:.2f} s ({:.2f} s measured) with a relative error of "
+                                 "{:.1f}%, short of the {:.1f}% asked for",
+                                 r.samples.size(), wall_secs, r.measured_seconds, r.time.relative_error() * 100,
+                                 cfg.target_relative_error * 100),
         });
     }
 
@@ -486,6 +499,4 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
     // anything about it.
     // A no-op outside a test, which is what keeps `run` usable from ordinary code and from an application.
     nx::impl::record_benchmark_result(r);
-
-    return r;
 }
