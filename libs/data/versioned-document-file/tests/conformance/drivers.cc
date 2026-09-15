@@ -1,26 +1,27 @@
 #include "store_fixture.hh"
 
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
-#include <nexus/tests/invoke_tests.hh>
 
 /// The drivers: one per store implementation, each running the WHOLE conformance suite.
 ///
 /// A test that only one arm could pass would not be a conformance test, so there is no per-arm test file — the two
 /// entries below are the only place the arms are named.
 
-TEST("vdoc::file - the in-memory store")
+/// Each child opens a medium of its own, so the children run in parallel.
+ASYNC_TEST("vdoc::file - the in-memory store")
 {
-    nx::invoke_tests("in-memory", vdoc::file::test::in_memory_impl());
+    co_await nx::async_invoke_tests_in_parallel("in-memory", vdoc::file::test::in_memory_impl());
 }
 
-TEST("vdoc::file - the sqlite store")
+ASYNC_TEST("vdoc::file - the sqlite store")
 {
     auto const impl = vdoc::file::test::sqlite_impl();
     if (!impl.is_available())
         SKIP("the SQLite backend was not compiled in");
     else
-        nx::invoke_tests("sqlite", impl);
+        co_await nx::async_invoke_tests_in_parallel("sqlite", impl);
 }
 
 /// Defines, per conformance test, an alias that runs it on both arms.
