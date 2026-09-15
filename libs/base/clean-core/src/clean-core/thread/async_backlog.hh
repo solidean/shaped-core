@@ -70,6 +70,11 @@ struct cc::async_backlog
     /// Racy on live work, for diagnostics and tests rather than control flow.
     [[nodiscard]] isize outstanding_count() const;
 
+    /// How many entries the backlog still holds, live or not.
+    /// Tracking compacts it, so this stays bounded by the live entries whether or not anyone settles it.
+    /// For diagnostics and tests.
+    [[nodiscard]] isize tracked_count() const;
+
 private:
     void track_node(async_node_weak node);
 

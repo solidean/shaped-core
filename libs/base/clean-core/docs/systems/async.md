@@ -841,7 +841,7 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 ```
 
 - **Entries are weak.** A backlog never keeps work alive, and a node that is gone or settled counts for nothing.
-  Settled work is pruned from the front as more is tracked; a gap further in waits for the next `settled()` sweep.
+  Tracking compacts dead entries away once the backlog doubles past what last survived, so one nobody settles stays bounded by its live entries.
 - **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
   A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
 - **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.

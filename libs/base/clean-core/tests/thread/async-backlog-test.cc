@@ -82,6 +82,25 @@ ASYNC_TEST("async backlog - an entry whose node is gone counts for nothing")
     co_await cc::async_settled(backlog.settled());
 }
 
+// A production backlog is never settled, so tracking alone must keep dead entries bounded, even behind a live one.
+TEST("async backlog - dead entries behind a live one are reclaimed without settling")
+{
+    cc::async_backlog backlog;
+    auto const held_cold = cc::make_async_lazy([] { return 0; });
+    backlog.track(held_cold);
+
+    for (auto i = 0; i < 1000; ++i)
+    {
+        auto const work = cc::make_async_manual<int>();
+        backlog.track(work);
+        work->push_value(i);
+    }
+
+    // One live entry, so compaction keeps the ring below its 32-entry floor rather than at a thousand.
+    CHECK(backlog.tracked_count() <= 32);
+    CHECK(held_cold->is_cold()); // compacting keeps a cold entry and must not be what starts it
+}
+
 // The rounds are the point of settled(): work a settling node tracks on its way out is still part of the backlog.
 ASYNC_TEST("async backlog - settled waits for work tracked while it waits")
 {
