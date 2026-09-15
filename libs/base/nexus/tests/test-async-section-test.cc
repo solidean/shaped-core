@@ -322,7 +322,7 @@ TEST("async section - work outliving a pass fails that leaf and ends the replay"
     {
         probe p;
         auto const exec = run_body(&leaks_in_first, p, m);
-        p.kept = {};
+        p.kept.reset();
 
         REQUIRE(exec.executions.size() == 1);
         auto const& root = exec.executions[0].root;

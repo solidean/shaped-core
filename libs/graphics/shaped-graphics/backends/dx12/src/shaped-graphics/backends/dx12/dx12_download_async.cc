@@ -127,7 +127,7 @@ private:
     // An empty window still submits and signals, keeping the fence monotonic and gap-free.
     void fold_cancelled_completion(dx12_async_download_job& job)
     {
-        sg::impl::release_ambient(job.ambient);
+        job.ambient.reset();
         // The future itself is gone, but a completion() handed out earlier can outlive it — and a manual node nobody
         // pushes parks its dependents forever, so cancellation has to be said out loud.
         if (job.completion)

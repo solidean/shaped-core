@@ -627,7 +627,7 @@ TEST("test sections - work outliving a section fails that section and ends the r
 
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
-    kept = {};
+    kept.reset();
 
     CHECK(visited_after == 0);
     CHECK(exec.count_failed_tests() == 1);

@@ -17,7 +17,6 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 #include <shaped-graphics/resource/texture_region.hh>
-#include <shaped-graphics/transfer/impl/transfer_ambient.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
@@ -91,8 +90,9 @@ struct sg::backend::vulkan::vulkan_async_download_job
     vulkan_group_value upload_wait;
 
     /// The context of whoever enqueued this, captured on their thread when the job is built.
-    /// The actor installs it around the work it does for the job, so a validation message raised by that work's submit,
-    /// or a check inside a source or sink, finds the test or trace that asked for the transfer.
+    /// Installed only around the work that is this job's alone: its copy's record and submit, and its sink.
+    /// Reset before anything it settles.
+    /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
     ///
     /// Declared last so it is destroyed first: dropping `drain` can resume a caller waiting for idle, and that caller
     /// must not find this job still holding its context.

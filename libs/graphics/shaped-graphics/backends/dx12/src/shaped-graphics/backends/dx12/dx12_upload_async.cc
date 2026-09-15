@@ -258,7 +258,7 @@ private:
     // Saying it out loud is mandatory: a manual async nobody pushes parks its dependents for the process's lifetime.
     void cancel_stream(dx12_async_upload_job& job)
     {
-        sg::impl::release_ambient(job.ambient);
+        job.ambient.reset();
         if (job.stream)
         {
             job.stream->completion->push_error(cc::async_error::make_cancelled());

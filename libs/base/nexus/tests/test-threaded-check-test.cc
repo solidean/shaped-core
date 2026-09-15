@@ -290,9 +290,6 @@ TEST("threaded check - an attributed thread's checks are filed under the section
 TEST("threaded check - with_fallback_test bills a bare thread to the fallback and a test's thread to its own test",
      no_scheduler)
 {
-    // Dropping a handle by moving it out: assigning a default one would capture whatever is installed right here.
-    auto const release = [](cc::async_ambient_handle& h) { (void)cc::async_ambient_handle(cc::move(h)); };
-
     // This outer test's own context, as a fallback no inner test should ever reach.
     auto outer = nx::capture_current_test();
 
@@ -305,7 +302,7 @@ TEST("threaded check - with_fallback_test bills a bare thread to the fallback an
                             // A thread no test started: the report lands on the installer instead of on no test.
                             std::thread t([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
                             t.join();
-                            release(fallback);
+                            fallback.reset();
                         });
     reg.add_declaration("bystander", {},
                         [&]
@@ -318,7 +315,7 @@ TEST("threaded check - with_fallback_test bills a bare thread to the fallback an
     config.jobs = 1;
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, config);
-    release(outer);
+    outer.reset();
 
     CHECK(exec.orphan_checks == 0);
     REQUIRE(exec.executions.size() == 2);

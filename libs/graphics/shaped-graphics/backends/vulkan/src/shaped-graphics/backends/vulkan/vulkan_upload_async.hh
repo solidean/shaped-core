@@ -15,7 +15,6 @@
 #include <shaped-graphics/backends/vulkan/vulkan_transfer_window_log.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
-#include <shaped-graphics/transfer/impl/transfer_ambient.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
@@ -38,8 +37,9 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     sg::impl::transfer_drain::token drain;
 
     /// The context of whoever enqueued this, captured on their thread when the job is built.
-    /// The actor installs it around the work it does for the job, so a validation message raised by that work's submit,
-    /// or a check inside a source or sink, finds the test or trace that asked for the transfer.
+    /// Installed only around the work that is this job's alone: its source poll, and its copy's record and submit.
+    /// Reset before anything it settles.
+    /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
     cc::async_ambient_handle ambient;
 
     // Exactly one destination is set.
