@@ -10,8 +10,8 @@
 // It does not care which API either side came through:
 //   - vkCreateDevice / vkDestroyDevice against vkCreateRayTracingPipelinesKHR, which
 //     docs/bugs-external/vulkan-concurrent-device-lifecycle-deadlock reproduces in raw Vulkan;
-//   - vkDestroyDevice against a D3D12 context releasing its resources, and against a D3D12 BLAS build,
-//     both seen as hangs in shaped-graphics-test when its vulkan and dx12 entry drivers ran side by side.
+//   - vkDestroyDevice against a D3D12 context releasing its resources, and against a D3D12 BLAS build, which
+//     docs/bugs-external/nvidia-raytracing-device-lifecycle-cross-api-deadlock reproduces with nothing of ours.
 //
 // Device creation and teardown take it exclusively, so they are serialized against each other and against ray tracing.
 // A process creates a handful of devices, so that costs nothing that matters.

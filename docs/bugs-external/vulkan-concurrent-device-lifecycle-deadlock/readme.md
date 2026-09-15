@@ -92,4 +92,5 @@ It removes the deadlock for anything going through sg, and an application reachi
 
 Run `run.py`.
 If `churn + raytracing pipelines` reports `ok` across several attempts, the driver is fixed: the Vulkan half of `device_lifecycle.hh` is no longer needed, and this directory with it.
-The lock is shared with dx12 for the same driver's cross-API variant, a Vulkan device destroyed beside D3D12 teardown or a BLAS build, which this repro does not cover.
+The lock also serves the same driver's cross-API form, where the ray-tracing call comes from D3D12.
+[nvidia-raytracing-device-lifecycle-cross-api-deadlock](../nvidia-raytracing-device-lifecycle-cross-api-deadlock/readme.md) reproduces that one, so retire the lock only once both are fixed.
