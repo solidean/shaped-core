@@ -14,11 +14,7 @@ using namespace cc::primitive_defines;
 //
 // Each section uses its own view_id: sections share the enclosing setup rather than re-running it, so a shared id would
 // carry one section's accumulation into the next.
-//
-// TODO: an ASYNC_INVOCABLE_TEST ending in `co_await cc::async_settled(sv::background_work(ctx))`, like every other test
-// that traces, once nexus supports SECTION in an async body (libs/base/nexus/docs/TODO.md).
-// Until then it cannot wait, and what its traces detached outlives it.
-INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -194,6 +190,9 @@ INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::contex
         (void)trace(scaled);
         CHECK(accumulated(v.id) == 1);
     }
+
+    // Reached at the end of every pass, so what one section's traces detached never outlives it.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The same property as above, but down the *plan* path — `viewer_renderer::execute` -> `view_renderer::resolve` +
