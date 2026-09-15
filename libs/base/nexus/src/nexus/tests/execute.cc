@@ -39,6 +39,7 @@
 #include <nexus/tests/section.hh>
 #include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>
+#include <nexus/tests/thread_scope.hh>
 
 #include <string>        // std::string: key type for the std::unordered_map below
 #include <unordered_map> // std::unordered_map: cc::map has landed, this has not migrated yet
@@ -60,11 +61,8 @@ namespace
 struct phase_locks;
 } // namespace
 
-namespace nx
-{
-namespace
-{
-struct test_section
+// In nx::impl rather than an anonymous namespace only so section.hh's opener can name them.
+struct nx::impl::test_section
 {
     std::unordered_map<std::string, cc::unique_ptr<test_section>> subsections;
     cc::vector<test_section*> subsections_ordered;
@@ -140,7 +138,7 @@ struct test_section
     }
 };
 
-struct test_context
+struct nx::impl::test_context
 {
     nx::test_execution* execution = nullptr;
     nx::test_schedule_config const* config = nullptr;
@@ -169,30 +167,40 @@ struct test_context
     // after every section-replay pass, so it counts the pass rather than the test.
     // This is what the failure cap is measured against, so a test with many sections gets one budget rather than one
     // per section.
-    int total_failed_checks = 0;
+    // Atomic because the side path counts against the same budget.
+    cc::atomic<int> total_failed_checks = {0};
 
     // Set when the cap promoted a CHECK to a REQUIRE, so the replay loop stops instead of moving to the next section.
     // The throw alone would only end the current pass, which is not what "the test is over" means.
-    bool aborted_by_failure_cap = false;
+    cc::atomic<bool> aborted_by_failure_cap = {false};
+
+    // Set by a duplicate section or a section closed out of order, before anything throws, and it ends the replay.
+    // An async body's throw becomes its node's error, and this is what tells that error apart from a real failure.
+    cc::atomic<bool> aborted_by_section_misuse = {false};
 
     // Checks and metrics reported from anywhere else: a pool worker driving this test's nodes, or a thread it started.
-    // They are counted but kept OUT of the section machinery, which is single-threaded replay state — so they merge into the ROOT section at test_execute_end.
-    // Splitting them this way is what keeps the thread's own path exactly as fast, and exactly as section-aware, as it was.
+    // Counted on the side rather than in the plain counters above, and filed with them under the pass's leaf when the pass ends.
+    // Splitting them this way is what keeps the thread's own path exactly as fast as it was.
     cc::atomic<int> off_thread_executed_checks = {0};
     cc::atomic<int> off_thread_failed_checks = {0};
     cc::mutex<cc::vector<test_error>> off_thread_errors;
     cc::mutex<cc::vector<nx::recorded_metric>> off_thread_metrics;
 
     // Set once the test's stats have been finalized, after which nothing more may be recorded here.
-    // A check arriving later comes from work that outlived the test, and is reported as an orphan naming it — see run_test_body's leak check.
+    // A check arriving later comes from work that outlived the test, and is reported as an orphan naming it.
     cc::atomic<bool> is_finished = {false};
 
-    // False for an ASYNC_TEST: the section tree is replay state, and the body of an async test runs exactly once.
-    bool allows_sections = true;
+    // True for an ASYNC_TEST body, which has no thread of its own: any strand of it may open a section.
+    bool is_async_body = false;
+
+    // Serializes the section tree, curr_section and leaf_section.
+    // A sync body needs none of it, but an async body may reach them from several workers, and only a misuse from two at once.
+    cc::mutex<cc::unit> section_guard;
 
     // Set by a SKIP or a failed REQUIRE that ended a poll by throwing.
     // The async system turns that throw into the node's error, and it propagates up the graph an ASYNC_TEST body awaited.
-    // That error is the abort the check asked for, already recorded, so finish_async_test must not report it again.
+    // That error is the abort the check asked for, already recorded, so finish_async_pass must not report it again.
+    // Per pass: cleared before each body runs.
     cc::atomic<bool> aborted_by_check_throw = {false};
 
     // The exclusion locks of the phase this test runs in, which an async invocation takes a child's tags from.
@@ -212,6 +220,13 @@ struct test_context
 
     int exec_count = 0;
 };
+
+namespace nx
+{
+namespace
+{
+using impl::test_context;
+using impl::test_section;
 
 /// How many `execute_tests` calls are on the stack, process-wide.
 ///
@@ -243,6 +258,17 @@ struct scoped_execution_depth
 /// Deliberately not configurable — a run whose verdict changes with a knob is worth less than one whose does not.
 constexpr int max_reported_check_failures = 30;
 
+/// The error the cap adds, once per test, at the check that reached it.
+test_error too_many_failed_checks(cc::source_location location, int failed)
+{
+    return test_error{
+        .expr = "too many failed checks",
+        .location = location,
+        .extra_lines = {},
+        .expanded = cc::format("stopped after {} failed checks — the rest of this test did not run", failed),
+    };
+}
+
 // Exception thrown when a REQUIRE fails
 struct test_require_failed
 {
@@ -253,10 +279,9 @@ struct test_skipped
 {
 };
 
+// Exception thrown when a section is opened twice in one pass; the error is recorded before the throw
 struct test_duplicate_section
 {
-    cc::string name;
-    cc::source_location location;
 };
 
 // Contexts whose BODY this thread is currently inside, innermost last.
@@ -505,10 +530,10 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     auto& ctx = *owned;
     CC_ASSERT(ctx.execution != nullptr, "should always have a valid execution");
 
-    // Fold in what was reported off the test's own thread.
-    // The root section, not the leaf: off-thread work does not follow the section replay, so there is no meaningful leaf to blame it on.
-    ctx.root_section->executed_checks += ctx.off_thread_executed_checks.load(cc::memory_order_acquire);
-    ctx.root_section->failed_checks += ctx.off_thread_failed_checks.load(cc::memory_order_acquire);
+    // Every pass already filed its side reports under its leaf, so what is left here arrived after the last pass ended.
+    // There is no pass left to blame it on, so it goes to the root.
+    ctx.root_section->executed_checks += ctx.off_thread_executed_checks.exchange(0, cc::memory_order_acq_rel);
+    ctx.root_section->failed_checks += ctx.off_thread_failed_checks.exchange(0, cc::memory_order_acq_rel);
     ctx.off_thread_errors.lock(
         [&](cc::vector<test_error>& errors)
         {
@@ -532,6 +557,72 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
 
     if (keep_alive)
         g_leaked_contexts.lock([&](cc::vector<cc::unique_ptr<test_context>>& kept) { kept.push_back(cc::move(owned)); });
+}
+
+/// Reset what one section-replay pass tracks, before the body runs again.
+/// Nothing of the test may be running while this does, which both drivers guarantee by calling it between passes.
+void begin_pass(test_context& ctx)
+{
+    ctx.exec_count++;
+    ctx.leaf_section = nullptr;
+    ctx.root_section->next_open_section = nullptr;
+    ctx.aborted_by_check_throw.store(false, cc::memory_order_release);
+}
+
+/// Record that a test ended a pass with async work still carrying its context.
+///
+/// That work will run during a LATER pass or test and report there, so it is interference rather than cleanup someone else will do.
+/// Reported as a failure naming this test, which is the policy cc deliberately leaves to us.
+void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl, i32 outstanding)
+{
+    ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
+    ctx.off_thread_errors.lock(
+        [&](cc::vector<test_error>& errors)
+        {
+            errors.push_back(test_error{
+                .expr = cc::format("\"{}\" left async work running", decl.name),
+                .location = decl.location,
+                .extra_lines = {"the work carries this test's context and would report into its next section or the "
+                                "next test's run — await or cancel it"},
+                .expanded = cc::format("{} async item(s) still carry this test's context", outstanding),
+            });
+        });
+}
+
+/// File the pass that just ended under its leaf, and say whether another one runs.
+///
+/// Everything the pass reported belongs to it, whoever reported it: the body's own plain counters and the side path both.
+/// `outstanding` is how much async work still carries the test's link now that the pass's body is gone; any at all
+/// fails this pass and ends the test, since that work would otherwise report into the next pass's leaf.
+[[nodiscard]] bool end_pass(test_context& ctx, nx::test_declaration const& decl, double pass_started_at, i32 outstanding)
+{
+    if (outstanding > 0)
+        note_leaked_async_work(ctx, decl, outstanding);
+
+    auto* const sec = ctx.leaf_section != nullptr ? ctx.leaf_section : ctx.root_section.get();
+    sec->duration_seconds = cc::current_time_steady_secs() - pass_started_at;
+    sec->executed_checks
+        = cc::exchange(ctx.executed_checks, 0) + ctx.off_thread_executed_checks.exchange(0, cc::memory_order_acq_rel);
+    sec->failed_checks
+        = cc::exchange(ctx.failed_checks, 0) + ctx.off_thread_failed_checks.exchange(0, cc::memory_order_acq_rel);
+    sec->errors = cc::exchange(ctx.errors, {});
+    ctx.off_thread_errors.lock(
+        [&](cc::vector<test_error>& errors)
+        {
+            sec->errors.push_back_range(cc::move(errors));
+            errors.clear(); // push_back_range moves the elements out but leaves the husks behind
+        });
+
+    // no new sections to execute? then the root is done, which is also what keeps it from reporting itself unreachable
+    auto const explored = ctx.root_section->next_open_section == nullptr;
+    if (explored)
+        ctx.root_section->is_done = true;
+
+    // The cap and a section misuse end the TEST, not just the pass that hit them.
+    // A bare throw would unwind this pass and the replay would go on to the next section.
+    auto const stopped = outstanding > 0 || ctx.aborted_by_failure_cap.load(cc::memory_order_acquire)
+                      || ctx.aborted_by_section_misuse.load(cc::memory_order_acquire);
+    return !explored && !stopped;
 }
 
 // Operator to string conversion
@@ -639,9 +730,13 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     ctx.off_thread_executed_checks.fetch_add(1, cc::memory_order_relaxed);
 
     bool const is_skip = result.op == impl::cmp_op::skip;
-    if (!is_skip && !result.passed)
+    auto const is_failure = !is_skip && !result.passed;
+    auto const location = result.location;
+    auto total_failed = 0;
+    if (is_failure)
     {
         ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
+        total_failed = ctx.total_failed_checks.fetch_add(1, cc::memory_order_relaxed) + 1;
 
         auto expanded = render_expanded(result);
         ctx.off_thread_errors.lock(
@@ -657,13 +752,20 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     }
 
     if (!cc::async_is_polling())
-        return; // nothing would catch the throw
+        return; // nothing would catch the throw, so neither a REQUIRE nor the failure cap may abort here
 
-    auto const aborts = is_skip || (!result.passed && result.kind == impl::check_kind::require);
+    // The same whole-test budget the own-body path spends; see report_check_result.
+    auto const capped
+        = is_failure && result.kind != impl::check_kind::require && total_failed >= max_reported_check_failures;
+    if (capped && !ctx.aborted_by_failure_cap.exchange(true, cc::memory_order_acq_rel))
+        ctx.off_thread_errors.lock([&](cc::vector<test_error>& errors)
+                                   { errors.push_back(too_many_failed_checks(location, total_failed)); });
+
+    auto const aborts = is_skip || (is_failure && result.kind == impl::check_kind::require) || capped;
     if (!aborts)
         return;
 
-    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_test reads this to tell it apart from a real failure.
+    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_pass reads this to tell it apart from a real failure.
     ctx.aborted_by_check_throw.store(true, cc::memory_order_release);
     if (is_skip)
         throw test_skipped{};
@@ -734,26 +836,6 @@ void run_scheduled_instance(nx::test_execution& execution, nx::test_schedule_con
         /*filter_offset=*/0);
 }
 
-/// Record that a test ended with async work still carrying its context.
-///
-/// That work will run during a LATER test and report there, so it is interference rather than cleanup someone else will do.
-/// Reported as a failure naming this test, which is the policy cc deliberately leaves to us.
-void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl, i32 outstanding)
-{
-    ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
-    ctx.off_thread_errors.lock(
-        [&](cc::vector<test_error>& errors)
-        {
-            errors.push_back(test_error{
-                .expr = cc::format("\"{}\" left async work running", decl.name),
-                .location = decl.location,
-                .extra_lines = {"the work carries this test's context and would report into the next test's "
-                                "run — await or cancel it"},
-                .expanded = cc::format("{} async item(s) still carry this test's context", outstanding),
-            });
-        });
-}
-
 /// What one ASYNC_TEST carries across the polls of its wrapper node.
 struct async_test_state
 {
@@ -779,9 +861,15 @@ struct async_test_state
     // One link, not one per poll, because the leak check counts what still holds it.
     cc::async_ambient_handle ambient;
 
+    // The running pass's body; both null between passes.
     cc::shared_async<cc::unit> root;
     cc::shared_async<int> command_root; // set instead of `root` for an ASYNC_COMMAND
     bool started = false;
+
+    // The section replay, as run_test_body keeps it on its stack: one fresh body per pass, all inside this one node.
+    int pass = 0;
+    double pass_started_at = 0.0;
+    bool leaked = false; // set by the pass that ended the test with work still carrying its link
 
     // The trace this test's recording is bucketed under, minted alongside the ambient link above.
     cc::rec::trace_id record_trace = cc::rec::trace_id::none;
@@ -797,11 +885,12 @@ struct async_test_state
 /// Null if the body threw before producing one.
 nx::impl::async_test_sink run_async_prologue(test_context& ctx,
                                              nx::test_declaration const& decl,
-                                             cc::span<nx::typed_value*> values)
+                                             cc::span<nx::typed_value*> values,
+                                             int pass)
 {
     auto* const crash_slot = running_test_slot_for_this_thread();
     scoped_running_test const published(crash_slot);
-    publish_running_test(crash_slot, decl, 0);
+    publish_running_test(crash_slot, decl, pass);
 
     scoped_body const own_body(&ctx);
 
@@ -849,20 +938,88 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
     return sink;
 }
 
-/// Fold an async test's outcome into its execution and drop its context.
-void finish_async_test(async_test_state& state)
+/// Obtain this pass's body from the declaration, then place and schedule it.
+///
+/// The caller installs the test's ambient link first: scheduling a COLD node stamps the calling thread's ambient onto
+/// it as its resume token, and that single stamp is what makes every check the pass reports find this test.
+/// Leaves both roots null when there is nothing to wait on — the prologue threw or skipped, or the body is not a coroutine.
+void start_async_pass(async_test_state& state)
+{
+    auto& ctx = *state.ctx;
+    auto const& decl = *state.execution->instance.declaration;
+
+    begin_pass(ctx);
+    if (state.config->verbose)
+    {
+        if (state.pass == 0)
+            *ctx.verbose_sink += cc::format("  - start \"{}\"\n", decl.name);
+        else
+            *ctx.verbose_sink += cc::format("  - start \"{}\" section {}\n", decl.name, state.pass);
+    }
+    state.pass_started_at = cc::current_time_steady_secs();
+
+    {
+        auto sink = run_async_prologue(ctx, decl, state.values, state.pass);
+        state.root = cc::move(sink.root);
+        state.command_root = cc::move(sink.command_root);
+    }
+    state.pass++;
+
+    // Whichever the body handed back, placed and scheduled the same way.
+    auto* body = static_cast<cc::async_node_base*>(nullptr);
+    if (state.root != nullptr)
+        body = state.root.get();
+    else if (state.command_root != nullptr)
+        body = state.command_root.get();
+
+    // The stamp also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
+    // Only a coroutine can be placed on a home before it starts, which is what main_thread and the scheduler modes need.
+    // A raw frame is a hot-path tool with no place in a test body, so it is refused outright rather than accepted wherever placement happens not to matter.
+    if (body != nullptr && !body->reserves_home_word())
+    {
+        ctx.errors.push_back(test_error{
+            .expr = "an async test body must be a coroutine",
+            .location = decl.location,
+            .extra_lines = {"write the body with co_await / co_return rather than returning a graph built another "
+                            "way",
+                            "e.g.  ASYNC_TEST(\"...\") { auto const v = co_await work(); CHECK(v == 42); }"},
+            .expanded = "the body handed back a graph that is not a coroutine",
+        });
+        state.root = {};
+        state.command_root = {};
+        body = nullptr;
+    }
+
+    if (body != nullptr)
+    {
+        CC_ASSERT(body->is_cold(), "an async test body must hand back its coroutine unstarted");
+
+        // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
+        if (decl.test_config.main_thread)
+        {
+            auto const homed = body->try_home_cold(cc::main_thread_scheduler());
+            CC_ASSERT(homed, "a cold coroutine always takes a home");
+        }
+        body->schedule();
+    }
+}
+
+/// File the pass whose body just resolved, and say whether another one runs.
+[[nodiscard]] bool finish_async_pass(async_test_state& state)
 {
     auto& ctx = *state.ctx;
     auto const& decl = *state.execution->instance.declaration;
 
     // The graph's failure channel is a TEST failure, never an error we pass on — see execute_tests on why a test node must resolve to a value.
-    // A SKIP or REQUIRE that ended the graph by throwing has already said what happened, and its error is that abort rather than a second failure.
+    // A SKIP, a REQUIRE or a section misuse that ended the graph by throwing has already said what happened, and its error is that abort rather than a second failure.
+    auto const aborted = ctx.aborted_by_check_throw.load(cc::memory_order_acquire)
+                      || ctx.aborted_by_section_misuse.load(cc::memory_order_acquire);
     if (state.command_root != nullptr)
     {
+        // Every pass that returns a status overwrites the last, as a synchronous COMMAND's report_exit_code does.
         if (auto const* const code = state.command_root->try_value(); code != nullptr)
             state.execution->exit_code = *code;
-        else if (auto const* const err = state.command_root->try_error();
-                 err != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
+        else if (auto const* const err = state.command_root->try_error(); err != nullptr && !aborted)
             ctx.errors.push_back(test_error{
                 .expr = cc::format("the command's async graph failed: {}",
                                    err->is_cancelled() ? cc::string("cancelled") : err->underlying().to_string()),
@@ -870,10 +1027,9 @@ void finish_async_test(async_test_state& state)
                 .extra_lines = {},
                 .expanded = "the command resolved to an error instead of an exit status",
             });
-        state.command_root = {};
     }
 
-    if (state.root != nullptr && !ctx.aborted_by_check_throw.load(cc::memory_order_acquire))
+    if (state.root != nullptr && !aborted)
     {
         if (auto const* const err = state.root->try_error(); err != nullptr)
         {
@@ -887,23 +1043,20 @@ void finish_async_test(async_test_state& state)
         }
     }
 
-    // No section replay here, so everything the body's own thread reported belongs to the root section.
-    auto& sec = *ctx.root_section;
-    sec.duration_seconds = cc::current_time_steady_secs() - state.execution->started_at_steady_s;
-    sec.executed_checks += cc::exchange(ctx.executed_checks, 0);
-    sec.failed_checks += cc::exchange(ctx.failed_checks, 0);
-    sec.errors.push_back_range(cc::exchange(ctx.errors, {}));
-
-    // Drop the root before counting: a ready node carries no context, but whatever it left behind still does.
+    // Drop the roots before counting: a ready node carries no context, but whatever it left behind still does.
     state.root = {};
+    state.command_root = {};
 
-    // `ambient` holds exactly one reference; anything beyond it is work that outlived the test still naming it.
+    // `ambient` holds exactly one reference; anything beyond it is work that outlived the pass still naming the test.
     auto const outstanding = cc::async_ambient_outstanding(state.ambient.head());
-    auto const leaked = outstanding > 0;
-    if (leaked)
-        note_leaked_async_work(ctx, decl, outstanding);
+    state.leaked = outstanding > 0;
+    return end_pass(ctx, decl, state.pass_started_at, outstanding);
+}
 
-    test_execute_end(cc::move(state.ctx), leaked);
+/// Fold an async test's outcome into its execution and drop its context.
+void finish_async_test(async_test_state& state)
+{
+    test_execute_end(cc::move(state.ctx), state.leaked);
     state.execution->finished_at_steady_s = cc::current_time_steady_secs();
 
     // The run's recorder comes back BEFORE the bucket is closed against it, which is the order the synchronous path
@@ -913,7 +1066,7 @@ void finish_async_test(async_test_state& state)
 }
 
 /// Drive one poll of an async test's wrapper node.
-/// Waiting while the body's graph is still running; resolved once the test has been finalized.
+/// Waiting while a pass's body is still running; resolved once the last pass has been filed and the test finalized.
 cc::async_step_status step_async_test(async_test_state& state, cc::async_context<cc::unit>& actx)
 {
     if (!state.started)
@@ -934,7 +1087,7 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         }
         state.ctx = test_execute_begin(*state.execution, *state.config, state.section_scopes, state.filter_offset);
         state.ctx->locks = state.locks;
-        state.ctx->allows_sections = false;
+        state.ctx->is_async_body = true;
 
         auto const& decl = *state.execution->instance.declaration;
 
@@ -953,57 +1106,23 @@ cc::async_step_status step_async_test(async_test_state& state, cc::async_context
         cc::async_ambient_scope const scope(nx::impl::test_ambient_tag(), state.ctx.get());
         state.ambient = cc::async_ambient_handle();
 
-        {
-            auto sink = run_async_prologue(*state.ctx, decl, state.values);
-            state.root = cc::move(sink.root);
-            state.command_root = cc::move(sink.command_root);
-        }
-
-        // Whichever the body handed back, placed and scheduled the same way.
-        auto* body = static_cast<cc::async_node_base*>(nullptr);
-        if (state.root != nullptr)
-            body = state.root.get();
-        else if (state.command_root != nullptr)
-            body = state.command_root.get();
-
-        // Scheduling a COLD node stamps the calling thread's ambient onto it as its resume token — this scope.
-        // That single stamp is what makes every check the graph reports find this test, from whichever worker polls it,
-        // and it also reaches the cold nodes the graph drives inline, since those inherit their driver's context.
-        // Only a coroutine can be placed on a home before it starts, which is what main_thread and the scheduler modes need.
-        // A raw frame is a hot-path tool with no place in a test body, so it is refused outright rather than accepted wherever placement happens not to matter.
-        if (body != nullptr && !body->reserves_home_word())
-        {
-            state.ctx->errors.push_back(test_error{
-                .expr = "an async test body must be a coroutine",
-                .location = decl.location,
-                .extra_lines = {"write the body with co_await / co_return rather than returning a graph built another "
-                                "way",
-                                "e.g.  ASYNC_TEST(\"...\") { auto const v = co_await work(); CHECK(v == 42); }"},
-                .expanded = "the body handed back a graph that is not a coroutine",
-            });
-            state.root = {};
-            state.command_root = {};
-            body = nullptr;
-        }
-
-        if (body != nullptr)
-        {
-            CC_ASSERT(body->is_cold(), "an async test body must hand back its coroutine unstarted");
-
-            // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
-            if (decl.test_config.main_thread)
-            {
-                auto const homed = body->try_home_cold(cc::main_thread_scheduler());
-                CC_ASSERT(homed, "a cold coroutine always takes a home");
-            }
-            body->schedule();
-        }
+        start_async_pass(state);
     }
 
-    if (state.root != nullptr && !actx.require(state.root))
-        return actx.wait_for_dependencies();
-    if (state.command_root != nullptr && !actx.require(state.command_root))
-        return actx.wait_for_dependencies();
+    while (true)
+    {
+        if (state.root != nullptr && !actx.require(state.root))
+            return actx.wait_for_dependencies();
+        if (state.command_root != nullptr && !actx.require(state.command_root))
+            return actx.wait_for_dependencies();
+
+        if (!finish_async_pass(state))
+            break;
+
+        // The same link the first pass was scheduled under, re-installed from the handle that kept it alive.
+        cc::async_ambient_install_scope const installed(state.ambient);
+        start_async_pass(state);
+    }
 
     finish_async_test(state);
     return actx.resolve_to_value(cc::unit{}); // terminal: nothing may follow it
@@ -1066,12 +1185,10 @@ nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::s
     auto* const ctx_ptr = current_context();
     CC_ASSERT(ctx_ptr != nullptr, "SECTION must be used inside a running test");
     auto& ctx = *ctx_ptr;
-    CC_ASSERT(ctx.allows_sections, "SECTION is not available in an ASYNC_TEST: the section tree is replay state, and "
-                                   "an async body runs once");
 
-    // The section tree is single-threaded replay state — the whole test body re-runs once per section path, which only the test's own thread does.
-    // So this is a framework misuse rather than something to serialize, and it is reported as one.
-    if (!is_own_test_body(&ctx))
+    // A synchronous body's sections are replayed by the test's own thread, so one opened elsewhere is a framework misuse rather than something to serialize.
+    // An async body has no thread of its own: any strand of it may open one, and the guard below serializes them.
+    if (!ctx.is_async_body && !is_own_test_body(&ctx))
     {
         ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
         ctx.off_thread_errors.lock(
@@ -1085,83 +1202,130 @@ nx::impl::raii_section_opener nx::impl::test_open_section(cc::string name, cc::s
                     .expanded = cc::format("SECTION \"{}\" outside the test's own thread", name),
                 });
             });
-        return raii_section_opener(false);
+        return raii_section_opener();
     }
 
-    auto& curr_sec = *ctx.curr_section.back();
+    auto duplicate = false;
+    auto* const entered = ctx.section_guard.lock(
+        [&](cc::unit&) -> test_section*
+        {
+            auto& curr_sec = *ctx.curr_section.back();
 
-    // check section filter if provided
-    if (!is_section_allowed(ctx.curr_section, name, ctx.section_scopes, ctx.filter_offset))
+            // check section filter if provided; so early that the subsection is not even created
+            if (!is_section_allowed(ctx.curr_section, name, ctx.section_scopes, ctx.filter_offset))
+                return nullptr;
+
+            // new subsection? (std::unordered_map is keyed by std::string, so bridge the name)
+            auto& subsec = curr_sec.subsections[std::string(name.data(), name.size())];
+            if (subsec == nullptr)
+            {
+                subsec = cc::make_unique<test_section>();
+                subsec->name = name;
+                subsec->location = location;
+                curr_sec.subsections_ordered.push_back(subsec.get());
+            }
+
+            // section opened twice in the same pass
+            if (subsec->last_visited_in_exec == ctx.exec_count)
+            {
+                duplicate = true;
+                return nullptr;
+            }
+            subsec->last_visited_in_exec = ctx.exec_count;
+
+            // don't execute more sections if a leaf was already executed, but note down that the parent could continue here
+            if (ctx.leaf_section != nullptr)
+            {
+                curr_sec.next_open_section = subsec.get();
+                return nullptr;
+            }
+
+            // don't execute sections that are fully done
+            if (subsec->is_done)
+                return nullptr;
+
+            ctx.curr_section.push_back(subsec.get());
+            subsec->next_open_section = nullptr;
+            return subsec.get();
+        });
+
+    if (duplicate)
     {
-        // we do this so early that the subsection is not even actually created
-        return raii_section_opener(false);
+        // Recorded here rather than where the throw lands: in an async body it lands as a node error, far from the name.
+        // The flag is what ends the replay, and what tells that node error apart from a real failure.
+        ctx.off_thread_errors.lock(
+            [&](cc::vector<test_error>& errors)
+            {
+                errors.push_back(test_error{
+                    .expr = cc::format("duplicate section: \"{}\"", name),
+                    .location = location,
+                    .extra_lines = {},
+                    .expanded = cc::format("duplicate section: \"{}\"", name),
+                });
+            });
+        ctx.aborted_by_section_misuse.store(true, cc::memory_order_release);
+        throw test_duplicate_section{};
     }
 
-    // new subsection? (std::unordered_map is keyed by std::string, so bridge the name)
-    auto& subsec = curr_sec.subsections[std::string(name.data(), name.size())];
-    if (subsec == nullptr)
-    {
-        subsec = cc::make_unique<test_section>();
-        subsec->name = name;
-        subsec->location = location;
-        curr_sec.subsections_ordered.push_back(subsec.get());
-    }
-
-    // section opened twice in the same run
-    if (subsec->last_visited_in_exec == ctx.exec_count)
-        throw test_duplicate_section{
-            .name = cc::move(name),
-            .location = location,
-        };
-    subsec->last_visited_in_exec = ctx.exec_count;
-
-    // don't execute more sections if a leaf was already executed
-    if (ctx.leaf_section != nullptr)
-    {
-        // but note down that parent could continue here
-        curr_sec.next_open_section = subsec.get();
-        return raii_section_opener(false);
-    }
-
-    // don't execute sections that are fully done
-    if (subsec->is_done)
-        return raii_section_opener(false);
-
-    // .. otherwise enter it
-    ctx.curr_section.push_back(subsec.get());
-    subsec->next_open_section = nullptr;
-    return raii_section_opener(true);
-}
-
-nx::impl::raii_section_opener::raii_section_opener(bool is_opened) : _is_opened(is_opened)
-{
+    if (entered == nullptr)
+        return raii_section_opener();
+    return raii_section_opener(ctx, *entered);
 }
 
 nx::impl::raii_section_opener::~raii_section_opener()
 {
-    if (_is_opened)
+    if (_entered == nullptr)
+        return;
+
+    auto& ctx = *_ctx;
+    auto& subsec = *_entered;
+
+    // Sections close last-in, first-out on one strand.
+    // Closing one that is not on top means concurrent work opened a section while this one was open.
+    // The stack is repaired either way, and the test fails and stops replaying.
+    auto const in_order = ctx.section_guard.lock(
+        [&](cc::unit&)
+        {
+            auto index = ctx.curr_section.size() - 1;
+            while (index > 0 && ctx.curr_section[index] != &subsec)
+                --index;
+            CC_ASSERT(index >= 1, "a section that was entered is on the stack until it closes");
+
+            // if after the section we have no subsecs => found & executed a leaf!
+            // (no next open, might have unreachable still)
+            // also applies to our way back up
+            if (subsec.next_open_section == nullptr)
+            {
+                if (ctx.leaf_section == nullptr)
+                    ctx.leaf_section = &subsec;
+                subsec.is_done = true;
+            }
+            else
+            {
+                // make sure parent knows that children have open sections
+                ctx.curr_section[index - 1]->next_open_section = subsec.next_open_section;
+            }
+
+            auto const was_top = index == ctx.curr_section.size() - 1;
+            ctx.curr_section.remove_at(index);
+            return was_top;
+        });
+
+    if (!in_order)
     {
-        auto& ctx = *current_context();
-        auto& subsec = *ctx.curr_section.back();
-
-        CC_ASSERT(ctx.curr_section.size() >= 2, "should always have at least this + root on the stack");
-
-        // if after the section we have no subsecs => found & executed a leaf!
-        // (no next open, might have unreachable still)
-        // also applies to our way back up
-        if (subsec.next_open_section == nullptr)
-        {
-            if (ctx.leaf_section == nullptr)
-                ctx.leaf_section = &subsec;
-            subsec.is_done = true;
-        }
-        else
-        {
-            // make sure parent knows that children have open sections
-            ctx.curr_section[ctx.curr_section.size() - 2]->next_open_section = subsec.next_open_section;
-        }
-
-        ctx.curr_section.remove_back();
+        ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
+        ctx.off_thread_errors.lock(
+            [&](cc::vector<test_error>& errors)
+            {
+                errors.push_back(test_error{
+                    .expr = cc::format("SECTION \"{}\" opened by concurrent work", subsec.name),
+                    .location = subsec.location,
+                    .extra_lines = {"another section was opened while this one was open, and closed after it — open "
+                                    "sections from the body or from work it awaits one at a time"},
+                    .expanded = cc::format("SECTION \"{}\" closed while a later section was still open", subsec.name),
+                });
+            });
+        ctx.aborted_by_section_misuse.store(true, cc::memory_order_release);
     }
 }
 
@@ -1308,6 +1472,11 @@ void nx::impl::report_invocation_cycle(nx::test_declaration const* decl)
     });
 }
 
+bool nx::impl::has_current_test()
+{
+    return current_context() != nullptr;
+}
+
 nx::test_execution* nx::impl::current_execution()
 {
     auto const* const ctx = current_context();
@@ -1332,11 +1501,11 @@ bool nx::is_thorough()
 
 int nx::impl::current_filter_consumed()
 {
-    auto const* const ctx = current_context();
+    auto* const ctx = current_context();
     if (ctx == nullptr)
         return 0;
     // curr_section always holds at least the root (which carries no filterable name)
-    return ctx->filter_offset + int(ctx->curr_section.size()) - 1;
+    return ctx->filter_offset + ctx->section_guard.lock([&](cc::unit&) { return int(ctx->curr_section.size()) - 1; });
 }
 
 cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
@@ -1491,12 +1660,10 @@ void nx::impl::report_check_result(check_result result)
     }
 
     // Reported from somewhere other than the test's own body: a pool worker driving its nodes, or a thread it started.
-    // Counted on the side, and never allowed near the section tree.
+    // Counted on the side, and filed under the running pass's leaf when the pass ends.
     if (!is_own_test_body(&ctx))
     {
         // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
-        // The failure CAP is deliberately not applied here: it ends a test by throwing, and a throw on a pool worker
-        // would take the worker rather than the test.
         if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
             CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
                          result.location.file_name(), result.location.line());
@@ -1516,7 +1683,7 @@ void nx::impl::report_check_result(check_result result)
     if (!result.passed)
     {
         ++ctx.failed_checks;
-        ++ctx.total_failed_checks;
+        auto const total_failed = ctx.total_failed_checks.fetch_add(1, cc::memory_order_relaxed) + 1;
 
         auto expanded = render_expanded(result);
 
@@ -1543,16 +1710,10 @@ void nx::impl::report_check_result(check_result result)
         // A test that fails thousands of checks has said what it has to say by the thirtieth: the rest is a wall of
         // output nobody reads, one test_error each, and a long wait for a verdict already decided.
         // Counted per TEST rather than per section-replay pass, so a test with many sections gets one budget.
-        if (ctx.total_failed_checks >= max_reported_check_failures && result.kind != check_kind::require)
+        if (total_failed >= max_reported_check_failures && result.kind != check_kind::require)
         {
-            ctx.aborted_by_failure_cap = true;
-            ctx.errors.push_back(test_error{
-                .expr = "too many failed checks",
-                .location = result.location,
-                .extra_lines = {},
-                .expanded = cc::format("stopped after {} failed checks — the rest of this test did not run",
-                                       ctx.total_failed_checks),
-            });
+            if (!ctx.aborted_by_failure_cap.exchange(true, cc::memory_order_acq_rel))
+                ctx.errors.push_back(too_many_failed_checks(result.location, total_failed));
             throw test_require_failed{};
         }
 
@@ -1680,9 +1841,7 @@ void nx::impl::run_test_body(nx::test_execution& execution,
         while (should_continue)
         {
             // CAUTION: a test is allowed to run nested tests, thus growing the body stack here
-            ctx.exec_count++;
-            ctx.leaf_section = nullptr;
-            ctx.root_section->next_open_section = nullptr;
+            begin_pass(ctx);
 
             // publish the running test for the crash-context hook (points a fatal fault at this test)
             publish_running_test(crash_slot, decl, section_num);
@@ -1715,15 +1874,9 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 // SKIP already counted as a successful check in report_check_result, this catch
                 // only serves to abort test execution
             }
-            catch (test_duplicate_section const& e)
+            catch (test_duplicate_section const&) // NOLINT(bugprone-empty-catch)
             {
-                ctx.errors.push_back(test_error{
-                    .expr = cc::format("duplicate section: \"{}\"", e.name),
-                    .location = e.location,
-                    .extra_lines = {},
-                    .expanded = cc::format("duplicate section: \"{}\"", e.name),
-                });
-                should_continue = false; // wrong use of test framework
+                // already recorded by test_open_section, whose flag also ends the replay
             }
             catch (std::exception const& e)
             {
@@ -1744,39 +1897,9 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 });
             }
 
-            // associate stats & errors with leaf
-            auto sec = ctx.leaf_section;
-            if (sec == nullptr)
-                sec = ctx.root_section.get();
-            CC_ASSERT(sec != nullptr, "should always have a leaf section");
-            {
-                sec->duration_seconds = cc::current_time_steady_secs() - t_section_start;
-                sec->executed_checks = cc::exchange(ctx.executed_checks, 0);
-                sec->failed_checks = cc::exchange(ctx.failed_checks, 0);
-                sec->errors = cc::exchange(ctx.errors, {});
-            }
-
-            // The cap ends the TEST, not just the pass that hit it.
-            // A bare throw would unwind this pass and the loop would go on to the next section, which is exactly the
-            // wall of output the cap exists to stop.
-            if (ctx.aborted_by_failure_cap)
-                should_continue = false;
-
-            // no new sections to execute? we're done
-            if (ctx.root_section->next_open_section == nullptr)
-            {
-                // so it's not marked as unreachable
-                ctx.root_section->is_done = true;
-
-                // .. and we're done!
-                should_continue = false;
-            }
-        }
-
-        if (test_ambient.outstanding() != 0)
-        {
-            leaked_async_work = true;
-            note_leaked_async_work(ctx, decl, test_ambient.outstanding());
+            auto const outstanding = test_ambient.outstanding();
+            leaked_async_work = outstanding > 0;
+            should_continue = end_pass(ctx, decl, t_section_start, outstanding);
         }
     }
 
@@ -2370,8 +2493,8 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
     auto* const parent_ctx = current_context();
     CC_ASSERT(parent_ctx != nullptr && parent_ctx->execution != nullptr, "nx::async_invoke_tests_* must be awaited "
                                                                          "from inside a running test");
-    CC_ASSERT(!parent_ctx->allows_sections, "nx::async_invoke_tests_* must be awaited from an async test body; a "
-                                            "synchronous body uses nx::invoke_tests");
+    CC_ASSERT(parent_ctx->is_async_body, "nx::async_invoke_tests_* must be awaited from an async test body; a "
+                                         "synchronous body uses nx::invoke_tests");
 
     auto result = invocation_result{};
     auto* const parent = parent_ctx->execution;

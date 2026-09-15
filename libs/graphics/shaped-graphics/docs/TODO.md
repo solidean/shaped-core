@@ -233,3 +233,21 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   WebGPU offers only a callback, `onSubmittedWorkDone`, so the contract flips there.
   The backend calls `settle_due_completions()` when it learns of progress, and dx12 and vulkan run the waiter themselves.
   Reshape the seam that way before writing the backend, rather than emulating a blocking wait over the callback.
+
+- **`shaped-graphics-test` crashed once with an access violation, in the release preset under load.**
+  The sixth of twelve loaded repeats of the release suite faulted; the binary has no symbols there and its log was overwritten before the faulting site was known.
+  The crash hook named "sg - a routine whose init fails reports failed, not pending" as the only running test, and that test alone passed 400 repeats.
+  The faulting thread's own stack stopped at the exception dispatcher, and one pool thread was mid-work in unsymbolized frames.
+  Reproducing it wants a symbolized optimized build under the same load, and the log copied aside the moment a run fails.
+
+- **Synchronization validation reported a `WRITE_AFTER_WRITE` between two transfer copies, once in about three loaded runs.**
+  All 479 tests passed; the run failed on eight unattributed checks from the validation listener, each naming one transfer command buffer writing one `VkBuffer` twice.
+  Two copies in one async window cannot happen: each window records one copy into its own of the three reused command buffers, so the same handle is a slot reused three windows later.
+  Per-destination order holds, since `transfer_scheduler` only picks a family's head, and every window carries a memory barrier ahead of its copy.
+  **The likely cause is the layer rather than the copies.**
+  A window submit waits on other timelines, and the layer defers checking a submission whose waited value it thinks is unreached.
+  It replays that check inside a later submit, which is the path `vulkan_epoch.cc` already avoids for host signals.
+  **What is in place for the next occurrence:** both async transfer systems keep their last 32 windows.
+  The sg vulkan driver appends them to an `_AFTER_WRITE` failure: slot, window value, destination, range, waits and sequence.
+  If the two copies overlap and were queued out of submission order it is a real bug; if they are disjoint or in order it is the layer.
+  The experiment beside it is dropping `wait_token` and `download_wait` from a window submit once the host counter shows them reached, which the comment at that wait chose not to do.

@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
@@ -11,6 +12,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_transfer_window_log.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
@@ -33,6 +35,12 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     /// is staged — it is delivered when the window carrying it completes.
     /// That is what makes ctx.block_until_idle() true of the upload half as well; see sg::impl::transfer_drain.
     sg::impl::transfer_drain::token drain;
+
+    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// Installed only around the work that is this job's alone: its source poll, and its copy's record and submit.
+    /// Reset before anything it settles.
+    /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
+    cc::async_ambient_handle ambient;
 
     // Exactly one destination is set.
     std::weak_ptr<vulkan_buffer const> buffer_target;
@@ -215,6 +223,9 @@ public:
 
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 
+    /// The last windows this system submitted, one line each, for a validation hazard to be read against.
+    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async upload"); }
+
     // --- actor-facing ------------------------------------------------------------------------------
     // Called only from the copy actor thread, so none of it needs a lock.
 
@@ -307,6 +318,8 @@ private:
 
     /// Which job fills the open window next, and how windows are shared between the two tiers.
     sg::impl::transfer_scheduler _scheduler;
+
+    vulkan_transfer_window_log _window_log;
 
     /// Outstanding uploads, counted from admission to the completion of the window that carried them.
     sg::impl::transfer_drain _drain;

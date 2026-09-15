@@ -444,11 +444,10 @@ rules:
 
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: the test drives a scheduler of its own, or a SECTION body that cannot await
+    reason: the test drives a scheduler of its own
     files:
       - tests/thread/async-coroutine-test.cc
       - tests/thread/async-mutex-test.cc
-      - tests/algorithm/sort-async-test.cc
 
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]

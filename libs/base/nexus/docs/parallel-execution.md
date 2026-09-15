@@ -183,12 +183,17 @@ The cold nodes that root drives inline inherit it in turn, because a node withou
 
 A coroutine body is cold by construction — [`cc::async`'s coroutines are lazy](../../clean-core/docs/systems/async.md#co_await--co_return) — so the stamp always lands.
 
-Two limits, both deliberate:
+**`SECTION` works as it does in a `TEST`.**
+The body is replayed once per section path: each pass calls it again for a fresh coroutine, all inside the one test node, so exclusion and `main_thread` hold across every pass.
+Every check a pass reports is filed under that pass's section, from whichever worker reported it.
+Open sections from the body or from work it awaits one at a time.
+Sections opened by concurrently running strands share one stack, and one closing while a later one is still open fails the test by name.
+Two that happen to nest cleanly — the later one opening and closing inside the earlier — are not caught, and the pass files its checks under the inner one.
+That gap is deliberate: exact detection needs to know which strand is polling, which clean-core does not track, and tracking it would cost every poll a thread-local write.
+Work a pass leaves running fails that section and ends the replay, since it would otherwise report under the next one.
 
-* **`SECTION` is not available in an async body**, and asserts.
-  The section tree is replay state — the body re-runs once per section path — and an async body runs once.
-* **A graph resolving to an error fails the test, naming the error**, and is never propagated onward.
-  An awaited dependency that fails is exactly that: it short-circuits the rest of the body, then fails the test.
+**A graph resolving to an error fails the pass, naming the error**, and is never propagated onward.
+An awaited dependency that fails is exactly that: it short-circuits the rest of that pass's body, then fails its section.
 
 **Scheduling asks apply as they do to a `TEST`.**
 `main_thread` is above; exclusion holds across every suspend; `own_pool(n)` runs the body and what it schedules on that pool.

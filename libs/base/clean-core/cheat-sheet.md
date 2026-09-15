@@ -982,6 +982,9 @@ void* p = cc::async_ambient_lookup_ptr(my_tag());     // the same walk for a slo
 u64 v2 = cc::async_ambient_lookup_in(head, my_tag()); // same, from a head you already hold (no TLS)
 void* p2 = cc::async_ambient_lookup_ptr_in(head, my_tag()); // ...and its pointer spelling
 s.link();  s.outstanding();      // this scope's chain head / how much async work still carries it (racy; diagnostics)
+auto h = cc::async_ambient_handle(); // CAPTURE the calling thread's head (retained) — for a thread cc never sees
+cc::async_ambient_install_scope const i(h); // install it there for a block; takes no ref, so h must outlive it
+h.reset();                       // drop the hold now. NOT `h = {}`: a default-constructed handle captures again
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw
 // DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep

@@ -44,14 +44,15 @@ nx::test_thread_scope const scope(captured);
 ## What an attributed off-thread check does and does not get
 
 It is **counted**, its failure **fails the test**, and its message reaches the report.
+It is filed under the section whose pass was running when it arrived, like a check from the test's own thread.
 Three things stay with the test's own thread:
 
-* **Sections.** The body is replayed once per section path, which only the test's thread does — so a `SECTION` opened elsewhere is a recorded failure rather than something to serialize.
-  Off-thread checks are attributed to the test's root section.
+* **Opening sections.** The body is replayed once per section path, which only the test's thread does — so a `SECTION` opened elsewhere is a recorded failure rather than something to serialize.
+  An `ASYNC_TEST` body has no thread of its own, so there any strand of the body may open one; see [parallel-execution](parallel-execution.md).
 * **Aborting.** `REQUIRE` and `SKIP` abort by throwing.
   Inside an async frame that is fine: cc::async contains the throw and fails the node on its error channel, which is exactly the "stop this computation" the caller asked for.
   On a bare thread there is nothing between the throw and the thread function, so it would terminate the process — there it degrades to a recorded failure and execution continues.
-* **Ordering.** Off-thread checks merge into the test's totals when the test ends, not as they arrive.
+* **Ordering.** Off-thread checks merge into the section's totals when its pass ends, not as they arrive.
 
 ## Work that outlives its test
 
@@ -59,10 +60,13 @@ Three things stay with the test's own thread:
 The work still carries that test's context, so it would run during a *later* test and report against one that has already finished.
 That is precisely the interference parallel execution exists to find.
 
+It is checked after every section's pass, not only at the end.
+Work a section leaves behind would otherwise report under the next section, so the leaving section fails and the replay stops there.
+
 If it does run afterwards anyway, its checks become orphans naming the test they came from, never mis-billed to whatever was running at the time.
 
 ## Deliberately not a lock
 
-The test thread's own path is unchanged: plain counters, no atomics, no lock, full section awareness.
-Only the off-thread path pays for synchronization, and it pays into a separate spill that is merged once.
+The test thread's own path takes no lock: plain counters, and an atomic only when a check fails.
+Only the off-thread path pays for synchronization, and it pays into a separate spill that is merged once per pass.
 Making the shared state thread-safe instead would have put a lock on every `CHECK` in the repo to serve the few that need it.

@@ -40,7 +40,9 @@ from tools.review.lib.entry.generate import (  # noqa: E402
 from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_svg  # noqa: E402
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
-from tools.review.lib.changeset.ingest import bulk_candidate, candidates_for, group_hunks, register  # noqa: E402
+from tools.review.lib.changeset.ingest import (  # noqa: E402
+    bulk_candidate, candidates_for, group_hunks, register, superseded_by_move,
+)
 from tools.review.lib.changeset.ingest import _adopt_residue as adopt_residue, _claim_of as ingest_claim_of  # noqa: E402
 from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
 from tools.review.lib.entry.answers import AnswerFile  # noqa: E402
@@ -368,6 +370,47 @@ def test_a_reused_claim_follows_its_hunk_after_a_head_move(root: Path) -> None:
         # Idempotent: a second pass over the same head re-points nothing.
         again = register(ledger, second, round_number=2, write_body=lambda *_: None)
         assert not again.repointed, [c.summary for c in again.repointed]
+
+
+def test_a_hunk_that_only_moved_is_not_superseded_by_sync(root: Path) -> None:
+    """A comment removed above a reviewed hunk shifts its claim out of net space without changing its content.
+
+    `sync` used to supersede on the old claim alone, and a superseded change is never re-pointed nor re-created.
+    Its atoms then stayed unaccounted, and neither a plain ingest nor `--rest` could claim them.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(120)})
+    comment = "comment a\ncomment b\ncomment c\n"
+    # Added lines only, as in the case that found this: a removed atom is keyed on the base side and never moves.
+    body = numbered(120).replace("line 100\n", "line 100\nline 100 ADDED\n")
+    head_one = commit(root, "edit", {"a.txt": comment + body})
+
+    net_one = build_net(git, base, head_one)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        first = candidates_for(git, base, head_one, context=8, gap=20, net=net_one)
+        created = register(ledger, first, round_number=1, write_body=lambda *_: None).created
+        assert len(created) == 2, [c.summary for c in created]
+        edit = next(c for c in created if c.claim.get(ADDED, "a.txt").contains(104))
+        prelude = next(c for c in created if c.id != edit.id)
+
+        # The comment goes, and every line number below it moves up; the edit's own text is untouched.
+        head_two = commit(root, "drop the comment", {"a.txt": body})
+        net_two = build_net(git, base, head_two)
+        second = candidates_for(git, base, head_two, context=8, gap=20, net=net_two)
+        assert edit.claim.intersect(net_two).is_empty, "the scenario needs the old claim to miss the new net"
+
+        gone = {c.id for c in superseded_by_move(ledger, second, net_two)}
+        assert edit.id not in gone, "a hunk that only moved must not be superseded"
+        assert prelude.id in gone, "a hunk whose content left the range is superseded"
+
+        for change_id in gone:
+            change = ledger.get(change_id)
+            change.superseded = True
+            ledger.append(change)
+        register(ledger, second, round_number=2, write_body=lambda *_: None)
+        left = net_two.subtract(ledger.covered())
+        assert left.is_empty, f"sync left {len(left)} atoms unaccounted: {left.runs()}"
 
 
 def test_a_superseded_claim_is_not_re_pointed(root: Path) -> None:

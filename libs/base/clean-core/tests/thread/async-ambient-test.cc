@@ -176,6 +176,27 @@ TEST("async-ambient - outstanding() counts holders beyond the scope")
     CHECK(s.outstanding() == 0); // back to clean — what a leak-checking consumer wants to see at scope exit
 }
 
+TEST("async-ambient - a handle's reset drops its hold, and assigning an empty one captures instead")
+{
+    cc::async_ambient_scope const s(tag_a(), &value_a);
+
+    auto h = cc::async_ambient_handle();
+    CHECK(h.head() == s.link());
+    CHECK(s.outstanding() == 1);
+
+    h.reset();
+    CHECK(h.head() == nullptr);
+    CHECK(s.outstanding() == 0);
+    h.reset(); // an empty handle resets to empty
+    CHECK(s.outstanding() == 0);
+
+    // The spelling that reads as a reset: the temporary's default constructor captures the scope right here.
+    auto g = cc::async_ambient_handle();
+    g = {};
+    CHECK(g.head() == s.link());
+    CHECK(s.outstanding() == 1);
+}
+
 TEST("async-ambient - store adjusts counts and is idempotent in value")
 {
     cc::async_ambient_scope const s(tag_a(), &value_a);

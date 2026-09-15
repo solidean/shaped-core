@@ -258,6 +258,7 @@ private:
     // Saying it out loud is mandatory: a manual async nobody pushes parks its dependents for the process's lifetime.
     void cancel_stream(dx12_async_upload_job& job)
     {
+        job.ambient.reset();
         if (job.stream)
         {
             job.stream->completion->push_error(cc::async_error::make_cancelled());
@@ -528,7 +529,13 @@ private:
         auto& a = _active[index];
         CC_ASSERT(a.source != nullptr, "only a source-driven job pulls chunks");
 
-        sg::stream_poll poll = a.source->try_next_chunk();
+        // The source is the caller's code, so it runs under the caller's context.
+        // Only the poll: finishing or failing the job below settles what the caller may await.
+        sg::stream_poll poll = [&]
+        {
+            cc::async_ambient_install_scope const installed(a.job.ambient);
+            return a.source->try_next_chunk();
+        }();
         switch (poll.status)
         {
         case sg::stream_source_status::ready:
@@ -609,6 +616,7 @@ private:
         isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
         dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
+        cc::async_ambient_install_scope const installed(a.job.ambient); // recording this chunk is this job's alone
         isize const consumed = a.packer->execute_next_job(*_list.Get(), alloc);
         if (consumed == 0)
             return false;

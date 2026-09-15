@@ -4,7 +4,7 @@ Change ids are derived from content, so a hunk the author did not touch keeps th
 That is the whole reason `sync` can say anything useful: what comes back is not "everything changed" but the three
 answers that matter — what is new, what is gone, and which entries were talking about what is gone.
 
-A change whose claim no longer meets net space is **superseded**, never deleted.
+A change whose content is gone from the range is **superseded**, never deleted.
 An entry that discussed it stays readable, and in a `land-changes` review the fact that its change is superseded
 is the evidence the fix actually landed.
 
@@ -64,7 +64,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     net = ctx.net_space(moved)
     ledger = ctx.ledger(paths)
 
-    gone = [c for c in ledger.live() if c.claim.intersect(net).is_empty]
+    candidates = review.candidates_for(
+        ctx.git, new_base, new_head,
+        context=moved.context, gap=moved.coalesce_gap, net=net,
+    )
+    gone = review.superseded_by_move(ledger, candidates, net)
     entries = ctx.entries(paths)
     stale = [
         (entry.id, entry.title, sorted(set(entry.referenced_changes()) & {c.id for c in gone}))
@@ -72,10 +76,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     ]
     stale = [(entry_id, title, ids) for entry_id, title, ids in stale if ids]
 
-    candidates = review.candidates_for(
-        ctx.git, new_base, new_head,
-        context=moved.context, gap=moved.coalesce_gap, net=net,
-    )
     known = ledger.by_digest()
     fresh = [c for c in candidates if c.digest not in known]
 

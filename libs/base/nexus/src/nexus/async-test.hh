@@ -28,13 +28,12 @@
 //
 // SKIP and REQUIRE behave as in a TEST, at any depth: the node error their throw becomes is the abort, not a second failure.
 //
-// Two limits, both deliberate:
+// SECTION works as in a TEST: the body is replayed once per section path, each pass a fresh coroutine inside the one test node.
+// Open sections from the body or from work it awaits one at a time, never from strands running concurrently with it.
 //
-// * SECTION is not available in an async body, and asserts.
-//   The section machinery replays the body once per section path, which is single-threaded state, and an async body runs once.
-// * A graph resolving to an ERROR fails the test, naming the error, and is never propagated onward.
-//   A test node always resolves to a value, or an exclusivity edge would carry the failure into every test ordered behind it.
-//   An awaited dependency that fails is exactly that case: it short-circuits the rest of the body, then fails the test.
+// A graph resolving to an ERROR fails the pass, naming the error, and is never propagated onward.
+// A test node always resolves to a value, or an exclusivity edge would carry the failure into every test ordered behind it.
+// An awaited dependency that fails is exactly that case: it short-circuits the rest of the body, then fails the section.
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh> // cc::unit

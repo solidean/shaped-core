@@ -239,6 +239,7 @@ void vulkan_upload_async_system::signal_on_queue(vulkan_group_value const& value
 
 void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool delivered)
 {
+    job.ambient.reset();
     if (job.stream == nullptr || job.stream->completion == nullptr)
         return;
     if (job.stream->completion->is_ready())
@@ -356,7 +357,10 @@ bool vulkan_upload_async_system::run_one_window()
 
         // The completion value is signalled either way, so the lifetime gate and any forward reader stamped with it
         // never hang — which is the whole reason it is reserved at enqueue rather than at stage time.
-        signal_on_queue(job.completion);
+        {
+            cc::async_ambient_install_scope const installed(job.ambient);
+            signal_on_queue(job.completion);
+        }
         settle_now(job, /*delivered =*/false);
         _pending.remove_at(i);
     }
@@ -396,6 +400,9 @@ bool vulkan_upload_async_system::run_one_window()
         // A source-driven transfer needs a chunk in hand before a window can be filled with it.
         if (candidate.source != nullptr && candidate.chunk.empty() && !candidate.source_done)
         {
+            // The source is the caller's code, so it runs under the caller's context.
+            cc::async_ambient_install_scope const installed(candidate.ambient);
+
             auto poll = candidate.source->try_next_chunk();
             if (poll.status == sg::stream_source_status::not_yet)
             {
@@ -407,6 +414,7 @@ bool vulkan_upload_async_system::run_one_window()
                 // The only way out for a source that can never produce what it promised — without it the transfer
                 // would sit here forever, and anything chained onto its completion with it.
                 signal_on_queue(candidate.completion);
+                candidate.ambient.reset();
                 if (candidate.stream != nullptr && candidate.stream->completion != nullptr
                     && !candidate.stream->completion->is_ready())
                     candidate.stream->completion->push_error(cc::async_error::make_error(cc::any_error("stream source "
@@ -445,12 +453,18 @@ bool vulkan_upload_async_system::run_one_window()
         // Right here rather than once the copy lands: anything submitted in between would signal a higher value
         // first, which a timeline rejects.
         if (job.source != nullptr)
+        {
+            cc::async_ambient_install_scope const installed(job.ambient);
             signal_on_queue(job.completion);
+        }
 
         if (job.last_window_value == 0)
         {
             if (job.source == nullptr)
+            {
+                cc::async_ambient_install_scope const installed(job.ambient);
                 signal_on_queue(job.completion); // nothing was ever queued
+            }
             settle_now(job, /*delivered =*/alive);
         }
         else
@@ -484,131 +498,152 @@ bool vulkan_upload_async_system::run_one_window()
     auto const dst_offset = job.dst_offset + (job.source != nullptr ? job.chunk_offset : 0) + job.staged;
     cc::memcpy(_mapped + isize(slot) * _window_bytes, payload.data() + job.staged, size_t(chunk_bytes));
 
-    vkResetCommandPool(_ctx->_device, _window_pools[slot], 0);
-    auto const begin = VkCommandBufferBeginInfo{
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    vkBeginCommandBuffer(_window_buffers[slot], &begin);
-
-    // One memory dependency per window, ahead of the copy.
-    //
-    // The layout is settled by the direct queue, so this queue emits no *image* barrier — but two copies
-    // submitted to it in succession still need a dependency between them: submission order is execution order,
-    // not a memory dependency, and two writes to one resource are a hazard synchronization validation reports.
-    // A plain memory barrier is enough and costs one per window: this queue only ever copies.
-    auto const transfer_dep_barrier = VkMemoryBarrier2{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
-        .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
-    };
-    auto const transfer_dep = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                                               .memoryBarrierCount = 1,
-                                               .pMemoryBarriers = &transfer_dep_barrier};
-    vkCmdPipelineBarrier2(_window_buffers[slot], &transfer_dep);
-
-    if (job.is_texture)
-    {
-        // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
-        // transfer was enqueued, and the semaphore wait that orders this submit after that one also makes its writes
-        // visible here.
-        // That is the whole point of settling the layout up front — a transfer that claims no layout has none for the
-        // validation layer to disagree with, and it reads submit-call order rather than GPU order.
-        auto const range = sg::subresource_range(job.subresource);
-
-        // Which rows of the region this chunk covers.
-        auto const first_row = dst_offset / job.row_bytes;
-        auto const row_count = chunk_bytes / job.row_bytes;
-        auto const copy = VkBufferImageCopy{
-            .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
-            .bufferRowLength = 0, // tightly packed to imageExtent, which is what sg hands over
-            .bufferImageHeight = 0,
-            .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
-                                 .mipLevel = u32(job.subresource.mip_level),
-                                 .baseArrayLayer = u32(job.subresource.array_layer),
-                                 .layerCount = 1},
-            .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
-            .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
-        };
-        // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
-        // and one layout for both directions is what keeps a transfer of the other direction from
-        // moving it — see vulkan_context::async_ready_layout.
-        vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
-    }
-    else
-    {
-        auto const region = VkBufferCopy{
-            .srcOffset = VkDeviceSize(isize(slot) * _window_bytes),
-            .dstOffset = VkDeviceSize(dst_offset),
-            .size = VkDeviceSize(chunk_bytes),
-        };
-        vkCmdCopyBuffer(_window_buffers[slot], _staging, target->_buffer, 1, &region);
-    }
-    vkEndCommandBuffer(_window_buffers[slot]);
-
-    job.staged += chunk_bytes;
-    bool const payload_done = job.staged >= payload.size();
+    bool const payload_done = job.staged + chunk_bytes >= payload.size();
     bool const transfer_done = payload_done && (job.source == nullptr || job.source_done);
 
-    // The cross-queue handshake, every edge in one submit.
-    VkSemaphore waits[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    u64 wait_values[2] = {0, 0};
-    VkPipelineStageFlags const wait_stages[2] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
-    u32 wait_count = 0;
-    if (job.wait_token != sg::submission_token::not_submitted)
+    // Recording and submitting this window is the job's alone, so a validation message raised by either finds whoever
+    // enqueued it.
     {
-        waits[wait_count] = _ctx->_submission_timeline;
-        wait_values[wait_count] = u64(job.wait_token);
-        ++wait_count;
-    }
-    // Waited on even once reached: the validation layer sees only semaphore waits, not the host reading a counter.
-    if (job.download_wait.is_pending())
-    {
-        waits[wait_count] = job.download_wait.group->timeline;
-        wait_values[wait_count] = job.download_wait.value;
-        ++wait_count;
-    }
+        cc::async_ambient_install_scope const installed(job.ambient);
 
-    ++_window_next_value;
-    _window_values[slot] = _window_next_value;
+        vkResetCommandPool(_ctx->_device, _window_pools[slot], 0);
+        auto const begin = VkCommandBufferBeginInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        };
+        vkBeginCommandBuffer(_window_buffers[slot], &begin);
 
-    // A resident payload knows its last chunk, so its completion value rides that submit.
-    // A source-driven one does not, and settles off the window value instead — see job.last_window_value.
-    VkSemaphore signals[2] = {_window_timeline, VK_NULL_HANDLE};
-    u64 signal_values[2] = {_window_next_value, 0};
-    u32 signal_count = 1;
-    if (transfer_done && job.source == nullptr && job.completion.is_pending())
-    {
-        signals[1] = job.completion.group->timeline;
-        signal_values[1] = job.completion.value;
-        signal_count = 2;
+        // One memory dependency per window, ahead of the copy.
+        //
+        // The layout is settled by the direct queue, so this queue emits no *image* barrier — but two copies
+        // submitted to it in succession still need a dependency between them: submission order is execution order,
+        // not a memory dependency, and two writes to one resource are a hazard synchronization validation reports.
+        // A plain memory barrier is enough and costs one per window: this queue only ever copies.
+        auto const transfer_dep_barrier = VkMemoryBarrier2{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+            .dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT,
+        };
+        auto const transfer_dep = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                                   .memoryBarrierCount = 1,
+                                                   .pMemoryBarriers = &transfer_dep_barrier};
+        vkCmdPipelineBarrier2(_window_buffers[slot], &transfer_dep);
+
+        if (job.is_texture)
+        {
+            // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
+            // transfer was enqueued, and the semaphore wait that orders this submit after that one also makes its writes
+            // visible here.
+            // That is the whole point of settling the layout up front — a transfer that claims no layout has none for the
+            // validation layer to disagree with, and it reads submit-call order rather than GPU order.
+            auto const range = sg::subresource_range(job.subresource);
+
+            // Which rows of the region this chunk covers.
+            auto const first_row = dst_offset / job.row_bytes;
+            auto const row_count = chunk_bytes / job.row_bytes;
+            auto const copy = VkBufferImageCopy{
+                .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
+                .bufferRowLength = 0, // tightly packed to imageExtent, which is what sg hands over
+                .bufferImageHeight = 0,
+                .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
+                                     .mipLevel = u32(job.subresource.mip_level),
+                                     .baseArrayLayer = u32(job.subresource.array_layer),
+                                     .layerCount = 1},
+                .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
+                .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
+            };
+            // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
+            // and one layout for both directions is what keeps a transfer of the other direction from
+            // moving it — see vulkan_context::async_ready_layout.
+            vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+        }
+        else
+        {
+            auto const region = VkBufferCopy{
+                .srcOffset = VkDeviceSize(isize(slot) * _window_bytes),
+                .dstOffset = VkDeviceSize(dst_offset),
+                .size = VkDeviceSize(chunk_bytes),
+            };
+            vkCmdCopyBuffer(_window_buffers[slot], _staging, target->_buffer, 1, &region);
+        }
+        vkEndCommandBuffer(_window_buffers[slot]);
+
+        job.staged += chunk_bytes;
+
+        // The cross-queue handshake, every edge in one submit.
+        VkSemaphore waits[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        u64 wait_values[2] = {0, 0};
+        VkPipelineStageFlags const wait_stages[2] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
+        u32 wait_count = 0;
+        if (job.wait_token != sg::submission_token::not_submitted)
+        {
+            waits[wait_count] = _ctx->_submission_timeline;
+            wait_values[wait_count] = u64(job.wait_token);
+            ++wait_count;
+        }
+        // Waited on even once reached: the validation layer sees only semaphore waits, not the host reading a counter.
+        if (job.download_wait.is_pending())
+        {
+            waits[wait_count] = job.download_wait.group->timeline;
+            wait_values[wait_count] = job.download_wait.value;
+            ++wait_count;
+        }
+
+        ++_window_next_value;
+        _window_values[slot] = _window_next_value;
+
+        // A resident payload knows its last chunk, so its completion value rides that submit.
+        // A source-driven one does not, and settles off the window value instead — see job.last_window_value.
+        VkSemaphore signals[2] = {_window_timeline, VK_NULL_HANDLE};
+        u64 signal_values[2] = {_window_next_value, 0};
+        u32 signal_count = 1;
+        if (transfer_done && job.source == nullptr && job.completion.is_pending())
+        {
+            signals[1] = job.completion.group->timeline;
+            signal_values[1] = job.completion.value;
+            signal_count = 2;
+        }
+        job.last_window_value = _window_next_value;
+
+        auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            .waitSemaphoreValueCount = wait_count,
+            .pWaitSemaphoreValues = wait_count != 0 ? wait_values : nullptr,
+            .signalSemaphoreValueCount = signal_count,
+            .pSignalSemaphoreValues = signal_values,
+        };
+        auto const submit = VkSubmitInfo{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = &timeline_info,
+            .waitSemaphoreCount = wait_count,
+            .pWaitSemaphores = wait_count != 0 ? waits : nullptr,
+            .pWaitDstStageMask = wait_count != 0 ? wait_stages : nullptr,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &_window_buffers[slot],
+            .signalSemaphoreCount = signal_count,
+            .pSignalSemaphores = signals,
+        };
+        // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
+        VkResult const r = _ctx->queue_guard().lock(
+            [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
+        CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
+
+        _window_log.note({
+            .window_value = _window_next_value,
+            .slot = slot,
+            .sequence = job.sequence,
+            .destination = job.is_texture ? u64(reinterpret_cast<uintptr_t>(texture->_image))
+                                          : u64(reinterpret_cast<uintptr_t>(target->_buffer)),
+            .is_texture = job.is_texture,
+            .offset = i64(dst_offset),
+            .bytes = i64(chunk_bytes),
+            .wait_token = job.wait_token != sg::submission_token::not_submitted ? u64(job.wait_token) : 0,
+            .cross_wait_value = job.download_wait.is_pending() ? job.download_wait.value : 0,
+            .completion_value = signal_count == 2 ? signal_values[1] : 0,
+        });
     }
-    job.last_window_value = _window_next_value;
-
-    auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
-        .waitSemaphoreValueCount = wait_count,
-        .pWaitSemaphoreValues = wait_count != 0 ? wait_values : nullptr,
-        .signalSemaphoreValueCount = signal_count,
-        .pSignalSemaphoreValues = signal_values,
-    };
-    auto const submit = VkSubmitInfo{
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = &timeline_info,
-        .waitSemaphoreCount = wait_count,
-        .pWaitSemaphores = wait_count != 0 ? waits : nullptr,
-        .pWaitDstStageMask = wait_count != 0 ? wait_stages : nullptr,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &_window_buffers[slot],
-        .signalSemaphoreCount = signal_count,
-        .pSignalSemaphores = signals,
-    };
-    // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
-    VkResult const r
-        = _ctx->queue_guard().lock([&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
-    CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
 
     if (job.stream != nullptr)
         job.stream->bytes_done.fetch_add(i64(chunk_bytes), std::memory_order_relaxed);
