@@ -143,7 +143,7 @@ REC_TEST("record/sampling - a sampler catches the running thread and names where
     CHECK(with_anchor == samples);
 }
 
-REC_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwards")
+REC_THOROUGH_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwards")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -179,7 +179,7 @@ REC_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwar
     CHECK(count_samples(after_rl.take()) == 0);
 }
 
-REC_TEST("record/sampling - splicing moves a sample onto the thread it caught")
+REC_THOROUGH_TEST("record/sampling - splicing moves a sample onto the thread it caught")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -240,7 +240,7 @@ REC_TEST("record/sampling - splicing twice changes nothing")
     CHECK(event_layout(twice) == event_layout(once));
 }
 
-REC_TEST("record/sampling - a scope shortens what a sample has to carry")
+REC_THOROUGH_TEST("record/sampling - a scope shortens what a sample has to carry")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -284,7 +284,7 @@ REC_TEST("record/sampling - a scope shortens what a sample has to carry")
     CHECK(typical_frames(bounded) < typical_frames(unbounded));
 }
 
-REC_TEST("record/sampling - threads the recorder never heard of are sampled too, without an anchor")
+REC_THOROUGH_TEST("record/sampling - threads the recorder never heard of are sampled too, without an anchor")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -347,7 +347,7 @@ REC_TEST("record/sampling - the sampler records its own cadence and cost")
         CHECK(!t.is_open);
 }
 
-REC_TEST("record/sampling - one tick covers every thread, so a rate is a per-thread rate")
+REC_THOROUGH_TEST("record/sampling - one tick covers every thread, so a rate is a per-thread rate")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
@@ -442,7 +442,7 @@ REC_TEST("record/sampling - unknown threads are off unless asked for")
     CHECK(!cc::rec::sampling_config{}.include_unknown_threads);
 }
 
-REC_TEST("record/sampling - the configuration can change while the sampler runs")
+REC_THOROUGH_TEST("record/sampling - the configuration can change while the sampler runs")
 {
     if (!sampling_possible())
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");

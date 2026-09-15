@@ -492,7 +492,7 @@ TEST("export - junit report for an all-pass run has no failure elements", no_sch
     CHECK(!xml.contains("<failure"));
 }
 
-TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler)
+TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler, thorough_only)
 {
     nx::test_registry reg;
 
@@ -554,7 +554,7 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
     CHECK(samples.size() >= 8);
 }
 
-TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler)
+TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler, thorough_only)
 {
     // The RESOLVED baseline rather than the config flag.
     // With nothing marked, the first loop declared is the baseline and the report says so, so a sidecar writing
@@ -599,7 +599,7 @@ TEST("export - the benchmark sidecar names the baseline the console drew", no_sc
     CHECK(!loops[1]["no_baseline"].as_bool());
 }
 
-TEST("export - a sweep's loops carry no baseline at all", no_scheduler)
+TEST("export - a sweep's loops carry no baseline at all", no_scheduler, thorough_only)
 {
     // One loop setting `no_baseline` drops the comparison from the whole table, so no row may claim to be the
     // baseline: a consumer that divided one row by another would be reporting the input sizes rather than the code.

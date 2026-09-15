@@ -74,6 +74,9 @@ TEST("mesh - decimation holds on every model in the corpus", thorough_only)
 - **Skipped, not left out.** The test is still selected and scheduled, and its body is replaced by a `SKIP("runs only under --thorough")` that passes.
   A filter naming it in a default run therefore reports it green without running it; add `--thorough` to run it.
 - **Prefer narrowing when a narrow version exists.** A test that proves something on a smaller input keeps running on every commit, which is worth more than a skip.
+- **A test that holds the binary still for real time is the prime candidate.**
+  A live sampler, a measured benchmark loop or a hardware-counter pass is `exclusive()` or tagged, so its wall clock is everyone's.
+  Mark those `thorough_only` and leave a cheap test of the same machinery in the default run, as `bench-run-test.cc` and `record-sampling-test.cc` do.
 - **It holds at dispatch too.** An `INVOCABLE_TEST` marked `thorough_only` is skipped by `nx::invoke_tests` in a default run, whatever its driver carries.
 
 **Not yet: a skip is reported as a pass.**

@@ -69,7 +69,7 @@ u64 work(u64 x)
 }
 } // namespace
 
-TEST("bench - run accepts a void() body", nx::config::exclusive("bench"))
+TEST("bench - run accepts a void() body", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto acc = u64(0);
     auto const r = nx::bench::run("void", quick(), [&] { acc = work(acc); });
@@ -86,7 +86,7 @@ TEST("bench - run accepts a void() body", nx::config::exclusive("bench"))
     CHECK(r.items_per_second == 0);
 }
 
-TEST("bench - run accepts a void(iteration&) body", nx::config::exclusive("bench"))
+TEST("bench - run accepts a void(iteration&) body", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto acc = u64(0);
     auto seen_indices = isize(0);
@@ -109,7 +109,9 @@ TEST("bench - run accepts a void(iteration&) body", nx::config::exclusive("bench
     CHECK(r.items_per_second > 0);
 }
 
-TEST("bench - run accepts a void(isize) body and reports one sample per batch", nx::config::exclusive("bench"))
+TEST("bench - run accepts a void(isize) body and reports one sample per batch",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto acc = u64(0);
     auto const r = nx::bench::run("batched", quick(),
@@ -124,7 +126,9 @@ TEST("bench - run accepts a void(isize) body and reports one sample per batch", 
     CHECK(r.measured_iterations == r.batch_size * isize(r.samples.size()));
 }
 
-TEST("bench - a cheap body gets batched, an expensive one does not", nx::config::exclusive("bench"))
+TEST("bench - a cheap body gets batched, an expensive one does not",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto acc = u64(0);
     auto const cheap = nx::bench::run("cheap", quick(), [&] { acc = work(acc); });
@@ -160,7 +164,7 @@ TEST("bench - single_shot measures one iteration per sample and warms up once", 
     CHECK(r.find_warning(nx::bench::warning_kind::overhead_significant) == nullptr);
 }
 
-TEST("bench - pause excludes its span from the measurement", nx::config::exclusive("bench"))
+TEST("bench - pause excludes its span from the measurement", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.batch = false;
@@ -203,7 +207,7 @@ TEST("bench - pause excludes its span from the measurement", nx::config::exclusi
     CHECK((r.find_warning(nx::bench::warning_kind::paused_fraction_high) != nullptr) == pause_warning_is_earned(r));
 }
 
-TEST("bench - recorded quantities aggregate by their unit", nx::config::exclusive("bench"))
+TEST("bench - recorded quantities aggregate by their unit", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto cfg = quick();
 
@@ -239,7 +243,9 @@ TEST("bench - recorded quantities aggregate by their unit", nx::config::exclusiv
     CHECK(ratio->per_second == 0.0);
 }
 
-TEST("bench - warmup iterations contribute no items and no quantities", nx::config::exclusive("bench"))
+TEST("bench - warmup iterations contribute no items and no quantities",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.warmup_iterations = 7;
@@ -256,7 +262,9 @@ TEST("bench - warmup iterations contribute no items and no quantities", nx::conf
     CHECK(r.items == r.measured_iterations); // the seven warmup iterations declared items and were ignored
 }
 
-TEST("bench - a run that cannot converge says so rather than pretending", nx::config::exclusive("bench"))
+TEST("bench - a run that cannot converge says so rather than pretending",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.target_relative_error = 1e-9; // unreachable
@@ -269,7 +277,9 @@ TEST("bench - a run that cannot converge says so rather than pretending", nx::co
     CHECK(r.find_warning(nx::bench::warning_kind::did_not_converge) != nullptr);
 }
 
-TEST("bench - a sample cap that cannot satisfy min_time is not a convergence failure", nx::config::exclusive("bench"))
+TEST("bench - a sample cap that cannot satisfy min_time is not a convergence failure",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     // The regression: with 1 ms batches, min_time_secs of 0.5 needs about 500 samples.
     // A max_samples below that means elapsed never reaches min_time, so a run that had long since hit its target
@@ -287,7 +297,7 @@ TEST("bench - a sample cap that cannot satisfy min_time is not a convergence fai
     CHECK(r.find_warning(nx::bench::warning_kind::did_not_converge) == nullptr);
 }
 
-TEST("bench - an unnamed run and a default-config run both work", nx::config::exclusive("bench"))
+TEST("bench - an unnamed run and a default-config run both work", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto acc = u64(0);
 
@@ -352,7 +362,9 @@ TEST("bench - calibration report", nx::config::manual, nx::config::exclusive("be
     cc::print(nx::bench::format_report("the same, markdown-safe", loops, md));
 }
 
-TEST("bench - counters are measured in their own passes, and can be turned off", nx::config::exclusive("bench"))
+TEST("bench - counters are measured in their own passes, and can be turned off",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.measure_counters = false;
@@ -377,7 +389,9 @@ TEST("bench - counters are measured in their own passes, and can be turned off",
     }
 }
 
-TEST("bench - a counter pass does not double-count items or quantities", nx::config::exclusive("bench"))
+TEST("bench - a counter pass does not double-count items or quantities",
+     nx::config::exclusive("bench"),
+     nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.measure_counters = true;
@@ -431,7 +445,7 @@ TEST("bench - a loop's results reach cc::rec, at its boundary rather than per sa
     CHECK(rec.all().count("bench/median seconds") == 1);
 }
 
-TEST("bench - a pause around expensive setup is not warned about", nx::config::exclusive("bench"))
+TEST("bench - a pause around expensive setup is not warned about", nx::config::exclusive("bench"), nx::config::thorough_only)
 {
     auto cfg = quick();
     cfg.batch = false;

@@ -24,6 +24,10 @@
 
 #define REC_TEST(name_) TEST(name_, nx::config::exclusive(), nx::config::owns_recorder)
 
+// For a test that measures a live sampler: it holds the whole binary still for real time, so a default run skips it.
+#define REC_THOROUGH_TEST(name_) \
+    TEST(name_, nx::config::exclusive(), nx::config::owns_recorder, nx::config::thorough_only)
+
 namespace cc_rec_test
 {
 using namespace cc::primitive_defines;
