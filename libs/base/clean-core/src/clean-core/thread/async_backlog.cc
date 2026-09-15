@@ -116,8 +116,7 @@ cc::shared_async<cc::unit> cc::async_backlog::settled(cc::span<async_backlog con
     {
         auto released = cc::vector<async_node_ptr>();
         for (auto const& state : states)
-            state->entries.lock([&](impl::async_backlog_entries& entries)
-                                { impl::compact(entries, &pinned, released); });
+            state->entries.lock([&](impl::async_backlog_entries& entries) { impl::compact(entries, &pinned, released); });
     }
     if (pinned.empty())
         return cc::make_async_from_value(cc::unit{});

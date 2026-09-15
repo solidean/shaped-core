@@ -60,7 +60,8 @@ TEST("cc system_metrics - cpu counters climb across readings")
         auto all_climbed = total_climbed;
         for (isize i = 0; i < baseline.per_core.size(); ++i)
         {
-            core_climbed[i] = core_climbed[i] || next.value().per_core[i].total_secs() > previous.per_core[i].total_secs();
+            core_climbed[i]
+                = core_climbed[i] || next.value().per_core[i].total_secs() > previous.per_core[i].total_secs();
             all_climbed = all_climbed && core_climbed[i];
         }
 
