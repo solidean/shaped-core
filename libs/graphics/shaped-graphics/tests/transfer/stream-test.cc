@@ -181,7 +181,10 @@ ASYNC_INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it
     auto const bytes = co_await back.bytes();
     CHECK(bytes[0] == src[0]);
     CHECK(bytes[8191] == src[8191]);
-    CHECK(stream.is_settled());
+
+    // The list waited on the GPU, and the handle settles on the transfer system's next wake, so it may lag by a cycle.
+    co_await stream.completion();
+    CHECK(stream.is_complete());
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on the transfer",
@@ -207,7 +210,9 @@ ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later list wait on th
     CHECK(bytes[0] == src[0]);
     CHECK(bytes[8191] == src[8191]);
 
-    CHECK(stream.is_settled()); // still reporting, exactly as before the promotion
+    // Still reporting, exactly as before the promotion — on the transfer system's next wake, which may trail the readback.
+    co_await stream.completion();
+    CHECK(stream.is_complete());
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - streaming makes progress while async work saturates the queue",
