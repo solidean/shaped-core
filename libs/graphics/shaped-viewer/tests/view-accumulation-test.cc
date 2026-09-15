@@ -11,9 +11,6 @@ using namespace cc::primitive_defines;
 // Headless, one view traced repeatedly: what a view's persistent record does across frames.
 // No pixel readback — the observable surface is the target's identity and the accumulation counter, which is exactly
 // what decides whether the shader overwrites the image or blends into it.
-//
-// Each section uses its own view_id: sections share the enclosing setup rather than re-running it, so a shared id would
-// carry one section's accumulation into the next.
 ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

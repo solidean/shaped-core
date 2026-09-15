@@ -765,7 +765,7 @@ void report_off_thread_check_result(test_context& ctx, impl::check_result result
     if (!aborts)
         return;
 
-    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_test reads this to tell it apart from a real failure.
+    // Marked BEFORE the throw: the node's error it becomes is how the abort reaches the test's root, and finish_async_pass reads this to tell it apart from a real failure.
     ctx.aborted_by_check_throw.store(true, cc::memory_order_release);
     if (is_skip)
         throw test_skipped{};
