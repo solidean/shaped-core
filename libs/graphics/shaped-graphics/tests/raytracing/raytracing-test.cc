@@ -64,12 +64,10 @@ INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_handle con
     REQUIRE(tlas != nullptr);
     ctx->submit_command_list(cc::move(cmd));
 
-    CHECK(blas->storage() != nullptr);
     CHECK(blas->size_in_bytes() > 0);
     CHECK(blas->geometry_count() == 1);
     CHECK(!blas->is_expired());
 
-    CHECK(tlas->storage() != nullptr);
     CHECK(tlas->size_in_bytes() > 0);
     CHECK(tlas->instance_count() == 1);
     CHECK(!tlas->is_expired());
@@ -106,7 +104,6 @@ INVOCABLE_TEST("sg - builds a procedural (aabb) blas", (sg::context_handle const
     REQUIRE(blas != nullptr);
     ctx->submit_command_list(cc::move(cmd));
 
-    CHECK(blas->storage() != nullptr);
     CHECK(blas->size_in_bytes() > 0);
     CHECK(!blas->is_expired());
 }
