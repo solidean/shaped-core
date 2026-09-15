@@ -254,6 +254,39 @@ TEST("threaded check - attributed_to_current_test rescues a bare thread", no_sch
     CHECK(exec.count_failed_tests() == 1);
 }
 
+TEST("threaded check - an attributed thread's checks are filed under the section that ran it", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("threads_in_sections", {},
+                        []
+                        {
+                            SECTION("threaded")
+                            {
+                                std::thread t(nx::attributed_to_current_test(
+                                    []
+                                    {
+                                        CHECK(true);
+                                        CHECK(true);
+                                    }));
+                                t.join();
+                            }
+                            SECTION("plain")
+                            {
+                                CHECK(true);
+                            }
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    REQUIRE(exec.executions.size() == 1);
+    auto const& root = exec.executions[0].root;
+    CHECK(exec.count_failed_tests() == 0); // "threaded" is not an empty section: the thread's checks count there
+    REQUIRE(root.subsections.size() == 2);
+    CHECK(root.subsections[0].executed_checks == 2);
+    CHECK(root.subsections[1].executed_checks == 1);
+}
+
 TEST("threaded check - a REQUIRE on an attributed bare thread records instead of throwing", no_scheduler)
 {
     nx::test_registry reg;
