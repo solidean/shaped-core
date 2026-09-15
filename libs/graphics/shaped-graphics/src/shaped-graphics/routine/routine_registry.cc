@@ -328,7 +328,10 @@ void routine_registry::clear()
     // Waiting here is what makes "the context outlives everything started against it" true rather than usually true.
     // Outside the lock because the wait blocks, and a routine registering another one while we hold `_entries` would
     // deadlock against its own initialization.
-    (void)cc::try_async_blocking_get(_ctx.backlog.settled());
+    // Only when something is outstanding: a context destroyed during static teardown has no ambient scheduler left, and
+    // blocking on even an empty backlog needs one.
+    if (_ctx.backlog.outstanding_count() > 0)
+        (void)cc::try_async_blocking_get(_ctx.backlog.settled());
 
     // Edges next: a token holds a strong reference, so a cycle that slipped past add_dependency would otherwise keep
     // its own routines alive after the map let go of them.
