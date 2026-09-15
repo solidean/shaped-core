@@ -2,6 +2,7 @@
 
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-viewer/fwd.hh>
 
@@ -47,4 +48,11 @@ namespace impl
 /// The ACQUISITION is thread-safe — two threads asking at once get one device, not two.
 /// What it hands back keeps sg's own rules, and the window system it feeds is main-thread bound anyway.
 [[nodiscard]] cc::result<sg::context_handle> acquire_viewer_context();
+
+/// Completes once the background work started so far against `ctx` has settled, whether it succeeded or failed.
+///
+/// That is `ctx.backlog`, every shader the viewer's shader library handed out, and the stores the default blob cache queued for them.
+/// Such work outlives the frame that started it, so a loop or a test that must leave nothing running awaits this before it ends.
+/// **Lazy**: start it after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.
+[[nodiscard]] cc::shared_async<cc::unit> background_work(sg::context& ctx);
 } // namespace sv

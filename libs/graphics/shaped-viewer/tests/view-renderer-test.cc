@@ -65,8 +65,8 @@ INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle c
                                                                                          : sg::routine_outcome::declined;
                                            }));
 
-    // Every trace starts the fallback's compile whether or not it is needed, and it must not outlive the test.
-    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
+    // What the traces started — the permutation compiles and the pipeline builds — must not outlive the test.
+    CHECK(sv_test::drain_ambient_work(ctx));
 
     CHECK(traced.width() == size[0]);
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
@@ -137,7 +137,7 @@ INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::co
                                                return store.accumulated_frames(v.id) > 0 ? sg::routine_outcome::executed
                                                                                          : sg::routine_outcome::declined;
                                            }));
-    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
+    CHECK(sv_test::drain_ambient_work(ctx));
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));

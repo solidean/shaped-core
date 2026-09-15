@@ -97,17 +97,6 @@ protected:
     /// safe to abandon between `with_cmd` bodies.
     virtual cc::shared_async<cc::unit> init(routine_init_scope scope);
 
-    /// Wait out async work this routine STARTED outside its own phases, before the context goes away.
-    ///
-    /// A routine whose execute discovers work — a compile it needs and does not have — may kick that off on the frame
-    /// path rather than decline forever.
-    /// Such a node belongs to no phase, so the tick cannot collect it and readiness never covers it, and it is holding
-    /// a context that `clear()` is about to let go of.
-    /// Override this to wait for whatever was started; `routine_registry::clear()` calls it on every instance first.
-    ///
-    /// Default is a no-op, which is right for the routines that start nothing outside init — nearly all of them.
-    virtual void drain_detached_work() {}
-
 private:
     // The phase engine is driven by the CRTP's static entry points (acquire / prewarm), not by user code.
     template <class, class>
@@ -116,7 +105,6 @@ private:
     template <class>
     friend class routine_guard;
     // The tick drives initialization, so it needs to ask whether a routine still wants driving and to run its phases.
-    // clear() also calls drain_detached_work on every instance before dropping it.
     friend class routine_registry;
 
     /// Which phases have run, and at which reload generation.

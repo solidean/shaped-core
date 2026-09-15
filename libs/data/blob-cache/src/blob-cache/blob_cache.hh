@@ -8,6 +8,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh> // backlog() hands one out, and a caller awaits it
 
 #include <memory>      // std::shared_ptr — impl::cache_core outlives this handle, see the member
 #include <type_traits> // std::is_invocable_r_v — what keeps the two acquire() overloads disjoint
@@ -278,6 +279,10 @@ public:
     /// Writes buffered access times out now.
     /// Advisory: tests wait on it, nothing else needs to.
     [[nodiscard]] cc::shared_async<cc::unit> flush();
+
+    /// The stores `acquire` queued after handing its value back, which nobody awaits.
+    /// A test that must leave nothing running awaits `backlog().settled()`; a disabled cache never tracks anything.
+    [[nodiscard]] cc::async_backlog const& backlog() const;
 
     /// Counters since create(). Cheap, and never touches the database.
     [[nodiscard]] cache_stats get_stats() const;

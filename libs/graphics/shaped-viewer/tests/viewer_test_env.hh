@@ -13,6 +13,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-viewer/context.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/rendering/shaders.hh>
 #include <shaped-viewer/scene/mesh.hh>
@@ -95,29 +96,26 @@ inline void drive_ambient_work()
     cc::this_thread_yield();
 }
 
-/// Runs async work on this thread until none is queued and `started` has settled, so what a test started ends with the test.
+/// Runs async work on this thread until `sv::background_work(ctx)` has settled, so what a test started ends with the test.
 /// False when `timeout_secs` ran out first, which only a broken build reaches.
 ///
-/// The GPU tests share one context across the whole driver, so nothing tears it down between them.
-/// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, and a compile left
-/// unfinished is async work the next test inherits.
-///
-/// **Queued work alone is not enough.** With threads, a trace starts the fallback's compile on a pool worker, where no queue shows it.
-/// So a test that traced passes what it started as `started`: `frame::background_work()` for a viewer loop, copied while the viewer lives,
-/// or `material_shader_cache::acquire_fallback().shader` for a test holding its own resource manager.
-/// A node nobody started is not waited for, since nothing would ever finish it.
-template <class T>
-[[nodiscard]] inline bool drain_ambient_work(cc::shared_async<T> const& started, double timeout_secs = 60.0)
+/// The GPU tests share one context across the whole driver, so nothing tears it down between them, and work a test left
+/// running is async work the next test inherits.
+/// Under `SC_THREADS=OFF` this thread is the only one that can finish a compile a frame started, which is why it pumps
+/// rather than blocks.
+/// Call it after the frame loop, never inside a frame: see `sv::background_work`.
+[[nodiscard]] inline bool drain_ambient_work(sg::context& ctx, double timeout_secs = 60.0)
 {
     CC_RECORD_SCOPE("sv_test.drain_ambient_work");
 
+    auto const settled = cc::async_start(sv::background_work(ctx));
     auto const start = cc::current_time_steady_secs();
     while (true)
     {
         while (cc::ambient_async_scheduler().try_run_one() || cc::thread_pump_all())
         {
         }
-        if (started == nullptr || started->is_cold() || started->is_ready())
+        if (settled->is_ready())
             return true;
         if (cc::current_time_steady_secs() - start >= timeout_secs)
             return false;

@@ -594,6 +594,17 @@ public:
         return false;
     }
 
+    /// require() for a node held without its type — a registry of mixed work, say.
+    bool require(async_node_ptr const& dep) const
+    {
+        CC_ASSERT(dep != nullptr, "cannot require a null async");
+        CC_ASSERT(!current->is_ready(), "this async already resolved — a spent frame must not touch its context");
+        if (dep->is_ready())
+            return true;
+        current->add_pending_dependency(dep.get());
+        return false;
+    }
+
     // the step's resolution latch — read by async_node_base::invoke_frame_step's handler
 public:
     /// True once this step resolved the node.

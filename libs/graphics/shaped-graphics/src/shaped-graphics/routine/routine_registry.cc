@@ -323,13 +323,12 @@ routine_readiness routine_registry::readiness_of(render_routine_base& routine)
 
 void routine_registry::clear()
 {
-    // Detached work first, and OUTSIDE the map lock: a routine may have started a compile on the frame path that no
-    // phase owns, and that node holds the context this clear is part of tearing down.
+    // Detached work first, and OUTSIDE the map lock: a pipeline build no phase owns still references the context this
+    // clear is part of tearing down.
     // Waiting here is what makes "the context outlives everything started against it" true rather than usually true.
-    // Outside the lock because a drain blocks, and a routine registering another one while we hold `_entries` would
+    // Outside the lock because the wait blocks, and a routine registering another one while we hold `_entries` would
     // deadlock against its own initialization.
-    for (auto const& routine : snapshot())
-        routine->drain_detached_work();
+    (void)cc::try_async_blocking_get(_ctx.backlog.settled());
 
     // Edges next: a token holds a strong reference, so a cycle that slipped past add_dependency would otherwise keep
     // its own routines alive after the map let go of them.

@@ -58,6 +58,7 @@ cache->clear(ns);                               // -> shared_async<i64> entries 
 cache->set_limits(limits);  cache->get_limits();
 cache->collect_garbage();                       // -> shared_async<gc_result>; a whole pass (still slice-bounded), for tests
 cache->flush();                                 // -> shared_async<cc::unit>; write buffered access times out
+cache->backlog();                               // -> cc::async_backlog const&; the stores acquire queued after returning its value
 cache->get_stats();                             // -> cache_stats; cheap, never touches the database
 
 #include <blob-cache/default_cache.hh>          // the process-wide cache every subsystem shares

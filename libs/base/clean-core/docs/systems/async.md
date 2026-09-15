@@ -824,6 +824,39 @@ They would be parked by a new `async_step_status::park`, which leaves a node `bl
 It removes the allocation, and `park` is the primitive a condition variable or an async event would want too.
 It costs a new switch arm in `poll()` and an unlink that races a concurrent grant, which is why it waits for a measurement that asks for it.
 
+## Detached work
+
+**`cc::async_backlog` tracks work a component started and does not await itself, so someone else can wait until all of it has settled.**
+A cache that starts a compile on a miss detaches it: the compile runs to a result whether or not the caller that asked still holds it.
+So does an actor request whose promise nobody reads.
+Nothing else can answer "is everything this component started done?", which is what a test must know before it ends and a teardown before it destroys what the work references.
+
+```cpp
+cc::async_backlog backlog;                                // one per component that detaches work
+return backlog.start(compile(desc));                      // cc::async_start, for work nobody has to await
+backlog.track(promise);                                   // already running, or a manual node an actor will push
+
+co_await cc::async_settled(backlog.settled());            // every started, tracked node has settled
+co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs, listed upstream first
+```
+
+- **Entries are weak.** A backlog never keeps work alive, and a node that is gone or settled counts for nothing.
+  Settled work is pruned from the front as more is tracked; a gap further in waits for the next `settled()` sweep.
+- **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
+  A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
+- **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.
+  It resolves once a sweep finds nothing, never fails, and its node shares the backlog's state, so it may outlive the backlog.
+  Work that keeps re-arming itself never lets it resolve, so a caller that cannot rule that out bounds its wait.
+- **Several backlogs settle together** through the static `settled(span)`, in one sweep over all of them.
+  List them upstream first: a compile that queues its cache store into a later backlog before it resolves is then never missed.
+- **Track the outermost node** of what was detached.
+  A node that depends on a tracked one is woken beside the waiter, and can still be finishing when `settled()` resolves.
+- **A tracked node must be driven to a result by whoever owns it.** A `settled()` pinning a manual node its producer abandoned stays parked, so track a request only once its actor accepted it.
+- **`async_start` stays the plain primitive.** Most of its uses are structured concurrency — start several, await them together — and a default backlog would be hidden global state.
+  Detaching is the explicit spelling, on a backlog the component owns.
+
+A backlog answers "is it done", not "whose is it": work it tracks still carries the context of whatever started it, which is what attributes its logging and profiling.
+
 ## Ambient context
 
 One opaque word rides the graph, so code anywhere inside a frame can ask **"which logical task is this work part of?"**.
