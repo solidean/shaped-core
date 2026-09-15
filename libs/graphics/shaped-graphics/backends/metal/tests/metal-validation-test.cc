@@ -1,8 +1,6 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh>
-#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
@@ -50,14 +48,25 @@ TEST("sg metal - an MTLLogState handler is not the validation channel")
     auto* const log_state = device->newLogState(descriptor, &error);
     descriptor->release();
 
-    CHECK(log_state != nullptr).context("a log state is creatable, which is what makes its silence meaningful");
+    // **A host that cannot make one cannot make this measurement**, so it skips rather than failing.
+    // What makes the silence meaningful is a log state existing to be silent; where none can be created there is
+    // nothing to conclude either way.
+    // CI is exactly that host — a GitHub runner's paravirtualised GPU creates a device and refuses a log state — which
+    // also means this measurement is a developer-machine one, like every other device test in this suite.
+    if (log_state == nullptr)
+    {
+        device->release();
+        SKIP("this host creates no MTLLogState, so its silence proves nothing");
+    }
 
-    if (log_state != nullptr)
-        log_state->release();
+    // Creation succeeded, so Metal reported nothing alongside it.
+    CHECK(error == nullptr).context("a log state was created, so nothing should have been reported making it");
+
+    log_state->release();
     device->release();
 }
 
-ASYNC_TEST("sg metal - a commit's feedback handler runs")
+TEST("sg metal - a commit's feedback handler runs")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -85,7 +94,7 @@ ASYNC_TEST("sg metal - a commit's feedback handler runs")
     ctx->queue()->commit(buffers, 1, options);
     options->release();
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     // Draining the GPU says nothing about the handler, which runs on a dispatch queue of Metal's choosing — so wait on
     // the condition rather than assuming the drain covered it.
@@ -98,7 +107,7 @@ ASYNC_TEST("sg metal - a commit's feedback handler runs")
     allocator->release();
 }
 
-ASYNC_TEST("sg metal - a clean run leaves the deferred error channel empty")
+TEST("sg metal - a clean run leaves the deferred error channel empty")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -106,7 +115,7 @@ ASYNC_TEST("sg metal - a clean run leaves the deferred error channel empty")
 
     (void)ctx->submit_command_list(ctx->create_command_list());
     ctx->advance_epoch();
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     CHECK(ctx->take_pending_errors().empty());
     CHECK(!ctx->is_device_lost());

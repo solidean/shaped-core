@@ -1,8 +1,6 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh>
-#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 // Inline transfer, smallest case first.
@@ -25,7 +23,7 @@ constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy
 }
 } // namespace
 
-ASYNC_TEST("sg metal - an upload and a download in one list round-trip")
+TEST("sg metal - an upload and a download in one list round-trip")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -39,7 +37,7 @@ ASYNC_TEST("sg metal - an upload and a download in one list round-trip")
     auto future = cmd->download.bytes_from_buffer(buffer, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -52,7 +50,7 @@ ASYNC_TEST("sg metal - an upload and a download in one list round-trip")
     CHECK(mismatches == 0).context(cc::format("{} of 256 bytes differ", mismatches));
 }
 
-ASYNC_TEST("sg metal - an upload and a download in two lists round-trip")
+TEST("sg metal - an upload and a download in two lists round-trip")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -72,7 +70,7 @@ ASYNC_TEST("sg metal - an upload and a download in two lists round-trip")
     auto future = down->download.bytes_from_buffer(buffer, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -84,7 +82,7 @@ ASYNC_TEST("sg metal - an upload and a download in two lists round-trip")
     CHECK(mismatches == 0).context(cc::format("{} of 256 bytes differ", mismatches));
 }
 
-ASYNC_TEST("sg metal - a device-to-device copy moves the bytes")
+TEST("sg metal - a device-to-device copy moves the bytes")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -100,7 +98,7 @@ ASYNC_TEST("sg metal - a device-to-device copy moves the bytes")
     auto future = cmd->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -112,7 +110,7 @@ ASYNC_TEST("sg metal - a device-to-device copy moves the bytes")
     CHECK(mismatches == 0).context(cc::format("{} of 256 bytes differ", mismatches));
 }
 
-ASYNC_TEST("sg metal - a copy between two lists sees the previous list's write")
+TEST("sg metal - a copy between two lists sees the previous list's write")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -136,7 +134,7 @@ ASYNC_TEST("sg metal - a copy between two lists sees the previous list's write")
     auto future = down->download.bytes_from_buffer(dst, 0, 256);
     ctx->submit_command_list(cc::move(down));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -148,7 +146,7 @@ ASYNC_TEST("sg metal - a copy between two lists sees the previous list's write")
     CHECK(mismatches == 0).context(cc::format("{} of 256 bytes differ", mismatches));
 }
 
-ASYNC_TEST("sg metal - a copy within one buffer moves the bytes")
+TEST("sg metal - a copy within one buffer moves the bytes")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -169,7 +167,7 @@ ASYNC_TEST("sg metal - a copy within one buffer moves the bytes")
     auto future = cmd->download.bytes_from_buffer(buffer, 128, 64);
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());

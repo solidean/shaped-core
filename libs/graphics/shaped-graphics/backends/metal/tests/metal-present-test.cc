@@ -1,8 +1,6 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh>
-#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/present/swapchain.hh>
 
@@ -27,7 +25,7 @@ TEST("sg metal - headless presentation is always supported")
     CHECK(ctx->supports_headless_present());
 }
 
-ASYNC_TEST("sg metal - a headless chain hands out distinct back buffers")
+TEST("sg metal - a headless chain hands out distinct back buffers")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -55,7 +53,7 @@ ASYNC_TEST("sg metal - a headless chain hands out distinct back buffers")
     auto const second = chain->acquire_backbuffer();
     CHECK(second.texture() != first.texture());
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 }
 
 TEST("sg metal - a windowed chain refuses a non-cocoa window")

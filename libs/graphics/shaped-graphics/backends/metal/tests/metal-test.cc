@@ -1,8 +1,6 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh>
-#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -49,7 +47,7 @@ TEST("sg metal - ray tracing is reported, and it is the device's answer")
     CHECK(!ctx->supports(sg::feature::tessellation_shader));
 }
 
-ASYNC_TEST("sg metal - epochs advance and retire")
+TEST("sg metal - epochs advance and retire")
 {
     auto const ctx = test::make_context();
     if (ctx == nullptr)
@@ -67,12 +65,12 @@ ASYNC_TEST("sg metal - epochs advance and retire")
     CHECK(ctx->current_epoch() == sg::epoch(u64(start) + 1));
 
     // An empty epoch has no GPU work in it, so the signal lands as soon as the queue reaches it.
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
     CHECK(ctx->completed_epoch() >= start);
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
 
-ASYNC_TEST("sg metal - a command list can be opened and submitted empty")
+TEST("sg metal - a command list can be opened and submitted empty")
 {
     auto const ctx = test::make_context();
     if (ctx == nullptr)
@@ -82,11 +80,11 @@ ASYNC_TEST("sg metal - a command list can be opened and submitted empty")
     CHECK(token != sg::submission_token::invalid);
     CHECK(token != sg::submission_token::not_submitted);
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
     CHECK(ctx->is_submission_complete(token));
 }
 
-ASYNC_TEST("sg metal - a command list can be opened and dropped")
+TEST("sg metal - a command list can be opened and dropped")
 {
     auto const ctx = test::make_context();
     if (ctx == nullptr)
@@ -100,13 +98,13 @@ ASYNC_TEST("sg metal - a command list can be opened and dropped")
     CHECK(ctx->in_flight_epoch_count() == 0);
 
     ctx->advance_epoch();
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     CHECK(ctx->current_epoch() == sg::epoch(u64(before) + 1));
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
 
-ASYNC_TEST("sg metal - an allocator is recycled across epochs")
+TEST("sg metal - an allocator is recycled across epochs")
 {
     auto const ctx = test::make_context();
     if (ctx == nullptr)
@@ -121,7 +119,7 @@ ASYNC_TEST("sg metal - an allocator is recycled across epochs")
         ctx->block_until_epochs_in_flight(1);
     }
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
 

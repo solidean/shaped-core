@@ -3,8 +3,6 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/async_coroutine.hh>
-#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
@@ -82,7 +80,7 @@ TEST("sg metal - a compute pipeline refuses a shader of the wrong format")
     CHECK(pipeline.has_error());
 }
 
-ASYNC_TEST("sg metal - a dispatch doubles the values it was given")
+TEST("sg metal - a dispatch doubles the values it was given")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -124,7 +122,7 @@ ASYNC_TEST("sg metal - a dispatch doubles the values it was given")
     auto future = cmd->download.bytes_from_buffer(buffer, 0, buffer->size_in_bytes());
     ctx->submit_command_list(cc::move(cmd));
 
-    co_await ctx->idle_completion();
+    ctx->block_until_idle();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());

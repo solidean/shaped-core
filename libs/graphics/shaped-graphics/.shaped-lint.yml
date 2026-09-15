@@ -77,6 +77,12 @@ rules:
 
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    reason: "on metal a download's copy-out is delivered by the MTL4CommitFeedback handler, on a dispatch queue sg does not own — so idle_completion() can settle before the bytes land, where block_until_idle also drains the transfer actors. Awaiting instead reads zeroes, intermittently with threads and reliably without them. Revisit once the copy-out settles its own completion rather than being drained for"
+    files:
+      - backends/metal/tests/*.cc
+
+  - kind: allow-blocking-wait
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
     reason: block_until_idle's own guarantees are tested here
     files:
       - tests/context/context-test.cc
