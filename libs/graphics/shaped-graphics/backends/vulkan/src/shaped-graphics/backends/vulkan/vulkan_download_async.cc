@@ -357,7 +357,8 @@ bool vulkan_download_async_system::run_one_window()
             wait_values[wait_count] = u64(job.wait_token);
             ++wait_count;
         }
-        if (job.upload_wait.is_pending() && !job.upload_wait.has_reached())
+        // Waited on even once reached: the validation layer sees only semaphore waits, not the host reading a counter.
+        if (job.upload_wait.is_pending())
         {
             waits[wait_count] = job.upload_wait.group->timeline;
             wait_values[wait_count] = job.upload_wait.value;
