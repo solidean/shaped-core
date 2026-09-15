@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -15,6 +16,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_ambient.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
@@ -86,6 +88,14 @@ struct sg::backend::vulkan::vulkan_async_download_job
     /// epoch cycle, so nothing else orders the two.
     /// dx12 needs the same edge; it just spells it as a Wait on the upload queue's fence.
     vulkan_group_value upload_wait;
+
+    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The actor installs it around the work it does for the job, so a validation message raised by that work's submit,
+    /// or a check inside a source or sink, finds the test or trace that asked for the transfer.
+    ///
+    /// Declared last so it is destroyed first: dropping `drain` can resume a caller waiting for idle, and that caller
+    /// must not find this job still holding its context.
+    cc::async_ambient_handle ambient;
 };
 
 /// Drives readbacks through the shared transfer scheduler, one window at a time.

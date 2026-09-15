@@ -3,6 +3,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
@@ -11,6 +12,7 @@
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_ambient.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
@@ -54,6 +56,12 @@ struct sg::backend::dx12::dx12_async_upload_job
     // Carries the priority and cancel flag the actor reads when picking, the progress counters it advances, and the
     // completion node it must settle exactly once — including on every cancellation path.
     std::shared_ptr<sg::impl::stream_control> stream;
+
+    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The actor installs it around the work that is this job's alone — polling its source, recording its chunk — so a
+    /// debug-layer message or a check raised there finds the test or trace that asked for the transfer.
+    /// A window packs several jobs, so what the window's submit raises is attributed to none of them.
+    cc::async_ambient_handle ambient;
 };
 
 /// A message carrying nothing: its only job is to wake the copy actor so it re-polls sources that said `not_yet`.

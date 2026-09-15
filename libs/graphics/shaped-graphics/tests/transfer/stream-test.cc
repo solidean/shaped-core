@@ -245,6 +245,9 @@ ASYNC_INVOCABLE_TEST("sg stream - streaming makes progress while async work satu
     auto const back = c.download.bytes_from_buffer(target, 0, 64 * 1024);
     auto const bytes = co_await back.bytes();
     CHECK(bytes[65535] == payload[65535]);
+
+    // The flood was never awaited, and a test settles what it started.
+    co_await c.idle_completion();
 }
 
 namespace

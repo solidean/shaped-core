@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
 
 // vulkan entry-point driver inside the sg API test binary (shaped-graphics-test).
@@ -25,13 +26,18 @@ namespace vulkan = sg::backend::vulkan;
 // Per-context rather than thread-scoped, unlike dx12's: a Vulkan messenger belongs to one instance and delivers only
 // that instance's messages.
 // See vulkan_context::set_message_callback.
+//
+// A message raised where no test is installed lands on this driver.
+// Synchronization validation can raise one inside a later, unrelated submission when it re-checks a deferred one.
+// The context is the driver's own, so the captured driver is released with it, before the driver ends.
 void fail_on_validation_messages(sg::context_handle const& ctx)
 {
     static_cast<vulkan::vulkan_context&>(*ctx).set_message_callback(
-        [](vulkan::vulkan_message_severity severity, cc::string_view message)
+        [driver = nx::capture_current_test()](vulkan::vulkan_message_severity severity, cc::string_view message)
         {
             if (severity <= vulkan::vulkan_message_severity::warning)
-                CHECK(false).context(cc::format("vulkan validation: {}", message));
+                nx::with_fallback_test(driver,
+                                       [&] { CHECK(false).context(cc::format("vulkan validation: {}", message)); });
         });
 }
 } // namespace

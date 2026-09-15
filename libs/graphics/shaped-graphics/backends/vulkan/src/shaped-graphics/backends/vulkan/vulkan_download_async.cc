@@ -161,6 +161,7 @@ void vulkan_download_async_system::settle_and_drop(isize index, bool delivered, 
         // one whose copy is still in flight.
         if (signal_here && job.completion_value.is_pending())
         {
+            cc::async_ambient_install_scope const installed(job.ambient);
             u64 const signal_value = job.completion_value.value;
             auto const timeline_info = VkTimelineSemaphoreSubmitInfo{
                 .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
@@ -176,6 +177,7 @@ void vulkan_download_async_system::settle_and_drop(isize index, bool delivered, 
             (void)_ctx->queue_guard().lock(
                 [&](int&) { return vkQueueSubmit(_ctx->download_queue(), 1, &empty_submit, VK_NULL_HANDLE); });
         }
+        sg::impl::release_ambient(job.ambient);
         if (job.completion)
         {
             if (delivered)
@@ -209,7 +211,7 @@ bool vulkan_download_async_system::run_one_window()
     // It waits one more cycle instead, by which time whatever was ahead of it has finished.
     for (isize i = 0; i < _pending.size();)
     {
-        auto const& job = _pending[i];
+        auto& job = _pending[i];
         bool const has_destination = job.sink ? true : job.pin.lock() != nullptr;
         if (has_destination && job.size_in_bytes != 0)
         {
@@ -228,6 +230,9 @@ bool vulkan_download_async_system::run_one_window()
         }
 
         // Nothing was queued, so the value has to be signalled here or a later writer waiting on it hangs.
+        // The stream error below resumes its awaiter, so the hold goes first — and settle_and_drop's signal then runs
+        // without the enqueuer's context, which only a validation message raised by that submit would miss.
+        sg::impl::release_ambient(job.ambient);
         if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
             job.stream->completion->push_error(cc::async_error::make_cancelled());
         settle_and_drop(i, /*delivered =*/false, /*signal_here =*/true);
@@ -254,6 +259,11 @@ bool vulkan_download_async_system::run_one_window()
 
     isize const index = picked.value();
     auto& job = _pending[index];
+
+    // Everything this window does is on behalf of whoever enqueued the job: a validation message its submit raises,
+    // or a check in its sink, finds them.
+    // Referenced rather than copied: every settle below releases the job's hold first — see sg::impl::release_ambient.
+    cc::async_ambient_install_scope const installed(job.ambient);
 
     // The source is owned by the job, so it cannot go away underneath this — a caller that dropped every handle to
     // the resource still gets the bytes they hold a future for.
@@ -421,6 +431,7 @@ bool vulkan_download_async_system::run_one_window()
             // A sink that refuses fails the transfer, and no further chunk is delivered.
             if (!job.sink(cc::span<byte const>(staged, chunk), done - chunk))
             {
+                sg::impl::release_ambient(job.ambient);
                 if (job.stream != nullptr && job.stream->completion != nullptr && !job.stream->completion->is_ready())
                     job.stream->completion->push_error(cc::async_error::make_error(cc::any_error("stream sink rejected "
                                                                                                  "the chunk")));
@@ -441,6 +452,7 @@ bool vulkan_download_async_system::run_one_window()
             // Cancellation bounds future work rather than undoing past work: chunks already recorded still run.
             if (job.stream->cancelled.load(std::memory_order_relaxed) && !is_last)
             {
+                sg::impl::release_ambient(job.ambient);
                 if (job.stream->completion != nullptr && !job.stream->completion->is_ready())
                     job.stream->completion->push_error(cc::async_error::make_cancelled());
                 if (job.completion)

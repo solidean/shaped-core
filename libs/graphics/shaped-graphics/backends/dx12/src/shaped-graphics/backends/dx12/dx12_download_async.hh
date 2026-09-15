@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/dx12_completion_group.hh>
@@ -12,6 +13,7 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture_region.hh>
+#include <shaped-graphics/transfer/impl/transfer_ambient.hh>
 #include <shaped-graphics/transfer/impl/transfer_drain.hh>
 #include <shaped-graphics/transfer/impl/transfer_scheduler.hh>
 #include <shaped-graphics/transfer/stream_handle.hh>
@@ -54,6 +56,12 @@ struct sg::backend::dx12::dx12_async_download_job
 
     // Carries the priority and cancel flag the actor reads when picking, plus the completion node it must settle.
     std::shared_ptr<sg::impl::stream_control> stream;
+
+    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The actor installs it around the work that is this job's alone — polling its source, recording its chunk — so a
+    /// debug-layer message or a check raised there finds the test or trace that asked for the transfer.
+    /// A window packs several jobs, so what the window's submit raises is attributed to none of them.
+    cc::async_ambient_handle ambient;
 };
 
 /// Async GPU→CPU readback on the dedicated COPY queue, decoupled from epochs.

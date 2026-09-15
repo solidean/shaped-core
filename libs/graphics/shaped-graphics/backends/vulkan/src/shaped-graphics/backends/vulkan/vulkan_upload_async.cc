@@ -239,6 +239,7 @@ void vulkan_upload_async_system::signal_on_queue(vulkan_group_value const& value
 
 void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool delivered)
 {
+    sg::impl::release_ambient(job.ambient);
     if (job.stream == nullptr || job.stream->completion == nullptr)
         return;
     if (job.stream->completion->is_ready())
@@ -356,7 +357,10 @@ bool vulkan_upload_async_system::run_one_window()
 
         // The completion value is signalled either way, so the lifetime gate and any forward reader stamped with it
         // never hang — which is the whole reason it is reserved at enqueue rather than at stage time.
-        signal_on_queue(job.completion);
+        {
+            cc::async_ambient_install_scope const installed(job.ambient);
+            signal_on_queue(job.completion);
+        }
         settle_now(job, /*delivered =*/false);
         _pending.remove_at(i);
     }
@@ -396,6 +400,9 @@ bool vulkan_upload_async_system::run_one_window()
         // A source-driven transfer needs a chunk in hand before a window can be filled with it.
         if (candidate.source != nullptr && candidate.chunk.empty() && !candidate.source_done)
         {
+            // The source is the caller's code, so it runs under the caller's context.
+            cc::async_ambient_install_scope const installed(candidate.ambient);
+
             auto poll = candidate.source->try_next_chunk();
             if (poll.status == sg::stream_source_status::not_yet)
             {
@@ -407,6 +414,7 @@ bool vulkan_upload_async_system::run_one_window()
                 // The only way out for a source that can never produce what it promised — without it the transfer
                 // would sit here forever, and anything chained onto its completion with it.
                 signal_on_queue(candidate.completion);
+                sg::impl::release_ambient(candidate.ambient);
                 if (candidate.stream != nullptr && candidate.stream->completion != nullptr
                     && !candidate.stream->completion->is_ready())
                     candidate.stream->completion->push_error(cc::async_error::make_error(cc::any_error("stream source "
@@ -429,6 +437,11 @@ bool vulkan_upload_async_system::run_one_window()
     }
 
     auto& job = _pending[index];
+
+    // Everything this window does is on behalf of whoever enqueued the job, so a validation message its submit raises
+    // finds them.
+    // Referenced rather than copied: every settle below releases the job's hold first — see sg::impl::release_ambient.
+    cc::async_ambient_install_scope const installed(job.ambient);
 
     auto const target = job.buffer_target.lock();
     auto const texture = job.texture_target.lock();

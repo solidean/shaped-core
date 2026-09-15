@@ -127,6 +127,7 @@ private:
     // An empty window still submits and signals, keeping the fence monotonic and gap-free.
     void fold_cancelled_completion(dx12_async_download_job& job)
     {
+        sg::impl::release_ambient(job.ambient);
         // The future itself is gone, but a completion() handed out earlier can outlive it — and a manual node nobody
         // pushes parks its dependents forever, so cancellation has to be said out loud.
         if (job.completion)
@@ -312,6 +313,7 @@ private:
         isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
         dx12_download_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
+        cc::async_ambient_install_scope const installed(a.job.ambient); // recording this chunk is this job's alone
         dx12_pending_copy chunk = a.packer->execute_next_job(*_list.Get(), alloc);
         if (chunk.bytes == 0)
             return false;
