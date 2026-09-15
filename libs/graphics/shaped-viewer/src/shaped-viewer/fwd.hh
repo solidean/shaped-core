@@ -58,6 +58,9 @@ struct render_settings;
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
+struct quadric3;          // a quadric surface, as the 10 entries of the symmetric 4x4 Q (scene/quadric.hh)
+struct quadric_primitive; // one drawn quadric: a surface, a clipper, and the box both are expressed about
+struct quadric_hit;       // what a ray hit on one is: how far along, and the normal there
 enum class scalar_type : u8;
 struct attribute_format;
 enum class attribute_frequency : u8;

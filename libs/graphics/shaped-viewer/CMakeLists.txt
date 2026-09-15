@@ -15,6 +15,7 @@ add_library(shaped-viewer
     src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
+    src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -194,6 +195,7 @@ if(SC_BUILD_TESTS)
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
         tests/keyed-cache-test.cc
+        tests/quadric-test.cc
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
