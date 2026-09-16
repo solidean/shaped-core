@@ -29,8 +29,10 @@ See [Posting is a separate instruction](../../../docs/guides/reviewing-prs.md#po
 
 ## Use the tool
 
-Drive `review.py` for any review with more than a handful of hunks, which is nearly all of them.
-Chat is fine for a one-line fix; the moment you would be tempted to write "and a few other small things", you needed the ledger.
+**Drive `review.py` for every review, unless the maintainer says in words to skip it.**
+Nothing else lifts it: not a small diff, not findings that look mechanical, not a maintainer who is on a phone, and not a hurry of your own.
+Only "just tell me in chat", or a request naming a single file or line, is the exception.
+
 A chat review posts nothing on its own either — the rule above binds it exactly as it binds a tool-driven one.
 
 The tool exists because a chat review is a narrative, and a narrative silently skips a file.
@@ -88,6 +90,10 @@ One entry per round is plenty; if there is nothing to say, leave the group empty
 
 They combine.
 Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment --goal land-changes`.
+
+**A maintainer naming a goal is picking a workflow, never opting out of the tool.**
+"It is my PR, so land changes" means `--goal land-changes` driven through `review.py`, with its rounds and its ledger — it does not mean fix things and report back in chat.
+The goal says what the review is for; the tool is how every review runs.
 
 ## The flow
 
