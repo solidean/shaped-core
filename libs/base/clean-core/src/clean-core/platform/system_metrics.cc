@@ -198,14 +198,10 @@ cc::result<cc::cpu_counter_set, cc::query_error> read_counters()
     // Darwin counts in scheduler ticks, which are hundredths of a second on every version that has shipped.
     constexpr f64 k_per_tick = 1.0 / 100.0;
 
-    auto info = host_cpu_load_info_data_t{};
-    auto count = mach_msg_type_number_t(HOST_CPU_LOAD_INFO_COUNT);
-    if (::host_statistics(::mach_host_self(), HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&info), &count)
-        != KERN_SUCCESS)
-        return cc::error(read_failed("host_statistics(HOST_CPU_LOAD_INFO)"));
-
+    // The total is summed from the cores rather than read from host_statistics, which is the fallback only.
+    // host_statistics is rate-limited for non-platform binaries and quietly answers with a cached reading,
+    // so its total can stand still for a second while every core climbs.
     auto out = cc::cpu_counter_set();
-    out.total = counters_from(info.cpu_ticks, k_per_tick);
 
     natural_t cores = 0;
     processor_info_array_t per_core = nullptr;
@@ -214,11 +210,27 @@ cc::result<cc::cpu_counter_set, cc::query_error> read_counters()
         == KERN_SUCCESS)
     {
         for (natural_t i = 0; i < cores; ++i)
-            out.per_core.push_back(counters_from(&per_core[i * CPU_STATE_MAX], k_per_tick));
+        {
+            auto const core = counters_from(&per_core[i * CPU_STATE_MAX], k_per_tick);
+            out.per_core.push_back(core);
+            out.total.user_secs += core.user_secs;
+            out.total.system_secs += core.system_secs;
+            out.total.idle_secs += core.idle_secs;
+        }
 
         ::vm_deallocate(::mach_task_self(), vm_address_t(per_core), per_core_count * sizeof(integer_t));
     }
 
+    if (!out.per_core.empty())
+        return out;
+
+    auto info = host_cpu_load_info_data_t{};
+    auto count = mach_msg_type_number_t(HOST_CPU_LOAD_INFO_COUNT);
+    if (::host_statistics(::mach_host_self(), HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&info), &count)
+        != KERN_SUCCESS)
+        return cc::error(read_failed("host_statistics(HOST_CPU_LOAD_INFO)"));
+
+    out.total = counters_from(info.cpu_ticks, k_per_tick);
     return out;
 }
 

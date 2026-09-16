@@ -76,12 +76,13 @@ void enqueue_store(std::weak_ptr<cache_core> const& core,
     if (!options.compute_time_secs.has_value())
         options.compute_time_secs = cc::current_time_steady_secs() - compute_began;
 
-    // Fire and forget: the promise is dropped here, and a failure to store never touches the value we return.
+    // Fire and forget: nobody awaits the promise, and a failure to store never touches the value we return.
     // That is the mechanical reason a broken cache is slow rather than lossy.
-    (void)held->actor->enqueue_message(put_request{.key = key,
-                                                   .data = value,
-                                                   .options = cc::move(options),
-                                                   .promise = cc::make_async_manual<put_result>()});
+    // Tracked only once accepted, since a rejected message is never answered.
+    auto promise = cc::make_async_manual<put_result>();
+    if (held->actor->enqueue_message(
+            put_request{.key = key, .data = value, .options = cc::move(options), .promise = promise}))
+        held->backlog.track(promise);
 }
 
 /// The acquire pipeline: lookup, then compute on a miss, then store.
@@ -212,6 +213,11 @@ cc::unique_ptr<blob_cache> blob_cache::create_disabled()
 cc::shared_async<cc::unit> blob_cache::opened() const
 {
     return _core->opened;
+}
+
+cc::async_backlog const& blob_cache::backlog() const
+{
+    return _core->backlog;
 }
 
 // ---- reading and writing -------------------------------------------------------------------------

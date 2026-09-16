@@ -9,6 +9,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
@@ -145,6 +146,10 @@ public:
 
     /// Deduplicated, async layout / pipeline cache: `ctx.cached.acquire_compute_pipeline(...)`.
     context_cached_scope cached;
+
+    /// Work started against this context that nobody has to await — pipeline builds, or what a routine kicks off on the frame path.
+    /// Such work references the context, so `routines.clear()` waits for it, and a test awaits `ctx.backlog.settled()` before it ends.
+    cc::async_backlog backlog;
 
     /// Per-context render-routine registry (see routine_registry / render_routine).
     /// Routines are reached by type through `sg::render_routine::acquire_exclusive(cmd)`, or `acquire(cmd)` to only read.

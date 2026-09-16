@@ -54,10 +54,9 @@ struct resolved_view
 
     /// Whether some procedural instance here names a permutation that has not finished compiling.
     ///
-    /// It decides whether the trace is handed the PROCEDURAL stand-in, and the answer has to be this narrow.
-    /// Acquiring that stand-in GENERATES and compiles a permutation, and a node started on the frame path is one the
-    /// routine's shutdown drain then owes a wait — so asking for one the view could never select leaves a compile
-    /// running that nothing needs and nothing is waiting on.
+    /// It decides whether the trace is handed the PROCEDURAL stand-in, and the answer is this narrow on purpose:
+    /// acquiring that stand-in GENERATES and compiles a permutation, so a scene whose quadrics are all shading
+    /// normally — or which has none at all — would be paying for a hit group nothing in it could ever select.
     /// Read with `try_value`, which observes a node without starting it.
     bool wants_quadric_fallback = false;
 };
@@ -500,7 +499,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const bindless = resources.freeze();
 
     // Acquired only where a procedural instance actually has nothing to shade with yet: acquiring generates and
-    // compiles a permutation, so asking for one in the steady state would start work nothing ever needs.
+    // compiles a permutation, so asking for one in the steady state would start work nothing ever selects.
     auto const* const quadric_fallback
         = resolved.wants_quadric_fallback ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
@@ -596,7 +595,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const bindless = resources.freeze();
 
     // Acquired only where a procedural instance actually has nothing to shade with yet: acquiring generates and
-    // compiles a permutation, so asking for one in the steady state would start work nothing ever needs.
+    // compiles a permutation, so asking for one in the steady state would start work nothing ever selects.
     auto const* const quadric_fallback
         = resolved.wants_quadric_fallback ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 

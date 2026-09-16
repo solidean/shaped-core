@@ -11,10 +11,7 @@ using namespace cc::primitive_defines;
 // Headless, one view traced repeatedly: what a view's persistent record does across frames.
 // No pixel readback — the observable surface is the target's identity and the accumulation counter, which is exactly
 // what decides whether the shader overwrites the image or blends into it.
-//
-// Each section uses its own view_id: sections share the enclosing setup rather than re-running it, so a shared id would
-// carry one section's accumulation into the next.
-INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -190,6 +187,9 @@ INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::contex
         (void)trace(scaled);
         CHECK(accumulated(v.id) == 1);
     }
+
+    // Reached at the end of every pass, so what one section's traces detached never outlives it.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The same property as above, but down the *plan* path — `viewer_renderer::execute` -> `view_renderer::resolve` +
@@ -307,4 +307,6 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);
     CHECK(slot->texture.raw() != nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

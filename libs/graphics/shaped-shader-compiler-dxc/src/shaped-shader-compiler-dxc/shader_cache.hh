@@ -4,6 +4,7 @@
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/key_value_cache.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <shaped-graphics/fwd.hh> // sg::async_compiled_shader
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 #include <shaped-shader-compiler-dxc/fwd.hh> // also what puts the bare sized aliases in scope inside ssc::dxc
@@ -47,6 +48,9 @@ public:
     /// Runs bookkeeping (e.g. in-memory eviction) on all tiers.
     void apply_bookkeeping();
 
+    /// Every compile this cache started, which runs to a result whether or not its caller awaits it.
+    [[nodiscard]] cc::async_backlog const& backlog() const { return _backlog; }
+
 private:
     [[nodiscard]] cc::hash128 compute_key(shader_description const& desc, compile_options const& options) const;
 
@@ -59,4 +63,5 @@ private:
 
     cc::optional<bcache::blob_cache*> _blob_cache;
     cc::key_value_cache<cc::hash128, sg::async_compiled_shader> _cache;
+    cc::async_backlog _backlog;
 };

@@ -6,6 +6,7 @@
 #include <nexus/bench/report.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/bench/run_async.hh>
+#include <nexus/bench/statistics.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
 
@@ -56,7 +57,9 @@ nx::bench::run_config quick()
 {
     auto c = nx::bench::run_config::standard();
     c.min_time_secs = 0.002;
-    c.max_time_secs = 0.15;
+    // Far above what 32 samples of about a millisecond take: a run here ends on its sample cap or its effort floor.
+    // Only a starved machine reaches this, and it would then cut short the sample counts the tests assert on.
+    c.max_time_secs = 10;
     c.min_samples = 8;
     c.max_samples = 32;
     c.warmup_time_secs = 0.001;
@@ -274,16 +277,30 @@ TEST("bench - a sample cap that cannot satisfy min_time is not a convergence fai
     // The regression: with 1 ms batches, min_time_secs of 0.5 needs about 500 samples.
     // A max_samples below that means elapsed never reaches min_time, so a run that had long since hit its target
     // precision still reported itself as not converged, every single time.
+    //
+    // Driven through the stopping rule with the times handed in rather than measured.
+    // End to end, a stalled sample can reach the wall cap first and spread the samples past the target, and neither is what this pins.
     auto cfg = quick();
     cfg.min_time_secs = 10; // unreachable at this batch size and cap
     cfg.max_samples = 12;
     cfg.target_relative_error = 0.9; // trivially met, so precision is not what is under test
 
-    auto acc = u64(0);
-    auto const r = nx::bench::run("capped", cfg, [&] { acc = work(acc); });
+    auto r = nx::bench::result{};
+    auto elapsed = 0.0;
+    auto stopped = false;
+    while (!stopped && r.samples.size() < 100)
+    {
+        r.samples.push_back(0.001);
+        elapsed += 0.001;
+        stopped = nx::bench::impl::sampling_should_stop(r, cfg, elapsed, elapsed);
+    }
 
     CHECK(isize(r.samples.size()) == 12);
     CHECK(r.converged); // the answer was precise, whatever ended the loop
+
+    r.time = nx::bench::compute_statistics(r.samples);
+    r.measured_seconds = elapsed;
+    nx::bench::impl::finish_sampled_result(r, cfg, elapsed);
     CHECK(r.find_warning(nx::bench::warning_kind::did_not_converge) == nullptr);
 }
 

@@ -100,12 +100,6 @@ material_permutation const* material_shader_cache::find(cc::hash128 key) const
     return _by_key.get_ptr(key);
 }
 
-material_permutation const* material_shader_cache::find_fallback(geometry_kind kind) const
-{
-    // The same key `acquire` would compute, re-derived rather than remembered: the fallback resolution is a pure
-    // function of the kind, so there is no state here that could disagree with what was minted.
-    return find(material_shader_key(fallback_resolution(kind).permutation_key, generation_options(kind)));
-}
 
 material_permutation const& material_shader_cache::acquire(resolved_material const& r, geometry_kind kind)
 {

@@ -3,6 +3,7 @@
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
+#include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
 
@@ -24,17 +25,20 @@ constexpr char const* hardware_driver = "sr dx12 - hardware";
 
 /// Fails whichever test provoked it on any debug-layer warning or worse, bar the advisories sg provokes on purpose.
 /// Without this a validation error is a line on stderr nobody reads, and the run stays green.
+//
+// A message raised where no test is installed — a copy window packing several transfers' copies — lands on this driver.
+// The context is the driver's own, so the captured driver is released with it, before the driver ends.
 void fail_on_validation_messages(sg::context_handle const& ctx)
 {
     static_cast<dx12::dx12_context&>(*ctx).set_message_callback(
-        [](dx12::dx12_message_severity severity, cc::string_view message)
+        [driver = nx::capture_current_test()](dx12::dx12_message_severity severity, cc::string_view message)
         {
             if (severity > dx12::dx12_message_severity::warning)
                 return;
             if (dx12::is_expected_validation_message(message))
                 return;
 
-            CHECK(false).context(cc::format("dx12 debug layer: {}", message));
+            nx::with_fallback_test(driver, [&] { CHECK(false).context(cc::format("dx12 debug layer: {}", message)); });
         });
 }
 } // namespace

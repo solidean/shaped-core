@@ -147,6 +147,17 @@ def candidates_for(
     return out
 
 
+def superseded_by_move(ledger: Ledger, candidates: list[Candidate], net: LineSpace) -> list[Change]:
+    """The live changes a head move retires: their claim left net space, and no candidate carries their content.
+
+    A change whose digest a candidate still carries is the same hunk at new line numbers, which `register` re-points.
+    Superseding it instead would be permanent, since `register` leaves a superseded change alone and no ingest creates
+    a second change for a known digest, so its atoms would stay unaccounted for good.
+    """
+    surviving = {c.digest for c in candidates}
+    return [c for c in ledger.live() if c.digest not in surviving and c.claim.intersect(net).is_empty]
+
+
 def register(
     ledger: Ledger, candidates: list[Candidate], *, round_number: int,
     write_body, only_uncovered: bool = False,

@@ -148,9 +148,11 @@ ASYNC_INVOCABLE_TEST("sg pipeline_cache - a different shader yields a different 
 
     CHECK(base.get() != other.get());
 
-    // Identity is the claim, but both are real PSO builds on the ambient scheduler — finished here rather than left running past the test.
-    co_await cc::async_settled(base);
-    co_await cc::async_settled(other);
+    // Identity is the claim, but both are real PSO builds on the ambient scheduler, and nobody here awaits them.
+    // The context tracked both, so its backlog is what finishes them rather than leaving them running past the test.
+    co_await cc::async_settled(ctx.backlog.settled());
+    CHECK(base->is_ready());
+    CHECK(other->is_ready());
 }
 
 INVOCABLE_TEST("sg pipeline_cache - pipeline-level static samplers participate in the pipeline-layout key",

@@ -89,8 +89,7 @@ public:
     /// a caller waiting for a settled image has to watch this AND `view_ref::accumulated_frames`.
     [[nodiscard]] isize pending_resource_work() const;
 
-    /// Completes once the background work this viewer has started so far is finished, whether it succeeded or failed.
-    /// Such work runs on the pool and outlives the frame, so a loop that must leave nothing running waits on this before it ends.
+    /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.
     /// **Lazy**: start it with `cc::async_start` after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();

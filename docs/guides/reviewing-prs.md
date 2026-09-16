@@ -162,6 +162,11 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
   The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
   What landed was `frame::background_work() -> cc::shared_async<cc::unit>`, which covers the fallback today and grows with the internals while its signature stays put.
   The same holds for a fix a review lands: an accessor added to reach one internal is a finding against the fix.
+  **It binds the doc comment as much as the signature.**
+  pr-174 kept `sv::background_work(ctx)` outcome-only in its type and then listed the three backlogs it settles in the header, the cheat sheet and the guidelines.
+  The maintainer's answer was that exhaustively enumerating internals in public API comments is unnecessary.
+  The line they called exactly the right sentiment: "settles once the background work so far is done, including process-wide compiles and cache writes; what it covers is internal".
+  What survives from such a list is only the fact a caller could be wrong about — there, that the wait is process-wide despite the `ctx` parameter.
 
 Report API shape **in symbols**: signatures, the actual type names, and a few lines of call-site code.
 Prose about an API is much harder to judge than the API.
@@ -224,6 +229,23 @@ The lighter the process, the more the rule is carrying: a chat review that skips
 The worked example is a review of #154 that went well and then posted itself.
 The maintainer had opened with "this is a small one, so maybe in-chat is sufficient" and "goal is pr comment", read nothing, and found the comment already on the PR.
 A review the maintainer has not seen is a draft whatever its quality, and publishing one spends their credibility on findings they never agreed to.
+
+### A review that lands changes records them as a comment
+
+**The PR description is immutable once the PR is open; what a review changed goes into a PR comment.**
+The comment says what the review commits changed and why, measured against the description: which of its claims no longer hold, and what replaced them.
+A PR is then a record of how the change developed, which is worth more here than a description kept clean.
+
+This binds a `land-changes` review on our own branch as much as one on someone else's.
+The comment is drafted like any other artifact and still posts only on the maintainer's go-ahead.
+
+pr-178 is the worked case.
+The review settled from DXC's source the one question the description called unsettleable, and the first instinct was to rewrite that line of the description.
+The maintainer's answer, verbatim:
+
+```raw
+the pr description stays immutable and we have a record of development instead. that is more valuable for our purposes than a "clean" pr description
+```
 
 ### Price work in what it improves and how long an agent takes, never in human hours
 
@@ -341,6 +363,21 @@ The seam's own contract was never violated, and both halves are correct read on 
 The generalization the maintainer drew is worth keeping beside it: **trailer metadata is a design smell for anything that cannot assume bounded frames.**
 "Seek to the end and read it properly" works only where the frame ends where the stream ends, which a blob embedded in a container never does.
 So the answer was that deflate has no streaming size hint at all, rather than a cleverer way to find one.
+
+### An amortised pass under a lock is profiled, and says what it can cost
+
+Amortised O(1) is an average, and the pass that pays for it is O(n) in one go.
+When that pass runs under a lock other threads take on a hot path, one large instance stalls all of them at once — which a frame shows as a stutter and nothing else attributes.
+
+So a review that recommends such a pass, or finds one, asks for two things beside it.
+A `CC_RECORD_SCOPE_IF` gated on the size, so a large pass shows up in a profile by name while small ones cost nothing.
+And a comment saying the pass can cause stutter in pathological cases, so whoever sees the scope knows what they are looking at.
+Keeping the algorithm simple is still fine; the point is that its worst case is visible rather than solved.
+
+pr-174 is the worked case.
+The review recommended that `cc::async_backlog::track_node` compact its whole ring once it doubles past what last survived, instead of pruning from the front.
+The maintainer accepted it with exactly this condition: larger compactions behind a record scope, and a comment that they may cause frame stutter in pathological situations.
+What landed opens `CC_RECORD_SCOPE_IF(count >= 1024, "cc.async_backlog.compact")`.
 
 ### The `#ifdef` arm this machine does not compile is where the defect is
 

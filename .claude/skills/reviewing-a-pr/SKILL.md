@@ -84,6 +84,8 @@ One entry per round is plenty; if there is nothing to say, leave the group empty
 
 - **`pr-comment`** — the artifact is one standalone comment for an author who was not in the conversation.
 - **`land-changes`** — the rounds are work orders you carry out in this session, and `sync` verifies each fix landed.
+  It still ends in a PR comment: what the review changed and why, measured against the PR description.
+  The description itself is never edited — see [A review that lands changes records them as a comment](../../../docs/guides/reviewing-prs.md#a-review-that-lands-changes-records-them-as-a-comment).
 - **`design`** — no changeset at all; the artifact is agreement on something that does not exist yet.
 
 They combine.
@@ -282,6 +284,7 @@ Name it with `title` as usual, and hand it over the same way.
 
 9. **When most entries are settled, draft the artifact as an entry.**
    For a `pr-comment` review, add `985-draft-comment` immediately before `990` holding the comment you would actually post, and ask whether to post it.
+   A `land-changes` review drafts one too, once its fixes are pushed: what the review commits changed and why, against the PR description.
    The maintainer approves the exact text rather than a summary of it, which is the last thing they cannot check any other way.
    See [entry-types/draft-artifact.md](../../../tools/review/docs/entry-types/draft-artifact.md).
 

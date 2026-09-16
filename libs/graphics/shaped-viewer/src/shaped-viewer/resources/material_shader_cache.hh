@@ -143,11 +143,6 @@ public:
     /// The neutral quadric permutation — `acquire_fallback(geometry_kind::quadrics)`.
     material_permutation const& acquire_quadric_fallback();
 
-    /// The neutral permutation of `kind` if something has already acquired it, else null.
-    ///
-    /// The lookup form of `acquire_fallback`, for a caller asking "is there one" rather than "give me one" — acquiring
-    /// starts a compile, and a caller reporting on outstanding work would otherwise create the work it reports.
-    [[nodiscard]] material_permutation const* find_fallback(geometry_kind kind) const;
 
     /// The permutation for `key`, or null if nothing has acquired it.
     [[nodiscard]] material_permutation const* find(cc::hash128 key) const;

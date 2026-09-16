@@ -34,6 +34,7 @@ class ssc::dxc::compiler
 public:
     /// Creates a compiler (one IDxcUtils + IDxcCompiler3). Fails only on a broken DXC install.
     /// A compiler instance is not thread-safe; use one per thread.
+    /// Instances on different threads may compile at the same time.
     [[nodiscard]] static cc::result<compiler> create();
 
     compiler(compiler const&) = delete;

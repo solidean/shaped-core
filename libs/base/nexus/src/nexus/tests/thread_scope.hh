@@ -11,7 +11,8 @@
 // These are the door out of that: capture on the test's thread, install on the other one.
 //
 // Nothing here is needed for work driven by cc::async, which is already attributed.
-// Note also what this does NOT buy: sections stay owned by the test's own thread.
+// Note also what this does NOT buy: in a TEST, opening sections stays with the test's own thread.
+// Checks reported here are filed under the section whose pass is running.
 // And a REQUIRE here records a failure instead of aborting, since nothing would catch the throw.
 
 /// Attribute everything the calling thread reports to a captured test, for this scope.
@@ -26,6 +27,12 @@ struct nx::test_thread_scope
 private:
     cc::async_ambient_install_scope _scope;
 };
+
+namespace nx::impl
+{
+/// Whether a report from the calling thread would find a test, running or already finished.
+[[nodiscard]] bool has_current_test();
+} // namespace nx::impl
 
 namespace nx
 {
@@ -47,5 +54,22 @@ template <class F>
         test_thread_scope const scope(captured);
         fn();
     };
+}
+
+/// Run `f` attributed to the calling thread's own test, or to `fallback` when the thread carries none.
+///
+/// For a callback a library raises from threads of its own, such as a graphics API's validation messages.
+/// Under a test the report lands there; anywhere else it lands on whoever installed the callback, rather than failing the run with no test named.
+/// `fallback` must be released before its test ends, or the test counts it as async work left running.
+template <class F>
+void with_fallback_test(cc::async_ambient_handle const& fallback, F&& f)
+{
+    if (impl::has_current_test())
+    {
+        f();
+        return;
+    }
+    test_thread_scope const scope(fallback);
+    f();
 }
 } // namespace nx

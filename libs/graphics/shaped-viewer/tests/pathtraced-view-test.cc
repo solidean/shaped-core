@@ -13,7 +13,7 @@
 //
 // No pixel readback: this asserts the pipeline runs rather than inspecting the image (same philosophy as the
 // raytraced-view test). Reaching the end without an assert/exception means every GPU stage succeeded.
-INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -139,6 +139,8 @@ INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_handle co
     CHECK(mesh_rec->triangle_count == box.materials.size());
     CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
     CHECK(records[0].is_indexed == 0u);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile costs its own meshes, not the view",
@@ -242,6 +244,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     // Driven, because the fallback's own state object is built asynchronously — see sv_test::frames_until_executed.
     CHECK(sv_test::frames_until_executed(
         ctx, [&](sg::command_list& cmd) { return trace(cmd, &resources.shaders.acquire_fallback()); }));
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The same trace, shaded through a texture rather than through per-face colours.
@@ -254,8 +258,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 //
 // What makes this test mean something is the sampler count below: a change that stopped generating samplers would
 // otherwise leave it green while testing nothing.
-INVOCABLE_TEST("sv - a path-traced textured material builds its sampler group (headless)",
-               (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler group (headless)",
+                     (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -350,4 +354,6 @@ INVOCABLE_TEST("sv - a path-traced textured material builds its sampler group (h
                                                         .hit_groups = hit_groups,
                                                         .bindless = &bindless});
         }));
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

@@ -50,7 +50,7 @@ TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-wo
 ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; nexus awaits the body
 {                                        //   a CHECK at any depth below it still lands on THIS test
     auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
-    CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
+    CHECK(e.is_compiled());              //   SECTION works as in a TEST; a graph error fails the test by name
 }                                        // must be a coroutine: nothing to await? end with `co_return;`
 // Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
 // Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
@@ -287,9 +287,12 @@ nx::test_thread_scope const s(captured);    \ ... on that thread
   A check that proved nothing must not look like a pass.
 - **Off the test's own thread, `REQUIRE`/`SKIP` abort only where a throw can land.**
   Inside an async frame it terminates that node (cc::async turns it into the node's error); on a bare thread it degrades to a recorded failure.
-- **`SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
+- **In a `TEST`, `SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
   Opening one elsewhere is a recorded failure.
-- **Leaving async work running past the end of a test fails that test**, by name: it would otherwise report into whatever runs next.
+- **In an `ASYNC_TEST`, open sections from the body or from work it awaits one at a time** — each pass gets a fresh coroutine.
+  Sections from concurrently running strands that close out of order fail the test by name.
+- **Every check reported during a pass lands on that pass's section**, whichever thread or worker reported it.
+- **Leaving async work running past the end of a section fails that section and ends the test**, by name: it would otherwise report into whatever runs next.
 
 ## Chaining diagnostics (on the check_handle)
 

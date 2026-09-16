@@ -1,5 +1,7 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -8,7 +10,7 @@
 // The frame-level counterpart is viewer-renderer-test; this one pins the half a caller reaches for when it wants the image rather than a composited frame.
 //
 // No pixel readback: reaching the end without an assert / exception / debug-layer error means the trace recorded and ran.
-INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -65,8 +67,8 @@ INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle c
                                                                                          : sg::routine_outcome::declined;
                                            }));
 
-    // Every trace starts the fallback's compile whether or not it is needed, and it must not outlive the test.
-    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
+    // What the traces started — the permutation compiles and the pipeline builds — must not outlive the test.
+    co_await cc::async_settled(sv::background_work(ctx));
 
     CHECK(traced.width() == size[0]);
     CHECK(traced.height() == size[1]); // sized from the view, not from any target
@@ -75,7 +77,7 @@ INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_handle c
 // The same frame, driven from indexed geometry: an indexed BLAS build plus the closest-hit's Vertices[Indices[..]] lookup.
 // A Cornell box is the payload because its quads genuinely share vertices, so welding actually shrinks the vertex buffer.
 // The index buffer is then not the identity sequence the non-indexed path would synthesize.
-INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
 
@@ -137,7 +139,7 @@ INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (sg::co
                                                return store.accumulated_frames(v.id) > 0 ? sg::routine_outcome::executed
                                                                                          : sg::routine_outcome::declined;
                                            }));
-    CHECK(sv_test::drain_ambient_work(resources.shaders.acquire_fallback().shader));
+    co_await cc::async_settled(sv::background_work(ctx));
 
     // A second acquire of the same content must hit the cache rather than build a second BLAS.
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));

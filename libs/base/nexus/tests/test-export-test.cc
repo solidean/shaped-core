@@ -449,7 +449,10 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
                         {
                             auto cfg = nx::bench::run_config::standard();
                             cfg.min_time_secs = 0.001;
-                            cfg.max_time_secs = 0.05;
+                            // max_time_secs is wall time and wins over min_samples, so a tight cap on a loaded
+                            // machine stops this loop short of the eight samples checked below.
+                            // Eight samples of this body take microseconds, so only a stalled run ever reaches this.
+                            cfg.max_time_secs = 10.0;
                             cfg.min_samples = 8;
                             cfg.max_samples = 16;
                             cfg.warmup_time_secs = 0.001;

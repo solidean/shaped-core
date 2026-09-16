@@ -4,6 +4,8 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/array.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -250,7 +252,8 @@ image_stats trace_furnace(sg::context& ctx,
 }
 } // namespace
 
-INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environment", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environment",
+                     (sg::context_handle const& ctx_h))
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
@@ -404,4 +407,6 @@ INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environmen
         CHECK(tg::abs(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
             .dump("clear", lossless_means[0])
             .dump("scattering", lossless_means[i]);
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }
