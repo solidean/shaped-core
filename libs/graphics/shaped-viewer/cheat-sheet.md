@@ -401,6 +401,64 @@ Nothing renders either form directly: the renderer consumes `sv::scene_item` (id
 `sv::resolve_material` runs against the GPU form, since that is the one whose attributes and textures are already named by id.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
 
+## Quadric authoring — analytic spheres and tubes
+
+```cpp
+#include <shaped-viewer/scene/quadric_set.hh>
+
+sv::quadric3                     // a quadric surface: the 10 entries of the symmetric 4x4 Q, as {diag, off_diag, linear, constant}
+sv::quadric3::sphere_about_origin(r)           // -> |p|^2 - r^2
+sv::quadric3::cylinder_about_origin(axis, r)   // -> the infinite cylinder about the origin along unit `axis`
+sv::quadric3::slab(axis, offset, half_height)  // -> (p.axis - offset)^2 - h^2; the clipper that makes a cylinder finite
+q.evaluate(p);  q.gradient(p);   // p is the DISPLACEMENT from the primitive's origin, not a world position
+
+sv::quadric_primitive            // { pos3f origin; quadric3 surface; quadric3 clip; aabb3f bounds; } — 92 bytes on the GPU, plus the box
+sv::quadric_primitive::create_sphere(tg::sphere3f)               // unclipped
+sv::quadric_primitive::create_cylinder(tg::segment3f, radius)    // an OPEN tube: the ends are where the clipper cuts
+p.admits(world_p);  p.normal_at(world_p);  p.end_parameter(world_p)  // 0 at the segment's first end, 1 at its second
+sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
+sv::append_capsule(out, segment, radius)       // three primitives: the cylinder plus a sphere at each end
+
+sv::quadric_set                  // the batch a caller builds and holds — the quadric counterpart of sv::mesh
+set.add(tg::sphere3f);  set.add(tg::segment3f, radius);  set.add_capsule(segment, radius);  set.add(primitive)
+set.clear();  set.reserve(n)
+set.primitives();  set.primitive_count();  set.hash();  set.bounds();  set.is_ready()
+set.name;  set.attributes;  set.transform;  set.material    // one material per batch; per-primitive variation is an attribute
+
+sv::resident_quadric_set         // that batch as resources: a quadric_set_id, bound attributes, transform, material, summary
+```
+
+```cpp
+auto set = sv::quadric_set();                       // built once: add() folds the hash and the bounds as it goes
+for (auto const& v : mesh.vertices()) set.add(tg::sphere3f(v, 0.02f));
+for (auto const& e : mesh.edges())    set.add(tg::segment3f(e.a, e.b), 0.008f);   // FLAT caps — the vertex spheres cover the joints
+set.material = steel;
+
+f.add_scene().add_quadrics(set);                    // -> sv::quadric_ref; uploads nothing when unchanged
+
+auto s = f.add_scene();                             // or, for a handful:
+s.add_sphere(tg::sphere3f(p, 0.02f), steel);        //   into a frame-owned batch per (view, layer, material),
+s.add_line(tg::segment3f(a, b), 0.008f, steel);     //   flushed once before the frame is flattened
+```
+
+**`add` is the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
+The fold is O(1) per primitive and order-SENSITIVE, because primitive order is what `PrimitiveIndex()` reads.
+The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recolouring or re-placing a million-primitive batch re-uploads nothing.
+
+**The primitives live in the SET's space**, and `transform` places that space in the world.
+A non-uniform placement turns its spheres into ellipsoids at no cost, because a general quadric is closed under an affine map where a typed sphere would not be.
+
+**A capsule is not a quadric** — its surface is piecewise — so a round-capped edge is three primitives.
+Where the joints already carry vertex spheres, `add(segment, radius)` is the flat form and is exact there rather than an approximation.
+
+Quadrics carry their own geometric frequencies.
+**`per_quadric`** is one value per primitive, indexed by `PrimitiveIndex()` exactly as `per_triangle` is; **`per_quadric_end`** is two values, blended along the primitive's own axis.
+That axis costs no bytes — it comes back out of the clipping slab, which is offset rather than centred precisely so it carries the axis WITH its sign.
+A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
+The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parametrization.
+
+See [docs/quadrics.md](docs/quadrics.md) for the design, and `examples/mesh-structure.cc` for it in practice.
+
 ## Asset loading — a file into `sv::mesh`
 
 babel reads the formats; sv turns a parsed document into things a view can draw.
