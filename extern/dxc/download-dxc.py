@@ -83,6 +83,16 @@ class Archive:
     def names(self) -> list[str]:
         return self._tar.getnames() if self._is_tar else self._zip.namelist()
 
+    @staticmethod
+    def _posix(name: str) -> str:
+        """A member name with `/` separators.
+
+        The v1.9.2607 Windows zip writes its entries as `bin\\x64\\dxcompiler.dll`, against the zip format's own rule that
+        separators are `/`, so every lookup has to normalize before it compares.
+        Extraction still takes the raw name: it is the key the archive is indexed by.
+        """
+        return name.replace("\\", "/")
+
     def extract(self, member: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if self._is_tar:
@@ -98,19 +108,24 @@ class Archive:
     def find(self, suffix: str) -> str | None:
         """The member whose path ends with `suffix`, since a tar prefixes every entry with `./`."""
         for name in self.names():
-            if name == suffix or name.endswith("/" + suffix):
+            posix = self._posix(name)
+            if posix == suffix or posix.endswith("/" + suffix):
                 return name
         return None
 
 
 # Which release member each declared `license_files` destination is copied from, by the member's upper-cased stem.
-# Matched by name, never by position: the Windows zip ships LICENSE-MS, LICENSE-MIT and LICENSE-LLVM, the Linux tarball
+# Matched by name, never by position: the Windows zip ships LICENSE-MS, the MIT text and LICENSE-LLVM, the Linux tarball
 # only LICENSE-MS and LICENSE-LLVM, so a positional pairing put the MIT text under the LLVM name on one OS and not the other.
+# Upstream has spelled the MIT member both LICENSE-MIT (v1.9.2602.24) and LICENCE-MIT (v1.9.2607), so both map here.
 LICENSE_SOURCES = {
     "LICENSE.TXT": ("LICENSE-MS", "LICENSE"),
     "LICENSE-LLVM.TXT": ("LICENSE-LLVM",),
-    "LICENSE-MIT.TXT": ("LICENSE-MIT",),
+    "LICENSE-MIT.TXT": ("LICENSE-MIT", "LICENCE-MIT"),
 }
+
+# Both spellings of "licence", since upstream uses each in different releases.
+LICENSE_PREFIXES = ("LICENSE", "LICENCE")
 
 
 def license_members(archive: Archive) -> dict[str, str]:
@@ -120,9 +135,9 @@ def license_members(archive: Archive) -> dict[str, str]:
     """
     out = {}
     for name in archive.names():
-        path = Path(name)
+        path = Path(Archive._posix(name))
         depth = len([p for p in path.parts if p not in (".", "")])
-        if path.name.upper().startswith("LICENSE") and depth == 1:
+        if path.name.upper().startswith(LICENSE_PREFIXES) and depth == 1:
             out[path.stem.upper()] = name
     return out
 
