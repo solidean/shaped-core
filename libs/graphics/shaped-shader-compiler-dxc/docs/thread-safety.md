@@ -110,30 +110,32 @@ Provably correct code, reported, because the `.so` is uninstrumented.
 The second is not sanitizer hygiene that happens to be free.
 glibc's locale rwlock was serializing a real share of every concurrent compile, and holding one reference is what stops it.
 
-## What this does not cover: Windows
+## Windows: settled from source, not measured
 
 Everything above was measured on Linux, because ThreadSanitizer does not run on Windows.
 
-There is one reason not to assume it transfers.
-LLVM's `PassRegistry` registers passes lazily on first use, and DXC guards it by platform.
+The one reason it might not transfer is LLVM's `PassRegistry`, which DXC locks differently per platform.
 `include/llvm/PassRegistry.h` wraps its `sys::SmartRWMutex<true> Lock` in `#ifndef LLVM_ON_WIN32`, with a "HLSL Change" comment saying Windows uses a mechanism of its own instead.
-[DXC #8819](https://github.com/microsoft/DirectXShaderCompiler/issues/8819) reports that mechanism as insufficient.
-Concurrent first calls to `IDxbcConverter::Convert` corrupt the registry's `DenseMap`.
+[DXC #8819](https://github.com/microsoft/DirectXShaderCompiler/issues/8819) reports concurrent first calls to `IDxbcConverter::Convert` corrupting the registry's `DenseMap`.
 That is `dxilconv`, which does DXBC to DXIL and which nothing here links — `ssc::dxc` uses `dxcompiler` alone.
 
-The Linux side of it is closed.
+**`dxcompiler` registers every pass at DLL load, and only reads the registry afterwards.**
+Its `DllMain` runs `InitMaybeFail`, which calls `hlsl::SetupRegistryPassForHLSL` and `SetupRegistryPassForPIX` under the loader lock, before any `DxcCreateInstance`.
+The Windows arm of `lib/IR/PassRegistry.cpp` states that design outright: registration is single-threaded at DllMain time, checked by an assert on the registering thread id, so reads need no lock.
+That was read against v1.9.2602.24's sources; not every `registerPass` caller was traced.
+
+The Linux side of it is measured too.
 #8819 notes that identical inputs do not reproduce the race, so the check was rerun with eight threads each starting on a *different* shader.
 Loops, atomics, groupshared plus barriers, texture sampling, wave intrinsics, unrolled math, structured buffers — so that every thread's first compile walks a different pass path.
 Same two families, no third; clean under AddressSanitizer and un-sanitized.
-
-**Open: whether `shader_cache`'s workers can reach that same lazy registration inside `dxcompiler` on Windows.**
-It cannot be settled from a Linux machine, and it is worth settling before anyone leans harder on concurrent compilation there.
 
 ## What would reopen this
 
 - **A DXC release that changes `ScopedLocale` or `ManagedStatic`.**
   Neither changed between v1.9.2602.24, v1.9.2607, v1.10.2605.37 and `main` at the time of writing, so a bump is not expected to move any of this.
   Running this against v1.10.2605.37's `libdxcompiler.so` bore that out: same two families, and `pin_utf8_locale` still leaves only the ManagedStatic one.
+- **A `dxcompiler` compile path that registers a pass after DLL load.**
+  On Windows that would be an unlocked write to a registry every other compile reads, which is #8819's mechanism.
 - **A TSan report through `ssc::dxc` that is not one of the two families above.**
   The suppression is scoped to `libdxcompiler.so` and to nothing of ours, so our own frames are still fully checked.
   A new report is a new finding.

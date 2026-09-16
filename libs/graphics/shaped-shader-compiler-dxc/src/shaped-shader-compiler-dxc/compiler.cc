@@ -89,9 +89,8 @@ struct dxc_invocation
 /// and the locale data behind that is one refcounted process-global in glibc.
 /// With no other reference held, each conversion loads it and the last one frees it, both under a glibc-internal
 /// rwlock -- so concurrent compiles queue on locale bookkeeping rather than on compiling.
-/// One reference held forever keeps the data loaded: worth 34% of wall time across 12 threads, and it is also what
-/// stops ThreadSanitizer reporting those cross-thread load/free pairs as races.
-/// libs/graphics/shaped-shader-compiler-dxc/docs/thread-safety.md carries the measurement and the reports.
+/// One reference held forever keeps the data loaded, and it is also what stops ThreadSanitizer reporting those
+/// cross-thread load/free pairs as races.
 ///
 /// TEMPORARY: the fix belongs upstream, where ScopedLocale should cache a locale rather than rebuild one per call.
 void pin_utf8_locale()
@@ -141,20 +140,20 @@ cc::result<preprocessed_source> compiler::preprocess(shader_description const& d
     auto args = impl::build_preprocess_args(desc, options);
     CC_RETURN_IF_ERROR(args);
 
-    impl::ComPtr<IDxcIncludeHandler> handler = impl::make_include_handler(_state->utils.Get(), resolve_include);
+    auto handler = impl::make_include_handler(_state->utils.Get(), resolve_include);
     auto invocation = invoke_dxc(_state->utils.Get(), _state->compiler.Get(), desc.source, args.value(), handler.Get(),
                                  "shader preprocess failed");
     CC_RETURN_IF_ERROR(invocation);
-    IDxcResult* result = invocation.value().result.Get();
+    auto* const result = invocation.value().result.Get();
 
     impl::ComPtr<IDxcBlob> hlsl;
     if (HRESULT hr = result->GetOutput(DXC_OUT_HLSL, IID_PPV_ARGS(hlsl.GetAddressOf()), nullptr); FAILED(hr) || !hlsl)
         return impl::dxc_error(hr, "GetOutput(DXC_OUT_HLSL)");
 
-    preprocessed_source out;
-    out.source = cc::string(reinterpret_cast<char const*>(hlsl->GetBufferPointer()), isize(hlsl->GetBufferSize()));
-    out.warnings = impl::dxc_diagnostics(result);
-    return out;
+    return preprocessed_source{
+        .source = cc::string(reinterpret_cast<char const*>(hlsl->GetBufferPointer()), isize(hlsl->GetBufferSize())),
+        .warnings = impl::dxc_diagnostics(result),
+    };
 }
 
 cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc, compile_options const& options)
@@ -166,11 +165,11 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
     CC_RETURN_IF_ERROR(args);
 
     // Reject includes: compile() takes already-preprocessed source.
-    impl::ComPtr<IDxcIncludeHandler> reject = impl::make_reject_include_handler();
+    auto reject = impl::make_reject_include_handler();
     auto invocation = invoke_dxc(_state->utils.Get(), _state->compiler.Get(), desc.source, args.value(), reject.Get(),
                                  "shader compilation failed");
     CC_RETURN_IF_ERROR(invocation);
-    IDxcResult* result = invocation.value().result.Get();
+    auto* const result = invocation.value().result.Get();
 
     impl::ComPtr<IDxcBlob> object;
     if (HRESULT hr = result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(object.GetAddressOf()), nullptr);
@@ -192,24 +191,24 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
 #endif
     CC_RETURN_IF_ERROR(reflected);
 
-    sg::compiled_shader shader;
-    shader.stage = desc.stage;
-    shader.format = options.target == compile_target::spirv ? sg::shader_format::spirv : sg::shader_format::dxil;
-    shader.entry_point = desc.entry_point;
-    auto const bytes = cc::span<byte const>(reinterpret_cast<byte const*>(object->GetBufferPointer()),
-                                            isize(object->GetBufferSize()));
-    shader.bytecode = cc::make_pinned_data(bytes);
-    shader.bindings = cc::move(reflected.value().bindings);
+    auto bindings = cc::move(reflected.value().bindings);
     // Reflection reports what the shader declares, never which stage it was compiled for, so the stage is
     // stamped here — the one place that knows it.
     // merge_bindings then unions the stages as a pipeline's shaders are folded into one layout.
-    sg::apply_stage_visibility(shader.bindings, shader.stage);
-    shader.workgroup_size = reflected.value().workgroup_size;
-    shader.compiler = sg::compiler_info{
-        .name = cc::string("dxc"),
-        .version = _state->version,
-        .signature = impl::join_args(args.value()),
+    sg::apply_stage_visibility(bindings, desc.stage);
+
+    return sg::compiled_shader{
+        .stage = desc.stage,
+        .format = options.target == compile_target::spirv ? sg::shader_format::spirv : sg::shader_format::dxil,
+        .entry_point = desc.entry_point,
+        .bytecode = cc::make_pinned_data(object_bytes),
+        .bindings = cc::move(bindings),
+        .workgroup_size = reflected.value().workgroup_size,
+        .compiler = {
+            .name = cc::string("dxc"),
+            .version = _state->version,
+            .signature = impl::join_args(args.value()),
+        },
     };
-    return shader;
 }
 } // namespace ssc::dxc

@@ -22,7 +22,7 @@ called_from_lib:libvulkan_radeon.so
 # Concurrent compilation itself is safe, and the locale reports that used to dominate this entry are gone at the
 # source -- ssc::dxc::pin_utf8_locale holds the reference whose churn glibc was reporting.
 # shaped-shader-compiler-dxc/docs/thread-safety.md is the investigation, the controls that prove each half, and what
-# would make this entry droppable.
+# would reopen it.
 called_from_lib:libdxcompiler.so
 
 # SDL3's D-Bus integration, reached through sr::window_system.

@@ -70,6 +70,16 @@ def already_installed(pin_hash: str) -> bool:
     return PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == pin_hash
 
 
+def _posix(name: str) -> str:
+    """An archive member name with `/` separators.
+
+    The v1.9.2607 Windows zip writes its entries as `bin\\x64\\dxcompiler.dll`, against the zip format's own rule that
+    separators are `/`, so every lookup has to normalize before it compares.
+    Extraction still takes the raw name: it is the key the archive is indexed by.
+    """
+    return name.replace("\\", "/")
+
+
 class Archive:
     """A zip or a tar.gz behind one interface, since the Windows and Linux releases ship different formats."""
 
@@ -82,16 +92,6 @@ class Archive:
 
     def names(self) -> list[str]:
         return self._tar.getnames() if self._is_tar else self._zip.namelist()
-
-    @staticmethod
-    def _posix(name: str) -> str:
-        """A member name with `/` separators.
-
-        The v1.9.2607 Windows zip writes its entries as `bin\\x64\\dxcompiler.dll`, against the zip format's own rule that
-        separators are `/`, so every lookup has to normalize before it compares.
-        Extraction still takes the raw name: it is the key the archive is indexed by.
-        """
-        return name.replace("\\", "/")
 
     def extract(self, member: str, dest: Path) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -108,7 +108,7 @@ class Archive:
     def find(self, suffix: str) -> str | None:
         """The member whose path ends with `suffix`, since a tar prefixes every entry with `./`."""
         for name in self.names():
-            posix = self._posix(name)
+            posix = _posix(name)
             if posix == suffix or posix.endswith("/" + suffix):
                 return name
         return None
@@ -135,7 +135,7 @@ def license_members(archive: Archive) -> dict[str, str]:
     """
     out = {}
     for name in archive.names():
-        path = Path(Archive._posix(name))
+        path = Path(_posix(name))
         depth = len([p for p in path.parts if p not in (".", "")])
         if path.name.upper().startswith(LICENSE_PREFIXES) and depth == 1:
             out[path.stem.upper()] = name
