@@ -205,13 +205,18 @@ TEST("sv::intersect draws no cap on an open cylinder")
     auto const p = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f);
     CHECK(!p.emits_clip_surface());
 
-    // Straight down the axis from outside: the cap plane is crossed, but it is not a surface, so the ray reaches the
-    // inside of the far wall instead.
-    auto const hit = sv::intersect(p, ray_from(tg::pos3f(0.1f, 0, -2), tg::vec3f(0, 0, 1)));
+    // Angled, not parallel: a ray running exactly along the axis inside the tube never meets the wall at all, so it would
+    // say nothing about whether the CAP was drawn.
+    // This one crosses the cap plane at z = 0 well inside the radius, then reaches the wall at z ~ 1.86.
+    auto const origin = tg::pos3f(0, 0, -1);
+    auto const dir = tg::vec3f(0.35f, 0, 1);
+
+    auto const hit = sv::intersect(p, ray_from(origin, dir));
     REQUIRE(hit.has_value());
 
-    auto const at = tg::pos3f(0.1f, 0, -2) + tg::vec3f(0, 0, 1) * hit.value().t;
-    CHECK(at[2] > 0.0f); // past the near cap plane, so nothing was drawn there
+    auto const at = origin + tg::normalize(dir) * hit.value().t;
+    CHECK(at[2] > 0.1f);                                     // past the cap plane, so nothing was drawn there
+    CHECK(near(at[0] * at[0] + at[1] * at[1], 1.0f, 1e-3f)); // and on the wall instead
 }
 
 TEST("sv::intersect draws the cap of a capped cylinder")
@@ -220,17 +225,23 @@ TEST("sv::intersect draws the cap of a capped cylinder")
         = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f, true);
     CHECK(p.emits_clip_surface());
 
-    // The same ray now stops on the flat end at z = 0, which is the CLIPPER's own surface rather than the cylinder's.
-    auto const hit = sv::intersect(p, ray_from(tg::pos3f(0.1f, 0, -2), tg::vec3f(0, 0, 1)));
-    REQUIRE(hit.has_value());
-    CHECK(near(hit.value().t, 2.0f));
+    // The SAME ray now stops on the flat end at z = 0, which is the clipper's own surface rather than the cylinder's.
+    auto const origin = tg::pos3f(0, 0, -1);
+    auto const dir = tg::vec3f(0.35f, 0, 1);
 
-    // And its normal is the cap's, pointing back along the axis at the ray rather than radially outward.
+    auto const hit = sv::intersect(p, ray_from(origin, dir));
+    REQUIRE(hit.has_value());
+
+    auto const at = origin + tg::normalize(dir) * hit.value().t;
+    CHECK(near(at[2], 0.0f));
+    CHECK(near(at[0], 0.35f));
+
+    // Its normal is the cap's, along the axis back at the ray rather than radially outward.
     CHECK(near(hit.value().normal, tg::vec3f(0, 0, -1)));
 
-    // A ray down the axis but OUTSIDE the cylinder's radius misses entirely: the cap is only a surface where it lies
+    // A ray crossing the cap plane OUTSIDE the cylinder's radius still misses: the cap is a surface only where it lies
     // inside the other quadric, which is the whole interval test.
-    CHECK(!sv::intersect(p, ray_from(tg::pos3f(3, 0, -2), tg::vec3f(0, 0, 1))).has_value());
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(3, 0, -1), tg::vec3f(0, 0, 1))).has_value());
 }
 
 TEST("sv::quadric_primitive bounds the solid, not the visible part of it")
@@ -275,4 +286,62 @@ TEST("sv::intersect draws a hemisphere with or without its floor")
     REQUIRE(with.has_value());
     CHECK(near(with.value().t, 3.0f)); // the floor, at z = 0
     CHECK(near(with.value().normal, tg::vec3f(0, 0, -1)));
+}
+
+TEST("sv::intersect handles a cone frustum")
+{
+    // A cone about +y through the origin: x² + z² - k² y² = 0, sliced by a slab.
+    // Nothing constructs one of these outside the gallery example, and the example is where a signed-extent bug in its
+    // BOUNDS went unnoticed until the picture looked wrong — so the shape gets a test of its own.
+    constexpr float slope = 0.5f;
+
+    auto p = sv::quadric_primitive();
+    p.origin = tg::pos3f(0, 0, 0);
+    p.surface = {.diag = tg::vec3f(1.0f, -slope * slope, 1.0f)};
+    p.clip = sv::quadric3::slab(tg::vec3f(0, 1, 0), 2.0f, 1.0f); // keeps 1 <= y <= 3
+    p.flags = sv::quadric_primitive::flag_emit_clip_surface;
+
+    // Broadside at y = 2, where the cone's radius is slope * 2 = 1.
+    auto const side = sv::intersect(p, ray_from(tg::pos3f(-5, 2, 0), tg::vec3f(1, 0, 0)));
+    REQUIRE(side.has_value());
+    CHECK(near(side.value().t, 4.0f));
+
+    // Straight down the axis onto the wide end at y = 3, which is the CLIPPER's surface.
+    auto const cap = sv::intersect(p, ray_from(tg::pos3f(0.4f, 6, 0), tg::vec3f(0, -1, 0)));
+    REQUIRE(cap.has_value());
+    CHECK(near(cap.value().t, 3.0f));
+    CHECK(near(cap.value().normal, tg::vec3f(0, 1, 0)));
+
+    // Below the slab there is nothing, even though the infinite double cone continues through it.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(-5, 0.5f, 0), tg::vec3f(1, 0, 0))).has_value());
+
+    // And outside the widest slice, likewise.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(-5, 2, 3), tg::vec3f(1, 0, 0))).has_value());
+}
+
+TEST("sv::intersect handles a hyperboloid of one sheet")
+{
+    // x² + z² - y² = waist², the shape with no typed counterpart at all — and the one that most exercises a quadric whose
+    // quadratic part is indefinite, where the two roots straddle the waist rather than bracketing a convex body.
+    constexpr float waist = 1.0f;
+
+    auto p = sv::quadric_primitive();
+    p.surface = {.diag = tg::vec3f(1.0f, -1.0f, 1.0f), .constant = -waist * waist};
+    p.clip = sv::quadric3::slab_about_origin(tg::vec3f(0, 1, 0), 2.0f);
+
+    // At the waist, y = 0, the radius is exactly `waist`.
+    auto const at_waist = sv::intersect(p, ray_from(tg::pos3f(-5, 0, 0), tg::vec3f(1, 0, 0)));
+    REQUIRE(at_waist.has_value());
+    CHECK(near(at_waist.value().t, 4.0f));
+
+    // Higher up it flares: at y = 2 the radius is sqrt(1 + 4).
+    auto const flared = sv::intersect(p, ray_from(tg::pos3f(-5, 1.999f, 0), tg::vec3f(1, 0, 0)));
+    REQUIRE(flared.has_value());
+    CHECK(near(flared.value().t, 5.0f - tg::sqrt(1.0f + 1.999f * 1.999f), 1e-2f));
+
+    // A ray through the throat along the axis meets the surface nowhere, because the surface never crosses it.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(0, -5, 0), tg::vec3f(0, 1, 0))).has_value());
+
+    // Outside the slab there is nothing, though the surface itself continues.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(-9, 3, 0), tg::vec3f(1, 0, 0))).has_value());
 }

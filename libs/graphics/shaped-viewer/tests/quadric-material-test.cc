@@ -12,12 +12,14 @@
 
 using namespace cc::primitive_defines;
 
-// How a material reaches a surface with no vertices: the quadric frequencies, and what resolution does with a frequency the
-// geometry cannot number.
+// How a material reaches a surface with no vertices.
 //
-// No device — resolution and generation are both pure functions of a type, a material and a geometry view.
-// That the generated source then COMPILES is material-shader-compile-test's job; what is pinned here is which rank won and what
-// the generator emitted for it.
+// There is ONE frequency set and a geometry admits the subset its own primitives number, which is what lets one material
+// definition generate one shader body for both — see libs/graphics/shaped-viewer/docs/quadrics.md.
+// What is pinned here is which rank won and what the generator emitted for it; that the source then COMPILES is
+// quadric-trace-test's job, and only a compile says the emitted text means anything.
+//
+// No device: resolution and generation are both pure functions of a type, a material and a geometry view.
 
 namespace
 {
@@ -56,7 +58,7 @@ namespace
 }
 } // namespace
 
-TEST("sv::serves splits the geometric frequencies by geometry kind")
+TEST("sv::serves splits the geometric frequencies by what each geometry numbers")
 {
     using f = sv::attribute_frequency;
 
@@ -64,18 +66,17 @@ TEST("sv::serves splits the geometric frequencies by geometry kind")
     CHECK(sv::serves(sv::geometry_kind::triangles, f::per_instance));
     CHECK(sv::serves(sv::geometry_kind::quadrics, f::per_instance));
 
-    // Everything else indexes something only one kind of geometry numbers.
+    // One value per element of the primitive stream, which BOTH geometries number — and the reason the frequencies are
+    // one set rather than one per kind.
+    CHECK(sv::serves(sv::geometry_kind::triangles, f::per_triangle));
+    CHECK(sv::serves(sv::geometry_kind::quadrics, f::per_triangle));
+
+    // Corners and vertices are the mesh's alone; a quadric has neither.
     CHECK(sv::serves(sv::geometry_kind::triangles, f::per_vertex));
     CHECK(sv::serves(sv::geometry_kind::triangles, f::per_corner));
-    CHECK(sv::serves(sv::geometry_kind::triangles, f::per_triangle));
-    CHECK(!sv::serves(sv::geometry_kind::triangles, f::per_triangle));
-    CHECK(!sv::serves(sv::geometry_kind::triangles, f::per_triangle));
-
-    CHECK(sv::serves(sv::geometry_kind::quadrics, f::per_triangle));
-    CHECK(sv::serves(sv::geometry_kind::quadrics, f::per_triangle));
     CHECK(!sv::serves(sv::geometry_kind::quadrics, f::per_vertex));
     CHECK(!sv::serves(sv::geometry_kind::quadrics, f::per_corner));
-    CHECK(!sv::serves(sv::geometry_kind::quadrics, f::per_triangle));
+    CHECK(!sv::serves(sv::geometry_kind::quadrics, f::per_edge));
 }
 
 TEST("sv::resolve_material takes a per_triangle attribute on a quadric batch")
@@ -86,7 +87,10 @@ TEST("sv::resolve_material takes a per_triangle attribute on a quadric batch")
     auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
     auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
 
-    auto const r = sv::resolve_material(type, material, quadric_set_with(attribute));
+    // Held in a named local rather than passed as a temporary: a `resolved_material` BORROWS its geometry, so a set that
+    // died at the end of the call expression would leave every attribute pointer dangling.
+    auto const set = quadric_set_with(attribute);
+    auto const r = sv::resolve_material(type, material, set);
 
     REQUIRE(r.attributes.size() == 1);
     CHECK(r.attributes[0].frequency == sv::material_frequency::mesh_attribute);
@@ -104,18 +108,18 @@ TEST("sv::resolve_material falls back when the geometry cannot number the freque
     auto const per_vertex = cc::array<tg::vec3f>::create_filled(3, tg::vec3f(1, 0, 0));
     auto const vertex_colour = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_vertex, per_vertex);
 
-    auto const on_quadrics = sv::resolve_material(type, material, quadric_set_with(vertex_colour));
+    auto const batch = quadric_set_with(vertex_colour);
+    auto const on_quadrics = sv::resolve_material(type, material, batch);
     REQUIRE(on_quadrics.attributes.size() == 1);
     CHECK(on_quadrics.attributes[0].frequency == sv::material_frequency::material_type);
     CHECK(on_quadrics.attributes[0].attribute == nullptr);
 
-    // And the other way round, which is what keeps one attribute list from being fatal on either geometry.
-    auto const per_triangle = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(0, 1, 0));
-    auto const quadric_colour = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, per_triangle);
-
-    auto const on_mesh = sv::resolve_material(type, material, mesh_with(quadric_colour));
+    // The same attribute on a mesh IS usable, which is what says the refusal is the geometry's rather than the attribute
+    // being malformed.
+    auto const mesh = mesh_with(vertex_colour);
+    auto const on_mesh = sv::resolve_material(type, material, mesh);
     REQUIRE(on_mesh.attributes.size() == 1);
-    CHECK(on_mesh.attributes[0].frequency == sv::material_frequency::material_type);
+    CHECK(on_mesh.attributes[0].frequency == sv::material_frequency::mesh_attribute);
 }
 
 TEST("sv::resolve_material leaves the texture ranks unreachable on a quadric")
@@ -132,7 +136,8 @@ TEST("sv::resolve_material leaves the texture ranks unreachable on a quadric")
     // Even carrying a uv set at a frequency it CAN number, a quadric resolves no sample: there is no surface
     // parametrization for one, so the uv lookup refuses regardless of what the batch offers.
     auto const uv = sv::mesh_attribute::create("uv", sv::attribute_frequency::per_triangle, uvs);
-    auto const on_quadrics = sv::resolve_material(type, material, quadric_set_with(uv));
+    auto const batch = quadric_set_with(uv);
+    auto const on_quadrics = sv::resolve_material(type, material, batch);
 
     REQUIRE(on_quadrics.attributes.size() == 1);
     CHECK(on_quadrics.attributes[0].sample == nullptr);
@@ -142,7 +147,8 @@ TEST("sv::resolve_material leaves the texture ranks unreachable on a quadric")
     // rather than the material being malformed.
     auto const mesh_uvs = cc::array<tg::vec2f>::create_filled(3, tg::vec2f(0.5f, 0.5f));
     auto const mesh_uv = sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, mesh_uvs);
-    auto const on_mesh = sv::resolve_material(type, material, mesh_with(mesh_uv));
+    auto const mesh = mesh_with(mesh_uv);
+    auto const on_mesh = sv::resolve_material(type, material, mesh);
 
     REQUIRE(on_mesh.attributes.size() == 1);
     CHECK(on_mesh.attributes[0].sample != nullptr);
@@ -156,53 +162,60 @@ TEST("sv::generate_material_shader emits a flat load for per_triangle")
 
     auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
     auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
-    auto const r = sv::resolve_material(type, material, quadric_set_with(attribute));
+    auto const set = quadric_set_with(attribute);
+    auto const r = sv::resolve_material(type, material, set);
 
     auto const generated = sv::generate_material_shader(r);
 
-    // `per_triangle` means exactly what `per_triangle` does — one element at PrimitiveIndex() — so it loads rather than blends.
+    // One element at PrimitiveIndex(), so it loads rather than blending.
     CHECK(contains(generated.source, "sv::load_element_f3"));
     CHECK(contains(generated.source, "ctx.primitive"));
     CHECK(!contains(generated.source, "ctx.barycentrics"));
 }
 
-TEST("sv::generate_material_shader blends the ends for per_triangle")
+TEST("sv::generate_material_shader emits ONE body for a mesh and a quadric alike")
 {
+    // The central claim of the shared frequency set, and the thing that would silently stop being true.
+    //
+    // A `per_triangle` attribute resolves the same way on either geometry, so the two produce the same permutation key and
+    // the same source — byte for byte.
+    // Only the PREAMBLE differs, and that is the runtime include rather than anything the generator emits here.
     auto const type = colour_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    // Two values per primitive, which is what an edge fading along its length is authored as.
-    auto const colours = cc::array<tg::vec3f>::create_filled(4, tg::vec3f(1, 0, 0));
+    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
     auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
 
     auto const set = quadric_set_with(attribute);
-    auto const r = sv::resolve_material(type, material, set);
+    auto const mesh = mesh_with(attribute);
 
-    REQUIRE(r.attributes[0].attribute != nullptr);
-    CHECK(r.attributes[0].attribute->frequency == sv::attribute_frequency::per_triangle);
+    auto const on_quadrics = sv::resolve_material(type, material, set);
+    auto const on_mesh = sv::resolve_material(type, material, mesh);
 
-    auto const generated = sv::generate_material_shader(r);
-
-    CHECK(contains(generated.source, "sv::interpolate_ends_f3"));
-    CHECK(contains(generated.source, "ctx.end_blend"));
-    CHECK(!contains(generated.source, "ctx.barycentrics"));
+    CHECK(on_quadrics.permutation_key == on_mesh.permutation_key);
+    CHECK(sv::generate_material_shader(on_quadrics).source == sv::generate_material_shader(on_mesh).source);
 }
 
-TEST("sv::generate_material_shader forks a permutation on the geometry's frequency")
+TEST("sv::generate_material_shader forks a permutation on the geometric frequency")
 {
+    // What DOES fork one: the same name at a different frequency, since that picks a different load.
     auto const type = colour_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    auto const flat = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
-    auto const ends = cc::array<tg::vec3f>::create_filled(4, tg::vec3f(1, 0, 0));
+    auto const one = cc::array<tg::vec3f>::create_filled(1, tg::vec3f(1, 0, 0));
+    auto const three = cc::array<tg::vec3f>::create_filled(3, tg::vec3f(1, 0, 0));
 
-    auto const a = sv::resolve_material(
-        type, material,
-        quadric_set_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, flat)));
-    auto const b = sv::resolve_material(
-        type, material,
-        quadric_set_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, ends)));
+    auto const flat_mesh = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, three));
+    auto const blended_mesh = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_vertex, three));
+    auto const constant_mesh
+        = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_instance, one));
 
-    // The geometric frequency picks the load code, so it is SHAPE: the two cannot share a generated shader.
-    CHECK(a.permutation_key != b.permutation_key);
+    auto const flat = sv::resolve_material(type, material, flat_mesh);
+    auto const blended = sv::resolve_material(type, material, blended_mesh);
+    auto const constant = sv::resolve_material(type, material, constant_mesh);
+
+    CHECK(flat.permutation_key != blended.permutation_key);
+
+    // And a per_instance value is a constant rather than an indexed load, so it forks again.
+    CHECK(constant.permutation_key != flat.permutation_key);
 }

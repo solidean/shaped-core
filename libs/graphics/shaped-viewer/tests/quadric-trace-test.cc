@@ -13,6 +13,7 @@
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
+#include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 
 using namespace cc::primitive_defines;
 
@@ -374,4 +375,215 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     CHECK(other_permutation->key != permutation->key);
     co_await cc::async_settled(other_permutation->shader);
     co_await cc::async_settled(other_permutation->intersection);
+}
+
+ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference", (sg::context_handle const& ctx_h))
+{
+    // `sv::intersect` and `intersect_quadric` are written to mirror each other, and until now that was asserted by comment.
+    // This runs BOTH against the same rays and compares what they hit.
+    //
+    // The comparison is the silhouette rather than the shading: what the two routines share is which points are on the
+    // solid, and a colour would drag the whole BSDF into a test about geometry.
+    //
+    // The shapes are the ones with the least other coverage — a capped cylinder, a cone frustum and a hyperboloid — since
+    // an agreement test is worth most exactly where neither side has been checked against anything else.
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    // Bigger than the other tests on purpose.
+    // The comparison can only differ where the silhouette crosses a pixel, so the test's strength is the ratio of interior
+    // to perimeter — and at 32x32 a shape this size is nearly all perimeter, which would pass with a badly wrong shader.
+    constexpr i32 agreement_size = 128;
+
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the quadric shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto set = sv::quadric_set();
+
+    // A capped cylinder: the clipper's own surface is drawn, so the caps are part of what has to agree.
+    set.add(tg::segment3f(tg::pos3f(-1.1f, -0.6f, 0), tg::pos3f(-1.1f, 0.6f, 0)), 0.45f, true);
+
+    // A cone frustum, built by hand as the gallery example builds its own.
+    {
+        constexpr float slope = 0.45f;
+        auto cone = sv::quadric_primitive();
+        cone.origin = tg::pos3f(0, 1.4f, 0);
+        cone.surface = {.diag = tg::vec3f(1.0f, -slope * slope, 1.0f)};
+        cone.clip = sv::quadric3::slab(tg::vec3f(0, 1, 0), -1.4f, 0.6f); // a slice below the apex
+        cone.flags = sv::quadric_primitive::flag_emit_clip_surface;
+        cone.bounds = tg::aabb3f(tg::pos3f(-0.9f, -0.6f, -0.9f), tg::pos3f(0.9f, 0.6f, 0.9f));
+        set.add(cone);
+    }
+
+    // A hyperboloid of one sheet, clipped to a slab.
+    {
+        auto hyp = sv::quadric_primitive();
+        hyp.origin = tg::pos3f(1.3f, 0, 0);
+        hyp.surface = {.diag = tg::vec3f(1.0f, -1.0f, 1.0f), .constant = -0.16f};
+        hyp.clip = sv::quadric3::slab_about_origin(tg::vec3f(0, 1, 0), 0.6f);
+        auto const reach = tg::sqrt(0.16f + 0.36f);
+        hyp.bounds = tg::aabb3f(tg::pos3f(1.3f - reach, -0.6f, -reach), tg::pos3f(1.3f + reach, 0.6f, reach));
+        set.add(hyp);
+    }
+
+    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
+    resources.wait_for_pending_uploads();
+
+    auto const* const record = resources.quadrics.get_ptr(batch);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->state == sv::residency::complete);
+
+    auto const& permutation = resources.shaders.acquire_quadric_fallback();
+
+    auto instances = cc::vector<sg::tlas_instance>();
+    instances.push_back(sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0});
+
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(&permutation);
+
+    auto camera = sv::camera::looking_at(tg::pos3d(0, 0.9, 5.0), tg::pos3d(0, 0, 0));
+    camera.projection.aspect_ratio = 1.0;
+
+    auto const gpu_camera = sv::camera_gpu::from(camera);
+
+    auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
+    {
+        auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
+
+        auto records = cc::vector<sv::instance_gpu>();
+        records.push_back(
+            {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
+
+        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(
+            frame, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1});
+
+        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(
+            background,
+            sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))));
+
+        auto const target = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                             .width = agreement_size,
+                                                             .height = agreement_size,
+                                                             .usage = sg::texture_usage::readonly_texture
+                                                                    | sg::texture_usage::readwrite_texture
+                                                                    | sg::texture_usage::copy_src});
+
+        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.data_to_buffer(instance_table, records);
+
+        auto const bindless = resources.freeze();
+        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .bindless = &bindless});
+
+        if (outcome == sg::routine_outcome::executed)
+            readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
+
+        return outcome;
+    };
+
+    auto pixels = cc::vector<tg::vec4f>();
+    auto const loop_start = cc::current_time_steady_secs();
+    while (pixels.empty())
+    {
+        (void)ctx.routines.tick();
+
+        auto readback = sg::data_future<tg::vec4f>();
+        auto cmd = ctx.create_command_list();
+        auto const outcome = trace(*cmd, readback);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+
+        if (outcome != sg::routine_outcome::executed)
+        {
+            REQUIRE(cc::current_time_steady_secs() - loop_start < 45.0);
+            sv_test::drive_ambient_work();
+            continue;
+        }
+
+        REQUIRE(readback.is_valid());
+        co_await ctx.idle_completion();
+
+        auto const delivered = readback.try_get_data();
+        REQUIRE(delivered.has_value());
+        auto const span = delivered.value().span();
+        pixels = cc::vector<tg::vec4f>::create_defaulted(span.size());
+        for (auto i = isize(0); i < span.size(); ++i)
+            pixels[i] = span[i];
+    }
+
+    REQUIRE(pixels.size() == isize(agreement_size) * isize(agreement_size));
+
+    // The ray the raygen forms for a pixel's CENTRE, mirrored exactly: ndc is [-1, 1] with y down, and the direction is
+    // forward + right_scaled * ndc.x - up_scaled * ndc.y.
+    auto const ray_for = [&](i32 x, i32 y)
+    {
+        auto const ndc_x = (float(x) + 0.5f) / float(agreement_size) * 2.0f - 1.0f;
+        auto const ndc_y = (float(y) + 0.5f) / float(agreement_size) * 2.0f - 1.0f;
+
+        auto const dir = gpu_camera.forward + gpu_camera.right_scaled * ndc_x - gpu_camera.up_scaled * ndc_y;
+        auto const origin = tg::pos3f::zero + gpu_camera.position;
+        return tg::ray3f(origin, tg::normalize(dir));
+    };
+
+    auto const is_hit = [&](tg::vec4f const& px) { return luminance_of(px) < env_radiance * 0.9f; };
+
+    auto disagreements = isize(0);
+    auto cpu_hits = isize(0);
+
+    for (auto y = 0; y < agreement_size; ++y)
+        for (auto x = 0; x < agreement_size; ++x)
+        {
+            auto const ray = ray_for(x, y);
+
+            auto cpu = false;
+            for (auto const& prim : set.primitives())
+                if (sv::intersect(prim, ray, 0.0f).has_value())
+                {
+                    cpu = true;
+                    break;
+                }
+
+            if (cpu)
+                ++cpu_hits;
+
+            if (cpu != is_hit(pixels[y * agreement_size + x]))
+                ++disagreements;
+        }
+
+    // The shapes have to be in frame at all, or agreeing about an empty image would prove nothing.
+    CHECK(cpu_hits > pixels.size() / 12);
+
+    // A pixel is one sample of an area: the GPU jitters four inside it while the CPU takes the centre, so the two can only
+    // differ where the silhouette crosses the pixel.
+    //
+    // Measured at about 3.5% of the hits — 79 of 2195 — which is the perimeter and nothing else.
+    // A tenth is the bound because it leaves that headroom while still failing on anything structural: a shader that hit
+    // nothing would disagree on all 2195, and losing one of the three shapes, or a cylinder's cap, is hundreds.
+    CHECK(disagreements < cpu_hits / 10);
 }
