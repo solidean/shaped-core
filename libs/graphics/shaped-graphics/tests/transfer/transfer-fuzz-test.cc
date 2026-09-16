@@ -257,6 +257,9 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());
+
+        // The ops start async transfers they do not all await, and a test settles what it started.
+        ctx->block_until_idle();
     }
 }
 

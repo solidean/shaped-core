@@ -20,6 +20,7 @@ from .lib.changeset.ingest import (
     bulk_candidate,
     candidates_for,
     register,
+    superseded_by_move,
 )
 from .lib.changeset.ledger import Change, Ledger
 from .lib.core.atomic import append_jsonl, read_json, read_jsonl, stat_key, write_atomic, write_json
@@ -162,6 +163,7 @@ __all__ = [
     "collect_commit_candidates",
     "commit_atoms",
     "candidates_for",
+    "superseded_by_move",
     "check_immutable",
     "check_supersedes",
     "compose",

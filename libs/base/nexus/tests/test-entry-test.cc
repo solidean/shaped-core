@@ -157,6 +157,43 @@ TEST("entry - a command's exit status is what its body returned, sync or async",
     CHECK(exec.executions[1].exit_code.value_or(-1) == 5);
 }
 
+namespace
+{
+// Returns at the end rather than inside a section: a return ends the pass before the next section is discovered.
+cc::shared_async<int> exits_per_section()
+{
+    auto status = 0;
+    SECTION("one")
+    {
+        CHECK(true);
+        status = 1;
+    }
+    SECTION("two")
+    {
+        CHECK(true);
+        status = 2;
+    }
+    co_return status;
+}
+} // namespace
+
+TEST("entry - an async command with sections exits with the status of its last pass, as a sync one does", no_scheduler)
+{
+    auto reg = nx::test_registry();
+    reg.add_async_declaration("sections", entry_cfg(nx::config::test_bucket::command), [](nx::impl::async_test_sink& sink)
+                              { nx::impl::submit_command_async(sink, exits_per_section()); });
+
+    auto select = nx::test_schedule_config{};
+    select.selected_bucket = nx::config::test_bucket::command;
+    auto const schedule = nx::test_schedule::create(select, reg);
+    auto const exec = nx::execute_tests(schedule, {});
+
+    REQUIRE(exec.executions.size() == 1);
+    CHECK(exec.count_failed_tests() == 0);
+    CHECK(exec.executions[0].root.subsections.size() == 2);
+    CHECK(exec.executions[0].exit_code.value_or(-1) == 2);
+}
+
 TEST("entry - run_command runs a command as a child and hands back its status", no_scheduler)
 {
     auto reg = nx::test_registry();

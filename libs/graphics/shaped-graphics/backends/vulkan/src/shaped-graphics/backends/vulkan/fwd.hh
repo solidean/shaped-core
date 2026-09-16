@@ -14,23 +14,25 @@ using vulkan_context_handle = std::shared_ptr<vulkan_context>;
 enum class vulkan_message_severity;
 class vulkan_command_list;
 class vulkan_buffer;
-struct vulkan_buffer_access;         // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
-struct vulkan_upload_allocation;     // one reservation in the inline upload ring (see vulkan_upload_inline.hh)
-class vulkan_upload_inline_system;   // the ring itself
-struct vulkan_async_upload_job;      // one async upload handed to the copy actor
-struct vulkan_transfer_wake;         // a bare wake for the copy actor
-class vulkan_upload_actor;           // drains async uploads in enqueue order
-class vulkan_upload_waker;           // the wake channel handed to every stream source
-class vulkan_upload_async_system;    // ctx.upload's transfer-queue system
-struct vulkan_async_download_job;    // one async readback handed to the readback actor
-class vulkan_download_async_actor;   // drains them in enqueue order
-class vulkan_download_async_system;  // ctx.download's transfer-queue system
-struct vulkan_download_copy_job;     // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
-class vulkan_download_actor;         // drains them in submission order
-class vulkan_download_inline_system; // the readback ring
-struct vulkan_query_pool_lease;      // one VkQueryPool leased by a command list
-class vulkan_query_system;           // the pool of them
-struct vulkan_completion_group;      // one resource's transfer timeline in one direction
+struct vulkan_buffer_access;          // cross-list access tracking for one buffer (see vulkan_buffer_access.hh)
+struct vulkan_upload_allocation;      // one reservation in the inline upload ring (see vulkan_upload_inline.hh)
+class vulkan_upload_inline_system;    // the ring itself
+struct vulkan_async_upload_job;       // one async upload handed to the copy actor
+struct vulkan_transfer_wake;          // a bare wake for the copy actor
+class vulkan_upload_actor;            // drains async uploads in enqueue order
+class vulkan_upload_waker;            // the wake channel handed to every stream source
+class vulkan_upload_async_system;     // ctx.upload's transfer-queue system
+struct vulkan_async_download_job;     // one async readback handed to the readback actor
+class vulkan_download_async_actor;    // drains them in enqueue order
+class vulkan_download_async_system;   // ctx.download's transfer-queue system
+struct vulkan_transfer_window_record; // one submitted transfer window (see vulkan_transfer_window_log.hh)
+class vulkan_transfer_window_log;     // the last few of them, for diagnosing a validation hazard
+struct vulkan_download_copy_job;      // one staged readback awaiting its copy-out (see vulkan_download_inline.hh)
+class vulkan_download_actor;          // drains them in submission order
+class vulkan_download_inline_system;  // the readback ring
+struct vulkan_query_pool_lease;       // one VkQueryPool leased by a command list
+class vulkan_query_system;            // the pool of them
+struct vulkan_completion_group;       // one resource's transfer timeline in one direction
 using vulkan_completion_group_handle = std::shared_ptr<vulkan_completion_group>;
 struct vulkan_group_value;          // a completion value plus the timeline it belongs to
 class vulkan_completion_group_pool; // hands them out and takes them back

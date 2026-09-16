@@ -252,6 +252,14 @@ struct cc::async_ambient_handle
     }
     ~async_ambient_handle() { impl::async_ambient_release(_head); }
 
+    /// Drop the reference now, leaving the handle empty.
+    /// `h = {}` is not this: a default-constructed handle captures whatever the calling thread has installed.
+    void reset()
+    {
+        impl::async_ambient_release(_head);
+        _head = nullptr;
+    }
+
     /// The captured chain head, for async_ambient_lookup_in.
     [[nodiscard]] void* head() const { return _head; }
 

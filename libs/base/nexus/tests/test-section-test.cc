@@ -1,8 +1,10 @@
 #include <clean-core/error/exception.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
+#include <nexus/tests/thread_scope.hh>
 
 #include <string>
 #include <utility>
@@ -597,6 +599,44 @@ TEST("test sections - leaf sections with no checks are considered failing", no_s
     // The test should be considered failed because one leaf section has no checks
     CHECK(exec.count_failed_tests() == 1);
     CHECK(exec.count_total_checks() == 1);
+}
+
+TEST("test sections - work outliving a section fails that section and ends the replay", no_scheduler)
+{
+    // Held past its section, the handle keeps the test's context alive exactly as an unjoined attributed thread would.
+    // Whatever that work reported during the next pass would be filed under a section that never ran it.
+    auto kept = cc::async_ambient_handle();
+    auto visited_after = 0;
+
+    nx::test_registry reg;
+    reg.add_declaration( //
+        "testLeaksBetweenSections", {},
+        [&]
+        {
+            SECTION("leaks")
+            {
+                kept = nx::capture_current_test();
+                CHECK(true);
+            }
+            SECTION("after")
+            {
+                ++visited_after;
+                CHECK(true);
+            }
+        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    kept.reset();
+
+    CHECK(visited_after == 0);
+    CHECK(exec.count_failed_tests() == 1);
+    REQUIRE(exec.executions.size() == 1);
+    REQUIRE(!exec.executions[0].root.subsections.empty());
+    auto found = false;
+    for (auto const& e : exec.executions[0].root.subsections[0].errors)
+        found |= e.expr.contains("left async work running");
+    CHECK(found);
 }
 
 TEST("test sections - CC_ASSERT_ALWAYS failure in root after subsections executes on all paths", no_scheduler)

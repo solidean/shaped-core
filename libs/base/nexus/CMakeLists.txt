@@ -206,6 +206,7 @@ if(SC_BUILD_TESTS)
         tests/test-threaded-check-test.cc
         tests/test-parallel-test.cc
         tests/test-async-test.cc
+        tests/test-async-section-test.cc
         tests/test-async-invocable-test.cc
         tests/test-seed-test.cc
         tests/test-entry-test.cc

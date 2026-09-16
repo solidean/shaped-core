@@ -5,12 +5,14 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_completion_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_access.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_transfer_window_log.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
@@ -86,6 +88,15 @@ struct sg::backend::vulkan::vulkan_async_download_job
     /// epoch cycle, so nothing else orders the two.
     /// dx12 needs the same edge; it just spells it as a Wait on the upload queue's fence.
     vulkan_group_value upload_wait;
+
+    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// Installed only around the work that is this job's alone: its copy's record and submit, and its sink.
+    /// Reset before anything it settles.
+    /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
+    ///
+    /// Declared last so it is destroyed first: dropping `drain` can resume a caller waiting for idle, and that caller
+    /// must not find this job still holding its context.
+    cc::async_ambient_handle ambient;
 };
 
 /// Drives readbacks through the shared transfer scheduler, one window at a time.
@@ -122,6 +133,9 @@ private:
 class sg::backend::vulkan::vulkan_download_async_system
 {
 public:
+    /// The last windows this system submitted, one line each, for a validation hazard to be read against.
+    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async download"); }
+
     [[nodiscard]] cc::result<cc::unit> initialize(vulkan_context& ctx, isize window_bytes);
 
     /// The streaming twin of download_buffer: it stamps only the lifetime value, so a later command list waits on
@@ -204,6 +218,8 @@ private:
     /// Window sharing and job selection, identical to the upload side's.
     /// Its `family` rule is what keeps two readbacks of one source in sequence order.
     sg::impl::transfer_scheduler _scheduler;
+
+    vulkan_transfer_window_log _window_log;
 
     /// Monotonic, actor-local, so the scheduler can order within a family.
     u64 _next_sequence = 0;
