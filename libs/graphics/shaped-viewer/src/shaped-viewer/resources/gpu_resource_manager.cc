@@ -363,12 +363,19 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quad
 
     _upload_parameters(cmd, r);
 
-    // A pending batch is traced as the placeholder cube through the neutral hit group, which reads neither of these — so the
-    // real buffers are named either way rather than substituting a stand-in nothing looks at.
+    // A pending batch names the STAND-IN rather than its own primitive buffer, and that is about the transfer rather than
+    // about what the shader reads.
+    // A command list that touches a resource a stream is still filling waits for the whole transfer to land — so naming
+    // the real buffer here would stall the first frames on megabytes nothing is going to read, since a pending batch is
+    // traced as the placeholder cube through the neutral hit group anyway.
+    // The stand-in is filled by a direct upload rather than a stream, so it is never the thing being waited on.
+    auto const pending = q.state != residency::complete;
+    auto const stand_in = meshes.index_stand_in().raw()->as_raw_readonly();
+
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
-            .vertices = u32(acquire_buffer(q.primitives.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+            .vertices = u32(pending ? acquire_buffer(stand_in) : acquire_buffer(q.primitives.raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(stand_in)),
             .is_indexed = 0u};
 }
 

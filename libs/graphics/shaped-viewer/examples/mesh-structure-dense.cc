@@ -47,6 +47,10 @@ namespace
 {
 /// How many times the icosahedron is subdivided — see the table above for what each level costs.
 /// Turn it up to watch the primitive count go with it; the authoring code below does not change.
+///
+/// 5 is what this is committed at because it is the last level whose tubes still RESOLVE at 1280x720.
+/// 6 renders fine — 163,842 primitives, captured in about three seconds — but reads as a texture rather than as
+/// geometry, which loses the point of drawing it.
 constexpr int subdivisions = 5;
 
 constexpr float sphere_radius = 2.0f;
