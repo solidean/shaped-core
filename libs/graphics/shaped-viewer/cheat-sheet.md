@@ -487,6 +487,7 @@ That is where a cylinder's end caps and a hemisphere's floor come from, and it m
 
 See [docs/quadrics.md](docs/quadrics.md) for the design.
 `examples/quadric-gallery.cc` shows what the representation reaches — cones, ellipsoids and hyperboloids as well as spheres and tubes.
+`examples/quadric-arrows.cc` is the arrow API, and the difference the sizing overload makes across a row of them.
 `examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
 
 ## Asset loading — a file into `sv::mesh`

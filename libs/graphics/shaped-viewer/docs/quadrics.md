@@ -289,11 +289,13 @@ Each step is meant to be landable and testable on its own.
    `scene_item` gained a `quadric_set` arm and `view_renderer` builds its TLAS instance; a batch still streaming is drawn as
    the shared placeholder cube through the TRIANGLE fallback, since a procedural hit group on a triangle BLAS is exactly the
    mismatch that refuses to build.
-7. **Examples** — landed, three of them, each with a committed capture.
+7. **Examples** — landed, four of them, each with a committed capture.
    `quadric-gallery.cc` is the showcase: a sphere, an ellipsoid, an open tube, a capped one, a capsule, a hemisphere, a cone
    frustum and a hyperboloid, side by side — and the same batch placed a second time under a non-uniform scale, which turns
    its spheres into ellipsoids for free.
    The open and capped tubes are the same record with one bit different, which is the clearest thing in the picture.
+   `quadric-arrows.cc` is the arrow API: an axis frame, and the same eight segments drawn twice — proportional in one row,
+   at a fixed shaft radius in the other — which is the difference the sizing overload makes and the reason there are two.
    `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured `per_quadric_end` so each
    edge runs from one endpoint's colour to the other's.
    `mesh-structure-dense.cc` is the same authoring code at the scale a real mesh has — a five-times-subdivided
