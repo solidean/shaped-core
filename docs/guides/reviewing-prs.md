@@ -230,6 +230,23 @@ The worked example is a review of #154 that went well and then posted itself.
 The maintainer had opened with "this is a small one, so maybe in-chat is sufficient" and "goal is pr comment", read nothing, and found the comment already on the PR.
 A review the maintainer has not seen is a draft whatever its quality, and publishing one spends their credibility on findings they never agreed to.
 
+### A review that lands changes records them as a comment
+
+**The PR description is immutable once the PR is open; what a review changed goes into a PR comment.**
+The comment says what the review commits changed and why, measured against the description: which of its claims no longer hold, and what replaced them.
+A PR is then a record of how the change developed, which is worth more here than a description kept clean.
+
+This binds a `land-changes` review on our own branch as much as one on someone else's.
+The comment is drafted like any other artifact and still posts only on the maintainer's go-ahead.
+
+pr-178 is the worked case.
+The review settled from DXC's source the one question the description called unsettleable, and the first instinct was to rewrite that line of the description.
+The maintainer's answer, verbatim:
+
+```raw
+the pr description stays immutable and we have a record of development instead. that is more valuable for our purposes than a "clean" pr description
+```
+
 ### Price work in what it improves and how long an agent takes, never in human hours
 
 **The author hands a comment to an agent, so the work in it is effectively free.**
