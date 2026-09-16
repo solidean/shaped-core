@@ -471,6 +471,7 @@ That is where a cylinder's end caps and a hemisphere's floor come from, and it m
 **The box bounds the solid and never the visible part of it**: toggling that bit must not move it, or the same geometry becomes two resources and a dropped hit a silent hole.
 
 See [docs/quadrics.md](docs/quadrics.md) for the design.
+`examples/quadric-gallery.cc` shows what the representation reaches — cones, ellipsoids and hyperboloids as well as spheres and tubes.
 `examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
 
 ## Asset loading — a file into `sv::mesh`

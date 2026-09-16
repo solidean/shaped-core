@@ -44,6 +44,16 @@
             {}
         ]
     },
+    "shaped-viewer/quadric-gallery": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "accumulate": 64,
+        "timeout": 600,
+        "captures": [
+            {}
+        ]
+    },
     "shaped-viewer/openpbr-spheres": {
         "mechanism": "sv",
         "size": "1280x720",

@@ -2,7 +2,8 @@
 
 **Status: landed.**
 **All seven phases below are in; what this document now describes is the code rather than the plan.**
-**`examples/mesh-structure.cc` is it in practice, `examples/mesh-structure-dense.cc` is it at mesh scale, and the [cheat sheet](../cheat-sheet.md) is the API.**
+**`examples/quadric-gallery.cc` is what the representation reaches; `examples/mesh-structure.cc` is it in practice, and `examples/mesh-structure-dense.cc` is it at mesh scale.**
+**The [cheat sheet](../cheat-sheet.md) is the API.**
 
 Analytic quadric surfaces as a second kind of scene item, traced by a custom DXR intersection shader over a procedural (AABB) BLAS.
 sv draws exactly one kind of thing today — a triangle mesh, placed by a transform, shaded by a generated material permutation — and this is the second.
@@ -288,7 +289,11 @@ Each step is meant to be landable and testable on its own.
    `scene_item` gained a `quadric_set` arm and `view_renderer` builds its TLAS instance; a batch still streaming is drawn as
    the shared placeholder cube through the TRIANGLE fallback, since a procedural hit group on a triangle BLAS is exactly the
    mismatch that refuses to build.
-7. **Examples** — landed, two of them, each with a committed capture.
+7. **Examples** — landed, three of them, each with a committed capture.
+   `quadric-gallery.cc` is the showcase: a sphere, an ellipsoid, an open tube, a capped one, a capsule, a hemisphere, a cone
+   frustum and a hyperboloid, side by side — and the same batch placed a second time under a non-uniform scale, which turns
+   its spheres into ellipsoids for free.
+   The open and capped tubes are the same record with one bit different, which is the clearest thing in the picture.
    `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured `per_quadric_end` so each
    edge runs from one endpoint's colour to the other's.
    `mesh-structure-dense.cc` is the same authoring code at the scale a real mesh has — a five-times-subdivided
