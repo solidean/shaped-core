@@ -1,69 +1,156 @@
-# Thread safety: an open finding
+# Thread safety: a closed finding
 
-**Every entry into DXC is serialized behind one process-wide lock today.**
-That is a holding position, not the answer, and this file is what it is holding the place for.
+**Concurrent compilation is safe.**
+One `ssc::dxc::compiler` per thread, compiling at the same time as every other thread's, corrupts nothing.
+Neither does sharing one instance — though the API still asks for one each, because DXC promises nothing about sharing.
 
-## What was observed
+This file exists because ThreadSanitizer says otherwise, loudly, and said so for long enough that a process-wide lock was added on the strength of it.
+The lock is gone.
+What follows is why the reports are wrong, how that was established, and what is left.
 
-The repo's first ThreadSanitizer run (the `sanitize-thread-*` presets) reported a data race inside the vendored `libdxcompiler.so`, reproducible from `shaped-shader-compiler-dxc-test`:
+Established against DXC v1.9.2602.24 on glibc 2.41, x86-64 Linux — the pinned release.
+Re-established unchanged against v1.10.2605.37's binaries while that release was being evaluated, so the conclusions are not specific to the pin.
 
-- one thread allocates through DXC's own `WideCharToMultiByte` shim (`calloc`, inside libdxcompiler),
-- another frees that same block on its way out of `IDxcCompiler3::Compile`.
+## The reports, and what they actually are
 
-Both threads were doing exactly what [compiler.hh](../src/shaped-shader-compiler-dxc/compiler.hh) prescribes: **a separate `ssc::dxc::compiler` instance each, on its own thread.**
-So the state involved sits *below* the instance, and the per-instance rule does not cover it.
+Two families, and neither is DXC sharing mutable state between compiles.
 
-That matters beyond the test.
-[shader_cache.hh](../src/shaped-shader-compiler-dxc/shader_cache.hh) is built on the per-instance rule — a thread-local compiler per worker — and compiles on several workers at once.
+### glibc's locale cache — was four reports in five, now none
 
-## What is still unknown
+DXC's `ScopedLocale` (its `WinAdapter.h`) builds a `locale_t` with `newlocale(LC_CTYPE_MASK, "C.UTF-8", …)` and destroys it with `freelocale`.
+It does that **around every single string conversion** `WideCharToMultiByte` and `MultiByteToWideChar` make.
+Everything DXC touches there is stack-local, and one thread creates and destroys it inside one scope.
 
-Nobody has established which of these it is, and the two call for different fixes:
+What crosses threads is glibc's own locale data, which is a refcounted process-global.
+One thread's `newlocale` takes a reference on data another thread loaded; a `freelocale` elsewhere drops the last one and frees it.
+glibc guards that with `__libc_setlocale_lock`, and `__freelocale` really does call `__pthread_rwlock_wrlock`.
+But it reaches the rwlock through glibc's *internal* alias rather than the interposable `pthread_rwlock_wrlock`.
+TSan's interceptor never fires, so no happens-before edge is recorded.
+The allocation and the free are then two unordered writes to one block, which is exactly what TSan printed.
 
-- **Benign.** DXC's shim may hand the block over with synchronization TSan cannot see — an uninstrumented library's release/acquire looks like plain memory to the tool.
-  Then nothing is wrong and the lock is pure lost throughput.
-- **Real.** The block is genuinely shared with no edge, in which case concurrent compilation has been corrupting DXC's heap all along, rarely enough that nothing noticed.
+The report named `WideCharToMultiByte` as the allocating frame, which is what made this look like DXC's own heap.
+It is not: the `calloc` is inside glibc's `wcstombs` loading a converter, and DXC's shim is merely the caller above it.
 
-The way to tell them apart is to read what libdxcompiler actually does around that shim, not to run the test more times: a race this narrow reproduces by luck.
+`ssc::dxc::pin_utf8_locale` in [compiler.cc](../src/shaped-shader-compiler-dxc/compiler.cc) removes this family at the source rather than muting it.
+It takes one reference to the same locale `ScopedLocale` will ask for and never releases it, so the data stays loaded and no conversion is ever the one that loads or frees it.
+That is a workaround for an upstream inefficiency — DXC should cache its own locale — and it is marked as one.
 
-## The lock
+### LLVM's ManagedStatic — one report, suppressed
 
-`SSC_DXC_SERIALIZE_INVOCATIONS` in [compiler.cc](../src/shaped-shader-compiler-dxc/compiler.cc), default `1`.
-It puts `compiler::create()`, `preprocess()`, `compile()` and `~compiler()` behind one `cc::mutex`, so only one thread is inside libdxcompiler at a time.
+The one that remains, once per process:
 
-**The destructor is on that list because releasing a COM pointer is a call into the library.**
-`~compiler` releases `IDxcUtils` and `IDxcCompiler3`, and the last release of a blob frees memory libdxcompiler allocated — which is the half of the observed race that is a free.
-The same reasoning is what puts the whole of `preprocess` and `compile` under the lock rather than the `Compile` call alone.
-`GetOutput`, `IDxcUtils::CreateReflection` and every `ComPtr` destructor on the way out are entries too.
+```
+Atomic read of size 1 by thread T4:     pthread_mutex_lock  <- llvm::sys::MutexImpl::acquire()
+Previous write of size 8 by thread T1:  malloc              <- llvm::sys::MutexImpl::MutexImpl(bool)  (mutexes: write M0)
+Location is heap block of size 40 allocated by thread T1
+```
 
-**Set it to `0` to get the un-serialized behaviour back** — which is what the investigation above needs, and the reason it is a define rather than a quietly-added lock.
+Under gdb the creating stack is `MutexImpl::MutexImpl` ← `object_creator<sys::SmartMutex<true>>` ← `ManagedStaticBase::RegisterManagedStatic`,
+and above that `llvm::sys::RemoveFileOnSignal` ← `clang::CompilerInstance::createOutputFile` ← `DxcCompiler::Compile`.
+So it is LLVM's lazily-created lock for the signal-handler file list, built by whichever thread compiles first.
 
-**Take the `libdxcompiler.so` entry out of [tools/cmake/tsan-suppressions.txt](../../../../tools/cmake/tsan-suppressions.txt) as well**, or the un-serialized run reports nothing.
-`dev.py` applies that list to every sanitized test run, and `called_from_lib` drops the report silently rather than counting it somewhere visible.
-The investigation then reads as a clean run when it has only been muted.
+DXC's `ManagedStatic` holds `std::atomic<void*> Ptr`, stores it with `memory_order_release` under a `std::recursive_mutex`, and loads it with `memory_order_acquire`.
+That is a correct double-checked lazy init.
+TSan models no atomics in an uninstrumented library, so that release/acquire edge does not exist as far as it is concerned.
 
-The cost is real: shader compilation is the most expensive thing this library does, and the cache in front of it exists precisely because of that.
-Serializing removes the parallelism `slib`'s async compilation was built for, and leaves the cache's concurrency buying only its hits.
+`called_from_lib:libdxcompiler.so` in [tsan-suppressions.txt](../../../../tools/cmake/tsan-suppressions.txt) covers it, and after the locale fix that is the only thing it covers.
 
-## What a real fix probably looks like
+## How this was established
 
-If the race turns out to be real, a mutex on every call is the wrong shape for it.
-DXC would become a **`cc::threaded_actor`** that owns the compiler and takes compile requests as messages.
-That is serialization by ownership rather than by lock, which is how the rest of shaped-core serializes a resource that cannot be shared.
-Callers already reach it through an async cache, so they would see a `cc::async<...>` either way.
-The actor would keep the call sites unchanged while making "one thread is inside DXC" a structural property instead of a discipline.
+Reading the sources settles what the code does; the controls below settle that TSan's blindness is the whole explanation.
+Each one is a few lines that link no DXC and still produce the report being explained.
+
+**The locale family, with no DXC at all:**
+
+```cpp
+// 4 threads x 200 iterations of what ScopedLocale does per conversion.
+locale_t loc = newlocale(LC_CTYPE_MASK, "C.UTF-8", (locale_t)0);
+locale_t prev = uselocale(loc);
+char out[64];
+wcstombs(out, L"hello", sizeof(out));
+uselocale(prev);
+freelocale(loc);
+```
+
+That prints the same three libc frames (`__freelocale` and two unsymbolized neighbours) the DXC run does.
+With `LC_ALL_MASK, "C"` it prints nothing, because glibc answers that one from a static object and never allocates.
+That is why the locale *name* matters, and why `pin_utf8_locale` mirrors `ScopedLocale`'s candidate list rather than picking its own.
+
+**The ManagedStatic family, with correct code:**
+
+```cpp
+// In a .so built WITHOUT -fsanitize=thread, called from a TSan main on 8 threads.
+void* p = g_ptr.load(std::memory_order_acquire);
+if (p == nullptr)
+{
+    std::lock_guard<std::mutex> lock(g_init);
+    p = g_ptr.load(std::memory_order_relaxed);
+    if (p == nullptr) { p = new_pthread_mutex(); g_ptr.store(p, std::memory_order_release); }
+}
+pthread_mutex_lock((pthread_mutex_t*)p);
+```
+
+TSan reports that as a race, in the same shape as the DXC one down to the 40-byte block and the `mutexes: write M0` annotation.
+Provably correct code, reported, because the `.so` is uninstrumented.
+
+**And the behaviour, not just the reasoning:**
+
+- 12,800 concurrent compiles (16 threads x 400), once with an instance per thread and once with one shared `IDxcCompiler3`, hashing every DXIL blob.
+  Zero failures, zero mismatches, one hash throughout.
+- 1,440 more under AddressSanitizer: clean.
+- Sharing one instance across eight threads produced no report the per-instance mode did not, so the reports never depended on the rule they appeared to contradict.
+
+## What it was worth
+
+| Change | Measured |
+|---|---|
+| Removing the process-wide lock | 12 threads x 200 compiles: 3.13 s → 0.67 s (**4.7x**) |
+| `pin_utf8_locale` | 12 threads x 300 compiles: 1.03 s → 0.68 s (**34%**) |
+
+The second is not sanitizer hygiene that happens to be free.
+glibc's locale rwlock was serializing a real share of every concurrent compile, and holding one reference is what stops it.
+
+## What this does not cover: Windows
+
+Everything above was measured on Linux, because ThreadSanitizer does not run on Windows.
+
+There is one reason not to assume it transfers.
+LLVM's `PassRegistry` registers passes lazily on first use, and DXC guards it by platform.
+`include/llvm/PassRegistry.h` wraps its `sys::SmartRWMutex<true> Lock` in `#ifndef LLVM_ON_WIN32`, with a "HLSL Change" comment saying Windows uses a mechanism of its own instead.
+[DXC #8819](https://github.com/microsoft/DirectXShaderCompiler/issues/8819) reports that mechanism as insufficient.
+Concurrent first calls to `IDxbcConverter::Convert` corrupt the registry's `DenseMap`.
+That is `dxilconv`, which does DXBC to DXIL and which nothing here links — `ssc::dxc` uses `dxcompiler` alone.
+
+The Linux side of it is closed.
+#8819 notes that identical inputs do not reproduce the race, so the check was rerun with eight threads each starting on a *different* shader.
+Loops, atomics, groupshared plus barriers, texture sampling, wave intrinsics, unrolled math, structured buffers — so that every thread's first compile walks a different pass path.
+Same two families, no third; clean under AddressSanitizer and un-sanitized.
+
+**Open: whether `shader_cache`'s workers can reach that same lazy registration inside `dxcompiler` on Windows.**
+It cannot be settled from a Linux machine, and it is worth settling before anyone leans harder on concurrent compilation there.
+
+## What would reopen this
+
+- **A DXC release that changes `ScopedLocale` or `ManagedStatic`.**
+  Neither changed between v1.9.2602.24, v1.9.2607, v1.10.2605.37 and `main` at the time of writing, so a bump is not expected to move any of this.
+  Running this against v1.10.2605.37's `libdxcompiler.so` bore that out: same two families, and `pin_utf8_locale` still leaves only the ManagedStatic one.
+- **A TSan report through `ssc::dxc` that is not one of the two families above.**
+  The suppression is scoped to `libdxcompiler.so` and to nothing of ours, so our own frames are still fully checked.
+  A new report is a new finding.
+- **Re-running the investigation** means taking `called_from_lib:libdxcompiler.so` out of [tsan-suppressions.txt](../../../../tools/cmake/tsan-suppressions.txt).
+  Then: `uv run dev.py test shaped-shader-compiler-dxc-test --preset sanitize-thread-linux-clang --repeat 30`.
+  One iteration in a handful trips the ManagedStatic report; nothing else should appear.
+  `dev.py` applies that list to every sanitized run, and `called_from_lib` drops a report silently.
+  Leaving it in makes the investigation read as a clean run when it has only been muted.
 
 ## Where compilation is headed: async
 
 **`ssc::dxc` predates `cc::async`, and its compiler API is synchronous for that reason alone.**
-The intent is for compilation to become async, but how depends on what the finding above turns out to be.
+The finding above used to gate this question; it no longer does.
 
-- **Benign.** The lock goes, the synchronous `compiler` stays the API, and the cache keeps compiling on several workers at once.
-  A synchronous core is simpler to use from tools, and nothing about a benign race argues for changing it.
-- **Real.** Callers should park rather than block on DXC.
-  The shape is an async entry point in front of one owner — a `cc::threaded_actor`, or a `cc::async_mutex<compiler>` that the cache awaits — so a queue of compiles never holds a queue of pool workers.
+The synchronous `compiler` stays the API.
+[shader_cache.hh](../src/shaped-shader-compiler-dxc/shader_cache.hh) keeps compiling on several workers at once with a thread-local compiler each.
+That is now known to be exactly as safe as it claimed to be.
+A synchronous core is simpler to drive from tools, and nothing here argues for changing it.
 
-Either way, **preprocessing touches file IO** through the include resolver, and that wants to be async regardless of how the race resolves.
-
-One constraint whichever way it goes: `~compiler` runs from a thread-local destructor at thread exit, where nothing can await.
-So a synchronous guard over libdxcompiler survives any async front for as long as thread-local compilers exist.
+**Preprocessing touches file IO** through the include resolver, and that is the part that still wants to be async.

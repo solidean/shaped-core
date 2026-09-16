@@ -11,6 +11,11 @@ rules:
     reason: sg's handles ARE std::shared_ptr, and the compiled-shader results are handed back as one
 
   - kind: allow-include
+    value: <locale.h>
+    reason: pin_utf8_locale holds one reference to the locale DXC's ScopedLocale rebuilds per string conversion — POSIX newlocale is the only way to take it, and docs/thread-safety.md is what it buys
+    files: src/shaped-shader-compiler-dxc/compiler.cc
+
+  - kind: allow-include
     value: <d3d12shader.h>
     reason: the single include gate for the DXC / COM reflection interfaces — every other TU reaches them through this file
     files: src/shaped-shader-compiler-dxc/impl/dxc_common.hh

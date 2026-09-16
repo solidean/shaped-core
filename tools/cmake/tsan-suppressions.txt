@@ -16,9 +16,13 @@
 called_from_lib:libvulkan_radeon.so
 
 # The prebuilt DXC we vendor (extern/dxc), reached through ssc::dxc.
-# It carries process-global state of its own -- a compile allocates in one thread and frees in another through its
-# WideCharToMultiByte shim -- so two compilers on two threads race inside it even though each instance is private.
-# That is a property of the binary we are given, not of how we call it.
+# What survives here is LLVM's ManagedStatic lazy init, once per process: a std::atomic release store under a mutex,
+# read by an acquire load outside it, which is correct and which TSan cannot see because it models no atomics in an
+# uninstrumented library.
+# Concurrent compilation itself is safe, and the locale reports that used to dominate this entry are gone at the
+# source -- ssc::dxc::pin_utf8_locale holds the reference whose churn glibc was reporting.
+# shaped-shader-compiler-dxc/docs/thread-safety.md is the investigation, the controls that prove each half, and what
+# would make this entry droppable.
 called_from_lib:libdxcompiler.so
 
 # SDL3's D-Bus integration, reached through sr::window_system.
