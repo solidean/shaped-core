@@ -32,6 +32,14 @@ using namespace cc::primitive_defines;
 // That is the same frequency a mesh reads a per-face colour at, and it generates the same line of shader code — a quadric
 // batch and a triangle mesh differ in the preamble that builds the shading context and in nothing else.
 //
+// The camera is the FLY one rather than the orbit default, because this is a scene laid out on a floor rather than a
+// subject held at arm's length — which is exactly the distinction `sv::camera_style` draws.
+// One call picks it; the viewer routes the events and runs the per-frame integration a held key needs.
+//
+// Controls
+//   right-drag   look           W/A/S/D   move along the view         E / Q   rise and fall
+//   shift        faster         ctrl      slower                      wheel   retune the base speed
+//
 // Run it:
 //   uv run dev.py example shaped-viewer/quadric-gallery
 //   uv run dev.py example shaped-viewer/quadric-gallery --capture
@@ -174,10 +182,15 @@ EXAMPLE("shaped-viewer/quadric-gallery")
     for (auto f : sv::interactive("shaped-viewer/quadric-gallery"))
     {
         auto view = f.window().view();
-        view.initial_orbit({.target = tg::pos3d(0, 1.4, 1.6),
-                            .distance = 15.0,
-                            .azimuth = tg::angle_d::make_from_degree(8.0),
-                            .elevation = tg::angle_d::make_from_degree(17.0)});
+
+        // Where the walk starts, applied the first time this view id is seen; after that wherever it has been flown to wins.
+        view.initial_fps({.position = tg::pos3d(-1.5, 3.2, -11.0),
+                          .yaw = tg::angle_d::make_from_degree(8.0),
+                          .pitch = tg::angle_d::make_from_degree(-11.0)});
+
+        // Re-asserted every frame, like `movable`: the viewer routes input against the PREVIOUS frame's answer, so a call
+        // that stops being made hands the view back to the orbit controller.
+        view.camera_style(sv::camera_style::fly);
 
         auto scene = view.add_scene();
         scene.add_mesh(floor);
