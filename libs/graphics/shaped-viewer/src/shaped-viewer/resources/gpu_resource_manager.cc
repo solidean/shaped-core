@@ -331,13 +331,8 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
     return out;
 }
 
-instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance)
+void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
-    auto const& m = meshes.get(mesh);
-
-    CC_ASSERT(contains_instance(instance), "no such instance_id");
-    auto& r = _instances[isize(u32(instance))];
-
     auto bytes = build_instance_parameters(r);
 
     // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
@@ -357,6 +352,34 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
         cmd.upload.data_to_buffer(r.parameters, bytes);
         r.uploaded = cc::move(bytes);
     }
+}
+
+instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance)
+{
+    auto const& q = quadrics.get(set);
+
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    auto& r = _instances[isize(u32(instance))];
+
+    _upload_parameters(cmd, r);
+
+    // A pending batch is traced as the placeholder cube through the neutral hit group, which reads neither of these — so the
+    // real buffers are named either way rather than substituting a stand-in nothing looks at.
+    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
+            .param_offset = 0,
+            .vertices = u32(acquire_buffer(q.primitives.raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+            .is_indexed = 0u};
+}
+
+instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance)
+{
+    auto const& m = meshes.get(mesh);
+
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    auto& r = _instances[isize(u32(instance))];
+
+    _upload_parameters(cmd, r);
 
     // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
     // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
@@ -390,6 +413,40 @@ bool gpu_resource_manager::_is_live(sv::resident_mesh const& m)
     for (auto const& t : m.textures)
         if (textures.get_ptr(t.source.texture) == nullptr)
             return false;
+
+    return true;
+}
+
+bool gpu_resource_manager::_is_live(sv::resident_quadric_set const& set)
+{
+    if (quadrics.get_ptr(set.geometry) == nullptr)
+        return false;
+
+    for (auto const& a : set.attributes)
+    {
+        if (a.attribute == attribute_id::invalid)
+            continue; // a per_instance attribute uploads nothing, so it names no record that could go away
+        if (attributes.get_ptr(a.attribute) == nullptr)
+            return false;
+    }
+
+    return true;
+}
+
+bool gpu_resource_manager::_is_resident(sv::resident_quadric_set const& set)
+{
+    auto const* const geometry = quadrics.get_ptr(set.geometry);
+    if (geometry == nullptr || geometry->state != residency::complete)
+        return false;
+
+    for (auto const& a : set.attributes)
+    {
+        if (a.attribute == attribute_id::invalid)
+            continue;
+        auto const* const record = attributes.get_ptr(a.attribute);
+        if (record == nullptr || record->state != residency::complete)
+            return false;
+    }
 
     return true;
 }
@@ -519,6 +576,72 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::resident_mesh const& mes
 scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
 {
     return acquire_scene_item(create_mesh(mesh));
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::resident_quadric_set const& set)
+{
+    CC_ASSERT(set.geometry != quadric_set_id::invalid, "a quadric batch needs geometry to be placed in a scene");
+
+    auto const lib = acquire_material_library();
+    CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a quadric batch's material through");
+
+    auto const material = set.material == material_id::invalid ? default_material(*lib.value()) : set.material;
+
+    // Resolved against the BATCH, which is what makes the quadric frequencies reachable and the texture ranks not.
+    auto const resolved = resolve_material(*lib.value(), material, set);
+
+    // And generated against the quadric runtime, so the permutation carries an intersection shader.
+    auto const& permutation = shaders.acquire_quadric(resolved);
+
+    return {.kind = scene_item_kind::quadric_set,
+            .quadrics = set.geometry,
+            .instance = acquire_instance(resolved, permutation.layout),
+            .shader_key = permutation.key,
+            .transform = set.transform};
+}
+
+scene_item gpu_resource_manager::acquire_scene_item(sv::quadric_set const& set)
+{
+    return acquire_scene_item(create_quadric_set(set));
+}
+
+sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::quadric_set const& data)
+{
+    CC_ASSERT(!data.is_empty(), "a quadric batch needs at least one primitive to be placed in a scene");
+
+    // Placed against this manager before, and every id it named still resolves — see `create_mesh` for why the slot is
+    // verified rather than believed.
+    // The transform and the material are re-read anyway, since those are what a caller changes between frames without
+    // changing a payload.
+    if (data.cache.manager == this && _is_live(data.cache.resources))
+    {
+        data.cache.resources.transform = data.transform;
+        data.cache.resources.material = data.material;
+        data.cache.ready = _is_resident(data.cache.resources);
+        return data.cache.resources;
+    }
+
+    auto const geometry = quadrics.acquire(quadric_data::of(data));
+
+    auto bindings = cc::vector<mesh_attribute_binding>();
+    bindings.reserve(data.attributes.size());
+    for (auto const& a : data.attributes)
+    {
+        auto const uploads = a.frequency != attribute_frequency::per_instance;
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+    }
+
+    data.cache = {.manager = this,
+                  .resources = {.name = data.name,
+                                .geometry = geometry,
+                                .attributes = cc::move(bindings),
+                                .transform = data.transform,
+                                .material = data.material,
+                                .bounds = data.bounds(),
+                                .primitive_count = data.primitive_count()}};
+
+    data.cache.ready = _is_resident(data.cache.resources);
+    return data.cache.resources;
 }
 
 bool gpu_resource_manager::contains_instance(instance_id id) const

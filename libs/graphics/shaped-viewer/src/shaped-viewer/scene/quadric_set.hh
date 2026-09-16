@@ -12,6 +12,35 @@
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
 
+/// One quadric batch as resources: the uploaded primitives and the BLAS built over them, placed by a transform and drawn by a
+/// material.
+///
+/// The GPU half of the pair `sv::quadric_set` completes, mirroring `sv::resident_mesh`.
+/// It cannot exist without a resource manager, which is what makes it the form that admits a batch produced on the GPU and never
+/// held on the CPU at all.
+///
+/// `bounds` and `primitive_count` are the CPU-side summary, kept for the same reason `resident_mesh` keeps its: with GPU-only
+/// data nothing else can answer a camera-framing question, and a placeholder drawn while the real batch is still arriving needs
+/// an extent to be drawn at.
+struct sv::resident_quadric_set
+{
+    cc::string name;
+
+    /// the uploaded primitives and the procedural BLAS built from them
+    quadric_set_id geometry = quadric_set_id::invalid;
+
+    cc::vector<mesh_attribute_binding> attributes;
+
+    tg::affine_transform3f transform = {};
+
+    material_id material = material_id::invalid;
+
+    /// the extent in the set's own frame — empty when nothing declared one
+    cc::optional<tg::aabb3f> bounds;
+
+    isize primitive_count = 0;
+};
+
 /// What placing a quadric set produced — the counterpart of `sv::impl::mesh_gpu_slot`, and a cache rather than an identity.
 ///
 /// The set's payload is content-hashed, so placing one against a manager that has never seen it mints the resources the slot
@@ -23,7 +52,8 @@ struct sv::impl::quadric_set_gpu_slot
     /// Identity ONLY, and never dereferenced — a set may outlive the manager it was placed against.
     void const* manager = nullptr;
 
-    quadric_set_id resources = quadric_set_id::invalid;
+    /// The resources minted for this set against that manager.
+    sv::resident_quadric_set resources;
 
     /// Whether those resources had reached the GPU, as of that placement.
     bool ready = false;
@@ -109,33 +139,4 @@ private:
     cc::hash128 _hash;
 
     cc::optional<tg::aabb3f> _bounds;
-};
-
-/// One quadric batch as resources: the uploaded primitives and the BLAS built over them, placed by a transform and drawn by a
-/// material.
-///
-/// The GPU half of the pair `sv::quadric_set` completes, mirroring `sv::resident_mesh`.
-/// It cannot exist without a resource manager, which is what makes it the form that admits a batch produced on the GPU and never
-/// held on the CPU at all.
-///
-/// `bounds` and `primitive_count` are the CPU-side summary, kept for the same reason `resident_mesh` keeps its: with GPU-only
-/// data nothing else can answer a camera-framing question, and a placeholder drawn while the real batch is still arriving needs
-/// an extent to be drawn at.
-struct sv::resident_quadric_set
-{
-    cc::string name;
-
-    /// the uploaded primitives and the procedural BLAS built from them
-    quadric_set_id geometry = quadric_set_id::invalid;
-
-    cc::vector<mesh_attribute_binding> attributes;
-
-    tg::affine_transform3f transform = {};
-
-    material_id material = material_id::invalid;
-
-    /// the extent in the set's own frame — empty when nothing declared one
-    cc::optional<tg::aabb3f> bounds;
-
-    isize primitive_count = 0;
 };

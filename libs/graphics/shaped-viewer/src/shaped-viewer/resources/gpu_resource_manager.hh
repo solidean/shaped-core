@@ -267,6 +267,14 @@ public:
     /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
+    /// The same for a quadric batch.
+    ///
+    /// `vertices` names the batch's PRIMITIVE buffer rather than a position buffer, which is what the intersection shader reads
+    /// by `PrimitiveIndex()`; the field means "the geometry buffer this instance reads" either way.
+    /// `indices` is the stand-in, since a quadric indexes nothing — the field still has to name something the bound snapshot
+    /// covers.
+    [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance);
+
     /// `data`'s payloads named by id, as the `sv::resident_mesh` a scene item is placed from.
     ///
     /// The result is remembered ON `data` — see `sv::impl::mesh_gpu_slot` — so the reference is into the mesh's own
@@ -296,6 +304,22 @@ public:
     /// The same, from CPU bytes: `create_mesh` followed by the resolution above.
     /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
+
+    /// `data`'s primitives and attributes named by id, as the `sv::resident_quadric_set` a scene item is placed from.
+    ///
+    /// The quadric counterpart of `create_mesh`, and the same contract: the result is remembered ON `data` (see
+    /// `sv::impl::quadric_set_gpu_slot`), every payload is acquired by the content hash it already carries, and a cached id
+    /// whose record was evicted is re-acquired from the bytes rather than trusted.
+    [[nodiscard]] sv::resident_quadric_set const& create_quadric_set(sv::quadric_set const& data);
+
+    /// Everything placing a quadric batch in a scene costs, as one `scene_item`.
+    ///
+    /// The counterpart of the mesh overloads, and the same one-resolution rule: the material is resolved against the BATCH, so
+    /// the permutation it yields is the quadric spelling and carries an intersection shader.
+    [[nodiscard]] scene_item acquire_scene_item(sv::resident_quadric_set const& set);
+
+    /// The same, from CPU bytes: `create_quadric_set` followed by the resolution above.
+    [[nodiscard]] scene_item acquire_scene_item(sv::quadric_set const& set);
 
     /// The layout of the staging group every bindless table is bound through.
     /// A pipeline that traces against those tables composes this as one of its groups, which is what makes the
@@ -377,6 +401,17 @@ private:
                          cc::vector<table_entry> tables,
                          texture_policy texture_policy,
                          work_budget work_budget);
+
+    /// Rebuilds `r`'s parameter block for THIS epoch and uploads it if it changed, creating its buffer on first use.
+    ///
+    /// Shared by both `describe_instance` overloads, because the block is the material's and has nothing to do with which
+    /// geometry reads it.
+    void _upload_parameters(sg::command_list& cmd, instance_record& r);
+
+    /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
+    /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.
+    [[nodiscard]] bool _is_live(sv::resident_quadric_set const& set);
+    [[nodiscard]] bool _is_resident(sv::resident_quadric_set const& set);
 
     /// The entry for `table` in a freshly built list, before `_slot_of` exists to index it.
     [[nodiscard]] static table_entry const* _find_table(cc::span<table_entry const> tables, bindless_table table);

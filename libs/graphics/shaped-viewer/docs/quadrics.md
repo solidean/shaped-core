@@ -1,7 +1,7 @@
 # Quadric primitives (plan)
 
-**Status: phases 1 to 5 have landed — the record, the batch, the manager, the first trace, and the material fork.**
-**Phases 6 and 7 are still design: the authoring surface, and an example.**
+**Status: phases 1 to 6 have landed — everything but the example.**
+**Phase 7, an example drawing a mesh's vertices and edges with a committed capture, is what is left.**
 
 Analytic quadric surfaces as a second kind of scene item, traced by a custom DXR intersection shader over a procedural (AABB) BLAS.
 sv draws exactly one kind of thing today — a triangle mesh, placed by a transform, shaded by a generated material permutation — and this is the second.
@@ -256,7 +256,14 @@ Each step is meant to be landable and testable on its own.
    which kind the geometry is, and a frequency it cannot number loses to the coarser rank like any other unusable candidate.
    The clip slab is offset rather than centred so it carries the axis WITH its sign, which is what makes the blend parameter
    free — see `sv::quadric_primitive::end_parameter`.
-6. **The authoring surface**: `add_quadrics`, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` sugar.
+6. **The authoring surface** — landed.
+   `scene_ref::add_quadrics` over either form, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` sugar over a
+   frame-owned batch per (view, layer, material).
+   The sugar's batch is flushed once, before the frame is flattened, because a batch is ONE scene item and is not placeable
+   until it is complete.
+   `scene_item` gained a `quadric_set` arm and `view_renderer` builds its TLAS instance; a batch still streaming is drawn as
+   the shared placeholder cube through the TRIANGLE fallback, since a procedural hit group on a triangle BLAS is exactly the
+   mismatch that refuses to build.
 7. **An example** drawing a loaded mesh's vertices and edges, with a committed capture.
 
 ## Elsewhere

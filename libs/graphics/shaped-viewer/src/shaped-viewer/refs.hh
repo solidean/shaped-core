@@ -41,6 +41,24 @@ private:
     u32 _item = 0;
 };
 
+/// One quadric batch placed in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_quadrics`.
+class sv::quadric_ref
+{
+public:
+    quadric_ref(frame* f, view_index view, u32 layer, u32 item) : _frame(f), _view(view), _layer(layer), _item(item) {}
+
+    /// Where this placement puts the batch, overriding the transform the set itself carries.
+    void transform(tg::affine_transform3f const& t);
+
+private:
+    [[nodiscard]] scene_item& target() const;
+
+    frame* _frame = nullptr;
+    view_index _view = view_index(0);
+    u32 _layer = 0;
+    u32 _item = 0;
+};
+
 /// One light in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_light`.
 class sv::light_ref
 {
@@ -76,6 +94,35 @@ public:
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
     /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
     mesh_ref add_mesh(sv::resident_mesh const& mesh);
+
+    /// Places a batch of analytic quadrics in the scene, at the transform the set carries.
+    ///
+    /// The primitives, the attributes and the procedural BLAS are acquired here, keyed by the content hash the set already
+    /// carries — so calling this every frame with an unchanged set uploads nothing and stays O(1).
+    /// See libs/graphics/shaped-viewer/docs/quadrics.md.
+    quadric_ref add_quadrics(sv::quadric_set const& set);
+
+    /// The same for a batch already made of resources — nothing to look up, since its ids are minted.
+    quadric_ref add_quadrics(sv::resident_quadric_set const& set);
+
+    /// Adds one sphere to this scene's implicit quadric batch, drawn with `material`.
+    ///
+    /// Sugar over `add_quadrics`: the frame owns one set per material and this appends to it, which is what makes drawing
+    /// three spheres cost three lines rather than a set a caller has to hold.
+    ///
+    /// **The implicit set hashes its CONTENTS**, so an unchanged frame still uploads nothing — the property the explicit
+    /// form has, kept rather than traded away for the convenience.
+    /// What it does cost is re-hashing the batch each frame, which is cheap against uploading it and is not free.
+    void add_sphere(tg::sphere3f const& sphere, material_id material = material_id::invalid);
+
+    /// The same for a segment thickened by `radius`, drawn as a capsule — round ends, so a polyline joins smoothly.
+    ///
+    /// `flat_caps` draws the open cylinder alone instead, which is what a mesh's edges want: their joints already carry
+    /// vertex spheres, so the caps would be three primitives of geometry nothing can see.
+    void add_line(tg::segment3f const& segment,
+                  float radius,
+                  material_id material = material_id::invalid,
+                  bool flat_caps = false);
 
     /// Adds an area light.
     /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.

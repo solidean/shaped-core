@@ -303,3 +303,74 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material blending along its ends compiles",
     auto const on_mesh = sv::resolve_material(type, material, mesh);
     CHECK(on_mesh.permutation_key != resolved.permutation_key);
 }
+
+ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manager", (sg::context_handle const& ctx_h))
+{
+    // The authoring path end to end: a set a caller holds, placed the way `scene_ref::add_quadrics` places one.
+    // What it pins is that ONE resolution produces the three fields a scene item carries, and that re-placing an unchanged
+    // set costs lookups rather than uploads — the property the whole per-frame authoring model rests on.
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the quadric shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto set = sv::quadric_set();
+    set.name = "edges";
+    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.2f));
+    set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.05f);
+
+    // Two values per primitive, which is what makes this a per_quadric_end material rather than a flat one.
+    auto const colours
+        = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1), tg::vec3f(0, 1, 0), tg::vec3f(1, 1, 0)};
+    set.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_quadric_end, colours));
+
+    auto const item = resources.acquire_scene_item(set);
+
+    CHECK(item.kind == sv::scene_item_kind::quadric_set);
+    CHECK(item.quadrics != sv::quadric_set_id::invalid);
+    CHECK(item.mesh == sv::mesh_id::invalid); // the arm a quadric item does NOT use
+    CHECK(resources.contains_instance(item.instance));
+
+    // The permutation the resolution yielded is the quadric spelling, so it carries an intersection shader.
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+    CHECK(permutation->intersection.is_valid());
+
+    co_await cc::async_settled(permutation->shader);
+    if (permutation->shader->has_error())
+        FAIL(cc::format("quadric closest-hit: {}\n--- source ---\n{}",
+                        permutation->shader->try_error()->underlying().to_string(), permutation->source));
+    co_await cc::async_settled(permutation->intersection);
+    REQUIRE(permutation->intersection->has_value());
+
+    // Placing the same set again is the same everything: the slot short-circuits, and the content hashes behind it agree.
+    auto const again = resources.acquire_scene_item(set);
+    CHECK(again.quadrics == item.quadrics);
+    CHECK(again.instance == item.instance);
+    CHECK(again.shader_key == item.shader_key);
+
+    resources.wait_for_pending_uploads();
+    CHECK(set.is_ready() == false); // `is_ready` is a snapshot of the last PLACEMENT, and that one predates the upload
+
+    auto const third = resources.acquire_scene_item(set);
+    CHECK(third.quadrics == item.quadrics);
+    CHECK(set.is_ready()); // re-placed after the upload landed, so the slot now says so
+
+    // And a batch whose geometry differs is a different resource, or a placement would draw the wrong thing.
+    auto other = sv::quadric_set();
+    other.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.3f));
+    auto const other_item = resources.acquire_scene_item(other);
+    CHECK(other_item.quadrics != item.quadrics);
+
+    // A batch with no attributes resolves differently, so it is a second permutation and a second pair of compiles.
+    // Driven here because a node this test started is async work still holding its context when it ends, which nexus
+    // reports as a failure of the test itself.
+    auto const* const other_permutation = resources.shaders.find(other_item.shader_key);
+    REQUIRE(other_permutation != nullptr);
+    CHECK(other_permutation->key != permutation->key);
+    co_await cc::async_settled(other_permutation->shader);
+    co_await cc::async_settled(other_permutation->intersection);
+}

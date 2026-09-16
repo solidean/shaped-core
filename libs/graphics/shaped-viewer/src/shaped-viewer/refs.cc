@@ -20,6 +20,16 @@ void mesh_ref::transform(tg::affine_transform3f const& t)
     target().transform = t;
 }
 
+scene_item& quadric_ref::target() const
+{
+    return _frame->_views[u32(_view)].layers[_layer].items[_item];
+}
+
+void quadric_ref::transform(tg::affine_transform3f const& t)
+{
+    target().transform = t;
+}
+
 area_light& light_ref::target() const
 {
     return _frame->_views[u32(_view)].layers[_layer].area_lights[_light];
@@ -50,6 +60,35 @@ mesh_ref scene_ref::add_mesh(sv::resident_mesh const& mesh)
     auto& items = target().items;
     items.push_back(_frame->resources().acquire_scene_item(mesh));
     return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+quadric_ref scene_ref::add_quadrics(sv::quadric_set const& set)
+{
+    // Content-keyed like `add_mesh`, so a caller re-adding an unchanged batch every frame pays lookups.
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_scene_item(set));
+    return quadric_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+quadric_ref scene_ref::add_quadrics(sv::resident_quadric_set const& set)
+{
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_scene_item(set));
+    return quadric_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+void scene_ref::add_sphere(tg::sphere3f const& sphere, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add(sphere);
+}
+
+void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material, bool flat_caps)
+{
+    auto& set = _frame->_immediate_batch_for(_view, _layer, material);
+    if (flat_caps)
+        set.add(segment, radius);
+    else
+        set.add_capsule(segment, radius);
 }
 
 light_ref scene_ref::add_light(area_light const& light)
