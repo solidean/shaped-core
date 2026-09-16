@@ -1,4 +1,4 @@
-# Quadric primitives (plan)
+# Quadric primitives
 
 **Status: landed.**
 **All seven phases below are in; what this document now describes is the code rather than the plan.**
@@ -40,19 +40,20 @@ struct sv::quadric3
 
 /// One primitive: a surface, and the region a hit has to lie in.
 /// Both are expressed about `origin`, which is what keeps float32 honest at mesh scale.
-struct sv::quadric_primitive          // 96 bytes on the GPU
+struct sv::quadric_primitive          // 120 bytes on the CPU; 96 of them go to the GPU
 {
     tg::pos3f origin = {};            // 12
     sv::quadric3 surface = {};        // 40
     sv::quadric3 clip = {};           // 40 — the solid is {surface <= 0} AND {clip <= 0}
     u32 flags = 0;                    //  4 — above all, whether the clipper's own surface is drawn
+    tg::aabb3f bounds = {};           // 24 — the BLAS build input, in the SET's space; not part of the GPU record
 };
 ```
 
 **The clipper is a full quadric rather than a plane**, and that is what makes the representation closed under the shapes that matter.
 A slab is itself a quadric — (x·n − d)² − h² is degree 2.
 So a finite cylinder is a cylinder clipped by a slab, a cone frustum is a cone clipped by a slab, and a hemisphere is a sphere clipped by a plane pair.
-All in the same 92 bytes and the same shader.
+All in the same 96 GPU bytes and the same shader.
 
 ### The origin is a correctness requirement, not a convenience
 
@@ -66,7 +67,7 @@ Expressing the pair about a per-primitive origin and translating the ray into it
 ### A capsule is three primitives
 
 The surface of a capsule is not degree 2 — it is a cylinder and two hemispheres, which is piecewise — so a round-capped edge is three records: a cylinder clipped to a slab, plus a sphere at each end.
-That is 276 bytes and three AABBs per edge, and it is the one place the choice of representation shows up in the primitive *count* rather than only in the bytes.
+That is 288 GPU bytes and three AABBs per edge, and it is the one place the choice of representation shows up in the primitive *count* rather than only in the bytes.
 
 On the workload this exists for, the caps are redundant anyway.
 A closed triangle mesh has roughly three edges per vertex.
@@ -79,7 +80,7 @@ capsules + vertex spheres                 3E + V   ≈ 10V primitives
 
 So the mesh-structure path emits **flat-capped cylinders**, and the flat cap is exact there rather than an approximation: the joint is covered by a sphere the drawing already wanted.
 
-A typed capsule tag would fit in 32 of the 92 bytes and cost a branch and no stride change, so adding one later stays additive.
+A typed capsule tag would fit in the record as it stands and cost a branch and no stride change, so adding one later stays additive.
 It is deliberately not in the first version.
 
 ## Batches, and the acceleration structures
@@ -207,6 +208,22 @@ A flat cap lies in the plane the clipper already cuts, so it adds nothing to the
 free.
 
 
+### A per-end frequency is the capability deliberately left out
+
+An earlier revision of this design gave quadrics frequencies of their own — `per_quadric` for one value per primitive, and
+`per_quadric_end` for a value at each end of a tube, blended along its length.
+The clip slab makes the second nearly free: it is offset rather than centred, so it carries the axis WITH its sign, and the
+blend parameter falls out of the same evaluation the intersection already does.
+
+It was dropped, and the reason is the whole point of the section above.
+A per-end frequency forks the generated body — one material would no longer produce one shader body for both geometries — and
+that property is worth more today than a gradient along an edge.
+`per_quadric` itself was redundant the moment `per_triangle` was read as "one value per element of the geometry's own primitive
+stream", which is what it already meant.
+
+So the gradient stays unbuilt rather than unconsidered.
+The cheap way back to it is a frequency that reads the clip slab's axial parameter, and nothing in the record has to change for it.
+
 ### No textures on quadrics, for now
 
 A general quadric has no natural surface parametrization, so there is nothing to sample by.
@@ -277,10 +294,12 @@ Each step is meant to be landable and testable on its own.
    `material_permutation` gained an `intersection` shader, and `pathtrace_routine` puts it on BOTH of a permutation's
    records — the shadow one too, since a shadow ray traverses the same procedural BLAS.
 5. **The material fork** — landed.
-   `per_quadric` and `per_quadric_end` joined the geometric frequencies, resolution runs against a `geometry_view` that says
-   which kind the geometry is, and a frequency it cannot number loses to the coarser rank like any other unusable candidate.
-   The clip slab is offset rather than centred so it carries the axis WITH its sign, which is what makes the blend parameter
-   free — see `sv::quadric_primitive::end_parameter`.
+   There is ONE frequency set and no quadric-only frequency: resolution runs against a `geometry_view` that says which kind the
+   geometry is, `sv::serves` says which frequencies that kind can number, and one it cannot loses to the coarser rank like any
+   other unusable candidate.
+   A batch therefore admits `per_instance` and `per_triangle` alone, which is what lets one material definition generate one
+   shader body for both geometries — the two differ in the preamble that builds the shading context and in nothing the material
+   fragment reads.
 6. **The authoring surface** — landed.
    `scene_ref::add_quadrics` over either form, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` / `add_arrow`
    sugar over a frame-owned batch per (view, layer, material).
@@ -296,13 +315,13 @@ Each step is meant to be landable and testable on its own.
    The open and capped tubes are the same record with one bit different, which is the clearest thing in the picture.
    `quadric-arrows.cc` is the arrow API: an axis frame, and the same eight segments drawn twice — proportional in one row,
    at a fixed shaft radius in the other — which is the difference the sizing overload makes and the reason there are two.
-   `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured `per_quadric_end` so each
-   edge runs from one endpoint's colour to the other's.
+   `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured at `per_triangle` — one value per
+   quadric, each vertex taking its own colour and each edge the average of its two endpoints'.
    `mesh-structure-dense.cc` is the same authoring code at the scale a real mesh has — a five-times-subdivided
    icosahedron, 10,242 vertices and 30,720 edges as **40,962 primitives in one batch**, one acceleration structure, one
    instance.
-   Its edges are coloured by their own length at `per_quadric`, which draws the construction's seams as a pattern rather
-   than a number.
+   Its edges are coloured by their own length, again at `per_triangle`, which draws the construction's seams as a pattern
+   rather than a number.
 
 ## Elsewhere
 

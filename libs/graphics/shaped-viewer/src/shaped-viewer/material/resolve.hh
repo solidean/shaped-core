@@ -140,8 +140,8 @@ namespace sv
 /// `material.type` is not checked against `type` — the library is what pairs them, and it validates once at registration rather
 /// than on every resolve.
 /// A frequency the geometry cannot serve is one more unusable candidate: it loses to the next-coarsest rank rather than failing.
-/// So a `per_vertex` attribute on a quadric set, or a `per_quadric` one on a mesh, falls back to the material's constant exactly
-/// as a format mismatch does.
+/// So a `per_vertex` or `per_corner` attribute on a quadric set falls back to the material's constant exactly as a format
+/// mismatch does, since a batch numbers its primitives and nothing else.
 ///
 /// **On quadrics the two texture ranks are unreachable**, and that follows from the same rule rather than being a special case:
 /// a sample needs a uv attribute, and a quadric serves no frequency a uv could be interpolated at.

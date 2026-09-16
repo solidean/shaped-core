@@ -11,7 +11,6 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 - [structure](structure.md) — the module roadmap, with a status tag per entry.
 - [asset-loading](asset-loading.md) — the mesh / asset importer: the CPU / GPU type split, the resource recipe model, and the glTF to OpenPBR mapping.
 - [quadrics](quadrics.md) — analytic quadric primitives as a second scene-item kind: the record, the procedural BLAS batching, and the material fork.
-  Design only; nothing has landed.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
 - [TODO](TODO.md) — running list of known follow-ups.
 

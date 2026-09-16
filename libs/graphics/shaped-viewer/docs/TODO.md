@@ -209,8 +209,11 @@ importance-samples the continuation — so what is left is coverage of the model
   built into a basis per corner first.
 - **A non-uniform instance scale shears the tangent frame.**
   The hit rotates the authored frame by `ObjectToWorld3x4` and renormalizes, which is exact for a rigid or uniformly scaled
-  placement and wrong for anything else — the normal wants the inverse transpose while the tangent wants the matrix itself.
-  Nothing in the tree scales non-uniformly yet.
+  placement and wrong for anything else — the tangent wants the matrix itself while the normal wants the inverse transpose,
+  so the two cannot both come out of one rotation of one frame.
+  The GEOMETRIC normal is not affected: both hit shaders take it through `WorldToObject3x4` in the row-vector form, which is
+  the inverse transpose, and `quadric-gallery` places a batch under a non-uniform scale on purpose.
+  What is left is the authored frame alone, and it needs the frame decomposed rather than rotated.
 - **Nothing produces a frame but the sphere example.**
   `openpbr-spheres` emits an analytic one per vertex.
   A glTF import would carry `TANGENT` and a handedness in its `w`, and a mesh with uvs but no tangents wants them derived

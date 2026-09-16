@@ -77,15 +77,25 @@ struct sv::pt_trace_desc
     /// `sg::tlas_instance::hit_group_offset` indexes exactly this list, so the caller has already fixed the order and
     /// must not disturb it between building the instances and getting here.
     /// A permutation whose shader has not compiled — still in flight, or a broken material — is replaced by
-    /// `fallback` for this trace, so one bad material costs its own meshes their shading rather than costing the view
-    /// its whole image.
+    /// `fallback` or `quadric_fallback` for this trace, so one bad material costs its own meshes their shading rather
+    /// than costing the view its whole image.
     cc::span<material_permutation const* const> hit_groups;
 
-    /// The neutral hit group a permutation that did not compile is substituted by — `material_shader_cache::acquire_fallback`.
+    /// The neutral TRIANGLE hit group a permutation that did not compile is substituted by — `material_shader_cache::acquire_fallback`.
     ///
     /// Null means no substitution: a permutation that has not compiled then makes the whole trace a no-op, which is the
     /// old all-or-nothing behavior and what a caller with no cache at hand gets.
     material_permutation const* fallback = nullptr;
+
+    /// The neutral PROCEDURAL hit group, for a quadric permutation — `material_shader_cache::acquire_quadric_fallback`.
+    ///
+    /// **A substitution has to keep the hit group's kind**, and that is a correctness requirement rather than tidiness:
+    /// a procedural BLAS must be traced by a group carrying an intersection shader, so standing a quadric permutation
+    /// in with the triangle fallback reports no hits at all and the batch silently disappears until its compile lands.
+    /// Which of the two a permutation wants is read off `material_permutation::intersection`.
+    ///
+    /// Null is the same all-or-nothing behavior `fallback` describes, for quadric permutations alone.
+    material_permutation const* quadric_fallback = nullptr;
 
     /// The manager's bindless tables, snapshotted and locked for this recording — bound as the pipeline's second group.
     /// It must outlive the dispatch, which is what `gpu_resource_manager::freeze()`'s scope is for.

@@ -95,7 +95,10 @@ void PtClosestHit(inout PtPayload payload, in PtAttributes attribs)
     float3 v1 = pt_instance_position(inst, ctx.corner.y);
     float3 v2 = pt_instance_position(inst, ctx.corner.z);
     float3 n_obj = normalize(cross(v1 - v0, v2 - v0));
-    float3 N = normalize(mul((float3x3)ObjectToWorld3x4(), n_obj));
+
+    // By the inverse transpose, not by ObjectToWorld: a normal is a covector, so a non-uniform placement tilts it
+    // differently from the surface under it. `mul(n, M)` is the row-vector form — n times WorldToObject on the left.
+    float3 N = normalize(mul(n_obj, (float3x3)WorldToObject3x4()));
 
     float3 V = -normalize(WorldRayDirection());
 

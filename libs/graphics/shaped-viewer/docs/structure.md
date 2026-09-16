@@ -109,8 +109,8 @@ asset loading (asset_loader)             [done]         glTF 2.0, OBJ and STL lo
                                                         The recipe and caching model in [asset-loading.md](asset-loading.md) is deliberately deferred — from_memory plus a key covers everything until assets get big enough that holding their payloads resident is the problem
 quadric primitives                       [done]         a second scene_item_kind: analytic quadrics traced by a custom intersection shader over a procedural (AABB) BLAS, for drawing a mesh's vertices and edges at scale.
                                                         One record is a surface quadric and a clipping quadric about a per-primitive origin, batched one BLAS and one TLAS instance per sv::quadric_set.
-                                                        Materials reach it as a second SPELLING of the same generator — a quadric runtime and epilogue, which material_shader_key already distinguishes — with per_quadric / per_quadric_end as quadric-only frequencies.
-                                                        The clip slab doubles as the interpolation axis, so an edge that fades along its length costs no bytes. See quadrics.md
+                                                        Materials reach it as a second SPELLING of the same generator — a quadric runtime and epilogue, which material_shader_key already distinguishes — over ONE frequency set, of which a batch admits per_instance and per_triangle.
+                                                        Still open: a per-end frequency blended along the clip slab's axis, which would give an edge a gradient for no extra bytes. See quadrics.md
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

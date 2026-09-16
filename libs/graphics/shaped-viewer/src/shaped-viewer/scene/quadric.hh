@@ -128,9 +128,12 @@ struct sv::quadric3
 /// A slab is itself a quadric, so a finite cylinder is a cylinder clipped by a slab, a cone frustum is a cone clipped by a slab,
 /// and a hemisphere is a sphere clipped by a plane pair — all in one record and one intersection routine.
 ///
-/// `bounds` is world-space and is what the procedural BLAS is built from.
-/// It is computed by the factory that knows the shape rather than derived from the coefficients, because a general quadric has no
-/// finite box at all and only the construction knows which bounded shape was meant.
+/// **Everything here is in the owning set's space, never the world's** — `origin`, the two quadrics, and `bounds` alike.
+/// `sv::quadric_set::transform` is what places that space in the world, so a caller holding a world position converts it before
+/// asking anything below.
+/// `bounds` is what the procedural BLAS is built from, and it is computed by the factory that knows the shape rather than
+/// derived from the coefficients, because a general quadric has no finite box at all and only the construction knows which
+/// bounded shape was meant.
 struct sv::quadric_primitive
 {
     /// Set in `flags` to draw the clipper's own surface as well as the surface quadric's.
@@ -177,10 +180,11 @@ struct sv::quadric_primitive
                                                        float base_radius,
                                                        bool capped = true);
 
-    /// Whether `p`, given in world space, lies in the region the clipper admits.
+    /// Whether `p` lies in the region the clipper admits.
+    /// `p` is in the SET's space, like everything else on this type — see the note above the struct.
     [[nodiscard]] bool admits(tg::pos3f const& p) const { return clip.evaluate(p - origin) <= 0.0f; }
 
-    /// The outward unit normal at a world-space point on the surface.
+    /// The outward unit normal at `p`, a point of the surface in the SET's space.
     /// Undefined where the gradient vanishes, which for the shapes built here is only a degenerate primitive.
     [[nodiscard]] tg::vec3f normal_at(tg::pos3f const& p) const;
 };
@@ -204,9 +208,17 @@ struct sv::quadric_hit
 
 namespace sv
 {
+/// The default upper bound on `intersect`, meaning "as far as the ray goes".
+///
+/// The largest finite f32 rather than an infinity, so a caller comparing against it never has to reason about NaN.
+/// tg has no scalar bound constant yet — `scalar_traits` carries capabilities and operations but no max value — so this is a
+/// local stand-in for a `tg::max_value<f32>` that belongs there.
+inline constexpr float unbounded_ray_t = 3.402823466e38f;
+
 /// The CPU reference for what the intersection shader reports, and the shape the two are tested against each other by.
 ///
-/// Reports the nearest root at or beyond `t_min` that the clipper admits, and otherwise the far root under the same two tests.
+/// Reports the nearest of up to FOUR candidates — two roots of each quadric — keeping each only where it lies inside the other
+/// quadric's interior and within [`t_min`, `t_max`]; the clipper's own two are candidates only where `emits_clip_surface`.
 /// The far-root fallback is load-bearing for ordinary geometry rather than only for interior views: a slab-clipped cylinder is an
 /// open tube, so seen near end-on its near root lies outside the slab and the visible surface is the inside of the far wall.
 ///
@@ -214,7 +226,7 @@ namespace sv
 [[nodiscard]] cc::optional<quadric_hit> intersect(quadric_primitive const& primitive,
                                                   tg::ray3f const& ray,
                                                   float t_min = 0.0f,
-                                                  float t_max = 3.4e38f);
+                                                  float t_max = unbounded_ray_t);
 
 } // namespace sv
 

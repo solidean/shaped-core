@@ -75,7 +75,8 @@ struct sv::impl::quadric_set_gpu_slot
 ///
 /// One material for the whole batch: a two-material drawing is two sets, which is cheap because the instance count is per set
 /// rather than per primitive.
-/// Per-primitive variation travels in `attributes` instead, at `per_quadric` or `per_quadric_end`.
+/// Per-primitive variation travels in `attributes` instead, at `per_triangle` — which on a batch means one value per
+/// quadric, indexed by `PrimitiveIndex()`.
 struct sv::quadric_set
 {
     /// human-readable, for debugging and for picking a set out of a scene; not an identity — nothing dedupes on it

@@ -67,9 +67,14 @@ void PtQuadricClosestHit(inout PtPayload payload, in QuadricAttributes attribs)
     sv::shading_context ctx = sv::make_quadric_context(inst, PrimitiveIndex());
 
     // The gradient the intersection already computed, moved into world space.
-    // Exact for a rigid or uniformly scaled placement; a non-uniform one wants the inverse transpose, which is the same
-    // approximation the triangle path takes for its face normal.
-    float3 N = normalize(mul((float3x3)ObjectToWorld3x4(), attribs.normal));
+    //
+    // By the INVERSE TRANSPOSE, not by ObjectToWorld: a normal is a covector, so a non-uniform scale tilts it
+    // differently from the surface under it and the forward matrix leaves it off the surface it belongs to.
+    // `mul(n, M)` is the row-vector form, which is n times WorldToObject on the left — the inverse transpose applied
+    // to a column, without ever forming one.
+    // Placing a batch under a non-uniform scale is a documented capability here (a sphere becomes an ellipsoid for
+    // free), so this is the ordinary case rather than an exotic one.
+    float3 N = normalize(mul(attribs.normal, (float3x3)WorldToObject3x4()));
 
     float3 V = -normalize(WorldRayDirection());
 
