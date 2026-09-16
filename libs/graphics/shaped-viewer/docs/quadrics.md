@@ -96,6 +96,10 @@ That is a cost proportional to the scene rather than to what changed, in a rende
 
 **A batch is content-hashed and immutable**, exactly like `sv::triangle_geometry`.
 That is what makes an unchanged batch upload and rebuild nothing.
+
+The key is one XXH3-128 pass over the primitive span, taken lazily on the first `hash()` after a mutation.
+Folding a digest per `add` was the first shape, and it is about five times the work for the same invariant.
+The cost is the call count rather than the bytes, and `tests/quadric-set-benchmark.cc` is what settled it.
 It is also what lands the streaming, residency and eviction story for free.
 A quadric batch becomes the same kind of thing `mesh_manager` already holds: a pinned hashed payload that `ctx.stream` uploads, and that `record_pending_work` builds a BLAS behind.
 

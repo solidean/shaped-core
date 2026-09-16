@@ -159,8 +159,15 @@ struct sv::quadric_set
     [[nodiscard]] bool is_empty() const { return _primitives.empty(); }
 
     /// The content key the resource managers cache by.
-    /// Folded as primitives arrive, and order-sensitive because primitive order IS `PrimitiveIndex()`.
-    [[nodiscard]] cc::hash128 hash() const { return _hash; }
+    ///
+    /// Order-sensitive, because primitive order IS `PrimitiveIndex()` and two sets holding the same primitives in a
+    /// different order are different resources.
+    /// That falls out of the mechanism rather than being arranged: the hash is taken over the primitive span's bytes,
+    /// and the byte range is the order.
+    ///
+    /// **Computed on first call after a mutation, then cached**, so a set filled once and placed every frame hashes
+    /// once — see `_hash_dirty` for why it is not folded per `add` instead.
+    [[nodiscard]] cc::hash128 hash() const;
 
     /// The extent of every primitive, in the set's own space.
     /// Empty while the set is, which is what a placeholder needs to know it has nothing to stand in for yet.
@@ -173,8 +180,19 @@ struct sv::quadric_set
 private:
     cc::vector<quadric_primitive> _primitives;
 
-    /// folded per primitive rather than computed over the buffer, so adding one is O(1) and placing one re-hashes nothing
-    cc::hash128 _hash;
+    /// The content key, and whether the primitives have moved under it since it was taken.
+    ///
+    /// One streaming hash over the whole span, lazily, rather than a fold per `add` — and that is a measured choice
+    /// rather than a stylistic one.
+    /// The fold costs two XXH3-128 calls per primitive (the record, then the running digest) against one long-input
+    /// pass, and the per-call setup is what dominates at 120 and 32 bytes: about five times the work for an identical
+    /// invariant.
+    /// At a million primitives, which is the scale this type is built for and re-authored every frame, it is 20.9 ms
+    /// against 4.6 ms — see `tests/quadric-set-benchmark.cc`.
+    ///
+    /// Mutable because taking the hash does not change the set; it only stops deferring work the set already owed.
+    mutable cc::hash128 _hash;
+    mutable bool _hash_dirty = false;
 
     cc::optional<tg::aabb3f> _bounds;
 };

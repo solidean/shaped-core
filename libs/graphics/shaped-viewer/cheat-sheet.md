@@ -460,8 +460,9 @@ s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
 s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
 ```
 
-**`add` is the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
-The fold is O(1) per primitive and order-SENSITIVE, because primitive order is what `PrimitiveIndex()` reads.
+**The factories are the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
+The hash is one pass over the primitive span, taken on the first `hash()` after a mutation and cached, so a set filled once and placed every frame hashes once.
+It is order-SENSITIVE without arranging for it, because the byte range IS the primitive order, which is what `PrimitiveIndex()` reads.
 The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recolouring or re-placing a million-primitive batch re-uploads nothing.
 
 **The primitives live in the SET's space**, and `transform` places that space in the world.

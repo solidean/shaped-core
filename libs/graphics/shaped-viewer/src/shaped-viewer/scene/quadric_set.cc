@@ -15,15 +15,27 @@ tg::aabb3f united(tg::aabb3f const& a, tg::aabb3f const& b)
 
 void sv::quadric_set::add(quadric_primitive const& p)
 {
-    // Folding the primitive's own digest in keeps this O(1) and keeps the result order-sensitive, which it must be:
-    // primitive order is what `PrimitiveIndex()` reads, so two sets holding the same primitives in a different order are
-    // different resources and must not share a cache entry.
-    auto const digest = cc::hash128::create(cc::span<quadric_primitive const>(&p, 1).as_bytes(), impl::quadric_hash_seed);
-    _hash = impl::combine_digests(_hash, digest);
+    // The hash is deferred rather than folded: one streaming pass over the span beats 2N short-input calls by about
+    // five times for the same invariant, and nothing here asks for the key until the set is placed.
+    _hash_dirty = true;
 
+    // The bounds fold stays, because a union of boxes is not a byte range and has no bulk form to defer to.
     _bounds = _bounds.has_value() ? united(_bounds.value(), p.bounds) : p.bounds;
 
     _primitives.push_back(p);
+}
+
+cc::hash128 sv::quadric_set::hash() const
+{
+    if (_hash_dirty)
+    {
+        // Over the raw bytes of the whole span, which is what makes the result order-sensitive without arranging for it.
+        // `quadric_primitive` is padding-free and static_asserts that it is — see scene/quadric.hh — so no indeterminate
+        // byte ever reaches a cache key.
+        _hash = cc::hash128::create(cc::span<quadric_primitive const>(_primitives).as_bytes(), impl::quadric_hash_seed);
+        _hash_dirty = false;
+    }
+    return _hash;
 }
 
 void sv::quadric_set::add_arrow(tg::segment3f const& s, arrow_style const& style)
@@ -42,5 +54,6 @@ void sv::quadric_set::clear()
 {
     _primitives.clear();
     _hash = {};
+    _hash_dirty = false; // an empty set's key is the default, which is what a never-filled one already reports
     _bounds = {};
 }
