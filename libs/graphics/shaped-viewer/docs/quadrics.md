@@ -2,7 +2,7 @@
 
 **Status: landed.**
 **All seven phases below are in; what this document now describes is the code rather than the plan.**
-**`examples/mesh-structure.cc` is it in practice, and the [cheat sheet](../cheat-sheet.md) is the API.**
+**`examples/mesh-structure.cc` is it in practice, `examples/mesh-structure-dense.cc` is it at mesh scale, and the [cheat sheet](../cheat-sheet.md) is the API.**
 
 Analytic quadric surfaces as a second kind of scene item, traced by a custom DXR intersection shader over a procedural (AABB) BLAS.
 sv draws exactly one kind of thing today — a triangle mesh, placed by a transform, shaded by a generated material permutation — and this is the second.
@@ -265,10 +265,14 @@ Each step is meant to be landable and testable on its own.
    `scene_item` gained a `quadric_set` arm and `view_renderer` builds its TLAS instance; a batch still streaming is drawn as
    the shared placeholder cube through the TRIANGLE fallback, since a procedural hit group on a triangle BLAS is exactly the
    mismatch that refuses to build.
-7. **An example** — landed, as `examples/mesh-structure.cc`, with a committed capture.
-   An icosahedron's vertices as spheres and its edges as flat-capped tubes, coloured `per_quadric_end` so each edge runs
-   from one endpoint's colour to the other's.
-   42 primitives of about ninety bytes each, where the tessellated equivalent would be thousands of triangles.
+7. **Examples** — landed, two of them, each with a committed capture.
+   `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured `per_quadric_end` so each
+   edge runs from one endpoint's colour to the other's.
+   `mesh-structure-dense.cc` is the same authoring code at the scale a real mesh has — a five-times-subdivided
+   icosahedron, 10,242 vertices and 30,720 edges as **40,962 primitives in one batch**, one acceleration structure, one
+   instance.
+   Its edges are coloured by their own length at `per_quadric`, which draws the construction's seams as a pattern rather
+   than a number.
 
 ## Elsewhere
 

@@ -457,7 +457,8 @@ That axis costs no bytes — it comes back out of the clipping slab, which is of
 A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
 The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parametrization.
 
-See [docs/quadrics.md](docs/quadrics.md) for the design, and `examples/mesh-structure.cc` for it in practice.
+See [docs/quadrics.md](docs/quadrics.md) for the design.
+`examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
 
 ## Asset loading — a file into `sv::mesh`
 
