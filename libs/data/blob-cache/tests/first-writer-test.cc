@@ -13,7 +13,7 @@ using namespace bcache::test;
 // different bytes — two ZIPs of the same files, say, differing only in their timestamps.
 // Either is a valid answer, and the mapping must not flap between them.
 
-ASYNC_TEST("bcache keeps the first value written under a key", main_thread)
+ASYNC_TEST("bcache keeps the first value written under a key")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -36,7 +36,7 @@ ASYNC_TEST("bcache keeps the first value written under a key", main_thread)
     CHECK(blob_text((co_await f.cache().get(key)).value().data) == "first bytes");
 }
 
-ASYNC_TEST("bcache lets a second connection see the first's entry and lose the race to it", main_thread)
+ASYNC_TEST("bcache lets a second connection see the first's entry and lose the race to it")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -63,7 +63,7 @@ ASYNC_TEST("bcache lets a second connection see the first's entry and lose the r
     CHECK(blob_text((co_await f.cache().get(key)).value().data) == "written by A");
 }
 
-ASYNC_TEST("bcache invalidate drops an entry and lets a new value take the key", main_thread)
+ASYNC_TEST("bcache invalidate drops an entry and lets a new value take the key")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -84,7 +84,7 @@ ASYNC_TEST("bcache invalidate drops an entry and lets a new value take the key",
     CHECK(blob_text((co_await f.cache().get(key)).value().data) == "new");
 }
 
-ASYNC_TEST("bcache clear empties one namespace and leaves the others alone", main_thread)
+ASYNC_TEST("bcache clear empties one namespace and leaves the others alone")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

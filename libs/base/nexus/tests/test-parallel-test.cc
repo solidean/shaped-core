@@ -190,6 +190,43 @@ TEST("parallel - a no-arg exclusive test runs alone", no_scheduler)
     CHECK(seen_beside_the_exclusive.load(cc::memory_order_acquire) == 0);
 }
 
+// Interleaved in schedule order, each exclusive() would split the phase into waves no longer than its slowest test.
+TEST("parallel - exclusive tests run after every other test of their phase, wherever they are declared", no_scheduler)
+{
+    for (auto const jobs : {1, 4})
+    {
+        cc::atomic<int> finished_shared = {0};
+        cc::atomic<int> exclusive_early = {0};
+
+        nx::test_registry reg;
+        auto const exclusive_body = [&]
+        {
+            if (finished_shared.load(cc::memory_order_acquire) != 6)
+                exclusive_early.fetch_add(1, cc::memory_order_relaxed);
+            CHECK(true);
+        };
+        auto const shared_body = [&]
+        {
+            finished_shared.fetch_add(1, cc::memory_order_acq_rel);
+            CHECK(true);
+        };
+
+        reg.add_declaration("alone-first", nx::impl::merge_config(nx::config::exclusive()), exclusive_body);
+        for (auto i = 0; i < 3; ++i)
+            reg.add_declaration(cc::format("shared{}", i), {}, shared_body);
+        reg.add_declaration("alone-middle", nx::impl::merge_config(nx::config::exclusive()), exclusive_body);
+        for (auto i = 3; i < 6; ++i)
+            reg.add_declaration(cc::format("shared{}", i), nx::impl::merge_config(nx::config::exclusive("tag")),
+                                shared_body);
+
+        auto const schedule = nx::test_schedule::create({}, reg);
+        auto const exec = nx::execute_tests(schedule, with_jobs(jobs));
+
+        CHECK(exec.count_failed_tests() == 0);
+        CHECK(exclusive_early.load(cc::memory_order_acquire) == 0).context(cc::format("-j{}", jobs));
+    }
+}
+
 // An exclusive ASYNC_TEST holds the phase lock across its suspends, and still has a scheduler to drive the root it hands back.
 ASYNC_TEST("parallel - an exclusive ASYNC_TEST still gets a scheduler", exclusive())
 {

@@ -141,9 +141,12 @@ That is what lets an `exclusive()` test, an `ASYNC_TEST` and a `main_thread` tes
 
 - **Tags are taken in name order, after the phase lock, one at a time**, which is what keeps two multi-tag tests from deadlocking.
 - **The phase lock is writer-preferring**: once an `exclusive()` test waits, tests arriving after it wait behind it.
+- **So `exclusive()` tests run as a second batch**, once every other test of the phase has finished, wherever they are declared.
+  Interleaved, each one would cut the phase into waves, every wave as long as its slowest test.
+  A binary with 137 exclusive tests ran one test at a time for nearly its whole wall clock that way.
 - **The trade: holders run in arrival order, not schedule order.**
   Under `-jN` two holders of a tag no longer run in the order the schedule lists them.
-  `-j1` still runs each phase in schedule order, so a failure that depends on the order is still reproducible there.
+  `-j1` still runs each batch in schedule order, so a failure that depends on the order is still reproducible there.
 - **Exclusion across scheduler modes is free**, because phases are sequential; a lock is only ever contended within its phase.
 
 A test may carry up to `nx::config::max_exclusion_tags` tags.

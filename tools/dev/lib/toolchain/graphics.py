@@ -94,6 +94,42 @@ def _vulkan_headers_check(cxx: str | None) -> tuple[str, bool | None, str]:
     return (label, None, f"vulkan/vulkan.h not found, so the vulkan backend is skipped at configure; {hint}")
 
 
+# The first SDK whose validation layer no longer drops a deferred submit batch unvalidated.
+# Older layers report WRITE_RACING_READ between our transfer and direct queues that never happened, which fails the
+# vulkan entry driver at random, since it runs with synchronization validation on.
+# docs/bugs-external/vulkan-syncval-wait-before-signal-false-race has the diagnosis and the upstream fix.
+_VULKAN_SDK_MIN_SYNCVAL = (1, 4, 350)
+
+
+def _vulkan_sdk_version_check() -> tuple[str, bool | None, str] | None:
+    """Whether $VULKAN_SDK's validation layer is new enough for the synchronization validation the tests turn on.
+
+    The version is read from the install directory's name, after resolving symlinks such as a `latest` one.
+    On Windows VULKAN_SDK names that directory; on Linux and macOS it names a platform subdirectory of it (`1.4.357.1/x86_64`).
+    None when there is no SDK or neither name carries a version, since then there is nothing to say.
+    """
+    sdk = os.environ.get("VULKAN_SDK")
+    if not sdk:
+        return None
+    resolved = Path(sdk).resolve()
+    version = None
+    for name in (resolved.name, resolved.parent.name):
+        parts = name.split(".")
+        if len(parts) >= 3 and all(p.isdigit() for p in parts[:3]):
+            version = tuple(int(p) for p in parts[:3])
+            break
+    if version is None:
+        return None
+    label = "vulkan validation layer"
+    shown = ".".join(str(v) for v in version)
+    if version >= _VULKAN_SDK_MIN_SYNCVAL:
+        return (label, True, f"SDK {shown}")
+    wanted = ".".join(str(v) for v in _VULKAN_SDK_MIN_SYNCVAL)
+    return (label, None,
+            f"SDK {shown} reports false WRITE_RACING_READ under synchronization validation, which fails "
+            f"shaped-graphics-test at random — install SDK {wanted} or newer and point VULKAN_SDK at it")
+
+
 def _vulkan_icd_dirs() -> list[Path]:
     """Where the loader looks for driver manifests, in the order it reads them.
 
@@ -286,9 +322,11 @@ def checks(root: Path, cxx: str | None) -> list[tuple[str, bool | None, str]]:
     headers = _vulkan_headers_check(cxx)
     vk_runtime = _vulkan_runtime_check()
     dx12_runtime = _dx12_runtime_check()
+    sdk_version = _vulkan_sdk_version_check()
     return [
         *_backend_rollup(headers, vk_runtime, dx12_runtime, cxx),
         headers,
+        *([sdk_version] if sdk_version else []),
         vk_runtime,
         dx12_runtime,
         _surface_check(cxx),

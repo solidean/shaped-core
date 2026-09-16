@@ -13,6 +13,8 @@ void dx12_context::shutdown()
     if (_is_shut_down)
         return;
 
+    sg::impl::device_lifecycle_hold const lifecycle; // see impl/device_lifecycle.hh
+
     // Release per-context routine instances first: they may cache epoch/allocator-managed resources
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.
     routines.clear();

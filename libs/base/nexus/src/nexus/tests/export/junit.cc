@@ -99,6 +99,8 @@ cc::string nx::write_junit_xml(cc::string_view suite_name,
         total_time += exec.root.duration_seconds;
 
     cc::string const suite = xml_escape(suite_name);
+    auto const serial = execution.serial_time();
+    auto const serial_group = xml_escape(serial.largest_group);
 
     // `assertions` (total checks evaluated) is not part of the base JUnit schema
     // but is widely understood; the dev.py runner reads it to report check counts.
@@ -106,6 +108,9 @@ cc::string nx::write_junit_xml(cc::string_view suite_name,
     {
         os.appendf("name=\"{}\" tests=\"{}\" failures=\"{}\" errors=\"0\" skipped=\"0\" assertions=\"{}\" time=\"{}\"",
                    suite, total_tests, failed_tests, total_checks, total_time);
+        os.appendf(" serial_time=\"{:.4f}\" serial_alone_time=\"{:.4f}\" serial_group=\"{}\" "
+                   "serial_group_time=\"{:.4f}\"",
+                   serial.total_s(), serial.alone_s, serial_group, serial.largest_group_s);
         if (resources.cpu_machine_fraction >= 0)
             os.appendf(" cpu_load=\"{:.4f}\" cores_used=\"{:.2f}\"", resources.cpu_machine_fraction,
                        resources.cpu_cores_used);

@@ -238,8 +238,10 @@ TEST("cc::threaded_actor - shutdown wakes a thread that is about to sleep", main
     // That window is only a few instructions wide, so waiting for the thread to announce itself is what makes aiming at
     // it possible at all — hammering start/shutdown blind just races thread startup, which is a thousand times longer.
     // The spin then sweeps the shutdown across the handful of steps between the announcement and the wait.
+    // A default run sweeps the shortest spins, where the window sits; a thorough one sweeps well past it.
     auto volatile sink = 0;
-    for (auto i = 0; i < 400; ++i)
+    auto const sweep = nx::is_thorough() ? 400 : 48;
+    for (auto i = 0; i < sweep; ++i)
     {
         g_actor_thread_started.store(false);
         auto actor = cc::make_and_start_threaded_actor<signaling_actor>();

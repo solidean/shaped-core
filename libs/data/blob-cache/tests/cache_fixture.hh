@@ -12,12 +12,11 @@
 /// Three things are pinned down, and every test here depends on all three:
 ///
 ///   the CLOCKS are injected, so a TTL elapses because the test said so and never because a machine was slow;
-///   the ACTOR is unthreaded, so message order is the test's own and a get really does follow the put before it;
-///   every test is an ASYNC_TEST with main_thread, awaiting the cache rather than pumping it.
+///   each fixture's ACTOR has one mailbox, so message order is the test's own and a get really does follow the put before it;
+///   every test is an ASYNC_TEST, awaiting the cache rather than pumping it.
 ///
-/// The third is the one that is easy to get wrong.
-/// An unthreaded store runs only when the loop that owns it sweeps, and in a test run that loop is nexus's on the main
-/// thread — so a test pumping the store itself from a pool thread races that loop for the store's replies.
+/// The actor is threaded, one thread per fixture, so a test over it needs no main_thread.
+/// Only a test opening an unthreaded store of its own does, since nexus's main loop is what sweeps that store.
 
 namespace bcache::test
 {

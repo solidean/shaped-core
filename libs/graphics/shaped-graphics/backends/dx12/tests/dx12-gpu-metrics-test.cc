@@ -184,7 +184,7 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
 }
 
 // A context of its own because the stamp is a process-wide recording, which needs exclusive() — and a child runs under its driver's config.
-TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive())
+TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive(), nx::config::thorough_only)
 {
     auto handle = dx12::make_fresh_context();
     REQUIRE(handle != nullptr);

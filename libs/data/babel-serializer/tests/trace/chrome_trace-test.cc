@@ -349,7 +349,10 @@ TRACE_TEST("chrome_trace - no samples means no sampled track")
     CHECK(!json.contains(R"("cat":"sampled")"));
 }
 
-TRACE_TEST("chrome_trace - sampled stacks become spans inside the scopes that were open")
+TEST("chrome_trace - sampled stacks become spans inside the scopes that were open",
+     nx::config::exclusive(),
+     nx::config::owns_recorder,
+     nx::config::thorough_only) // runs a live sampler for real time
 {
     if (!cc::stack_capture_from_context_available() || !CC_HAS_THREADS)
         SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");

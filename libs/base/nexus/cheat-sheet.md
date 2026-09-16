@@ -32,7 +32,7 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 
 // Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
-TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, after the rest of its phase
 TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — NO ambient scheduler at all: none bound, none
                                          //     installed. For a test standing up its own, and REQUIRED to nest
                                          //     nx::execute_tests. Touching an async without one asserts.
@@ -400,7 +400,7 @@ uv run dev.py test                       # build + run the whole suite
 // --timings-json <file> (every test's wall-clock interval and thread; `dev.py test --profile` draws one slice per test),
 //   --benchmark-rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
-//   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
+//   -j1 runs them one at a time in schedule order, exclusive() after the rest of each phase, rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
 //   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
