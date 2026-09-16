@@ -152,6 +152,7 @@ cc::span<u32 const> bound_resources::elements(bindless_table table) const
 
 gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
                                            mesh_manager meshes,
+                                           quadric_manager quadrics,
                                            material_manager materials,
                                            texture_manager textures,
                                            attribute_manager attributes,
@@ -161,6 +162,7 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
                                            texture_policy texture_policy,
                                            work_budget work_budget)
   : meshes(cc::move(meshes)),
+    quadrics(cc::move(quadrics)),
     materials(cc::move(materials)),
     textures(cc::move(textures)),
     attributes(cc::move(attributes)),
@@ -210,8 +212,9 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
     auto const format = ctx.accepted_shader_formats().front();
 
     return gpu_resource_manager(
-        ctx, mesh_manager::create(ctx, cfg.meshes), material_manager::create(ctx, cfg.materials),
-        texture_manager::create(ctx, cfg.textures), attribute_manager::create(ctx, cfg.attributes),
+        ctx, mesh_manager::create(ctx, cfg.meshes), quadric_manager::create(ctx, cfg.quadrics),
+        material_manager::create(ctx, cfg.materials), texture_manager::create(ctx, cfg.textures),
+        attribute_manager::create(ctx, cfg.attributes),
         material_shader_cache::create(
             format, {.epilogue_include = material_shader_cache::hit_epilogue_include, .bindless = &cfg.bindless}),
         cc::move(group), cc::move(tables), cfg.textures_policy, cfg.work);
@@ -756,6 +759,7 @@ void gpu_resource_manager::wait_for_pending_uploads()
 {
     attributes.wait_for_settled();
     meshes.wait_for_settled();
+    quadrics.wait_for_settled();
 
     auto landed = cc::vector<texture_id>();
     textures.wait_for_settled(landed);
@@ -770,6 +774,7 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // acquire set — this only collects the results.
     (void)attributes.collect_settled();
     (void)meshes.record_settled(cmd);
+    (void)quadrics.record_settled(cmd);
     _collect_textures();
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())

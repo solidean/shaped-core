@@ -25,7 +25,10 @@ struct texture_record;
 struct attribute_record;
 struct instance_slot;
 struct instance_record;
-struct instance_gpu;       // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
+struct instance_gpu; // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
+struct quadric_gpu;  // one quadric as the intersection shader reads it, by PrimitiveIndex() (resources/quadric_data.hh)
+struct quadric_data; // what a caller hands the quadric manager
+struct quadric_set_record; // one uploaded batch: two buffers and the procedural BLAS over them
 enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
 struct work_budget;        // how much follow-up GPU work one epoch may record
 struct texture_policy;     // what happens to a texture once it has landed
@@ -155,6 +158,7 @@ enum class buffer_id : u32;
 enum class attribute_id : u32;
 enum class instance_id : u32;
 class mesh_manager;
+class quadric_manager;
 class material_manager;
 class texture_manager;
 class attribute_manager;

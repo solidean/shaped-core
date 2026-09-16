@@ -48,6 +48,7 @@ struct sv::texture_policy
 struct sv::gpu_resource_manager_config
 {
     manager_config meshes = {};
+    manager_config quadrics = {};
     manager_config materials = {};
     manager_config textures = {};
     manager_config attributes = {};
@@ -219,7 +220,8 @@ public:
     /// How many payloads are still in flight, across every manager.
     [[nodiscard]] isize settling_count() const
     {
-        return meshes.settling_count() + attributes.settling_count() + textures.settling_count();
+        return meshes.settling_count() + quadrics.settling_count() + attributes.settling_count()
+             + textures.settling_count();
     }
 
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
@@ -307,6 +309,7 @@ public:
     [[nodiscard]] u32 table_capacity(bindless_table table) const;
 
     mesh_manager meshes;
+    quadric_manager quadrics;
     material_manager materials;
     texture_manager textures;
     attribute_manager attributes;
@@ -365,6 +368,7 @@ private:
 
     gpu_resource_manager(sg::context& ctx,
                          mesh_manager meshes,
+                         quadric_manager quadrics,
                          material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
