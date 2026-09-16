@@ -17,31 +17,36 @@ constexpr isize k_callable_slot = 3;
 constexpr isize k_table_slot_count = 4;
 } // namespace
 
+void release_raygen_binding(metal_residency_set& residency, metal_raytracing_shader_table::raygen_binding const& r)
+{
+    // The pipeline state is borrowed from the pipeline, which outlives this table, so it is not released here.
+    if (r.intersection != nullptr)
+        r.intersection->release();
+    if (r.miss != nullptr)
+        r.miss->release();
+    if (r.closest_hit != nullptr)
+        r.closest_hit->release();
+    if (r.callable != nullptr)
+        r.callable->release();
+    if (r.arguments != nullptr)
+    {
+        residency.remove(r.arguments);
+        r.arguments->release();
+    }
+}
+
 metal_raytracing_shader_table::~metal_raytracing_shader_table()
 {
     auto raygens = cc::move(_raygens);
     _raygens.clear();
 
+    // **Deferred here and immediate on the unwind path**, which is why the deferral is at the call site rather than
+    // inside the helper: a built table may still be in flight, and a partial build has never been submitted.
     _ctx.epochs().defer(
         [raygens = cc::move(raygens), &residency = _ctx.residency()]
         {
             for (auto const& r : raygens)
-            {
-                // The pipeline state is borrowed, so it is not released here.
-                if (r.intersection != nullptr)
-                    r.intersection->release();
-                if (r.miss != nullptr)
-                    r.miss->release();
-                if (r.closest_hit != nullptr)
-                    r.closest_hit->release();
-                if (r.callable != nullptr)
-                    r.callable->release();
-                if (r.arguments != nullptr)
-                {
-                    residency.remove(r.arguments);
-                    r.arguments->release();
-                }
-            }
+                release_raygen_binding(residency, r);
         });
 }
 
@@ -58,6 +63,18 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
     auto const scope = autorelease_scope();
 
     auto raygens = cc::vector<metal_raytracing_shader_table::raygen_binding>();
+
+    // **Every failure past this point owns objects nobody else will free.**
+    // Each iteration mints four function tables and an argument buffer, all owned references rather than autoreleased,
+    // and registers five residency entries — and the destructor that would release them never runs, because the table
+    // object is never constructed.
+    // Released immediately rather than deferred: nothing here has been submitted.
+    auto const unwind = [&](metal_raytracing_shader_table::raygen_binding const& partial)
+    {
+        release_raygen_binding(_residency, partial);
+        for (auto const& done : raygens)
+            release_raygen_binding(_residency, done);
+    };
 
     for (auto const raygen_handle : desc.raygen)
     {
@@ -86,7 +103,10 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
 
         if (binding.miss == nullptr || binding.closest_hit == nullptr || binding.callable == nullptr
             || binding.intersection == nullptr)
+        {
+            unwind(binding);
             return cc::error("raytracing_shader_table: the metal device refused a function table");
+        }
 
         // A handle that comes back null is an un-linked or misspelled function, and it is the one mistake that is
         // caught for free at table build — so it is an error here rather than a wrong call at trace time.
@@ -106,35 +126,53 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
         {
             auto const handle = u32(desc.miss[i]);
             if (handle >= u32(pipeline.miss_functions().size()))
+            {
+                unwind(binding);
                 return cc::error("raytracing_shader_table: a miss handle is out of the pipeline's range");
+            }
             if (!set_visible(binding.miss, i, pipeline.miss_functions()[isize(handle)]))
+            {
+                unwind(binding);
                 return cc::error(cc::format("raytracing_shader_table: the miss function at index {} did not link into "
                                             "this raygen's pipeline",
                                             i));
+            }
         }
 
         for (auto i = isize(0); i < desc.callable.size(); ++i)
         {
             auto const handle = u32(desc.callable[i]);
             if (handle >= u32(pipeline.callable_functions().size()))
+            {
+                unwind(binding);
                 return cc::error("raytracing_shader_table: a callable handle is out of the pipeline's range");
+            }
             if (!set_visible(binding.callable, i, pipeline.callable_functions()[isize(handle)]))
+            {
+                unwind(binding);
                 return cc::error(cc::format("raytracing_shader_table: the callable function at index {} did not link "
                                             "into this raygen's pipeline",
                                             i));
+            }
         }
 
         for (auto i = isize(0); i < desc.hit.size(); ++i)
         {
             auto const handle = u32(desc.hit[i]);
             if (handle >= u32(pipeline.hit_groups().size()))
+            {
+                unwind(binding);
                 return cc::error("raytracing_shader_table: a hit handle is out of the pipeline's range");
+            }
             auto const& group = pipeline.hit_groups()[isize(handle)];
 
             if (!set_visible(binding.closest_hit, i, group.closest_hit))
+            {
+                unwind(binding);
                 return cc::error(cc::format("raytracing_shader_table: the closest-hit function of hit group {} did "
                                             "not link into this raygen's pipeline",
                                             i));
+            }
 
             // What runs during traversal: an intersection shader for a procedural group, otherwise the any-hit if
             // there is one, and otherwise Metal's own triangle intersection.
@@ -143,9 +181,12 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
             {
                 auto* const handle_for = binding.state->functionHandle(traversal);
                 if (handle_for == nullptr)
+                {
+                    unwind(binding);
                     return cc::error(cc::format("raytracing_shader_table: the traversal function of hit group {} did "
                                                 "not link into this raygen's pipeline",
                                                 i));
+                }
                 binding.intersection->setFunction(handle_for, NS::UInteger(i));
             }
             else
@@ -159,7 +200,10 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
         auto* const arguments
             = _device->newBuffer(size_t(k_table_slot_count) * sizeof(u64), MTL::ResourceStorageModeShared);
         if (arguments == nullptr)
+        {
+            unwind(binding);
             return cc::error("raytracing_shader_table: the metal device refused an argument buffer");
+        }
 
         auto* const slots = static_cast<u64*>(arguments->contents());
         slots[k_intersection_slot] = binding.intersection->gpuResourceID()._impl;
