@@ -79,24 +79,22 @@ quadric_ref scene_ref::add_quadrics(sv::resident_quadric_set const& set)
 
 void scene_ref::add_sphere(tg::sphere3f const& sphere, material_id material)
 {
-    _frame->_immediate_batch_for(_view, _layer, material).add(sphere);
+    _frame->_immediate_batch_for(_view, _layer, material).add_sphere(sphere);
 }
 
-void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material, line_ends ends)
+void scene_ref::add_line(tg::segment3f const& segment, line_style const& style, material_id material)
 {
-    auto& set = _frame->_immediate_batch_for(_view, _layer, material);
-    switch (ends)
-    {
-    case line_ends::round:
-        set.add_capsule(segment, radius);
-        break;
-    case line_ends::flat:
-        set.add(segment, radius, true);
-        break;
-    case line_ends::open:
-        set.add(segment, radius);
-        break;
-    }
+    _frame->_immediate_batch_for(_view, _layer, material).add_line(segment, style);
+}
+
+void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material)
+{
+    add_line(segment, line_style{.radius = radius}, material);
+}
+
+void scene_ref::add_cone(tg::segment3f const& base_to_apex, float base_radius, material_id material, bool capped)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_cone(base_to_apex, base_radius, capped);
 }
 
 void scene_ref::add_arrow(tg::segment3f const& segment, material_id material)

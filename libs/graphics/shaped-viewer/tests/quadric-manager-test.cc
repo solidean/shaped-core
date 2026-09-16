@@ -22,9 +22,9 @@ namespace
 sv::quadric_set structure_of(float radius)
 {
     auto set = sv::quadric_set();
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), radius));
-    set.add(tg::sphere3f(tg::pos3f(1, 0, 0), radius));
-    set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), radius * 0.5f);
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), radius));
+    set.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), radius));
+    set.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), radius * 0.5f);
     return set;
 }
 } // namespace
@@ -132,7 +132,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch can be a single primitive", (sg::cont
     // One sphere is the smallest real batch, and a procedural BLAS over exactly one box is where an off-by-one in the
     // count or the stride shows up rather than being averaged away.
     auto set = sv::quadric_set();
-    set.add(tg::sphere3f(tg::pos3f(2, 3, 4), 0.5f));
+    set.add_sphere(tg::sphere3f(tg::pos3f(2, 3, 4), 0.5f));
 
     auto const id = manager.acquire(sv::quadric_data::of(set));
     manager.wait_for_settled();

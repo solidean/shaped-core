@@ -226,9 +226,21 @@ cc::fixed_vector<sv::quadric_primitive, 2> sv::arrow_primitives(tg::segment3f co
     return arrow_primitives(s, arrow_style::for_length((s.pos1 - s.pos0).length()));
 }
 
-void sv::append_capsule(cc::vector<quadric_primitive>& out, tg::segment3f const& s, float radius)
+cc::fixed_vector<sv::quadric_primitive, 3> sv::capsule_primitives(tg::segment3f const& s, float radius)
 {
+    auto out = cc::fixed_vector<quadric_primitive, 3>();
     out.push_back(quadric_primitive::create_cylinder(s, radius));
     out.push_back(quadric_primitive::create_sphere(tg::sphere3f(s.pos0, radius)));
     out.push_back(quadric_primitive::create_sphere(tg::sphere3f(s.pos1, radius)));
+    return out;
+}
+
+cc::fixed_vector<sv::quadric_primitive, 3> sv::line_primitives(tg::segment3f const& s, line_style const& style)
+{
+    if (style.ends == line_ends::round)
+        return capsule_primitives(s, style.radius);
+
+    auto out = cc::fixed_vector<quadric_primitive, 3>();
+    out.push_back(quadric_primitive::create_cylinder(s, style.radius, style.ends == line_ends::flat));
+    return out;
 }

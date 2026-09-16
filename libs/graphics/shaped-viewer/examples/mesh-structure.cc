@@ -139,7 +139,7 @@ EXAMPLE("shaped-viewer/mesh-structure")
 
     for (auto const& v : vertices)
     {
-        structure.add(tg::sphere3f(v, 0.13f));
+        structure.add_sphere(tg::sphere3f(v, 0.13f));
         colours.push_back(colour_of(v));
     }
 
@@ -148,7 +148,7 @@ EXAMPLE("shaped-viewer/mesh-structure")
         // OPEN tubes, deliberately: the joints already carry vertex spheres, so drawing the caps would be geometry
         // nothing can see.
         // `add(segment, radius, true)` closes them, at no change to the primitive's box.
-        structure.add(tg::segment3f(vertices[e[0]], vertices[e[1]]), 0.045f);
+        structure.add_line(tg::segment3f(vertices[e[0]], vertices[e[1]]), 0.045f);
 
         auto const a = colour_of(vertices[e[0]]);
         auto const b = colour_of(vertices[e[1]]);

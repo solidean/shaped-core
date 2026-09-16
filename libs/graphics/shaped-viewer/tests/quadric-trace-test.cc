@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/common/log.hh>
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
@@ -83,7 +84,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     // One sphere of radius 1 at the origin — the smallest thing that proves the chain works end to end.
     auto set = sv::quadric_set();
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
 
     auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
     resources.wait_for_pending_uploads();
@@ -321,8 +322,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
 
     auto set = sv::quadric_set();
     set.name = "edges";
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.2f));
-    set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.05f);
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.2f));
+    set.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.05f);
 
     // Two values per primitive, which is what makes this a per_triangle material rather than a flat one.
     auto const colours
@@ -363,7 +364,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
 
     // And a batch whose geometry differs is a different resource, or a placement would draw the wrong thing.
     auto other = sv::quadric_set();
-    other.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.3f));
+    other.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.3f));
     auto const other_item = resources.acquire_scene_item(other);
     CHECK(other_item.quadrics != item.quadrics);
 
@@ -416,7 +417,8 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     auto set = sv::quadric_set();
 
     // A capped cylinder: the clipper's own surface is drawn, so the caps are part of what has to agree.
-    set.add(tg::segment3f(tg::pos3f(-1.1f, -0.6f, 0), tg::pos3f(-1.1f, 0.6f, 0)), 0.45f, true);
+    set.add_line(tg::segment3f(tg::pos3f(-1.1f, -0.6f, 0), tg::pos3f(-1.1f, 0.6f, 0)),
+                 {.radius = 0.45f, .ends = sv::line_ends::flat});
 
     // A cone frustum, built by hand as the gallery example builds its own.
     {
@@ -439,6 +441,42 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
         auto const reach = tg::sqrt(0.16f + 0.36f);
         hyp.bounds = tg::aabb3f(tg::pos3f(1.3f - reach, -0.6f, -reach), tg::pos3f(1.3f + reach, 0.6f, reach));
         set.add(hyp);
+    }
+
+    // The rest of the family, in a row behind the three above, so ONE trace covers every shape the gallery draws.
+    //
+    // The three in front are the ones with the least other coverage; these four are the ones the CPU tests already pin
+    // individually, and the point of having them here is different — it is that the two implementations agree about them,
+    // not that either is right on its own.
+    constexpr float back_z = -2.2f;
+
+    // A sphere, and an ellipsoid: the same surface family under a diagonal that is not the identity.
+    set.add_sphere(tg::sphere3f(tg::pos3f(-1.9f, 0.1f, back_z), 0.5f));
+    {
+        auto ell = sv::quadric_primitive();
+        ell.origin = tg::pos3f(-0.7f, 0.1f, back_z);
+        auto const r = tg::vec3f(0.62f, 0.34f, 0.45f);
+        ell.surface
+            = {.diag = tg::vec3f(1.0f / (r[0] * r[0]), 1.0f / (r[1] * r[1]), 1.0f / (r[2] * r[2])), .constant = -1.0f};
+        ell.bounds = tg::aabb3f(ell.origin - r, ell.origin + r);
+        set.add(ell);
+    }
+
+    // An OPEN tube, which is the far-root case: seen near end-on its near root is outside the slab, and the visible
+    // surface is the inside of the opposite wall.
+    // The two implementations have to agree about that too.
+    set.add_line(tg::segment3f(tg::pos3f(0.5f, -0.35f, back_z), tg::pos3f(0.5f, 0.55f, back_z)),
+                 {.radius = 0.34f, .ends = sv::line_ends::open});
+
+    // A hemisphere: a sphere clipped by a plane pair, with the clipper's own surface drawn as the floor.
+    {
+        auto hemi = sv::quadric_primitive();
+        hemi.origin = tg::pos3f(1.7f, -0.3f, back_z);
+        hemi.surface = sv::quadric3::sphere_about_origin(0.55f);
+        hemi.clip = sv::quadric3::slab(tg::vec3f(0, 1, 0), 0.275f, 0.275f); // p.y in [0, 0.55] — the upper half
+        hemi.flags = sv::quadric_primitive::flag_emit_clip_surface;
+        hemi.bounds = tg::aabb3f(tg::pos3f(1.15f, -0.3f, back_z - 0.55f), tg::pos3f(2.25f, 0.25f, back_z + 0.55f));
+        set.add(hemi);
     }
 
     auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
@@ -556,18 +594,42 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     auto disagreements = isize(0);
     auto cpu_hits = isize(0);
 
+    // One per primitive, so a shape that contributes nothing is visible as a zero rather than hidden in the total.
+    // That is what catches a shape placed out of frame or behind another one, which would otherwise make this test
+    // quietly cover less than it says it does.
+    auto per_primitive = cc::vector<isize>::create_defaulted(set.primitive_count());
+
+    // Every hit must also lie in the primitive's own box, which is the invariant the whole design rests on: the box is
+    // the acceleration structure's, so a solid reaching outside it is geometry the GPU can never be asked about.
+    // Checked here rather than in a unit test because this is the one place a hand-built primitive meets a real trace.
+    auto outside_bounds = isize(0);
+
     for (auto y = 0; y < agreement_size; ++y)
         for (auto x = 0; x < agreement_size; ++x)
         {
             auto const ray = ray_for(x, y);
 
             auto cpu = false;
-            for (auto const& prim : set.primitives())
-                if (sv::intersect(prim, ray, 0.0f).has_value())
-                {
-                    cpu = true;
-                    break;
-                }
+            for (auto i = isize(0); i < set.primitive_count(); ++i)
+            {
+                auto const& prim = set.primitives()[i];
+                auto const hit = sv::intersect(prim, ray, 0.0f);
+                if (!hit.has_value())
+                    continue;
+
+                cpu = true;
+                ++per_primitive[i];
+
+                auto const p = ray.origin + ray.dir * hit.value().t;
+                auto const& b = prim.bounds;
+                constexpr float slack = 1e-3f; // a hit ON the boundary is in it
+                for (auto axis = 0; axis < 3; ++axis)
+                    if (p[axis] < b.min[axis] - slack || p[axis] > b.max[axis] + slack)
+                    {
+                        ++outside_bounds;
+                        break;
+                    }
+            }
 
             if (cpu)
                 ++cpu_hits;
@@ -576,14 +638,203 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
                 ++disagreements;
         }
 
+    // Every shape has to cover REAL area, not one grazing pixel, or this covers fewer of them than it claims.
+    // Sixty pixels is about an 8x8 patch, which is the floor at which a silhouette is a shape rather than a speck.
+    for (auto i = isize(0); i < per_primitive.size(); ++i)
+        CHECK(per_primitive[i] > 60);
+
+    // A solid outside its own box is a hole the GPU cannot fill, and it is the mistake a hand-built primitive makes.
+    CHECK(outside_bounds == 0);
+
     // The shapes have to be in frame at all, or agreeing about an empty image would prove nothing.
     CHECK(cpu_hits > pixels.size() / 12);
+
+    // Measured at 2314 hits over the seven shapes, 73 of them disagreeing — about 3%, which is the perimeter and
+    // nothing else.
+    // The smallest shape covers 138 pixels, so none of them is a speck the check would pass by accident.
+    CC_LOG_INFO("quadric agreement: {} cpu hits over {} shapes, {} disagreements, {} outside bounds", cpu_hits,
+                set.primitive_count(), disagreements, outside_bounds);
 
     // A pixel is one sample of an area: the GPU jitters four inside it while the CPU takes the centre, so the two can only
     // differ where the silhouette crosses the pixel.
     //
-    // Measured at about 3.5% of the hits — 79 of 2195 — which is the perimeter and nothing else.
-    // A tenth is the bound because it leaves that headroom while still failing on anything structural: a shader that hit
-    // nothing would disagree on all 2195, and losing one of the three shapes, or a cylinder's cap, is hundreds.
+    // A tenth is the bound because it leaves the perimeter room while still failing on anything structural: a shader that
+    // hit nothing would disagree on every hit, and losing one of the seven shapes — or a cylinder's cap, or the
+    // hemisphere's floor — is hundreds.
     CHECK(disagreements < cpu_hits / 10);
+}
+
+ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation is compiling",
+                     (sg::context_handle const& ctx_h))
+{
+    // The substitution path, which every other test here deliberately avoids by draining its compiles first.
+    //
+    // A permutation that has not compiled is stood in for by a neutral one, so a material still building costs its own
+    // geometry its shading rather than costing the view its image.
+    // For a quadric the stand-in has to be the PROCEDURAL one: a procedural BLAS traced by a hit group with no
+    // intersection shader reports no hits, so substituting the triangle fallback would make the batch vanish instead.
+    //
+    // What this pins is that it does not vanish.
+    // The batch is traced before anything has driven its own permutation, and the silhouette has to be there anyway.
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the quadric shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto set = sv::quadric_set();
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+
+    auto const batch = resources.quadrics.acquire(sv::quadric_data::of(set));
+    resources.wait_for_pending_uploads();
+
+    auto const* const record = resources.quadrics.get_ptr(batch);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->state == sv::residency::complete);
+
+    // A material whose body DOES NOT COMPILE, which is the deterministic way to reach the substitution branch.
+    //
+    // "Still compiling" was the obvious premise and it is not reproducible: the shader cache is content-addressed and
+    // process-wide, so the second run of this test — or any earlier test that compiled the same permutation — hands back
+    // a node that already has its value, and there is nothing left to stand in for.
+    // A failed compile stays failed however warm the cache is, and `_variant_for` treats the two the same way: its own
+    // comment is "still compiling, or a material that does not build".
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.2f, 0.1f)));
+    auto const type = sv::material_type::create("sv_test_uncompilable", cc::move(signature),
+                                                "    surface.base_color = tint;\n"
+                                                "    this_function_does_not_exist(surface);");
+    auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
+
+    auto resident = sv::resident_quadric_set{.name = "one sphere", .geometry = batch, .primitive_count = 1};
+    auto const resolved = sv::resolve_material(type, material, resident);
+    auto const* const own = &resources.shaders.acquire_quadric(resolved);
+
+    // The premise: it settles without a value, so the trace has to substitute.
+    co_await cc::async_settled(own->shader);
+    REQUIRE(own->shader->has_error());
+    REQUIRE(own->shader->try_value() == nullptr);
+
+    // The stand-in the trace would pick, and the one thing that makes it usable here: it is procedural.
+    auto const& stand_in = resources.shaders.acquire_quadric_fallback();
+    REQUIRE(stand_in.intersection.is_valid());
+
+    co_await cc::async_settled(stand_in.shader);
+    co_await cc::async_settled(stand_in.intersection);
+    REQUIRE(stand_in.shader->try_value() != nullptr);
+
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(own);
+
+    auto instances = cc::vector<sg::tlas_instance>();
+    instances.push_back(
+        sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0, .opaque_override = true});
+
+    auto camera = sv::camera::looking_at(tg::pos3d(0, 0, 4.0), tg::pos3d(0, 0, 0));
+    camera.projection.aspect_ratio = 1.0;
+    auto const gpu_camera = sv::camera_gpu::from(camera);
+
+    auto const trace = [&](sg::command_list& cmd, sg::data_future<tg::vec4f>& readback)
+    {
+        auto const primitives = u32(resources.acquire_buffer(record->primitives.raw()->as_raw_readonly()));
+
+        auto records = cc::vector<sv::instance_gpu>();
+        records.push_back(
+            {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
+
+        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(
+            frame, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1});
+
+        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(
+            background,
+            sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))));
+
+        auto const target = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                             .width = image_size,
+                                                             .height = image_size,
+                                                             .usage = sg::texture_usage::readonly_texture
+                                                                    | sg::texture_usage::readwrite_texture
+                                                                    | sg::texture_usage::copy_src});
+
+        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.data_to_buffer(instance_table, records);
+
+        auto const bindless = resources.freeze();
+        auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                                  .background = background,
+                                                                  .instances = instances,
+                                                                  .output = target,
+                                                                  .instance_table = instance_table,
+                                                                  .hit_groups = hit_groups,
+                                                                  .fallback = &resources.shaders.acquire_fallback(),
+                                                                  .quadric_fallback = &stand_in,
+                                                                  .bindless = &bindless});
+
+        if (outcome == sg::routine_outcome::executed)
+            readback = sg::data_future<tg::vec4f>(cmd.download.bytes_from_texture(target.raw()));
+
+        return outcome;
+    };
+
+    auto covered = isize(0);
+    auto const loop_start = cc::current_time_steady_secs();
+    auto traced = false;
+    while (!traced)
+    {
+        (void)ctx.routines.tick();
+
+        auto readback = sg::data_future<tg::vec4f>();
+        auto cmd = ctx.create_command_list();
+        auto const outcome = trace(*cmd, readback);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+
+        if (outcome != sg::routine_outcome::executed)
+        {
+            REQUIRE(cc::current_time_steady_secs() - loop_start < 45.0);
+            sv_test::drive_ambient_work();
+            continue;
+        }
+
+        REQUIRE(readback.is_valid());
+        co_await ctx.idle_completion();
+
+        auto const delivered = readback.try_get_data();
+        REQUIRE(delivered.has_value());
+        for (auto const& px : delivered.value().span())
+            if (luminance_of(px) < env_radiance * 0.9f)
+                ++covered;
+
+        traced = true;
+    }
+
+    // The sphere is there.
+    // Stood in for by the TRIANGLE fallback instead, this is 0: the procedural BLAS would be traversed by a hit group
+    // with no intersection shader and report nothing at all.
+    auto const expected = covered_fraction(1.0, 4.0, 60.0) * double(image_size) * double(image_size);
+    CHECK(double(covered) > expected * 0.5);
+
+    // Drained so nothing this test started outlives it; both settled on the error rather than on a value.
+    co_await cc::async_settled(own->intersection);
 }

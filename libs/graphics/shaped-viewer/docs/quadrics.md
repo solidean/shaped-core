@@ -116,9 +116,9 @@ set.name = "mesh structure";
 set.material = steel;
 
 for (auto const& v : m.vertices())
-    set.add(tg::sphere3f(v.pos, 0.02f));
+    set.add_sphere(tg::sphere3f(v.pos, 0.02f));
 for (auto const& e : m.edges())
-    set.add(tg::segment3f(e.from, e.to), 0.008f);
+    set.add_line(tg::segment3f(e.from, e.to), 0.008f);
 
 f.add_scene().add_quadrics(set);   // -> sv::quadric_ref
 ```
@@ -135,13 +135,13 @@ They write into a frame-owned set, bucketed by material.
 **That set hashes its contents, not its identity**, and the requirement is load-bearing rather than an optimization.
 Without it the sugar is a trap: the same drawing that is free with an explicit set costs a full re-upload and BLAS rebuild every frame, and nothing in the API would say so.
 
-`add` takes tg objects — `tg::sphere3f` for a vertex, and `tg::segment3f` plus a separate radius for an edge.
+The factories take tg objects — `tg::sphere3f` for a vertex, and `tg::segment3f` plus a radius or a style for an edge.
 Per-primitive data is parallel attribute arrays on the set, the way `sv::mesh` carries `mesh_attribute`, rather than a value at the call site.
 A heterogeneous push per primitive is the wrong shape at a million of them, and the parallel array is what the material system's frequency chain already knows how to read.
 
 Placing a set hands back `sv::quadric_ref`, carrying `transform()`, mirroring `sv::mesh_ref`.
 
-`add_line` draws a capsule by default, with a flag for flat caps.
+`add_line` takes an `sv::line_style` — a radius and how the ends are closed — and draws an OPEN tube when nothing says otherwise.
 There is no polyline overload; a polyline is a loop at the call site.
 
 ## Materials

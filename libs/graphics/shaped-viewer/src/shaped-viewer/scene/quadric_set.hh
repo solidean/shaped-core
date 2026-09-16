@@ -100,17 +100,21 @@ struct sv::quadric_set
     mutable impl::quadric_set_gpu_slot cache;
 
     /// Appends the sphere `s`.
-    void add(tg::sphere3f const& s) { add(quadric_primitive::create_sphere(s)); }
+    void add_sphere(tg::sphere3f const& s) { add(quadric_primitive::create_sphere(s)); }
 
-    /// Appends the segment `s` thickened by `radius`.
+    /// Appends the segment `s` drawn in `style` — one primitive for `flat` and `open` ends, three for `round`.
     ///
-    /// `capped` draws the two flat ends; without it this is an OPEN tube, which is what a mesh's edges want — the joints
-    /// already carry vertex spheres, so a cap there would draw geometry nothing can see.
-    /// The primitive's box is the same either way, so the choice costs nothing but a bit.
-    void add(tg::segment3f const& s, float radius, bool capped = false)
+    /// The default is an OPEN tube, which is what a mesh's edges want: the joints already carry vertex spheres, so a cap
+    /// there would draw geometry nothing can see.
+    /// Between `open` and `flat` the primitive's box is identical, so that choice costs nothing but a bit.
+    void add_line(tg::segment3f const& s, line_style const& style)
     {
-        add(quadric_primitive::create_cylinder(s, radius, capped));
+        for (auto const& p : line_primitives(s, style))
+            add(p);
     }
+
+    /// The same at `radius`, with the default ends — see `sv::line_style`.
+    void add_line(tg::segment3f const& s, float radius) { add_line(s, {.radius = radius}); }
 
     /// Appends the cone whose base disc is the circle of radius `base_radius` about `base_to_apex.pos0`, tipped at `pos1`.
     /// `capped` draws that base disc; without it the cone is open and shows its own interior.
@@ -138,6 +142,7 @@ struct sv::quadric_set
 
     /// Appends a round-capped segment — the cylinder plus a sphere at each end, so three primitives rather than one.
     /// A capsule's surface is not degree 2, which is why it cannot be one.
+    /// The same as `add_line` at `line_ends::round`, named because a capsule is a shape a caller asks for by name.
     void add_capsule(tg::segment3f const& s, float radius);
 
     /// Appends an already-built primitive, for a shape the named factories do not cover.

@@ -232,7 +232,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
 
     for (auto const& v : mesh.vertices)
     {
-        structure.add(tg::sphere3f(v, vertex_radius));
+        structure.add_sphere(tg::sphere3f(v, vertex_radius));
         colours.push_back(tg::vec3f(0.85f, 0.85f, 0.88f)); // neutral, so the edges carry the reading
     }
 
@@ -241,7 +241,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
         // Open tubes: the vertex spheres already cover every joint, so drawing the end caps would be geometry nothing can
         // see.
         // Closing them is one bit per primitive and no change to the box.
-        structure.add(tg::segment3f(mesh.vertices[e[0]], mesh.vertices[e[1]]), tube_radius);
+        structure.add_line(tg::segment3f(mesh.vertices[e[0]], mesh.vertices[e[1]]), tube_radius);
 
         auto const len = tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
         colours.push_back(ramp((len - shortest) / cc::max(longest - shortest, 1e-6f)));

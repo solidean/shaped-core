@@ -230,6 +230,35 @@ inline constexpr float unbounded_ray_t = 3.402823466e38f;
 
 } // namespace sv
 
+/// How a drawn segment is closed at its two ends.
+///
+/// The choice is one bit on the primitive for two of the three, and a different primitive COUNT for the third: a capsule's
+/// surface is not degree 2, so round ends are the tube plus a sphere at each end.
+enum class sv::line_ends : sv::u8
+{
+    round, ///< a hemisphere at each end — three primitives, and what a standalone polyline wants
+    flat,  ///< the clipper's own two planes, drawn — one primitive, a closed solid
+    open,  ///< nothing; the tube is open at both ends — one primitive, and what a wireframe wants
+};
+
+/// How a line is drawn: how thick, and how its ends are closed.
+///
+/// The counterpart of `sv::arrow_style`, and absolute in the same way — `radius` is in the set's own units, never relative
+/// to the segment's length.
+///
+/// **The default radius is a starting point rather than a derived value.**
+/// An arrow's default lengths come from `for_length(1)`, because an arrow has a length to take them from; a line's thickness
+/// is not derivable from anything the type carries, so this is simply a thin line at unit scale and most callers state one.
+/// `open` rather than `round` as the default end, because an open tube is one primitive against three and is what a
+/// wireframe wants — a caller drawing a standalone polyline asks for `round`.
+struct sv::line_style
+{
+    float radius = 0.01f;
+    line_ends ends = line_ends::open;
+
+    [[nodiscard]] friend constexpr bool operator==(line_style const&, line_style const&) = default;
+};
+
 /// The three lengths an arrow is drawn from, in the set's own units — absolute, never relative to the arrow.
 ///
 /// Absolute is what a gizmo or a vector field wants: every arrow the same thickness whatever it measures, so that length is
@@ -290,10 +319,16 @@ namespace sv
 /// The same with every length proportional to the arrow's own — `arrow_style::for_length`.
 [[nodiscard]] cc::fixed_vector<quadric_primitive, 2> arrow_primitives(tg::segment3f const& s);
 
-/// Appends the primitives of a round-capped segment — the open cylinder, plus a sphere at each end.
+/// The primitives of a round-capped segment — the open cylinder, plus a sphere at each end.
 ///
 /// Three records rather than one, because a capsule's surface is not degree 2.
 /// Where the joints already carry spheres — a mesh's vertices, above all — `create_cylinder` alone is what to write instead, and
 /// the flat cap is exact there rather than an approximation.
-void append_capsule(cc::vector<quadric_primitive>& out, tg::segment3f const& s, float radius);
+///
+/// Returned rather than appended, for the same reason `arrow_primitives` is: three is the most a capsule is, and a caller that
+/// wants them in a batch has `quadric_set::add_capsule` instead.
+[[nodiscard]] cc::fixed_vector<quadric_primitive, 3> capsule_primitives(tg::segment3f const& s, float radius);
+
+/// The primitives of a line drawn in `style` — one for `flat` and `open`, three for `round`.
+[[nodiscard]] cc::fixed_vector<quadric_primitive, 3> line_primitives(tg::segment3f const& s, line_style const& style);
 } // namespace sv

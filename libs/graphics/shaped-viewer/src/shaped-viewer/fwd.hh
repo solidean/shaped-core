@@ -65,6 +65,8 @@ struct quadric3;             // a quadric surface, as the 10 entries of the symm
 struct quadric_primitive;    // one drawn quadric: a surface, a clipper, and the box both are expressed about
 struct quadric_hit;          // what a ray hit on one is: how far along, and the normal there
 struct arrow_style;          // the three lengths an arrow is drawn from (scene/quadric.hh)
+enum class line_ends : u8;   // how a drawn segment is closed at its ends (scene/quadric.hh)
+struct line_style;           // how thick a line is drawn, and how its ends are closed
 struct quadric_set;          // a batch of quadrics drawn as one thing (scene/quadric_set.hh)
 struct resident_quadric_set; // that batch as resources
 enum class scalar_type : u8;
@@ -231,8 +233,7 @@ class capture_session;
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs
 class mesh_ref;
-class quadric_ref;         // one quadric batch placed in a scene (refs.hh)
-enum class line_ends : u8; // how scene_ref::add_line closes a drawn segment
+class quadric_ref; // one quadric batch placed in a scene (refs.hh)
 class light_ref;
 class scene_ref;
 class leaf_ref;

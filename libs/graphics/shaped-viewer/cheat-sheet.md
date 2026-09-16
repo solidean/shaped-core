@@ -420,15 +420,19 @@ sv::quadric_primitive::create_cylinder(tg::segment3f, radius, capped=false)  // 
 sv::quadric_primitive::create_cone(base_to_apex, base_radius, capped=true)   // base disc at pos0, tip at pos1; `capped` draws the disc
 p.admits(world_p);  p.normal_at(world_p);  p.emits_clip_surface()
 sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
-sv::append_capsule(out, segment, radius)       // three primitives: the cylinder plus a sphere at each end
+sv::capsule_primitives(segment, radius)        // -> fixed_vector<quadric_primitive, 3>: the cylinder, then a sphere at each end
+sv::line_primitives(segment, style)            // -> fixed_vector<quadric_primitive, 3>: 1 for flat/open ends, 3 for round
 sv::arrow_primitives(segment[, style|shaft_radius])  // -> fixed_vector<quadric_primitive, 2>: the shaft, then the head
 
 sv::arrow_style                  // { float shaft_radius, head_radius, head_length; } — ABSOLUTE, defaults = for_length(1)
 sv::arrow_style::for_shaft_radius(r)   // head 2.5x that radius and 3x its own, so the tip angle is fixed at atan(1/3)
 sv::arrow_style::for_length(len)       // = for_shaft_radius(0.02 * len)
 
+sv::line_ends                    // round (hemisphere each end, 3 prims) | flat (the clipper's planes, 1) | open (nothing, 1)
+sv::line_style                   // { float radius = 0.01f; line_ends ends = line_ends::open; } — ABSOLUTE, like arrow_style
+
 sv::quadric_set                  // the batch a caller builds and holds — the quadric counterpart of sv::mesh
-set.add(tg::sphere3f);  set.add(tg::segment3f, radius, capped=false);  set.add_capsule(segment, radius);  set.add(primitive)
+set.add_sphere(tg::sphere3f);  set.add_line(segment, style | radius);  set.add_capsule(segment, radius);  set.add(primitive)
 set.add_cone(base_to_apex, base_radius, capped=true)
 set.add_arrow(segment);  set.add_arrow(segment, shaft_radius);  set.add_arrow(segment, style)   // 2 primitives: shaft, head
 set.clear();  set.reserve(n)
@@ -440,16 +444,18 @@ sv::resident_quadric_set         // that batch as resources: a quadric_set_id, b
 
 ```cpp
 auto set = sv::quadric_set();                       // built once: add() folds the hash and the bounds as it goes
-for (auto const& v : mesh.vertices()) set.add(tg::sphere3f(v, 0.02f));
-for (auto const& e : mesh.edges())    set.add(tg::segment3f(e.a, e.b), 0.008f);   // FLAT caps — the vertex spheres cover the joints
+for (auto const& v : mesh.vertices()) set.add_sphere(tg::sphere3f(v, 0.02f));
+for (auto const& e : mesh.edges())    set.add_line(tg::segment3f(e.a, e.b), 0.008f);   // OPEN by default — the vertex spheres cover the joints
 set.material = steel;
 
 f.add_scene().add_quadrics(set);                    // -> sv::quadric_ref; uploads nothing when unchanged
 
 auto s = f.add_scene();                             // or, for a handful:
 s.add_sphere(tg::sphere3f(p, 0.02f), steel);        //   into a frame-owned batch per (view, layer, material),
-s.add_line(tg::segment3f(a, b), 0.008f, steel,      //   flushed once before the frame is flattened
-           sv::line_ends::open);                    //   round (capsule, 3 prims) | flat (capped, 1) | open (1)
+s.add_line(tg::segment3f(a, b), 0.008f, steel);     //   flushed once before the frame is flattened
+s.add_line(tg::segment3f(a, b),                     //   ...or with the ends named
+           {.radius = 0.008f, .ends = sv::line_ends::round}, steel);
+s.add_cone(tg::segment3f(base, tip), 0.05f, steel); //   base disc at pos0, tip at pos1
 s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
 s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
 ```
@@ -466,7 +472,7 @@ A head at least as long as the arrow is clamped to it and the shaft is dropped, 
 The overload is the whole difference between the two readings: `add_arrow(s)` is proportional, and `add_arrow(s, r)` fixes the thickness so that length is the only thing an arrow's size encodes.
 
 **A capsule is not a quadric** — its surface is piecewise — so a round-capped edge is three primitives.
-Where the joints already carry vertex spheres, `add(segment, radius)` is the flat form and is exact there rather than an approximation.
+Where the joints already carry vertex spheres, the default `open` end is exact there rather than an approximation.
 
 **There is ONE frequency set and a geometry admits the subset its own primitives number**, which is what lets one material definition generate one shader body for both.
 A batch numbers its primitives and nothing else, so it admits `per_instance` and `per_triangle`.

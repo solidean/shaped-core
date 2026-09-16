@@ -132,7 +132,7 @@ EXAMPLE("shaped-viewer/quadric-gallery")
     auto const push = [&](tg::vec3f const& c) { colours.push_back(c); };
 
     // 0: a plain sphere — the surface quadric with nothing clipping it.
-    gallery.add(tg::sphere3f(slot(0) + tg::vec3f(0, 0.8f, 0), 0.8f));
+    gallery.add_sphere(tg::sphere3f(slot(0) + tg::vec3f(0, 0.8f, 0), 0.8f));
     push(tg::vec3f(0.85f, 0.30f, 0.25f));
 
     // 1: an ellipsoid — a general quadric, built from its ten numbers.
@@ -140,11 +140,12 @@ EXAMPLE("shaped-viewer/quadric-gallery")
     push(tg::vec3f(0.95f, 0.65f, 0.20f));
 
     // 2: an open tube — the clipper cuts it to length and its own surface is not drawn, so you can see inside.
-    gallery.add(tg::segment3f(slot(2) + tg::vec3f(0, 0.25f, 0), slot(2) + tg::vec3f(0, 1.7f, 0)), 0.45f);
+    gallery.add_line(tg::segment3f(slot(2) + tg::vec3f(0, 0.25f, 0), slot(2) + tg::vec3f(0, 1.7f, 0)), 0.45f);
     push(tg::vec3f(0.35f, 0.75f, 0.40f));
 
     // 3: the SAME record with one bit set — the slab's two planes become the flat ends.
-    gallery.add(tg::segment3f(slot(3) + tg::vec3f(0, 0.25f, 0), slot(3) + tg::vec3f(0, 1.7f, 0)), 0.45f, true);
+    gallery.add_line(tg::segment3f(slot(3) + tg::vec3f(0, 0.25f, 0), slot(3) + tg::vec3f(0, 1.7f, 0)),
+                     {.radius = 0.45f, .ends = sv::line_ends::flat});
     push(tg::vec3f(0.30f, 0.65f, 0.85f));
 
     // 4: a capsule — three primitives, because its surface is piecewise and cannot be one quadric.
@@ -198,13 +199,16 @@ EXAMPLE("shaped-viewer/quadric-gallery")
         // The gallery as authored.
         scene.add_quadrics(gallery);
 
-        // ...and the same batch again, squashed and pushed back: one upload and one acceleration structure, two instances.
-        // A non-uniform scale turns every sphere in it into an ellipsoid, which costs nothing because a general quadric is
-        // closed under an affine map.
+        // ...and the same batch again, STRETCHED: one upload and one acceleration structure, two instances.
+        // A non-uniform scale turns every sphere in it into an ellipsoid, which costs nothing because a general quadric
+        // is closed under an affine map where a typed sphere would not be.
+        //
+        // Tall and narrow rather than uniformly smaller, which is the whole point of showing it: a shrunk copy reads as
+        // the same shapes further away, and only a copy whose PROPORTIONS changed shows the distortion happening.
         auto instanced = scene.add_quadrics(gallery);
         instanced.transform(
-            tg::compose(tg::affine_transform3f(tg::rigid_transform3f::make_translation(tg::vec3f(0, 0, 4.6f))),
-                        tg::affine_transform3f(tg::scaling_transform3f::make_scaling(tg::vec3f(0.5f, 0.32f, 0.5f)))));
+            tg::compose(tg::affine_transform3f(tg::rigid_transform3f::make_translation(tg::vec3f(-0.6f, 0, 4.4f))),
+                        tg::affine_transform3f(tg::scaling_transform3f::make_scaling(tg::vec3f(0.38f, 0.95f, 0.38f)))));
 
         scene.add_light({.center = tg::pos3f(-2.0f, 7.5f, -1.0f),
                          .half_extent_u = tg::vec3f(3.0f, 0, 0),

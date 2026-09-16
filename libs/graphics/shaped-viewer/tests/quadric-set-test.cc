@@ -27,9 +27,9 @@ bool near(float a, float b, float tol = eps)
 sv::quadric_set structure_of(float radius)
 {
     auto set = sv::quadric_set();
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), radius));
-    set.add(tg::sphere3f(tg::pos3f(1, 0, 0), radius));
-    set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), radius * 0.5f);
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), radius));
+    set.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), radius));
+    set.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), radius * 0.5f);
     return set;
 }
 } // namespace
@@ -42,19 +42,19 @@ TEST("sv::quadric_set accumulates primitives and their extent")
     CHECK(!set.bounds().has_value()); // nothing to stand in for yet
     CHECK(!set.is_ready());           // nobody has placed it, so nothing has uploaded it
 
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
     REQUIRE(set.bounds().has_value());
     CHECK(near(set.bounds().value().min[0], -1.0f));
     CHECK(near(set.bounds().value().max[0], 1.0f));
 
     // The extent is the union, so a second primitive grows it rather than replacing it.
-    set.add(tg::sphere3f(tg::pos3f(5, 0, 0), 1.0f));
+    set.add_sphere(tg::sphere3f(tg::pos3f(5, 0, 0), 1.0f));
     CHECK(set.primitive_count() == 2);
     CHECK(near(set.bounds().value().min[0], -1.0f));
     CHECK(near(set.bounds().value().max[0], 6.0f));
 
     // A flat-capped edge is one primitive; the round-capped form is three.
-    set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 0.1f);
+    set.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 0.1f);
     CHECK(set.primitive_count() == 3);
 
     set.add_capsule(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 4, 0)), 0.1f);
@@ -81,7 +81,7 @@ TEST("sv::quadric_set hashes differing contents differently")
 
     // One extra primitive is a different batch too.
     auto c = structure_of(0.25f);
-    c.add(tg::sphere3f(tg::pos3f(9, 9, 9), 0.25f));
+    c.add_sphere(tg::sphere3f(tg::pos3f(9, 9, 9), 0.25f));
     CHECK(c.hash() != a.hash());
 }
 
@@ -90,12 +90,12 @@ TEST("sv::quadric_set hashes primitive ORDER")
     // Primitive order is what PrimitiveIndex() reads, so a per-primitive attribute lines up with it.
     // Two sets holding the same primitives in a different order therefore shade differently and cannot share a cache entry.
     auto forward = sv::quadric_set();
-    forward.add(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
-    forward.add(tg::sphere3f(tg::pos3f(1, 0, 0), 2.0f));
+    forward.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+    forward.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), 2.0f));
 
     auto backward = sv::quadric_set();
-    backward.add(tg::sphere3f(tg::pos3f(1, 0, 0), 2.0f));
-    backward.add(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+    backward.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), 2.0f));
+    backward.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
 
     CHECK(forward.hash() != backward.hash());
 
@@ -138,17 +138,17 @@ TEST("sv::quadric_set clears back to empty")
 
     // And refilling reproduces the same key, so a per-frame rebuild of unchanged contents uploads nothing.
     auto refilled = set;
-    refilled.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.25f));
-    refilled.add(tg::sphere3f(tg::pos3f(1, 0, 0), 0.25f));
-    refilled.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.125f);
+    refilled.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.25f));
+    refilled.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), 0.25f));
+    refilled.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.125f);
     CHECK(refilled.hash() == structure_of(0.25f).hash());
 }
 
 TEST("sv::quadric_set carries its primitives in order")
 {
     auto set = sv::quadric_set();
-    set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
-    set.add(tg::segment3f(tg::pos3f(0, 0, -2), tg::pos3f(0, 0, 2)), 0.5f);
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+    set.add_line(tg::segment3f(tg::pos3f(0, 0, -2), tg::pos3f(0, 0, 2)), 0.5f);
 
     auto const prims = set.primitives();
     REQUIRE(prims.size() == 2);

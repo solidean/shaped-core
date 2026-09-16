@@ -112,8 +112,10 @@ EXAMPLE("shaped-viewer/quadric-arrows")
     {
         auto view = f.window().view();
 
-        view.initial_fps({.position = tg::pos3d(-1.6, 6.4, -13.4),
-                          .yaw = tg::angle_d::make_from_degree(4.0),
+        // Yawed well off the z axis on purpose: at a near-zero yaw the frame's own +z arrow points straight at the
+        // camera and reads as a stub, so a gizmo drawn to say "these are the three axes" says something else.
+        view.initial_fps({.position = tg::pos3d(-5.4, 6.5, -12.8),
+                          .yaw = tg::angle_d::make_from_degree(17.0),
                           .pitch = tg::angle_d::make_from_degree(-21.0)});
 
         view.camera_style(sv::camera_style::fly);

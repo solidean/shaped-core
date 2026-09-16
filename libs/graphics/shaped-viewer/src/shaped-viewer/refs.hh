@@ -41,14 +41,6 @@ private:
     u32 _item = 0;
 };
 
-/// How `scene_ref::add_line` closes a drawn segment.
-enum class sv::line_ends : sv::u8
-{
-    round, ///< a hemisphere at each end — three primitives, and what a standalone polyline wants
-    flat,  ///< the clipper's own two planes, drawn — one primitive, a closed solid
-    open,  ///< nothing; the tube is open at both ends — one primitive, and what a wireframe wants
-};
-
 /// One quadric batch placed in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_quadrics`.
 class sv::quadric_ref
 {
@@ -123,14 +115,21 @@ public:
     /// What it does cost is re-hashing the batch each frame, which is cheap against uploading it and is not free.
     void add_sphere(tg::sphere3f const& sphere, material_id material = material_id::invalid);
 
-    /// The same for a segment thickened by `radius`, drawn as a capsule — round ends, so a polyline joins smoothly.
+    /// The same for a segment drawn in `style` — see `sv::line_style`.
     ///
-    /// `ends` picks what closes it instead: `round` is the capsule (three primitives), `flat` a capped cylinder (one), and
+    /// `style.ends` picks what closes it: `round` is a capsule (three primitives), `flat` a capped cylinder (one), and
     /// `open` an uncapped tube (one), which is what a mesh's edges want since their joints already carry vertex spheres.
-    void add_line(tg::segment3f const& segment,
-                  float radius,
+    void add_line(tg::segment3f const& segment, line_style const& style, material_id material = material_id::invalid);
+
+    /// The same at `radius`, with the default ends.
+    void add_line(tg::segment3f const& segment, float radius, material_id material = material_id::invalid);
+
+    /// Adds a cone whose base disc is the circle of radius `base_radius` about `base_to_apex.pos0`, tipped at `pos1`.
+    /// `capped` draws that base disc; without it the cone is open and shows its own interior.
+    void add_cone(tg::segment3f const& base_to_apex,
+                  float base_radius,
                   material_id material = material_id::invalid,
-                  line_ends ends = line_ends::round);
+                  bool capped = true);
 
     /// Adds an arrow from `segment.pos0` to `segment.pos1`, drawn with `material` — a shaft and a head, so two primitives.
     ///

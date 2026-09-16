@@ -199,6 +199,7 @@ if(SC_BUILD_TESTS)
         tests/quadric-test.cc
         tests/quadric-set-test.cc
         tests/quadric-material-test.cc
+        tests/quadric-set-benchmark.cc
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc

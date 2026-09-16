@@ -1,6 +1,10 @@
 #include "resolve.hh"
 
+#include <clean-core/common/log.hh>
 #include <clean-core/container/byte_stream_builder.hh>
+#include <clean-core/container/set.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/material/impl/material_hash.hh>
 #include <shaped-viewer/material/material.hh>
@@ -46,6 +50,26 @@ bool serves(geometry_kind kind, attribute_frequency f)
 
 namespace
 {
+/// Says once that `name` was passed over because `kind` cannot number `f`.
+///
+/// Keyed on all three, because the same material on a mesh and on a batch is a different answer and both are worth hearing.
+/// Unbounded in principle and bounded in practice: the set is one entry per attribute a material actually mismatched, which is
+/// a handful, and it exists because resolution runs per placement per frame.
+void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_kind kind)
+{
+    static auto said = cc::mutex<cc::set<cc::string>>();
+
+    auto const key = cc::format("{}/{}/{}", name, int(f), int(kind));
+    auto const first = said.lock([&](cc::set<cc::string>& s) { return s.insert(key); });
+    if (!first)
+        return;
+
+    CC_LOG_WARNING("attribute '{}' is bound at a frequency {} geometry cannot number, so the material falls back to "
+                   "its "
+                   "own constant for it — a quadric batch numbers its primitives and nothing else",
+                   name, kind == geometry_kind::quadrics ? "quadric" : "triangle");
+}
+
 /// The uv attribute a sample needs: two floats, indexed by something the geometry numbers.
 /// A `per_instance` uv would be one coordinate for the whole mesh, which samples a single texel — so it does not count as carrying
 /// uvs at all.
@@ -81,8 +105,17 @@ namespace
 
         // A frequency this geometry does not number is one more unusable candidate, so it loses to the coarser rank the way a
         // format mismatch does — which is what keeps a set authored for one geometry from failing on the other.
+        //
+        // Said out loud, because this is the one fallback a caller cannot see: a format mismatch is a mistake in the
+        // attribute, and this is a mistake in pairing the attribute with the GEOMETRY.
+        // The data is there, correctly formatted, and the drawing silently takes the material's constant instead.
+        // Warned rather than refused, so an attribute list genuinely shared between a mesh and a batch still works —
+        // and once per (name, frequency, kind), since resolution runs per placement and this sits on the frame path.
         if (!serves(geometry.kind, a.frequency))
+        {
+            warn_unservable_once(name, a.frequency, geometry.kind);
             continue;
+        }
 
         return &a;
     }

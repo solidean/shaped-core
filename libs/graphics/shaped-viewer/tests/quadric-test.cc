@@ -175,10 +175,9 @@ TEST("sv::quadric_primitive survives far from the world origin")
         !sv::intersect(p, ray_from(centre - tg::vec3f(1, 0, 0) + tg::vec3f(0, 0.02f, 0), tg::vec3f(1, 0, 0))).has_value());
 }
 
-TEST("sv::append_capsule writes a cylinder and two caps")
+TEST("sv::capsule_primitives returns a cylinder and two caps")
 {
-    auto prims = cc::vector<sv::quadric_primitive>();
-    sv::append_capsule(prims, tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f);
+    auto const prims = sv::capsule_primitives(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f);
 
     REQUIRE(prims.size() == 3);
 
@@ -190,6 +189,30 @@ TEST("sv::append_capsule writes a cylinder and two caps")
     // The union's box reaches a full radius past each end, where the cylinder alone stops at the end.
     CHECK(near(prims[0].bounds.max[2], 4.0f));
     CHECK(near(prims[2].bounds.max[2], 5.0f));
+}
+
+TEST("sv::line_primitives spells the three ends")
+{
+    auto const s = tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4));
+
+    // round is the capsule; the other two are one primitive and differ only in the emit bit.
+    CHECK(sv::line_primitives(s, {.radius = 1.0f, .ends = sv::line_ends::round}).size() == 3);
+
+    auto const open = sv::line_primitives(s, {.radius = 1.0f, .ends = sv::line_ends::open});
+    auto const flat = sv::line_primitives(s, {.radius = 1.0f, .ends = sv::line_ends::flat});
+    REQUIRE(open.size() == 1);
+    REQUIRE(flat.size() == 1);
+
+    CHECK(!open[0].emits_clip_surface());
+    CHECK(flat[0].emits_clip_surface());
+
+    // The box must not move with the bit — the acceleration structure's box bounds the solid, never the visible part.
+    CHECK(open[0].bounds.min == flat[0].bounds.min);
+    CHECK(open[0].bounds.max == flat[0].bounds.max);
+
+    // And the surface quadrics are the same record either way.
+    CHECK(open[0].surface == flat[0].surface);
+    CHECK(open[0].clip == flat[0].clip);
 }
 
 TEST("sv::quadric_primitive handles a degenerate segment")

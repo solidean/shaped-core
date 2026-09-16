@@ -34,9 +34,8 @@ void sv::quadric_set::add_arrow(tg::segment3f const& s, arrow_style const& style
 
 void sv::quadric_set::add_capsule(tg::segment3f const& s, float radius)
 {
-    add(quadric_primitive::create_cylinder(s, radius));
-    add(quadric_primitive::create_sphere(tg::sphere3f(s.pos0, radius)));
-    add(quadric_primitive::create_sphere(tg::sphere3f(s.pos1, radius)));
+    for (auto const& p : capsule_primitives(s, radius))
+        add(p);
 }
 
 void sv::quadric_set::clear()
