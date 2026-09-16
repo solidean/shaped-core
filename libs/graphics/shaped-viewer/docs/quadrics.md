@@ -1,7 +1,7 @@
 # Quadric primitives (plan)
 
-**Status: nothing has landed.**
-**This is the agreed design, not a description of code.**
+**Status: phases 1 to 4 have landed — the record, the batch, the manager, and the first trace.**
+**Phases 5 to 7 are still design: the material fork, the authoring surface, and an example.**
 
 Analytic quadric surfaces as a second kind of scene item, traced by a custom DXR intersection shader over a procedural (AABB) BLAS.
 sv draws exactly one kind of thing today — a triangle mesh, placed by a transform, shaded by a generated material permutation — and this is the second.
@@ -241,13 +241,16 @@ Depth semantics — conservative depth costs the early-z rejection that is the r
 
 Each step is meant to be landable and testable on its own.
 
-1. **`sv::quadric3` and `sv::quadric_primitive`**, plus the CPU factories from `tg::sphere3f` and from a segment and radius, their AABBs, and a CPU reference intersection.
-   Tests are pure value tests, including the far-from-origin precision case.
-2. **`sv::quadric_set` and its content hash**, and `sv::resident_quadric_set` as the id-only form.
-   No device.
-3. **`quadric_manager`** beside `mesh_manager`: the streamed payload upload, the procedural BLAS build behind `record_pending_work`, and residency.
-4. **The intersection shader and the quadric epilogue**, with a single hard-coded material, driven directly through `pathtrace_routine`.
-   This is the first step that draws anything.
+1. **`sv::quadric3` and `sv::quadric_primitive`** — landed.
+   The CPU factories, their AABBs, and `sv::intersect` as the reference the shader is written against.
+2. **`sv::quadric_set` and its content hash** — landed, with `sv::resident_quadric_set` as the id-only form.
+3. **`quadric_manager`** — landed, beside `mesh_manager` and draining through `gpu_resource_manager`.
+4. **The intersection shader and the quadric epilogue** — landed.
+   `quadric_runtime.hlsli` adds the quadric decode and solve to `material_runtime.hlsli` rather than forking it, and
+   `pt_quadric_hit.hlsli` is the epilogue.
+   The shading tail both geometry kinds share moved into `pt_shade.hlsli`, so a hit is located per kind and shaded once.
+   `material_permutation` gained an `intersection` shader, and `pathtrace_routine` puts it on BOTH of a permutation's
+   records — the shadow one too, since a shadow ray traverses the same procedural BLAS.
 5. **The material fork**: the quadric runtime include, the two new frequencies, the clip parameter, and resolution rejecting what a quadric cannot serve.
 6. **The authoring surface**: `add_quadrics`, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` sugar.
 7. **An example** drawing a loaded mesh's vertices and edges, with a committed capture.

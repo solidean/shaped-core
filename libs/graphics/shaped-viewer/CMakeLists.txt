@@ -238,6 +238,7 @@ if(SC_BUILD_TESTS)
             tests/layout-routine-test.cc
             tests/gpu-resource-manager-test.cc
             tests/quadric-manager-test.cc
+            tests/quadric-trace-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc

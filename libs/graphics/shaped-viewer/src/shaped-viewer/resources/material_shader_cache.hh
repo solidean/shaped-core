@@ -42,6 +42,14 @@ struct sv::material_permutation
     /// its caller passed and declares exactly one type, so the raygen's ray and a shadow ray cannot share one.
     sg::async_compiled_shader shadow_any_hit;
 
+    /// The compiled intersection shader — null for a triangle permutation, set for a quadric one.
+    ///
+    /// Its presence is what makes the hit group PROCEDURAL, and that is a property of the acceleration structure rather than a
+    /// choice: a procedural BLAS must be traced by a group that has one, and a triangle BLAS by one that does not.
+    /// So it is carried per permutation, and `pathtrace_routine` puts it on both of the permutation's records — the shadow one
+    /// too, since a shadow ray traverses the same BLAS.
+    sg::async_compiled_shader intersection;
+
     /// Whether this permutation's material ever writes `geometry_opacity` — see `generated_material_shader::can_cut_out`.
     bool can_cut_out = false;
 
@@ -82,6 +90,14 @@ public:
     /// The epilogue that defines it — what `gpu_resource_manager` hands `create` as `epilogue_include`.
     static constexpr cc::string_view hit_epilogue_include = "pt_material_hit.hlsli";
 
+    // The quadric spelling of the same material: a different runtime and a different epilogue, which `material_shader_key`
+    // already folds in — so a quadric permutation and a triangle one of the same material are two entries in this one cache
+    // rather than two caches.
+    static constexpr cc::string_view quadric_runtime_include = "quadric_runtime.hlsli";
+    static constexpr cc::string_view quadric_hit_epilogue_include = "pt_quadric_hit.hlsli";
+    static constexpr cc::string_view quadric_hit_entry_point = "PtQuadricClosestHit";
+    static constexpr cc::string_view quadric_intersection_entry_point = "QuadricIntersection";
+
     /// A cache producing shaders in `format`, which must be one the context they are traced on accepts, generated under `opts`.
     /// The format is fixed per cache rather than per acquire: it is not part of the key, so two formats of one permutation
     /// would collide on it.
@@ -109,8 +125,18 @@ public:
     /// meshes instead of making the whole view a no-op.
     material_permutation const& acquire_fallback();
 
+    /// The neutral QUADRIC permutation — the same empty-signature material as `acquire_fallback`, spelled against the quadric
+    /// runtime and epilogue, so it carries an intersection shader and can trace a procedural BLAS.
+    ///
+    /// This is what a quadric batch shades with until materials reach quadrics properly: one hard-coded neutral surface, which
+    /// is enough to see that the geometry is there and correct.
+    material_permutation const& acquire_quadric_fallback();
+
     /// The permutation for `key`, or null if nothing has acquired it.
     [[nodiscard]] material_permutation const* find(cc::hash128 key) const;
+
+    /// The generation options for a quadric permutation: this cache's, with the quadric runtime and epilogue swapped in.
+    [[nodiscard]] material_shader_options quadric_generation_options() const;
 
     [[nodiscard]] isize count() const { return _by_key.size(); }
 

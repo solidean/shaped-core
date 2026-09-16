@@ -22,7 +22,26 @@ constexpr cc::string_view include_dir = "sv_shaders";
 {
     return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
 }
+
+/// The neutral material both fallbacks are built from: an EMPTY signature, which is the whole trick.
+///
+/// With no attributes there is no parameter block to read, so one hit group is valid for an instance whose block was laid out
+/// for something else entirely.
+/// Static because a `resolved_material` borrows its type and its material, and these have to outlive the resolve; the name is
+/// what the content hash is over, so nothing else can collide with them.
+resolved_material fallback_resolution()
+{
+    static auto const type = material_type::create("sv_fallback", {},
+                                                   "    surface.base_color = float3(0.5, 0.5, 0.5);\n"
+                                                   "    surface.specular_roughness = 1.0;");
+    static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
+
+    // The mesh is what a resolve walks for candidates, and an empty signature asks it for nothing.
+    static auto const mesh = sv::resident_mesh();
+    return resolve_material(type, material, mesh);
+}
 } // namespace
+
 
 material_shader_cache material_shader_cache::create(sg::shader_format format, material_shader_options const& opts)
 {
@@ -44,22 +63,64 @@ material_shader_options material_shader_cache::generation_options() const
             .bindless = &_bindless};
 }
 
+
 material_permutation const& material_shader_cache::acquire_fallback()
 {
-    // An EMPTY signature is the whole trick: with no attributes there is no parameter block to read, so this one hit
-    // group is valid for an instance whose block was laid out for something else entirely.
-    //
-    // Static because a `resolved_material` borrows its type and its material, and this one has to outlive the resolve.
-    // Its name is what its content hash is over, so nothing else can collide with it.
-    static auto const type = material_type::create("sv_fallback", {},
-                                                   "    surface.base_color = float3(0.5, 0.5, 0.5);\n"
-                                                   "    surface.specular_roughness = 1.0;");
-    static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
-
-    // The mesh is what a resolve walks for candidates, and an empty signature asks it for nothing.
-    auto const mesh = sv::resident_mesh();
-    return acquire(resolve_material(type, material, mesh));
+    return acquire(fallback_resolution());
 }
+
+material_shader_options material_shader_cache::quadric_generation_options() const
+{
+    auto opts = generation_options();
+    opts.runtime_include = quadric_runtime_include;
+    opts.epilogue_include = quadric_hit_epilogue_include;
+    return opts;
+}
+
+material_permutation const& material_shader_cache::acquire_quadric_fallback()
+{
+    // The same material `acquire_fallback` uses, spelled against the quadric runtime and epilogue — which is the whole point
+    // being demonstrated: one material, two geometry kinds, two permutations, one cache.
+    auto const resolved = fallback_resolution();
+
+    auto const opts = quadric_generation_options();
+    auto const key = material_shader_key(resolved.permutation_key, opts);
+    if (auto const* const resident = _by_key.get_ptr(key); resident != nullptr)
+        return *resident;
+
+    auto generated = generate_material_shader(resolved, opts);
+
+    auto lib = acquire_shader_library();
+    auto shader = sg::async_compiled_shader();
+    auto intersection = sg::async_compiled_shader();
+
+    if (lib.has_error())
+    {
+        shader = failed("shaped-viewer: no shader library to compile the quadric permutation through");
+        intersection = failed("shaped-viewer: no shader library to compile the quadric intersection through");
+    }
+    else
+    {
+        shader = lib.value()->compile_source(generated.source, sg::shader_stage::closest_hit, quadric_hit_entry_point,
+                                             _format, {.include_dir = include_dir, .label = "<quadric closest-hit>"});
+
+        // The SAME source at its other entry point, exactly as the cutout any-hit is compiled from the material's.
+        // One source per permutation is what keeps the two from disagreeing about the layout they read.
+        intersection = lib.value()->compile_source(generated.source, sg::shader_stage::intersection,
+                                                   quadric_intersection_entry_point, _format,
+                                                   {.include_dir = include_dir, .label = "<quadric intersection>"});
+    }
+
+    auto entry = _by_key.entry(key);
+    return entry.get_or_emplace(material_permutation{.key = generated.key,
+                                                     .layout = cc::move(generated.layout),
+                                                     .samplers = cc::move(generated.samplers),
+                                                     .shader = cc::move(shader),
+                                                     .intersection = cc::move(intersection),
+                                                     .can_cut_out = false,
+                                                     .source = cc::move(generated.source)});
+}
+
 
 material_permutation const* material_shader_cache::find(cc::hash128 key) const
 {
