@@ -15,14 +15,14 @@
 //
 // Two things in here are worth reading for, beyond "it draws":
 //
-//   The edges use FLAT caps.
-//   A round-capped edge is three primitives — a clipped cylinder plus a sphere at each end — and every one of those caps
-//   would sit inside the vertex sphere that is already there.
-//   `add` on a segment is the flat form, and it is exact here rather than an approximation.
+//   The edges are OPEN tubes, with their end caps not drawn.
+//   The clipper that cuts a cylinder to length has a surface of its own — two planes — and whether that surface is drawn is
+//   one bit on the primitive, not a second piece of geometry.
+//   Here it is off: the joints already carry vertex spheres, so a cap would draw something nothing can see.
 //
-//   The colour runs ALONG each edge, from one endpoint's colour to the other's.
-//   That is the `per_quadric_end` frequency: two values per primitive, blended by where along its own axis the ray hit.
-//   The axis costs nothing to know — it comes back out of the clipping slab the primitive already carries.
+//   The colour is per PRIMITIVE, at `per_triangle` — the same frequency a mesh reads a per-face colour at.
+//   That is not a coincidence: a quadric batch numbers its primitives and nothing else, so it admits exactly the
+//   frequencies a mesh's primitive stream does, and one material definition generates one shader body for both.
 //
 // See libs/graphics/shaped-viewer/docs/quadrics.md for the design behind all of it.
 //
@@ -133,30 +133,30 @@ EXAMPLE("shaped-viewer/mesh-structure")
     structure.name = "structure";
     structure.reserve(vertices.size() + edges.size());
 
-    // Two colours per primitive, in primitive order — which is what `per_quadric_end` reads.
-    // A sphere has no two ends and takes the first.
-    // An edge runs from one endpoint's colour to the other's, which is the gradient the capture shows.
+    // One colour per primitive, in primitive order — which is what `PrimitiveIndex()` reads.
     auto colours = cc::vector<tg::vec3f>();
-    colours.reserve(2 * (vertices.size() + edges.size()));
+    colours.reserve(vertices.size() + edges.size());
 
     for (auto const& v : vertices)
     {
         structure.add(tg::sphere3f(v, 0.13f));
         colours.push_back(colour_of(v));
-        colours.push_back(colour_of(v));
     }
 
     for (auto const& e : edges)
     {
-        // FLAT caps, deliberately: the joints already carry vertex spheres, so round ones would be two more primitives
-        // each of geometry nothing can see.
+        // OPEN tubes, deliberately: the joints already carry vertex spheres, so drawing the caps would be geometry
+        // nothing can see.
+        // `add(segment, radius, true)` closes them, at no change to the primitive's box.
         structure.add(tg::segment3f(vertices[e[0]], vertices[e[1]]), 0.045f);
-        colours.push_back(colour_of(vertices[e[0]]));
-        colours.push_back(colour_of(vertices[e[1]]));
+
+        auto const a = colour_of(vertices[e[0]]);
+        auto const b = colour_of(vertices[e[1]]);
+        colours.push_back((a + b) * 0.5f);
     }
 
     structure.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_quadric_end, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
 
     for (auto f : sv::interactive("shaped-viewer/mesh-structure"))
     {

@@ -21,15 +21,18 @@ struct sv::quadric_gpu
     sv::quadric3 surface;
     sv::quadric3 clip;
 
+    /// `quadric_primitive::flag_*`, above all whether the clipper's own surface is drawn.
+    u32 flags;
+
     [[nodiscard]] static quadric_gpu of(quadric_primitive const& p)
     {
-        return {.origin = p.origin, .surface = p.surface, .clip = p.clip};
+        return {.origin = p.origin, .surface = p.surface, .clip = p.clip, .flags = p.flags};
     }
 };
 
 namespace sv
 {
-static_assert(sizeof(quadric_gpu) == 92, "quadric_gpu must match sv::quadric in the quadric shader runtime");
+static_assert(sizeof(quadric_gpu) == 96, "quadric_gpu must match sv::quadric in the quadric shader runtime");
 } // namespace sv
 
 /// What a caller hands the quadric manager: the primitives, plus the content hash that identifies them.

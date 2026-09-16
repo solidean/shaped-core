@@ -199,28 +199,80 @@ TEST("sv::quadric_primitive handles a degenerate segment")
     CHECK(near(hit.value().t, 4.5f));
 }
 
-TEST("sv::quadric_primitive locates a point along its own axis")
+TEST("sv::intersect draws no cap on an open cylinder")
 {
-    // What `per_quadric_end` blends by, and the property the offset slab exists for: the parameter runs from the segment's
-    // FIRST endpoint to its second, so the two ends are told apart rather than merely the axis being known.
-    auto const p = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 0.5f);
+    // The default, and what a wireframe wants: the ends are where the clipper cuts, and nothing closes them.
+    auto const p = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f);
+    CHECK(!p.emits_clip_surface());
 
-    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 0)), 0.0f));
-    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 2)), 0.5f));
-    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 4)), 1.0f));
+    // Straight down the axis from outside: the cap plane is crossed, but it is not a surface, so the ray reaches the
+    // inside of the far wall instead.
+    auto const hit = sv::intersect(p, ray_from(tg::pos3f(0.1f, 0, -2), tg::vec3f(0, 0, 1)));
+    REQUIRE(hit.has_value());
 
-    // Reversing the segment reverses the parameter, which a centred slab could not have expressed: its clipper is identical
-    // for an axis and its negation, so both ends would have read the same.
-    auto const flipped
-        = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 4), tg::pos3f(0, 0, 0)), 0.5f);
-    CHECK(near(flipped.end_parameter(tg::pos3f(0.5f, 0, 4)), 0.0f));
-    CHECK(near(flipped.end_parameter(tg::pos3f(0.5f, 0, 0)), 1.0f));
+    auto const at = tg::pos3f(0.1f, 0, -2) + tg::vec3f(0, 0, 1) * hit.value().t;
+    CHECK(at[2] > 0.0f); // past the near cap plane, so nothing was drawn there
+}
 
-    // Clamped rather than extrapolated, so a hit a hair outside the slab reads its nearer end.
-    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, -1)), 0.0f));
-    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 9)), 1.0f));
+TEST("sv::intersect draws the cap of a capped cylinder")
+{
+    auto const p
+        = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 1.0f, true);
+    CHECK(p.emits_clip_surface());
 
-    // A sphere has no two ends to blend between.
-    auto const s = sv::quadric_primitive::create_sphere(tg::sphere3f(tg::pos3f(1, 2, 3), 1.0f));
-    CHECK(near(s.end_parameter(tg::pos3f(2, 2, 3)), 0.0f));
+    // The same ray now stops on the flat end at z = 0, which is the CLIPPER's own surface rather than the cylinder's.
+    auto const hit = sv::intersect(p, ray_from(tg::pos3f(0.1f, 0, -2), tg::vec3f(0, 0, 1)));
+    REQUIRE(hit.has_value());
+    CHECK(near(hit.value().t, 2.0f));
+
+    // And its normal is the cap's, pointing back along the axis at the ray rather than radially outward.
+    CHECK(near(hit.value().normal, tg::vec3f(0, 0, -1)));
+
+    // A ray down the axis but OUTSIDE the cylinder's radius misses entirely: the cap is only a surface where it lies
+    // inside the other quadric, which is the whole interval test.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(3, 0, -2), tg::vec3f(0, 0, 1))).has_value());
+}
+
+TEST("sv::quadric_primitive bounds the solid, not the visible part of it")
+{
+    // The invariant the acceleration structure rests on: the box is the same whether or not the caps are drawn.
+    // A box that tracked visibility would make one geometry two resources, and a dropped hit a silent hole.
+    auto const seg = tg::segment3f(tg::pos3f(-1, 2, 0.5f), tg::pos3f(3, -1, 2));
+
+    auto const open = sv::quadric_primitive::create_cylinder(seg, 0.4f);
+    auto const capped = sv::quadric_primitive::create_cylinder(seg, 0.4f, true);
+
+    CHECK(open.bounds.min == capped.bounds.min);
+    CHECK(open.bounds.max == capped.bounds.max);
+
+    // And the two differ in exactly one thing.
+    CHECK(open.surface == capped.surface);
+    CHECK(open.clip == capped.clip);
+    CHECK(open.flags != capped.flags);
+}
+
+TEST("sv::intersect draws a hemisphere with or without its floor")
+{
+    // A sphere clipped by a plane pair — the other shape the clipper's own surface is wanted for.
+    // The slab's half-height is the sphere's radius, so one of its two planes lies outside and only the cut at z = 0 shows.
+    auto const dome = [](bool floor)
+    {
+        auto p = sv::quadric_primitive::create_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 1.0f));
+        p.clip = sv::quadric3::slab(tg::vec3f(0, 0, 1), 0.5f, 0.5f); // keeps 0 <= z <= 1
+        p.flags = floor ? sv::quadric_primitive::flag_emit_clip_surface : 0u;
+        return p;
+    };
+
+    // Looking up from below at the flat side.
+    auto const ray = ray_from(tg::pos3f(0.2f, 0, -3), tg::vec3f(0, 0, 1));
+
+    auto const without = sv::intersect(dome(false), ray);
+    REQUIRE(without.has_value());
+    auto const at_without = tg::pos3f(0.2f, 0, -3) + tg::vec3f(0, 0, 1) * without.value().t;
+    CHECK(at_without[2] > 0.0f); // the floor is not there, so the dome's inner surface is what is hit
+
+    auto const with = sv::intersect(dome(true), ray);
+    REQUIRE(with.has_value());
+    CHECK(near(with.value().t, 3.0f)); // the floor, at z = 0
+    CHECK(near(with.value().normal, tg::vec3f(0, 0, -1)));
 }

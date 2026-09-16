@@ -74,12 +74,8 @@ struct sv::quadric3
     /// The slab of half-height `half_height` centred at `offset` along unit `axis`: (p·axis - offset)² - half_height².
     ///
     /// This is the clipper that turns an infinite cylinder into a finite one, and its A is axis axisᵀ.
-    ///
-    /// **A nonzero `offset` is what makes the axis recoverable from the clipper**, which is what `per_quadric_end` blends along.
-    /// A slab centred on the origin has b = 0, and A = axis axisᵀ is the same for `axis` and `-axis` — so the direction survives
-    /// but its SIGN does not, and the two ends of a segment become indistinguishable.
-    /// With an offset, b = -offset * axis carries both, and a shader recovers axis = -normalize(b) and offset = |b|.
-    /// That is why `create_cylinder` puts the origin at one endpoint rather than at the midpoint.
+    /// Its own zero set is the pair of planes at the slab's ends, which is what a capped cylinder's flat faces ARE — see
+    /// `quadric_primitive::emits_clip_surface`.
     ///
     /// `axis` must be unit length.
     [[nodiscard]] static constexpr quadric3 slab(tg::vec3f const& axis, float offset, float half_height)
@@ -100,10 +96,16 @@ struct sv::quadric3
     [[nodiscard]] friend constexpr bool operator==(quadric3 const&, quadric3 const&) = default;
 };
 
-/// One drawn primitive: a surface quadric, the region a hit has to lie in, and the object-space box both are expressed about.
+/// One drawn primitive: two quadrics whose interiors intersect, and the object-space box that bounds the result.
 ///
-/// A quadric surface is infinite where a drawn shape is not, so the pair is the representation rather than the surface alone.
-/// A hit at p is kept exactly when `surface.evaluate(p) == 0` and `clip.evaluate(p) <= 0`, with p relative to `origin`.
+/// **The solid is {surface <= 0} AND {clip <= 0}**, and its boundary therefore has two parts.
+/// Where `surface == 0` inside the clip region, the surface quadric is what is drawn.
+/// Where `clip == 0` inside the surface region, the CLIPPER is — a cylinder's flat end caps, a hemisphere's floor — and
+/// `emits_clip_surface` is what says whether that half is drawn at all.
+///
+/// A ray therefore meets up to FOUR candidate points: two roots of each quadric.
+/// Each is kept only if it lies in the other's interior, and the nearest survivor is the hit — which is what makes an
+/// open tube and a capped one the same record with one bit different.
 ///
 /// The clipper being a full quadric rather than a plane is what closes this under the shapes that matter.
 /// A slab is itself a quadric, so a finite cylinder is a cylinder clipped by a slab, a cone frustum is a cone clipped by a slab,
@@ -114,22 +116,38 @@ struct sv::quadric3
 /// finite box at all and only the construction knows which bounded shape was meant.
 struct sv::quadric_primitive
 {
+    /// Set in `flags` to draw the clipper's own surface as well as the surface quadric's.
+    static constexpr u32 flag_emit_clip_surface = 1u;
+
     tg::pos3f origin = {};
     sv::quadric3 surface = {};
     sv::quadric3 clip = sv::quadric3::everywhere();
 
-    /// world-space, and tight for every shape the factories below build
+    /// Bitfield over the `flag_` constants above; part of the GPU record, so it is a `u32` rather than a bool.
+    u32 flags = 0;
+
+    /// The box the primitive is traced through, in the set's own space.
+    ///
+    /// **It bounds the SOLID and never the visible part of it.**
+    /// Turning `flag_emit_clip_surface` on or off changes which pixels are drawn and must not change this by a single bit:
+    /// the box is the acceleration structure's, and a box that tracked visibility would make the same geometry two
+    /// resources and a dropped hit a silent hole.
     tg::aabb3f bounds = {};
+
+    [[nodiscard]] bool emits_clip_surface() const { return (flags & flag_emit_clip_surface) != 0; }
 
     /// The sphere `s`, unclipped.
     [[nodiscard]] static quadric_primitive create_sphere(tg::sphere3f const& s);
 
     /// The segment `s` thickened by `radius`, as a cylinder clipped to the segment's own slab.
     ///
-    /// This is an OPEN tube: the ends are where the clipper cuts, and nothing closes them.
-    /// A round-capped edge is this plus a sphere at each end, which `append_capsule` writes.
+    /// `capped` decides whether the slab's two end planes are drawn: false is an OPEN tube, which is what a wireframe wants
+    /// since a vertex sphere already covers each joint, and true is a closed solid.
+    /// The box is the same either way — see `bounds`.
+    ///
+    /// A round-capped edge is the open tube plus a sphere at each end, which `append_capsule` writes.
     /// A degenerate segment — both endpoints equal — yields a sphere instead, since there is no axis to build a cylinder about.
-    [[nodiscard]] static quadric_primitive create_cylinder(tg::segment3f const& s, float radius);
+    [[nodiscard]] static quadric_primitive create_cylinder(tg::segment3f const& s, float radius, bool capped = false);
 
     /// Whether `p`, given in world space, lies in the region the clipper admits.
     [[nodiscard]] bool admits(tg::pos3f const& p) const { return clip.evaluate(p - origin) <= 0.0f; }
@@ -137,17 +155,6 @@ struct sv::quadric_primitive
     /// The outward unit normal at a world-space point on the surface.
     /// Undefined where the gradient vanishes, which for the shapes built here is only a degenerate primitive.
     [[nodiscard]] tg::vec3f normal_at(tg::pos3f const& p) const;
-
-    /// Where `p` lies along this primitive's own axis: 0 at the segment's first endpoint, 1 at its second.
-    ///
-    /// This is what a `per_quadric_end` attribute blends by, and it costs no bytes: the axis, the offset and the half-length all
-    /// come out of the clipping slab the primitive already carries.
-    /// A primitive with no meaningful clip — a sphere — has no two ends to blend between and reads 0.
-    ///
-    /// Clamped to [0, 1], so a hit slightly outside the slab reads its nearer end rather than extrapolating.
-    /// `sv::quadric_runtime`'s HLSL mirrors this exactly; a divergence between them is a bug in one rather than a difference of
-    /// intent.
-    [[nodiscard]] float end_parameter(tg::pos3f const& p) const;
 };
 
 namespace sv
@@ -155,7 +162,7 @@ namespace sv
 // A set's content hash is taken over the raw bytes of its primitives, so a padding hole would feed indeterminate bytes into a
 // cache key — two identical sets could then hash differently and upload twice.
 // Every member is 4-byte aligned and the total is their exact sum, so there is no hole; this is what says so out loud.
-static_assert(sizeof(quadric_primitive) == 12 + 40 + 40 + 24,
+static_assert(sizeof(quadric_primitive) == 12 + 40 + 40 + 4 + 24,
               "quadric_primitive must stay padding-free — see quadric_set::add");
 static_assert(sizeof(quadric3) == 40, "quadric3 must stay padding-free");
 } // namespace sv

@@ -81,7 +81,11 @@ struct sv::quadric_set
     /// human-readable, for debugging and for picking a set out of a scene; not an identity — nothing dedupes on it
     cc::string name;
 
-    /// arbitrary extra data, looked up by name by the material — per primitive, per primitive end, or one value for the whole set
+    /// Arbitrary extra data, looked up by name by the material.
+    ///
+    /// A batch numbers its primitives and nothing else, so the frequencies it can serve are `per_instance` and `per_triangle`
+    /// — one value for the whole placement, or one per primitive indexed by `PrimitiveIndex()`.
+    /// Anything finer loses to the coarser rank, exactly as an unusable candidate does on a mesh.
     cc::vector<mesh_attribute> attributes;
 
     /// placement of the set's own space in the world; may scale or shear, so build it from tg's factories and `tg::compose`
@@ -97,11 +101,15 @@ struct sv::quadric_set
     /// Appends the sphere `s`.
     void add(tg::sphere3f const& s) { add(quadric_primitive::create_sphere(s)); }
 
-    /// Appends the segment `s` thickened by `radius`, as an OPEN cylinder with flat ends.
+    /// Appends the segment `s` thickened by `radius`.
     ///
-    /// This is what a mesh's edges want: where the joints already carry spheres, the flat cap is covered exactly rather than
-    /// approximated, and a round cap there would be three primitives drawing geometry nothing can see.
-    void add(tg::segment3f const& s, float radius) { add(quadric_primitive::create_cylinder(s, radius)); }
+    /// `capped` draws the two flat ends; without it this is an OPEN tube, which is what a mesh's edges want — the joints
+    /// already carry vertex spheres, so a cap there would draw geometry nothing can see.
+    /// The primitive's box is the same either way, so the choice costs nothing but a bit.
+    void add(tg::segment3f const& s, float radius, bool capped = false)
+    {
+        add(quadric_primitive::create_cylinder(s, radius, capped));
+    }
 
     /// Appends a round-capped segment — the cylinder plus a sphere at each end, so three primitives rather than one.
     /// A capsule's surface is not degree 2, which is why it cannot be one.

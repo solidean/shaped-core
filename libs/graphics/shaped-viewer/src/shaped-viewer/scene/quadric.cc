@@ -38,7 +38,7 @@ sv::quadric_primitive sv::quadric_primitive::create_sphere(tg::sphere3f const& s
             .bounds = tg::aabb3f(s.center - r, s.center + r)};
 }
 
-sv::quadric_primitive sv::quadric_primitive::create_cylinder(tg::segment3f const& s, float radius)
+sv::quadric_primitive sv::quadric_primitive::create_cylinder(tg::segment3f const& s, float radius, bool capped)
 {
     auto const along = s.pos1 - s.pos0;
     auto const len = along.length();
@@ -48,16 +48,15 @@ sv::quadric_primitive sv::quadric_primitive::create_cylinder(tg::segment3f const
         return create_sphere(tg::sphere3f(s.pos0, radius));
 
     auto const axis = along / len;
+    auto const mid = s.pos0 + along * 0.5f;
 
-    // The origin is `pos0` rather than the midpoint, and that is not arbitrary.
-    // It puts the clipping slab's centre at len/2 along the axis, which makes its linear term -(len/2) * axis — nonzero, and
-    // therefore carrying the axis WITH its sign.
-    // A midpoint origin would leave that term zero, and `axis` and `-axis` would give the same clipper: the surface would be
-    // identical and the two ends of the segment indistinguishable, which is what `per_quadric_end` has to tell apart.
-    // `pos0` is on the axis, so it is as good an origin for precision as the midpoint was.
-    return {.origin = s.pos0,
+    // The box is the capped solid's either way, which is the same as the open tube's: a flat end cap lies in the plane the
+    // slab already cuts, so it adds nothing to the extent.
+    // That is what lets `capped` be one bit rather than a second geometry.
+    return {.origin = mid,
             .surface = quadric3::cylinder_about_origin(axis, radius),
-            .clip = quadric3::slab(axis, len * 0.5f, len * 0.5f),
+            .clip = quadric3::slab_about_origin(axis, len * 0.5f),
+            .flags = capped ? flag_emit_clip_surface : 0u,
             .bounds = box_around(s.pos0, s.pos1, cylinder_extent(axis, radius))};
 }
 
@@ -66,31 +65,20 @@ tg::vec3f sv::quadric_primitive::normal_at(tg::pos3f const& p) const
     return tg::normalize(surface.gradient(p - origin));
 }
 
-float sv::quadric_primitive::end_parameter(tg::pos3f const& p) const
+namespace
 {
-    // The slab is (x·n - offset)^2 - h^2, so b = -offset * n and c = offset^2 - h^2.
-    // Both the axis and its sign come back out of b, which is the whole reason the slab is offset rather than centred.
-    auto const b = clip.linear;
-    auto const offset = b.length();
-    if (offset <= 1e-20f)
-        return 0.0f; // a symmetric or absent clipper names no first end
-
-    auto const axis = -b / offset;
-    auto const half = tg::sqrt(cc::max(0.0f, offset * offset - clip.constant));
-    if (half <= 1e-20f)
-        return 0.0f;
-
-    auto const along = tg::dot(p - origin, axis);
-    return cc::clamp((along - offset + half) / (2.0f * half), 0.0f, 1.0f);
-}
-
-cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, tg::ray3f const& ray, float t_min, float t_max)
+/// The real roots of `q` along the ray, in ascending order.
+///
+/// `count` is 0, 1 or 2; a vanishing quadratic term is a ray parallel to a degenerate direction of the quadric — a slab or a
+/// plane pair — where the equation is linear and has exactly one root, and treating it as a quadratic would divide by zero.
+struct quadric_roots
 {
-    auto const o = ray.origin - primitive.origin;
-    auto const& d = ray.dir;
-    auto const& q = primitive.surface;
+    int count = 0;
+    float t[2] = {0.0f, 0.0f};
+};
 
-    // Q(o + t d) = a t² + b t + c, with A the symmetric block and the factor 2 folded in as in `evaluate`.
+[[nodiscard]] quadric_roots roots_of(sv::quadric3 const& q, tg::vec3f const& o, tg::vec3f const& d)
+{
     auto const a_o = tg::vec3f(q.diag[0] * o[0] + q.off_diag[0] * o[1] + q.off_diag[1] * o[2],
                                q.off_diag[0] * o[0] + q.diag[1] * o[1] + q.off_diag[2] * o[2],
                                q.off_diag[1] * o[0] + q.off_diag[2] * o[1] + q.diag[2] * o[2]);
@@ -102,51 +90,72 @@ cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, 
     float const qb = 2.0f * (tg::dot(d, a_o) + tg::dot(q.linear, d));
     float const qc = q.evaluate(o);
 
-    float t_near = 0.0f;
-    float t_far = 0.0f;
+    auto out = quadric_roots{};
 
-    // A vanishing quadratic term is a ray parallel to a degenerate direction of the quadric — a slab or a plane pair.
-    // The equation is then linear and has exactly one root, and treating it as a quadratic would divide by zero.
     if (qa == 0.0f)
     {
         if (qb == 0.0f)
-            return {};
+            return out;
 
-        t_near = -qc / qb;
-        t_far = t_near;
-    }
-    else
-    {
-        float const disc = qb * qb - 4.0f * qa * qc;
-        if (disc < 0.0f)
-            return {};
-
-        float const root = tg::sqrt(disc);
-
-        // The numerically stable pair: forming both roots from -b - sign(b) sqrt(disc) avoids the cancellation that
-        // (-b + sqrt(disc)) suffers when b and sqrt(disc) nearly agree, which is exactly the grazing hit.
-        float const s = qb >= 0.0f ? -0.5f * (qb + root) : -0.5f * (qb - root);
-        float const r0 = s / qa;
-        float const r1 = s == 0.0f ? r0 : qc / s;
-
-        t_near = cc::min(r0, r1);
-        t_far = cc::max(r0, r1);
+        out.count = 1;
+        out.t[0] = -qc / qb;
+        return out;
     }
 
-    // The nearest root the range and the clipper both admit, else the far one under the same two tests.
-    for (float const t : {t_near, t_far})
+    float const disc = qb * qb - 4.0f * qa * qc;
+    if (disc < 0.0f)
+        return out;
+
+    float const root = tg::sqrt(disc);
+
+    // The numerically stable pair: forming both roots from -b - sign(b) sqrt(disc) avoids the cancellation that
+    // (-b + sqrt(disc)) suffers when b and sqrt(disc) nearly agree, which is exactly the grazing hit.
+    float const s = qb >= 0.0f ? -0.5f * (qb + root) : -0.5f * (qb - root);
+    float const r0 = s / qa;
+    float const r1 = s == 0.0f ? r0 : qc / s;
+
+    out.count = 2;
+    out.t[0] = cc::min(r0, r1);
+    out.t[1] = cc::max(r0, r1);
+    return out;
+}
+} // namespace
+
+cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, tg::ray3f const& ray, float t_min, float t_max)
+{
+    auto const o = ray.origin - primitive.origin;
+    auto const& d = ray.dir;
+
+    auto best = cc::optional<quadric_hit>();
+
+    // The solid is the intersection of the two interiors, so a candidate on either boundary counts only where it lies inside
+    // the OTHER — which is the whole test, and the reason the caps of a cylinder need no geometry of their own.
+    auto const consider = [&](float t, quadric3 const& own, quadric3 const& other)
     {
         if (t < t_min || t > t_max)
-            continue;
+            return;
+        if (best.has_value() && t >= best.value().t)
+            return;
 
-        auto const p = ray.origin + d * t;
-        if (!primitive.admits(p))
-            continue;
+        auto const p = o + d * t;
+        if (other.evaluate(p) > 0.0f)
+            return;
 
-        return quadric_hit{.t = t, .normal = primitive.normal_at(p)};
+        best = quadric_hit{.t = t, .normal = tg::normalize(own.gradient(p))};
+    };
+
+    auto const surface_roots = roots_of(primitive.surface, o, d);
+    for (auto i = 0; i < surface_roots.count; ++i)
+        consider(surface_roots.t[i], primitive.surface, primitive.clip);
+
+    if (primitive.emits_clip_surface())
+    {
+        auto const clip_roots = roots_of(primitive.clip, o, d);
+        for (auto i = 0; i < clip_roots.count; ++i)
+            consider(clip_roots.t[i], primitive.clip, primitive.surface);
     }
 
-    return {};
+    return best;
 }
 
 void sv::append_capsule(cc::vector<quadric_primitive>& out, tg::segment3f const& s, float radius)

@@ -64,14 +64,7 @@ void QuadricIntersection()
 void PtQuadricClosestHit(inout PtPayload payload, in QuadricAttributes attribs)
 {
     sv::instance inst = pt_bindings::Instances[InstanceID()];
-
-    // Re-read rather than carried through the attributes: the record is 92 bytes of one cache line the intersection shader
-    // just touched, and widening the hit attributes to carry it would cost every ray in the scene.
-    sv::quadric_primitive prim = sv::load_quadric(pt_quadric_buffer(inst), PrimitiveIndex());
-
-    // Object space, because that is the frame the primitive's own axis is expressed in.
-    float3 p_obj = ObjectRayOrigin() + ObjectRayDirection() * RayTCurrent();
-    sv::shading_context ctx = sv::make_quadric_context(inst, PrimitiveIndex(), prim, p_obj);
+    sv::shading_context ctx = sv::make_quadric_context(inst, PrimitiveIndex());
 
     // The gradient the intersection already computed, moved into world space.
     // Exact for a rigid or uniformly scaled placement; a non-uniform one wants the inverse transpose, which is the same

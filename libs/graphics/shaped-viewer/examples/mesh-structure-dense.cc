@@ -33,8 +33,8 @@ using namespace cc::primitive_defines;
 // Each tube is coloured by its own length, over the range the mesh actually spans — which on a subdivided icosahedron
 // draws the twelve pentagonal vertices the construction cannot avoid, as a pattern you can see rather than a number
 // you have to trust.
-// That is `per_quadric`: one value per primitive, indexed the way `per_triangle` is.
-// `mesh-structure` shows the other quadric frequency, `per_quadric_end`, which blends two values along each tube.
+// That is `per_triangle` — one value per element of the geometry's own primitive stream — which is the SAME frequency a
+// mesh reads a per-face colour at, generating the same shader body from the same material definition.
 //
 // Controls
 //   left-drag    orbit          middle-drag    pan          wheel    zoom
@@ -226,7 +226,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     structure.name = "edge network";
     structure.reserve(mesh.vertices.size() + edges.size());
 
-    // One value per primitive, in primitive order — `per_quadric`, which is what `PrimitiveIndex()` reads.
+    // One value per primitive, in primitive order — what `PrimitiveIndex()` reads.
     auto colours = cc::vector<tg::vec3f>();
     colours.reserve(mesh.vertices.size() + edges.size());
 
@@ -238,8 +238,9 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
 
     for (auto const& e : edges)
     {
-        // Flat caps: the vertex spheres already cover every joint, so round ones would be two more primitives each of
-        // geometry nothing can see — 61,440 of them at this subdivision.
+        // Open tubes: the vertex spheres already cover every joint, so drawing the end caps would be geometry nothing can
+        // see.
+        // Closing them is one bit per primitive and no change to the box.
         structure.add(tg::segment3f(mesh.vertices[e[0]], mesh.vertices[e[1]]), tube_radius);
 
         auto const len = tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
@@ -247,7 +248,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     }
 
     structure.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_quadric, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
 
     for (auto f : sv::interactive("shaped-viewer/mesh-structure-dense"))
     {

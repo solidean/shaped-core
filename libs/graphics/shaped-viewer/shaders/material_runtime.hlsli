@@ -41,13 +41,6 @@ struct shading_context
     uint primitive;      ///< PrimitiveIndex()
     uint3 corner;        ///< the three vertex indices of the hit triangle; zero on a quadric, which has no corners
     float3 barycentrics; ///< (1 - b.x - b.y, b.x, b.y), so the three weigh the three corners in order
-
-    /// Where along its own axis the hit landed on a QUADRIC: 0 at the primitive's first end, 1 at its second.
-    ///
-    /// What `per_quadric_end` blends by, and 0 on a triangle, which has no such axis.
-    /// It costs the primitive no bytes: the axis, the offset and the half-length all come back out of the clipping slab the
-    /// primitive already carries — see `sv::make_quadric_context`.
-    float end_blend;
 };
 
 /// One attribute descriptor out of a parameter block.
@@ -129,43 +122,6 @@ float4 interpolate_rotation(ByteAddressBuffer b, attribute_desc d, uint3 e, floa
     return len > 1e-8 ? q / len : float4(0, 0, 0, 1);
 }
 
-// Blends between the TWO elements a per_quadric_end attribute carries for one primitive.
-//
-// The pair is elements `2 * primitive` and `2 * primitive + 1`, so an edge that fades along its length is authored as two values
-// per primitive in the order the set was built in.
-// `t` is `ctx.end_blend`, already clamped to [0, 1] by the context that computed it.
-
-float interpolate_ends_f1(ByteAddressBuffer b, attribute_desc d, uint primitive, float t)
-{
-    return lerp(load_element_f1(b, d, 2 * primitive), load_element_f1(b, d, 2 * primitive + 1), t);
-}
-float2 interpolate_ends_f2(ByteAddressBuffer b, attribute_desc d, uint primitive, float t)
-{
-    return lerp(load_element_f2(b, d, 2 * primitive), load_element_f2(b, d, 2 * primitive + 1), t);
-}
-float3 interpolate_ends_f3(ByteAddressBuffer b, attribute_desc d, uint primitive, float t)
-{
-    return lerp(load_element_f3(b, d, 2 * primitive), load_element_f3(b, d, 2 * primitive + 1), t);
-}
-float4 interpolate_ends_f4(ByteAddressBuffer b, attribute_desc d, uint primitive, float t)
-{
-    return lerp(load_element_f4(b, d, 2 * primitive), load_element_f4(b, d, 2 * primitive + 1), t);
-}
-
-/// Two unit quaternions blended as a rotation rather than as four numbers, for the same reason `interpolate_rotation` is:
-/// `q` and `-q` are the same rotation, so the second is aligned into the first's hemisphere before the blend.
-float4 interpolate_ends_rotation(ByteAddressBuffer b, attribute_desc d, uint primitive, float t)
-{
-    float4 q0 = load_element_f4(b, d, 2 * primitive);
-    float4 q1 = load_element_f4(b, d, 2 * primitive + 1);
-
-    q1 = dot(q1, q0) < 0.0 ? -q1 : q1;
-
-    float4 q = lerp(q0, q1, t);
-    float len = length(q);
-    return len > 1e-8 ? q / len : float4(0, 0, 0, 1);
-}
-
 /// The three element indices a per_corner attribute reads, in the order `barycentrics` weighs them.
 uint3 corner_elements(shading_context ctx)
 {
@@ -195,7 +151,6 @@ shading_context make_context(instance inst, ByteAddressBuffer index_buffer, uint
     ctx.primitive = primitive;
     ctx.corner = triangle_corners(inst, index_buffer, primitive);
     ctx.barycentrics = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
-    ctx.end_blend = 0.0; // a triangle has no axis to blend along
     return ctx;
 }
 } // namespace sv

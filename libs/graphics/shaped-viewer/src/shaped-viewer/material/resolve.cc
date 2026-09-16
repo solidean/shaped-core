@@ -29,15 +29,16 @@ bool serves(geometry_kind kind, attribute_frequency f)
     case attribute_frequency::per_instance:
         return true; // one value for the whole placement, which any geometry has
 
+    case attribute_frequency::per_triangle:
+        // One value per element of the geometry's own primitive stream, indexed by PrimitiveIndex().
+        // Both geometries number that, and the generated load is the same for either — which is the whole reason the
+        // frequencies are one set rather than one per kind.
+        return true;
+
     case attribute_frequency::per_vertex:
     case attribute_frequency::per_corner:
-    case attribute_frequency::per_triangle:
     case attribute_frequency::per_edge:
         return kind == geometry_kind::triangles;
-
-    case attribute_frequency::per_quadric:
-    case attribute_frequency::per_quadric_end:
-        return kind == geometry_kind::quadrics;
     }
 
     return false;

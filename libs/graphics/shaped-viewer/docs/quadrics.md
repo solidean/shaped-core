@@ -39,11 +39,12 @@ struct sv::quadric3
 
 /// One primitive: a surface, and the region a hit has to lie in.
 /// Both are expressed about `origin`, which is what keeps float32 honest at mesh scale.
-struct sv::quadric_primitive          // 92 bytes
+struct sv::quadric_primitive          // 96 bytes on the GPU
 {
     tg::pos3f origin = {};            // 12
     sv::quadric3 surface = {};        // 40
-    sv::quadric3 clip = {};           // 40 — a hit is kept where xᵀCx <= 0
+    sv::quadric3 clip = {};           // 40 — the solid is {surface <= 0} AND {clip <= 0}
+    u32 flags = 0;                    //  4 — above all, whether the clipper's own surface is drawn
 };
 ```
 
@@ -149,42 +150,61 @@ It is called with a quadric runtime include and a quadric epilogue include, in p
 The consequence is that a material placed on both a mesh and a quadric set compiles twice.
 That is the price of the alternative being a divergent branch on geometry kind, inside the hottest shader in the renderer.
 
-### Quadrics carry their own geometric frequencies
+### Quadrics admit a SUBSET of the mesh frequencies
 
-`per_vertex` and `per_corner` have no reading on a quadric, so quadrics get their own values in the same enum and resolution rejects a frequency the geometry cannot serve.
+There is one frequency set, not one per geometry, and a geometry admits the part of it that its own primitives number.
 
 ```cpp
 enum class sv::attribute_frequency : sv::u8
 {
-    per_instance,   // one value for the whole placement      — both geometries
-    per_vertex,     // mesh only
-    per_corner,     // mesh only
-    per_triangle,   // mesh only    — indexed by PrimitiveIndex()
-    per_edge,       // mesh only
-
-    per_quadric,     // quadric only — indexed by PrimitiveIndex()
-    per_quadric_end, // quadric only — two values, blended by the clip parameter
+    per_instance, // both — one value for the whole placement
+    per_vertex,   // mesh only
+    per_corner,   // mesh only
+    per_triangle, // both — one value per element of the primitive stream, indexed by PrimitiveIndex()
+    per_edge,     // mesh only, and reserved
 };
 ```
 
-`per_triangle` keeps its name.
-It is a mesh-only name that says exactly what it indexes, and `per_quadric` sits beside it doing the same job for the other geometry — so neither reads as a category containing `per_vertex`.
+**That is what lets one material definition generate one shader body for both geometries.**
+`per_triangle` means "one value per element of the geometry's own primitive stream" — a triangle for a mesh, a quadric for a
+batch — so the generated load is the identical line of HLSL either way.
+The name is the mesh's and the meaning is the index; renaming it was considered and dropped, because a geometry-neutral name
+would read as a category containing `per_vertex` and `per_edge` rather than as a peer of them.
 
-Only the geometric frequency forks.
-`material_frequency`, the rank chain from type default down to texture, is untouched.
+So the two geometries differ in the **preamble** alone: `make_context` builds a triangle's shading context from its corners and
+barycentrics, `make_quadric_context` builds a quadric's from `PrimitiveIndex()`, and everything the material fragment reads is
+the same afterwards.
 
-### The clip slab is the interpolation axis
+A frequency the geometry cannot number loses to the next-coarsest rank, exactly as a format mismatch already did.
+So an attribute list authored for a mesh is not fatal on a batch, and the other way round.
 
-`per_quadric_end` blends two values along the primitive, and the parameter is free: the clipper for a finite cylinder is a slab, and a slab **is** an axis, an offset and a half-length.
+**A batch is one material.**
+The underlying API takes a range of quadrics that share one, and a caller wanting per-quadric *parameters* gets them by being
+bucketed into several batches — which is what `scene_ref::add_sphere` and `add_line` already do per material.
+Anything finer than one value per primitive is therefore a question about materials rather than about frequencies.
+A gradient along a tube, for instance, is a material that takes two parameter sets and interpolates between them; it is
+deliberately not a frequency, and it is not built.
 
-```text
-t = saturate( ( dot(hit, n) - d + h ) / max(2h, eps) )
-```
+### The clipper has a surface of its own
 
-Every term is data the intersection shader has already loaded and used to accept the hit, so there is nothing extra in the record and nothing for a caller to supply.
-A primitive with no meaningful clip has h = 0 and the guarded divide pins it to t = 0, which is the right answer: a sphere has no two ends to blend between.
+The solid is **{surface ≤ 0} ∩ {clip ≤ 0}**, so its boundary has two parts.
+Where `surface == 0` inside the clip region, the surface quadric is drawn.
+Where `clip == 0` inside the surface region, the CLIPPER is — a cylinder's flat end caps, a hemisphere's floor — and one bit on
+the primitive says whether that half is drawn at all.
 
-An edge that fades along its length, or a cone whose colour tracks its taper, is the technical-drawing vocabulary this feature exists to serve, and it costs one lerp.
+A ray therefore meets up to **four** candidate points, two roots of each quadric, and each counts only where it lies inside the
+other's interior.
+The nearest survivor is the hit, and its normal is the gradient of whichever quadric it landed on.
+
+That is what makes an open tube and a capped one **one record with one bit different**, rather than two pieces of geometry.
+
+**The box bounds the solid and never the visible part of it.**
+Toggling the emit bit changes which pixels are drawn and must not change the box by so much as a float: the box is the
+acceleration structure's, and one that tracked visibility would make the same geometry two resources and a dropped hit a
+silent hole.
+A flat cap lies in the plane the clipper already cuts, so it adds nothing to the extent anyway — which is what makes the bit
+free.
+
 
 ### No textures on quadrics, for now
 
@@ -194,14 +214,17 @@ The texture ranks of the frequency chain are unreachable on a quadric set, and r
 ## What the intersection shader reports
 
 ```text
-accept the near root if  t >= RayTMin  and  the clipper admits it
-else accept the far root if  t >= RayTMin  and  the clipper admits it
-else report no hit
+for each of the up to four roots — two of the surface quadric, two of the clipper:
+    skip it unless t is in [RayTMin, RayTMax]
+    skip it unless it lies inside the OTHER quadric
+    keep it if it is nearer than the best so far
+report the best, with the gradient of whichever quadric it landed on
 ```
 
-One `ReportHit`, no sorting, and one extra compare over reporting the near root unconditionally.
+The clipper's two roots are only considered when the emit bit is set, so an open tube solves one quadratic and a capped one two.
+Still one `ReportHit` and no sorting.
 
-**The far-root fallback is load-bearing for ordinary geometry**, not only for interior views.
+**Taking the nearest survivor rather than the first root is load-bearing for ordinary geometry**, not only for interior views.
 A slab-clipped cylinder is an open tube with nothing closing its ends.
 Seen near end-on — which is what every edge pointing at the camera does — the near root lies on the cylinder outside the slab, and the clipper rejects it.
 The far root is the inside of the opposite wall, and is genuinely visible.

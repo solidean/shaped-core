@@ -82,13 +82,21 @@ void scene_ref::add_sphere(tg::sphere3f const& sphere, material_id material)
     _frame->_immediate_batch_for(_view, _layer, material).add(sphere);
 }
 
-void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material, bool flat_caps)
+void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material, line_ends ends)
 {
     auto& set = _frame->_immediate_batch_for(_view, _layer, material);
-    if (flat_caps)
-        set.add(segment, radius);
-    else
+    switch (ends)
+    {
+    case line_ends::round:
         set.add_capsule(segment, radius);
+        break;
+    case line_ends::flat:
+        set.add(segment, radius, true);
+        break;
+    case line_ends::open:
+        set.add(segment, radius);
+        break;
+    }
 }
 
 light_ref scene_ref::add_light(area_light const& light)

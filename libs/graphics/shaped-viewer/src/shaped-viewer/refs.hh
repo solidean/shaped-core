@@ -41,6 +41,14 @@ private:
     u32 _item = 0;
 };
 
+/// How `scene_ref::add_line` closes a drawn segment.
+enum class sv::line_ends : sv::u8
+{
+    round, ///< a hemisphere at each end — three primitives, and what a standalone polyline wants
+    flat,  ///< the clipper's own two planes, drawn — one primitive, a closed solid
+    open,  ///< nothing; the tube is open at both ends — one primitive, and what a wireframe wants
+};
+
 /// One quadric batch placed in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_quadrics`.
 class sv::quadric_ref
 {
@@ -117,12 +125,12 @@ public:
 
     /// The same for a segment thickened by `radius`, drawn as a capsule — round ends, so a polyline joins smoothly.
     ///
-    /// `flat_caps` draws the open cylinder alone instead, which is what a mesh's edges want: their joints already carry
-    /// vertex spheres, so the caps would be three primitives of geometry nothing can see.
+    /// `ends` picks what closes it instead: `round` is the capsule (three primitives), `flat` a capped cylinder (one), and
+    /// `open` an uncapped tube (one), which is what a mesh's edges want since their joints already carry vertex spheres.
     void add_line(tg::segment3f const& segment,
                   float radius,
                   material_id material = material_id::invalid,
-                  bool flat_caps = false);
+                  line_ends ends = line_ends::round);
 
     /// Adds an area light.
     /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.

@@ -412,15 +412,16 @@ sv::quadric3::cylinder_about_origin(axis, r)   // -> the infinite cylinder about
 sv::quadric3::slab(axis, offset, half_height)  // -> (p.axis - offset)^2 - h^2; the clipper that makes a cylinder finite
 q.evaluate(p);  q.gradient(p);   // p is the DISPLACEMENT from the primitive's origin, not a world position
 
-sv::quadric_primitive            // { pos3f origin; quadric3 surface; quadric3 clip; aabb3f bounds; } — 92 bytes on the GPU, plus the box
-sv::quadric_primitive::create_sphere(tg::sphere3f)               // unclipped
-sv::quadric_primitive::create_cylinder(tg::segment3f, radius)    // an OPEN tube: the ends are where the clipper cuts
-p.admits(world_p);  p.normal_at(world_p);  p.end_parameter(world_p)  // 0 at the segment's first end, 1 at its second
+sv::quadric_primitive            // { pos3f origin; quadric3 surface; quadric3 clip; u32 flags; aabb3f bounds; } — 96 bytes on the GPU
+sv::quadric_primitive::flag_emit_clip_surface  // draw the CLIPPER's surface too — a cylinder's caps, a hemisphere's floor
+sv::quadric_primitive::create_sphere(tg::sphere3f)                       // unclipped
+sv::quadric_primitive::create_cylinder(tg::segment3f, radius, capped=false)  // false is an OPEN tube; the box is the same either way
+p.admits(world_p);  p.normal_at(world_p);  p.emits_clip_surface()
 sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
 sv::append_capsule(out, segment, radius)       // three primitives: the cylinder plus a sphere at each end
 
 sv::quadric_set                  // the batch a caller builds and holds — the quadric counterpart of sv::mesh
-set.add(tg::sphere3f);  set.add(tg::segment3f, radius);  set.add_capsule(segment, radius);  set.add(primitive)
+set.add(tg::sphere3f);  set.add(tg::segment3f, radius, capped=false);  set.add_capsule(segment, radius);  set.add(primitive)
 set.clear();  set.reserve(n)
 set.primitives();  set.primitive_count();  set.hash();  set.bounds();  set.is_ready()
 set.name;  set.attributes;  set.transform;  set.material    // one material per batch; per-primitive variation is an attribute
@@ -438,7 +439,8 @@ f.add_scene().add_quadrics(set);                    // -> sv::quadric_ref; uploa
 
 auto s = f.add_scene();                             // or, for a handful:
 s.add_sphere(tg::sphere3f(p, 0.02f), steel);        //   into a frame-owned batch per (view, layer, material),
-s.add_line(tg::segment3f(a, b), 0.008f, steel);     //   flushed once before the frame is flattened
+s.add_line(tg::segment3f(a, b), 0.008f, steel,      //   flushed once before the frame is flattened
+           sv::line_ends::open);                    //   round (capsule, 3 prims) | flat (capped, 1) | open (1)
 ```
 
 **`add` is the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
@@ -451,11 +453,22 @@ A non-uniform placement turns its spheres into ellipsoids at no cost, because a 
 **A capsule is not a quadric** — its surface is piecewise — so a round-capped edge is three primitives.
 Where the joints already carry vertex spheres, `add(segment, radius)` is the flat form and is exact there rather than an approximation.
 
-Quadrics carry their own geometric frequencies.
-**`per_quadric`** is one value per primitive, indexed by `PrimitiveIndex()` exactly as `per_triangle` is; **`per_quadric_end`** is two values, blended along the primitive's own axis.
-That axis costs no bytes — it comes back out of the clipping slab, which is offset rather than centred precisely so it carries the axis WITH its sign.
+**There is ONE frequency set and a geometry admits the subset its own primitives number**, which is what lets one material definition generate one shader body for both.
+A batch numbers its primitives and nothing else, so it admits `per_instance` and `per_triangle`.
+The latter means "one value per element of the primitive stream, indexed by `PrimitiveIndex()`" — a triangle for a mesh, a quadric for a batch.
+The two geometries differ in the PREAMBLE that builds the shading context, and in nothing the material fragment reads.
 A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
 The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parametrization.
+
+**A batch is one material.**
+The underlying API takes a range of quadrics sharing one; per-quadric *parameters* are had by being bucketed into several batches, which the immediate calls already do.
+Anything finer than one value per primitive is a question about materials rather than frequencies.
+A gradient along a tube would be a material taking two parameter sets; it is deliberately not built.
+
+**The clipper has a surface of its own.**
+The solid is {surface <= 0} AND {clip <= 0}, so a ray meets up to FOUR candidates — two roots of each quadric — and each counts only where it lies inside the other's interior.
+That is where a cylinder's end caps and a hemisphere's floor come from, and it makes an open tube and a capped one one record with one bit different.
+**The box bounds the solid and never the visible part of it**: toggling that bit must not move it, or the same geometry becomes two resources and a dropped hit a silent hole.
 
 See [docs/quadrics.md](docs/quadrics.md) for the design.
 `examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.

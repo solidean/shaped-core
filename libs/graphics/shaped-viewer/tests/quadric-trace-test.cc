@@ -251,11 +251,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     co_return;
 }
 
-ASYNC_INVOCABLE_TEST("sv - a quadric material blending along its ends compiles", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute compiles",
+                     (sg::context_handle const& ctx_h))
 {
-    // The generator and the quadric runtime have to agree on the helper's NAME and signature, and nothing CPU-side can check
-    // that: quadric-material-test asserts the emitted text, and only a real compile says the text means anything.
-    // `per_quadric_end` is the case worth compiling, because it is the one frequency with no triangle counterpart.
+    // The generated body for a quadric is the same text a mesh would get — that is the point of one shared frequency set —
+    // so what a real compile checks is that the quadric PREAMBLE supplies everything that body reads.
+    // quadric-material-test asserts the emitted text; only a compile says the text means anything.
     auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
@@ -267,12 +268,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material blending along its ends compiles",
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("colour", tg::vec3f(0.5f, 0.5f, 0.5f)));
     auto const type
-        = sv::material_type::create("sv_test_edge_fade", cc::move(signature), "    surface.base_color = colour;");
+        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "    surface.base_color = colour;");
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    // Two values per primitive: what an edge that fades along its length is authored as.
-    auto const colours = cc::array<tg::vec3f>::create_filled(4, tg::vec3f(1, 0, 0));
-    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_quadric_end, colours);
+    // One value per primitive, which is the finest a quadric batch can serve.
+    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
 
     auto set = sv::resident_quadric_set{.name = "edges", .geometry = sv::quadric_set_id(0), .primitive_count = 2};
     set.attributes.push_back(sv::mesh_attribute_binding::of(attribute, sv::attribute_id(0)));
@@ -280,7 +281,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material blending along its ends compiles",
     auto const resolved = sv::resolve_material(type, material, set);
     REQUIRE(resolved.attributes.size() == 1);
     REQUIRE(resolved.attributes[0].attribute != nullptr);
-    CHECK(resolved.attributes[0].attribute->frequency == sv::attribute_frequency::per_quadric_end);
+    CHECK(resolved.attributes[0].attribute->frequency == sv::attribute_frequency::per_triangle);
 
     auto const& permutation = resources.shaders.acquire_quadric(resolved);
 
@@ -322,10 +323,10 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     set.add(tg::sphere3f(tg::pos3f(0, 0, 0), 0.2f));
     set.add(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.05f);
 
-    // Two values per primitive, which is what makes this a per_quadric_end material rather than a flat one.
+    // Two values per primitive, which is what makes this a per_triangle material rather than a flat one.
     auto const colours
         = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1), tg::vec3f(0, 1, 0), tg::vec3f(1, 1, 0)};
-    set.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_quadric_end, colours));
+    set.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colours));
 
     auto const item = resources.acquire_scene_item(set);
 

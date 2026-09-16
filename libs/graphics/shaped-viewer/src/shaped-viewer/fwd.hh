@@ -230,7 +230,8 @@ class capture_session;
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs
 class mesh_ref;
-class quadric_ref; // one quadric batch placed in a scene (refs.hh)
+class quadric_ref;         // one quadric batch placed in a scene (refs.hh)
+enum class line_ends : u8; // how scene_ref::add_line closes a drawn segment
 class light_ref;
 class scene_ref;
 class leaf_ref;

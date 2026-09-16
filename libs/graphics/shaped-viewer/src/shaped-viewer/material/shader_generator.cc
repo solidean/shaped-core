@@ -122,12 +122,11 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     return cc::format("{}({})", hlsl_type_of(format), args);
 }
 
-/// How a frequency is read: one element, three blended across a triangle, or two blended along a quadric.
+/// How a frequency is read: one element, or three blended across a triangle.
 enum class load_shape
 {
     flat,        ///< one element, indexed directly
     barycentric, ///< three corners weighted by `ctx.barycentrics`
-    ends,        ///< two elements weighted by `ctx.end_blend`
 };
 
 [[nodiscard]] load_shape shape_of(attribute_frequency f)
@@ -137,19 +136,16 @@ enum class load_shape
     case attribute_frequency::per_vertex:
     case attribute_frequency::per_corner:
         return load_shape::barycentric;
-    case attribute_frequency::per_quadric_end:
-        return load_shape::ends;
     default:
-        // `per_triangle` and `per_quadric` are both one element for the whole primitive.
+        // `per_triangle` is one element for the whole primitive, whichever geometry numbered it.
         return load_shape::flat;
     }
 }
 
 /// The expression naming the element index (or indices) a frequency reads.
 ///
-/// `per_quadric` reads exactly what `per_triangle` does — one element at `PrimitiveIndex()` — because that is what both
-/// frequencies mean; they differ in which geometry numbers the primitive, not in how the load is spelled.
-/// `per_quadric_end` names the primitive too, and the helper it is passed to derives its two elements from it.
+/// `per_triangle` is `ctx.primitive` whichever geometry numbered it, which is what makes one generated body serve a mesh and a
+/// quadric batch alike.
 [[nodiscard]] cc::string element_expression(attribute_frequency f)
 {
     switch (f)
@@ -159,12 +155,9 @@ enum class load_shape
     case attribute_frequency::per_corner:
         return "sv::corner_elements(ctx)";
     case attribute_frequency::per_triangle:
-    case attribute_frequency::per_quadric:
-    case attribute_frequency::per_quadric_end:
         return "ctx.primitive";
     default:
-        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner, per_triangle, per_quadric or "
-                       "per_quadric_end");
+        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner or per_triangle");
     }
 }
 
@@ -464,12 +457,6 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                 case load_shape::barycentric:
                     // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
                     cc::format_append(src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n",
-                                      a.name, blend, buffer, element_expression(a.attribute->frequency));
-                    break;
-
-                case load_shape::ends:
-                    // Two elements per primitive, weighted by where along its own axis the hit landed.
-                    cc::format_append(src, "            {} = sv::interpolate_ends_{}({}, desc, {}, ctx.end_blend);\n",
                                       a.name, blend, buffer, element_expression(a.attribute->frequency));
                     break;
 
