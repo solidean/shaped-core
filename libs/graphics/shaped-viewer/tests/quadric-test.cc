@@ -1,6 +1,7 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/scene/quadric.hh>
+#include <shaped-viewer/scene/quadric_set.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot, tg::normalize
 
 using namespace cc::primitive_defines;
@@ -30,6 +31,11 @@ bool near(float a, float b, float tol = eps)
 }
 
 bool near(tg::vec3f const& a, tg::vec3f const& b, float tol = eps)
+{
+    return near(a[0], b[0], tol) && near(a[1], b[1], tol) && near(a[2], b[2], tol);
+}
+
+bool near(tg::pos3f const& a, tg::pos3f const& b, float tol = eps)
 {
     return near(a[0], b[0], tol) && near(a[1], b[1], tol) && near(a[2], b[2], tol);
 }
@@ -344,4 +350,138 @@ TEST("sv::intersect handles a hyperboloid of one sheet")
 
     // Outside the slab there is nothing, though the surface itself continues.
     CHECK(!sv::intersect(p, ray_from(tg::pos3f(-9, 3, 0), tg::vec3f(1, 0, 0))).has_value());
+}
+
+TEST("sv::quadric_primitive::create_cone builds the frustum's limiting case")
+{
+    // The same shape the frustum test builds by hand, but tipped: the factory takes a base circle and an apex, which is the
+    // pair every caller actually has.
+    auto const p = sv::quadric_primitive::create_cone(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 4, 0)), 2.0f);
+
+    // Broadside at y = 1, where three quarters of the height is left and the radius is therefore 1.5.
+    auto const side = sv::intersect(p, ray_from(tg::pos3f(-5, 1, 0), tg::vec3f(1, 0, 0)));
+    REQUIRE(side.has_value());
+    CHECK(near(side.value().t, 3.5f));
+
+    // The base disc is the clipper's own surface, and it faces away from the apex.
+    auto const disc = sv::intersect(p, ray_from(tg::pos3f(0.5f, -3, 0), tg::vec3f(0, 1, 0)));
+    REQUIRE(disc.has_value());
+    CHECK(near(disc.value().t, 3.0f));
+    CHECK(near(disc.value().normal, tg::vec3f(0, -1, 0)));
+
+    // The OTHER nappe is what a cone quadric cannot tell apart from this one, and the slab is what discards it: below the
+    // base the double cone continues, and nothing there is hit.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(-5, -1, 0), tg::vec3f(1, 0, 0))).has_value());
+
+    // Past the apex, likewise.
+    CHECK(!sv::intersect(p, ray_from(tg::pos3f(-5, 5, 0), tg::vec3f(1, 0, 0))).has_value());
+
+    // The box is the solid's: the base disc's extent, and the apex.
+    CHECK(near(p.bounds.min, tg::pos3f(-2, 0, -2)));
+    CHECK(near(p.bounds.max, tg::pos3f(2, 4, 2)));
+}
+
+TEST("sv::quadric_primitive::create_cone is axis-agnostic")
+{
+    // The general-axis form is the whole reason for `cone_about_origin`: every cone before this one was built about +y by
+    // hand, and an arrow points wherever it is asked to.
+    auto const apex = tg::pos3f(3, -1, 2);
+    auto const base = tg::pos3f(1, 1, 1);
+    auto const p = sv::quadric_primitive::create_cone(tg::segment3f(base, apex), 0.5f);
+
+    // The apex is ON the surface, and so is the rim: a point at the base, one radius off the axis.
+    CHECK(near(p.surface.evaluate(apex - p.origin), 0.0f));
+
+    auto const axis = tg::normalize(apex - base);
+    auto const any = tg::vec3f(0, 0, 1);
+    auto const off = tg::normalize(any - axis * tg::dot(any, axis));
+    auto const rim = base + off * 0.5f;
+    CHECK(near(p.surface.evaluate(rim - p.origin), 0.0f, 1e-3f));
+
+    // The clipper admits the interior; both of its planes pass through points tested above, so this asks halfway up the axis
+    // rather than on a boundary float32 will not land on exactly.
+    CHECK(p.admits(base + (apex - base) * 0.5f));
+
+    // The base's centre is inside the cone and admitted; a point a radius past the rim is neither.
+    CHECK(p.surface.evaluate(base - p.origin) < 0.0f);
+    CHECK(p.surface.evaluate(base + off * 1.0f - p.origin) > 0.0f);
+
+    // And the mirrored nappe, the same distance the other side of the apex, is on the surface but clipped away.
+    auto const mirrored = apex + (apex - rim);
+    CHECK(near(p.surface.evaluate(mirrored - p.origin), 0.0f, 1e-3f));
+    CHECK(!p.admits(mirrored));
+}
+
+TEST("sv::arrow_primitives puts the tip on pos1")
+{
+    // The property that makes an arrow measure something: it spans exactly the segment it is given, head included.
+    auto const tip = tg::pos3f(0, 3, 0);
+    auto const prims = sv::arrow_primitives(tg::segment3f(tg::pos3f(0, 0, 0), tip));
+    REQUIRE(prims.size() == 2);
+
+    auto const& shaft = prims[0];
+    auto const& head = prims[1];
+
+    // `create_cone` origins the primitive at the apex, so this is the tip itself rather than a point near it.
+    CHECK(near(head.origin, tip));
+
+    // A length of 3 gives a shaft radius of 0.06 and a head 0.45 long, so the shaft runs from 0 to 2.55.
+    auto const style = sv::arrow_style::for_length(3.0f);
+    CHECK(near(style.shaft_radius, 0.06f));
+    CHECK(near(style.head_length, 0.45f));
+    CHECK(near(shaft.origin, tg::pos3f(0, (3.0f - 0.45f) * 0.5f, 0)));
+
+    // The two boxes together span the segment and nothing beyond it.
+    CHECK(near(shaft.bounds.min[1], 0.0f));
+    CHECK(near(head.bounds.max[1], 3.0f));
+
+    // The head is the wider of the two, which is what hides the shaft's far cap.
+    CHECK(style.head_radius > style.shaft_radius);
+}
+
+TEST("sv::arrow_primitives clamps a head longer than the arrow")
+{
+    // A short arrow with a fixed shaft radius is the case this exists for: a vector field's shortest vectors would otherwise
+    // get an inside-out shaft, which is a hit at a negative extent rather than a missing one.
+    auto const s = tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0.1f, 0, 0));
+    auto const prims = sv::arrow_primitives(s, sv::arrow_style::for_shaft_radius(0.05f)); // a head 0.375 long
+
+    REQUIRE(prims.size() == 1);
+    CHECK(near(prims[0].origin, s.pos1));
+    CHECK(near(prims[0].bounds.min[0], 0.0f)); // the head alone, still spanning the segment
+
+    // A segment with no length has no direction for a head to point, so there is no arrow rather than a degenerate one.
+    CHECK(sv::arrow_primitives(tg::segment3f(s.pos0, s.pos0)).empty());
+}
+
+TEST("sv::arrow_style scales the head with the shaft")
+{
+    // What the overloads mean: the no-style form is the proportional one, and the float form fixes the thickness so that
+    // length is the only thing an arrow's size encodes.
+    CHECK(sv::arrow_style::for_length(1.0f) == sv::arrow_style());
+    CHECK(sv::arrow_style::for_length(2.0f) == sv::arrow_style::for_shaft_radius(0.04f));
+
+    auto const a = sv::arrow_style::for_shaft_radius(0.01f);
+    auto const b = sv::arrow_style::for_shaft_radius(0.02f);
+
+    // The tip's half-angle is what stays fixed across the two, which is what makes them read as the same arrow at two sizes.
+    CHECK(near(a.head_radius / a.head_length, b.head_radius / b.head_length));
+    CHECK(near(a.head_radius / a.head_length, 1.0f / 3.0f));
+}
+
+TEST("sv::quadric_set::add_arrow appends both primitives")
+{
+    auto set = sv::quadric_set();
+    set.add_arrow(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)));
+    CHECK(set.primitive_count() == 2);
+
+    // The bounds fold over both, so the batch spans the arrow.
+    REQUIRE(set.bounds().has_value());
+    CHECK(near(set.bounds().value().min[0], 0.0f));
+    CHECK(near(set.bounds().value().max[0], 1.0f));
+
+    // The three overloads are the same geometry where they agree, which is what keeps the sugar honest.
+    auto explicit_style = sv::quadric_set();
+    explicit_style.add_arrow(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), sv::arrow_style::for_length(1.0f));
+    CHECK(explicit_style.hash() == set.hash());
 }

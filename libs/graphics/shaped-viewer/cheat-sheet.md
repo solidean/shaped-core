@@ -409,6 +409,7 @@ The seeds behind every content key live in `impl/content_hash.hh`, so a geometry
 sv::quadric3                     // a quadric surface: the 10 entries of the symmetric 4x4 Q, as {diag, off_diag, linear, constant}
 sv::quadric3::sphere_about_origin(r)           // -> |p|^2 - r^2
 sv::quadric3::cylinder_about_origin(axis, r)   // -> the infinite cylinder about the origin along unit `axis`
+sv::quadric3::cone_about_origin(axis, slope)   // -> the DOUBLE cone apexed at the origin; a slab is what keeps one nappe
 sv::quadric3::slab(axis, offset, half_height)  // -> (p.axis - offset)^2 - h^2; the clipper that makes a cylinder finite
 q.evaluate(p);  q.gradient(p);   // p is the DISPLACEMENT from the primitive's origin, not a world position
 
@@ -416,12 +417,20 @@ sv::quadric_primitive            // { pos3f origin; quadric3 surface; quadric3 c
 sv::quadric_primitive::flag_emit_clip_surface  // draw the CLIPPER's surface too — a cylinder's caps, a hemisphere's floor
 sv::quadric_primitive::create_sphere(tg::sphere3f)                       // unclipped
 sv::quadric_primitive::create_cylinder(tg::segment3f, radius, capped=false)  // false is an OPEN tube; the box is the same either way
+sv::quadric_primitive::create_cone(base_to_apex, base_radius, capped=true)   // base disc at pos0, tip at pos1; `capped` draws the disc
 p.admits(world_p);  p.normal_at(world_p);  p.emits_clip_surface()
 sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
 sv::append_capsule(out, segment, radius)       // three primitives: the cylinder plus a sphere at each end
+sv::arrow_primitives(segment[, style|shaft_radius])  // -> fixed_vector<quadric_primitive, 2>: the shaft, then the head
+
+sv::arrow_style                  // { float shaft_radius, head_radius, head_length; } — ABSOLUTE, defaults = for_length(1)
+sv::arrow_style::for_shaft_radius(r)   // head 2.5x that radius and 3x its own, so the tip angle is fixed at atan(1/3)
+sv::arrow_style::for_length(len)       // = for_shaft_radius(0.02 * len)
 
 sv::quadric_set                  // the batch a caller builds and holds — the quadric counterpart of sv::mesh
 set.add(tg::sphere3f);  set.add(tg::segment3f, radius, capped=false);  set.add_capsule(segment, radius);  set.add(primitive)
+set.add_cone(base_to_apex, base_radius, capped=true)
+set.add_arrow(segment);  set.add_arrow(segment, shaft_radius);  set.add_arrow(segment, style)   // 2 primitives: shaft, head
 set.clear();  set.reserve(n)
 set.primitives();  set.primitive_count();  set.hash();  set.bounds();  set.is_ready()
 set.name;  set.attributes;  set.transform;  set.material    // one material per batch; per-primitive variation is an attribute
@@ -441,6 +450,8 @@ auto s = f.add_scene();                             // or, for a handful:
 s.add_sphere(tg::sphere3f(p, 0.02f), steel);        //   into a frame-owned batch per (view, layer, material),
 s.add_line(tg::segment3f(a, b), 0.008f, steel,      //   flushed once before the frame is flattened
            sv::line_ends::open);                    //   round (capsule, 3 prims) | flat (capped, 1) | open (1)
+s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
+s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
 ```
 
 **`add` is the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
@@ -449,6 +460,10 @@ The bounds fold alongside it and stay OUT of the identity, as do the name, the m
 
 **The primitives live in the SET's space**, and `transform` places that space in the world.
 A non-uniform placement turns its spheres into ellipsoids at no cost, because a general quadric is closed under an affine map where a typed sphere would not be.
+
+**An arrow spans EXACTLY the segment it is given**, head included — the head comes out of that length rather than past its end, so an arrow between two points measures the distance between them.
+A head at least as long as the arrow is clamped to it and the shaft is dropped, which is what keeps a vector field's shortest arrows from turning inside out.
+The overload is the whole difference between the two readings: `add_arrow(s)` is proportional, and `add_arrow(s, r)` fixes the thickness so that length is the only thing an arrow's size encodes.
 
 **A capsule is not a quadric** — its surface is piecewise — so a round-capped edge is three primitives.
 Where the joints already carry vertex spheres, `add(segment, radius)` is the flat form and is exact there rather than an approximation.

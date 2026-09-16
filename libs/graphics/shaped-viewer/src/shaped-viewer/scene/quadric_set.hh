@@ -111,6 +111,30 @@ struct sv::quadric_set
         add(quadric_primitive::create_cylinder(s, radius, capped));
     }
 
+    /// Appends the cone whose base disc is the circle of radius `base_radius` about `base_to_apex.pos0`, tipped at `pos1`.
+    /// `capped` draws that base disc; without it the cone is open and shows its own interior.
+    void add_cone(tg::segment3f const& base_to_apex, float base_radius, bool capped = true)
+    {
+        add(quadric_primitive::create_cone(base_to_apex, base_radius, capped));
+    }
+
+    /// Appends an arrow from `s.pos0` to `s.pos1` — a capped cylinder for the shaft plus a cone for the head, so two
+    /// primitives.
+    ///
+    /// The tip is exactly `s.pos1`: the head is taken out of the segment rather than added past its end.
+    /// This overload takes every length from the arrow's own, which is what makes one arrow a one-liner; the other two fix
+    /// the shaft radius instead, which is what a field of arrows that must look alike wants.
+    void add_arrow(tg::segment3f const& s) { add_arrow(s, arrow_style::for_length((s.pos1 - s.pos0).length())); }
+
+    /// The same with the head scaled to `shaft_radius` — `arrow_style::for_shaft_radius`.
+    void add_arrow(tg::segment3f const& s, float shaft_radius)
+    {
+        add_arrow(s, arrow_style::for_shaft_radius(shaft_radius));
+    }
+
+    /// The same with all three lengths given.
+    void add_arrow(tg::segment3f const& s, arrow_style const& style);
+
     /// Appends a round-capped segment — the cylinder plus a sphere at each end, so three primitives rather than one.
     /// A capsule's surface is not degree 2, which is why it cannot be one.
     void add_capsule(tg::segment3f const& s, float radius);

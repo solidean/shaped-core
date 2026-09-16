@@ -1,6 +1,7 @@
 #include "quadric.hh"
 
 #include <clean-core/common/utility.hh> // cc::min, cc::max
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot, tg::normalize
 #include <typed-geometry/scalar/scalar.hh>
@@ -25,6 +26,17 @@ tg::aabb3f box_around(tg::pos3f const& a, tg::pos3f const& b, tg::vec3f const& e
         = tg::pos3f(cc::min(a[0], b[0]) - extent[0], cc::min(a[1], b[1]) - extent[1], cc::min(a[2], b[2]) - extent[2]);
     auto const hi
         = tg::pos3f(cc::max(a[0], b[0]) + extent[0], cc::max(a[1], b[1]) + extent[1], cc::max(a[2], b[2]) + extent[2]);
+    return tg::aabb3f(lo, hi);
+}
+
+/// The box of the cone's SOLID — the convex hull of the apex and the base disc — given the disc's per-axis half-extent.
+/// Exact rather than conservative: every extremum of that hull is either the apex or a point of the disc's silhouette.
+tg::aabb3f cone_box(tg::pos3f const& apex, tg::pos3f const& base, tg::vec3f const& extent)
+{
+    auto const lo = tg::pos3f(cc::min(apex[0], base[0] - extent[0]), cc::min(apex[1], base[1] - extent[1]),
+                              cc::min(apex[2], base[2] - extent[2]));
+    auto const hi = tg::pos3f(cc::max(apex[0], base[0] + extent[0]), cc::max(apex[1], base[1] + extent[1]),
+                              cc::max(apex[2], base[2] + extent[2]));
     return tg::aabb3f(lo, hi);
 }
 } // namespace
@@ -58,6 +70,26 @@ sv::quadric_primitive sv::quadric_primitive::create_cylinder(tg::segment3f const
             .clip = quadric3::slab_about_origin(axis, len * 0.5f),
             .flags = capped ? flag_emit_clip_surface : 0u,
             .bounds = box_around(s.pos0, s.pos1, cylinder_extent(axis, radius))};
+}
+
+sv::quadric_primitive sv::quadric_primitive::create_cone(tg::segment3f const& base_to_apex, float base_radius, bool capped)
+{
+    auto const along = base_to_apex.pos0 - base_to_apex.pos1;
+    auto const height = along.length();
+
+    // No axis to build a cone about, so the honest answer is the sphere the degenerate segment describes.
+    if (height <= 0.0f)
+        return create_sphere(tg::sphere3f(base_to_apex.pos0, base_radius));
+
+    // From the apex towards the base, so the slab that keeps [0, height] along it keeps the nappe the base is on and
+    // discards the one opening the other way.
+    auto const axis = along / height;
+
+    return {.origin = base_to_apex.pos1,
+            .surface = quadric3::cone_about_origin(axis, base_radius / height),
+            .clip = quadric3::slab(axis, height * 0.5f, height * 0.5f),
+            .flags = capped ? flag_emit_clip_surface : 0u,
+            .bounds = cone_box(base_to_apex.pos1, base_to_apex.pos0, cylinder_extent(axis, base_radius))};
 }
 
 tg::vec3f sv::quadric_primitive::normal_at(tg::pos3f const& p) const
@@ -156,6 +188,42 @@ cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, 
     }
 
     return best;
+}
+
+cc::fixed_vector<sv::quadric_primitive, 2> sv::arrow_primitives(tg::segment3f const& s, arrow_style const& style)
+{
+    auto out = cc::fixed_vector<quadric_primitive, 2>();
+
+    auto const along = s.pos1 - s.pos0;
+    auto const len = along.length();
+
+    // Nothing points anywhere, so there is no arrow to draw rather than a headless stub to draw instead.
+    if (len <= 0.0f)
+        return out;
+
+    auto const axis = along / len;
+    auto const head_length = cc::min(style.head_length, len);
+    auto const head_base = s.pos1 - axis * head_length;
+
+    // The shaft is capped because its far end is only hidden while the head is the wider of the two, which a caller setting
+    // the three lengths itself is free to break — an open tube would then show its interior down the whole arrow.
+    if (head_length < len)
+        out.push_back(quadric_primitive::create_cylinder(tg::segment3f(s.pos0, head_base), style.shaft_radius, true));
+
+    if (head_length > 0.0f)
+        out.push_back(quadric_primitive::create_cone(tg::segment3f(head_base, s.pos1), style.head_radius));
+
+    return out;
+}
+
+cc::fixed_vector<sv::quadric_primitive, 2> sv::arrow_primitives(tg::segment3f const& s, float shaft_radius)
+{
+    return arrow_primitives(s, arrow_style::for_shaft_radius(shaft_radius));
+}
+
+cc::fixed_vector<sv::quadric_primitive, 2> sv::arrow_primitives(tg::segment3f const& s)
+{
+    return arrow_primitives(s, arrow_style::for_length((s.pos1 - s.pos0).length()));
 }
 
 void sv::append_capsule(cc::vector<quadric_primitive>& out, tg::segment3f const& s, float radius)

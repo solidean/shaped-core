@@ -99,6 +99,21 @@ void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id
     }
 }
 
+void scene_ref::add_arrow(tg::segment3f const& segment, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment);
+}
+
+void scene_ref::add_arrow(tg::segment3f const& segment, float shaft_radius, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, shaft_radius);
+}
+
+void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
+}
+
 light_ref scene_ref::add_light(area_light const& light)
 {
     auto& lights = target().area_lights;

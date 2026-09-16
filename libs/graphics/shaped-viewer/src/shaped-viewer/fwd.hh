@@ -64,6 +64,7 @@ struct triangle_geometry;
 struct quadric3;             // a quadric surface, as the 10 entries of the symmetric 4x4 Q (scene/quadric.hh)
 struct quadric_primitive;    // one drawn quadric: a surface, a clipper, and the box both are expressed about
 struct quadric_hit;          // what a ray hit on one is: how far along, and the normal there
+struct arrow_style;          // the three lengths an arrow is drawn from (scene/quadric.hh)
 struct quadric_set;          // a batch of quadrics drawn as one thing (scene/quadric_set.hh)
 struct resident_quadric_set; // that batch as resources
 enum class scalar_type : u8;

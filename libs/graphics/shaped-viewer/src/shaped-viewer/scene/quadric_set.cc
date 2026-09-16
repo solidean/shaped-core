@@ -26,6 +26,12 @@ void sv::quadric_set::add(quadric_primitive const& p)
     _primitives.push_back(p);
 }
 
+void sv::quadric_set::add_arrow(tg::segment3f const& s, arrow_style const& style)
+{
+    for (auto const& p : arrow_primitives(s, style))
+        add(p);
+}
+
 void sv::quadric_set::add_capsule(tg::segment3f const& s, float radius)
 {
     add(quadric_primitive::create_cylinder(s, radius));

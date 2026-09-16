@@ -282,8 +282,8 @@ Each step is meant to be landable and testable on its own.
    The clip slab is offset rather than centred so it carries the axis WITH its sign, which is what makes the blend parameter
    free — see `sv::quadric_primitive::end_parameter`.
 6. **The authoring surface** — landed.
-   `scene_ref::add_quadrics` over either form, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` sugar over a
-   frame-owned batch per (view, layer, material).
+   `scene_ref::add_quadrics` over either form, `sv::quadric_ref`, and the immediate `add_sphere` / `add_line` / `add_arrow`
+   sugar over a frame-owned batch per (view, layer, material).
    The sugar's batch is flushed once, before the frame is flattened, because a batch is ONE scene item and is not placeable
    until it is complete.
    `scene_item` gained a `quadric_set` arm and `view_renderer` builds its TLAS instance; a batch still streaming is drawn as

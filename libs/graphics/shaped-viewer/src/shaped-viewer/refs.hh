@@ -132,6 +132,20 @@ public:
                   material_id material = material_id::invalid,
                   line_ends ends = line_ends::round);
 
+    /// Adds an arrow from `segment.pos0` to `segment.pos1`, drawn with `material` — a shaft and a head, so two primitives.
+    ///
+    /// The tip is exactly `segment.pos1`: the head is taken out of the segment rather than added past its end, so an arrow
+    /// between two points measures the distance between them.
+    /// This overload takes every length from the arrow's own, at 2% of it for the shaft radius.
+    void add_arrow(tg::segment3f const& segment, material_id material = material_id::invalid);
+
+    /// The same with the shaft radius given and the head scaled to it — what a field of arrows that must look alike wants,
+    /// since then only their LENGTH differs.
+    void add_arrow(tg::segment3f const& segment, float shaft_radius, material_id material = material_id::invalid);
+
+    /// The same with all three lengths given — see `sv::arrow_style`.
+    void add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material = material_id::invalid);
+
     /// Adds an area light.
     /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.
     light_ref add_light(area_light const& light);

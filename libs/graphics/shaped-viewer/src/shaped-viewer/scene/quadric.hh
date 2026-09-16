@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
@@ -69,6 +70,22 @@ struct sv::quadric3
         return {.diag = tg::vec3f(1.0f - axis[0] * axis[0], 1.0f - axis[1] * axis[1], 1.0f - axis[2] * axis[2]),
                 .off_diag = tg::vec3f(-axis[0] * axis[1], -axis[0] * axis[2], -axis[1] * axis[2]),
                 .constant = -radius * radius};
+    }
+
+    /// The double cone about the line through the origin along unit `axis`, gaining `slope` of radius per unit of height:
+    /// |p|² - (1 + slope²)(p·axis)², whose A is I - (1 + slope²) axis axisᵀ.
+    ///
+    /// **Both nappes**, because a quadric cannot tell them apart: the equation is even in p·axis, so the cone opening the other
+    /// way satisfies it too, and a slab clipper on one side of the apex is what keeps a single one.
+    /// The apex is AT the origin, which is why `create_cone` puts the primitive's origin there.
+    ///
+    /// `axis` must be unit length.
+    [[nodiscard]] static constexpr quadric3 cone_about_origin(tg::vec3f const& axis, float slope)
+    {
+        float const k = 1.0f + slope * slope;
+        return {
+            .diag = tg::vec3f(1.0f - k * axis[0] * axis[0], 1.0f - k * axis[1] * axis[1], 1.0f - k * axis[2] * axis[2]),
+            .off_diag = tg::vec3f(-k * axis[0] * axis[1], -k * axis[0] * axis[2], -k * axis[1] * axis[2])};
     }
 
     /// The slab of half-height `half_height` centred at `offset` along unit `axis`: (p·axis - offset)² - half_height².
@@ -149,6 +166,17 @@ struct sv::quadric_primitive
     /// A degenerate segment — both endpoints equal — yields a sphere instead, since there is no axis to build a cylinder about.
     [[nodiscard]] static quadric_primitive create_cylinder(tg::segment3f const& s, float radius, bool capped = false);
 
+    /// The cone whose base disc is the circle of radius `base_radius` about `base_to_apex.pos0` and whose tip is `pos1`.
+    ///
+    /// A cone clipped to the slab between the apex and the base, so one primitive rather than a surface plus a disc.
+    /// The slab's far plane passes through the apex, where it meets the cone in that single point alone — so `capped` draws the
+    /// base disc and nothing else, and an uncapped cone shows its own hollow interior.
+    ///
+    /// A degenerate segment — both endpoints equal — yields a sphere, since there is no axis to build a cone about.
+    [[nodiscard]] static quadric_primitive create_cone(tg::segment3f const& base_to_apex,
+                                                       float base_radius,
+                                                       bool capped = true);
+
     /// Whether `p`, given in world space, lies in the region the clipper admits.
     [[nodiscard]] bool admits(tg::pos3f const& p) const { return clip.evaluate(p - origin) <= 0.0f; }
 
@@ -187,6 +215,68 @@ namespace sv
                                                   tg::ray3f const& ray,
                                                   float t_min = 0.0f,
                                                   float t_max = 3.4e38f);
+
+} // namespace sv
+
+/// The three lengths an arrow is drawn from, in the set's own units — absolute, never relative to the arrow.
+///
+/// Absolute is what a gizmo or a vector field wants: every arrow the same thickness whatever it measures, so that length is
+/// the only thing its size encodes.
+/// The proportional reading is had from `for_length`, and the overloads of `append_arrow` and `quadric_set::add_arrow` that
+/// take no style are that call.
+///
+/// The defaults are `for_length(1)`, so `arrow_style{}` is the arrow a unit segment wants.
+struct sv::arrow_style
+{
+    /// The shaft radius a proportional arrow gets — 2% of its length, so the shaft reads as a line rather than as a rod.
+    static constexpr float shaft_radius_fraction = 0.02f;
+
+    /// The head's radius as a multiple of the shaft's, and its length as a multiple of its radius.
+    /// Together they fix the tip's half-angle at atan(1/3) ≈ 18°, which is what makes an arrow read as one at any size.
+    static constexpr float head_radius_ratio = 2.5f;
+    static constexpr float head_length_ratio = 3.0f;
+
+    // Spelled through the ratios rather than as 0.02 / 0.05 / 0.15, so that `arrow_style{}` and `for_length(1)` agree to the
+    // BIT — a literal would differ by an ulp and make two arrows that should share a batch hash to different ones.
+    float shaft_radius = shaft_radius_fraction;
+    float head_radius = head_radius_ratio * shaft_radius_fraction;
+    float head_length = head_length_ratio * (head_radius_ratio * shaft_radius_fraction);
+
+    /// The style whose shaft is `shaft_radius`, with the head scaled to it.
+    /// This is what to write for arrows that must all look alike while measuring different lengths.
+    [[nodiscard]] static constexpr arrow_style for_shaft_radius(float shaft_radius)
+    {
+        auto const head_radius = head_radius_ratio * shaft_radius;
+        return {.shaft_radius = shaft_radius, .head_radius = head_radius, .head_length = head_length_ratio * head_radius};
+    }
+
+    /// The style an arrow of length `length` gets when nothing else is said.
+    [[nodiscard]] static constexpr arrow_style for_length(float length)
+    {
+        return for_shaft_radius(shaft_radius_fraction * length);
+    }
+
+    [[nodiscard]] friend constexpr bool operator==(arrow_style const&, arrow_style const&) = default;
+};
+
+namespace sv
+{
+/// The primitives of an arrow from `s.pos0` to `s.pos1`: a capped cylinder for the shaft, and a cone for the head.
+///
+/// **The tip is exactly `s.pos1` and the tail exactly `s.pos0`** — the head is taken OUT of the segment rather than added past
+/// its end, so an arrow drawn between two points measures the distance between them.
+/// A head at least as long as the arrow is clamped to it and the shaft is dropped, which is one primitive rather than an
+/// inside-out cylinder; a segment with no length yields nothing, since there is no direction for a head to point.
+///
+/// Returned rather than appended, because two is the most an arrow is and a caller that wants them in a batch has
+/// `quadric_set::add_arrow` instead.
+[[nodiscard]] cc::fixed_vector<quadric_primitive, 2> arrow_primitives(tg::segment3f const& s, arrow_style const& style);
+
+/// The same with the head scaled to a given shaft radius — `arrow_style::for_shaft_radius`.
+[[nodiscard]] cc::fixed_vector<quadric_primitive, 2> arrow_primitives(tg::segment3f const& s, float shaft_radius);
+
+/// The same with every length proportional to the arrow's own — `arrow_style::for_length`.
+[[nodiscard]] cc::fixed_vector<quadric_primitive, 2> arrow_primitives(tg::segment3f const& s);
 
 /// Appends the primitives of a round-capped segment — the open cylinder, plus a sphere at each end.
 ///

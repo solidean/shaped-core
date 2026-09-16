@@ -86,7 +86,7 @@ sv::quadric_primitive cone_frustum(tg::pos3f const& apex, float slope, float lo,
     auto const widest = slope * reach;
 
     return {.origin = apex,
-            .surface = {.diag = tg::vec3f(1.0f, -slope * slope, 1.0f)},
+            .surface = sv::quadric3::cone_about_origin(tg::vec3f(0, 1, 0), slope),
             .clip = sv::quadric3::slab(tg::vec3f(0, 1, 0), mid, half),
             .flags = sv::quadric_primitive::flag_emit_clip_surface,
             .bounds = tg::aabb3f(apex + tg::vec3f(-widest, lo, -widest), apex + tg::vec3f(widest, hi, widest))};
