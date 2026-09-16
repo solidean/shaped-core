@@ -198,3 +198,29 @@ TEST("sv::quadric_primitive handles a degenerate segment")
     REQUIRE(hit.has_value());
     CHECK(near(hit.value().t, 4.5f));
 }
+
+TEST("sv::quadric_primitive locates a point along its own axis")
+{
+    // What `per_quadric_end` blends by, and the property the offset slab exists for: the parameter runs from the segment's
+    // FIRST endpoint to its second, so the two ends are told apart rather than merely the axis being known.
+    auto const p = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(0, 0, 4)), 0.5f);
+
+    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 0)), 0.0f));
+    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 2)), 0.5f));
+    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 4)), 1.0f));
+
+    // Reversing the segment reverses the parameter, which a centred slab could not have expressed: its clipper is identical
+    // for an axis and its negation, so both ends would have read the same.
+    auto const flipped
+        = sv::quadric_primitive::create_cylinder(tg::segment3f(tg::pos3f(0, 0, 4), tg::pos3f(0, 0, 0)), 0.5f);
+    CHECK(near(flipped.end_parameter(tg::pos3f(0.5f, 0, 4)), 0.0f));
+    CHECK(near(flipped.end_parameter(tg::pos3f(0.5f, 0, 0)), 1.0f));
+
+    // Clamped rather than extrapolated, so a hit a hair outside the slab reads its nearer end.
+    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, -1)), 0.0f));
+    CHECK(near(p.end_parameter(tg::pos3f(0.5f, 0, 9)), 1.0f));
+
+    // A sphere has no two ends to blend between.
+    auto const s = sv::quadric_primitive::create_sphere(tg::sphere3f(tg::pos3f(1, 2, 3), 1.0f));
+    CHECK(near(s.end_parameter(tg::pos3f(2, 2, 3)), 0.0f));
+}

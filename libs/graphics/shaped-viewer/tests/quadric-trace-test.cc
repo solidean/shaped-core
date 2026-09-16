@@ -250,3 +250,56 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     co_return;
 }
+
+ASYNC_INVOCABLE_TEST("sv - a quadric material blending along its ends compiles", (sg::context_handle const& ctx_h))
+{
+    // The generator and the quadric runtime have to agree on the helper's NAME and signature, and nothing CPU-side can check
+    // that: quadric-material-test asserts the emitted text, and only a real compile says the text means anything.
+    // `per_quadric_end` is the case worth compiling, because it is the one frequency with no triangle counterpart.
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the quadric shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("colour", tg::vec3f(0.5f, 0.5f, 0.5f)));
+    auto const type
+        = sv::material_type::create("sv_test_edge_fade", cc::move(signature), "    surface.base_color = colour;");
+    auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
+
+    // Two values per primitive: what an edge that fades along its length is authored as.
+    auto const colours = cc::array<tg::vec3f>::create_filled(4, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_quadric_end, colours);
+
+    auto set = sv::resident_quadric_set{.name = "edges", .geometry = sv::quadric_set_id(0), .primitive_count = 2};
+    set.attributes.push_back(sv::mesh_attribute_binding::of(attribute, sv::attribute_id(0)));
+
+    auto const resolved = sv::resolve_material(type, material, set);
+    REQUIRE(resolved.attributes.size() == 1);
+    REQUIRE(resolved.attributes[0].attribute != nullptr);
+    CHECK(resolved.attributes[0].attribute->frequency == sv::attribute_frequency::per_quadric_end);
+
+    auto const& permutation = resources.shaders.acquire_quadric(resolved);
+
+    co_await cc::async_settled(permutation.shader);
+    if (permutation.shader->has_error())
+        FAIL(cc::format("quadric closest-hit: {}\n--- source ---\n{}",
+                        permutation.shader->try_error()->underlying().to_string(), permutation.source));
+
+    co_await cc::async_settled(permutation.intersection);
+    if (permutation.intersection->has_error())
+        FAIL(cc::format("quadric intersection: {}\n--- source ---\n{}",
+                        permutation.intersection->try_error()->underlying().to_string(), permutation.source));
+
+    CHECK(permutation.shader->try_value()->stage == sg::shader_stage::closest_hit);
+    CHECK(permutation.intersection->try_value()->stage == sg::shader_stage::intersection);
+
+    // The same material against a MESH is a different permutation, since the load code differs — which is the two-spellings
+    // property the whole fork rests on.
+    auto mesh = sv::resident_mesh{.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
+    auto const on_mesh = sv::resolve_material(type, material, mesh);
+    CHECK(on_mesh.permutation_key != resolved.permutation_key);
+}

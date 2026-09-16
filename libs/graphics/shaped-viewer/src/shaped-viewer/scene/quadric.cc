@@ -48,17 +48,40 @@ sv::quadric_primitive sv::quadric_primitive::create_cylinder(tg::segment3f const
         return create_sphere(tg::sphere3f(s.pos0, radius));
 
     auto const axis = along / len;
-    auto const mid = s.pos0 + along * 0.5f;
 
-    return {.origin = mid,
+    // The origin is `pos0` rather than the midpoint, and that is not arbitrary.
+    // It puts the clipping slab's centre at len/2 along the axis, which makes its linear term -(len/2) * axis — nonzero, and
+    // therefore carrying the axis WITH its sign.
+    // A midpoint origin would leave that term zero, and `axis` and `-axis` would give the same clipper: the surface would be
+    // identical and the two ends of the segment indistinguishable, which is what `per_quadric_end` has to tell apart.
+    // `pos0` is on the axis, so it is as good an origin for precision as the midpoint was.
+    return {.origin = s.pos0,
             .surface = quadric3::cylinder_about_origin(axis, radius),
-            .clip = quadric3::slab_about_origin(axis, len * 0.5f),
+            .clip = quadric3::slab(axis, len * 0.5f, len * 0.5f),
             .bounds = box_around(s.pos0, s.pos1, cylinder_extent(axis, radius))};
 }
 
 tg::vec3f sv::quadric_primitive::normal_at(tg::pos3f const& p) const
 {
     return tg::normalize(surface.gradient(p - origin));
+}
+
+float sv::quadric_primitive::end_parameter(tg::pos3f const& p) const
+{
+    // The slab is (x·n - offset)^2 - h^2, so b = -offset * n and c = offset^2 - h^2.
+    // Both the axis and its sign come back out of b, which is the whole reason the slab is offset rather than centred.
+    auto const b = clip.linear;
+    auto const offset = b.length();
+    if (offset <= 1e-20f)
+        return 0.0f; // a symmetric or absent clipper names no first end
+
+    auto const axis = -b / offset;
+    auto const half = tg::sqrt(cc::max(0.0f, offset * offset - clip.constant));
+    if (half <= 1e-20f)
+        return 0.0f;
+
+    auto const along = tg::dot(p - origin, axis);
+    return cc::clamp((along - offset + half) / (2.0f * half), 0.0f, 1.0f);
 }
 
 cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, tg::ray3f const& ray, float t_min, float t_max)

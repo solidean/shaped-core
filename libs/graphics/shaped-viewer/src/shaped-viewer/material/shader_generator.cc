@@ -122,13 +122,34 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     return cc::format("{}({})", hlsl_type_of(format), args);
 }
 
-/// The expression naming the three element indices a frequency reads, and whether it interpolates at all.
-/// `per_triangle` is flat — one element for the whole primitive — so it loads rather than interpolates.
-[[nodiscard]] bool interpolates(attribute_frequency f)
+/// How a frequency is read: one element, three blended across a triangle, or two blended along a quadric.
+enum class load_shape
 {
-    return f != attribute_frequency::per_triangle;
+    flat,        ///< one element, indexed directly
+    barycentric, ///< three corners weighted by `ctx.barycentrics`
+    ends,        ///< two elements weighted by `ctx.end_blend`
+};
+
+[[nodiscard]] load_shape shape_of(attribute_frequency f)
+{
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+    case attribute_frequency::per_corner:
+        return load_shape::barycentric;
+    case attribute_frequency::per_quadric_end:
+        return load_shape::ends;
+    default:
+        // `per_triangle` and `per_quadric` are both one element for the whole primitive.
+        return load_shape::flat;
+    }
 }
 
+/// The expression naming the element index (or indices) a frequency reads.
+///
+/// `per_quadric` reads exactly what `per_triangle` does — one element at `PrimitiveIndex()` — because that is what both
+/// frequencies mean; they differ in which geometry numbers the primitive, not in how the load is spelled.
+/// `per_quadric_end` names the primitive too, and the helper it is passed to derives its two elements from it.
 [[nodiscard]] cc::string element_expression(attribute_frequency f)
 {
     switch (f)
@@ -138,9 +159,12 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     case attribute_frequency::per_corner:
         return "sv::corner_elements(ctx)";
     case attribute_frequency::per_triangle:
+    case attribute_frequency::per_quadric:
+    case attribute_frequency::per_quadric_end:
         return "ctx.primitive";
     default:
-        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner or per_triangle");
+        CC_UNREACHABLE("a mesh attribute a material reads is per_vertex, per_corner, per_triangle, per_quadric or "
+                       "per_quadric_end");
     }
 }
 
@@ -432,18 +456,29 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                   "+ {});\n",
                                   s.offset);
                 auto const buffer = buffer_expression("desc");
-                if (interpolates(a.attribute->frequency))
+                auto const rotates = a.interpolation == attribute_interpolation::rotation;
+                auto const blend = rotates ? cc::string("rotation") : cc::string(load_suffix(components));
+
+                switch (shape_of(a.attribute->frequency))
+                {
+                case load_shape::barycentric:
                     // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
-                    // Flat frequencies fall through to the plain load below, where there is nothing to blend and the mode
-                    // therefore means nothing.
-                    cc::format_append(
-                        src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n", a.name,
-                        a.interpolation == attribute_interpolation::rotation ? cc::string("rotation")
-                                                                             : cc::string(load_suffix(components)),
-                        buffer, element_expression(a.attribute->frequency));
-                else
+                    cc::format_append(src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n",
+                                      a.name, blend, buffer, element_expression(a.attribute->frequency));
+                    break;
+
+                case load_shape::ends:
+                    // Two elements per primitive, weighted by where along its own axis the hit landed.
+                    cc::format_append(src, "            {} = sv::interpolate_ends_{}({}, desc, {}, ctx.end_blend);\n",
+                                      a.name, blend, buffer, element_expression(a.attribute->frequency));
+                    break;
+
+                case load_shape::flat:
+                    // One element for the whole primitive, so there is nothing to blend and the mode means nothing.
                     cc::format_append(src, "            {} = sv::load_element_{}({}, desc, {});\n", a.name,
                                       load_suffix(components), buffer, element_expression(a.attribute->frequency));
+                    break;
+                }
                 src += "        }\n";
                 break;
             }
@@ -460,7 +495,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                   uv_slot.offset);
 
                 auto const uv_buffer = buffer_expression("uv_desc");
-                if (interpolates(a.uv->frequency))
+                // A uv is only ever a triangle attribute — `find_uv_attribute` refuses a quadric — so the two shapes here are
+                // the barycentric one and the flat one.
+                if (shape_of(a.uv->frequency) == load_shape::barycentric)
                     cc::format_append(
                         src, "            float2 uv = sv::interpolate_f2({}, uv_desc, {}, ctx.barycentrics);\n",
                         uv_buffer, element_expression(a.uv->frequency));

@@ -7,6 +7,44 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/material_attribute.hh>
 
+/// Which kind of geometry a material is being resolved against.
+///
+/// It decides which geometric frequencies are servable at all, and therefore which candidates the walk may take.
+/// Nothing else about the geometry enters resolution, which is why this is a tag rather than a pointer to either type.
+enum class sv::geometry_kind : sv::u8
+{
+    triangles,
+    quadrics,
+};
+
+/// What resolution needs to know about the geometry: its kind, and the two lists a candidate can come from.
+///
+/// A view rather than either concrete type, so one walk serves both.
+/// It BORROWS, like everything else a resolution touches, and is only valid while the geometry it names is.
+struct sv::geometry_view
+{
+    geometry_kind kind = geometry_kind::triangles;
+
+    cc::span<mesh_attribute_binding const> attributes;
+
+    /// Always empty for quadrics: a general quadric has no natural surface parametrization, so there is nothing to sample by.
+    cc::span<mesh_texture_binding const> textures;
+
+    [[nodiscard]] static geometry_view of(sv::resident_mesh const& mesh);
+    [[nodiscard]] static geometry_view of(sv::resident_quadric_set const& set);
+};
+
+namespace sv
+{
+/// Whether geometry of `kind` can serve an attribute at `f`.
+///
+/// `per_instance` is one value for the whole placement and is servable by anything; every other frequency indexes something only
+/// one kind of geometry numbers.
+/// A candidate this rejects LOSES to the next-coarsest rank rather than failing the resolve, which is how every other unusable
+/// candidate behaves — see `resolve_material`.
+[[nodiscard]] bool serves(geometry_kind kind, attribute_frequency f);
+} // namespace sv
+
 /// One attribute of a material type, resolved against a concrete material and mesh.
 ///
 /// Exactly one of the three payloads is live, and `frequency` says which:
@@ -101,13 +139,34 @@ namespace sv
 ///
 /// `material.type` is not checked against `type` — the library is what pairs them, and it validates once at registration rather
 /// than on every resolve.
+/// A frequency the geometry cannot serve is one more unusable candidate: it loses to the next-coarsest rank rather than failing.
+/// So a `per_vertex` attribute on a quadric set, or a `per_quadric` one on a mesh, falls back to the material's constant exactly
+/// as a format mismatch does.
+///
+/// **On quadrics the two texture ranks are unreachable**, and that follows from the same rule rather than being a special case:
+/// a sample needs a uv attribute, and a quadric serves no frequency a uv could be interpolated at.
+[[nodiscard]] resolved_material resolve_material(material_type const& type,
+                                                 material const& material,
+                                                 geometry_view const& geometry);
+
+/// The same, against a triangle mesh.
 [[nodiscard]] resolved_material resolve_material(material_type const& type,
                                                  material const& material,
                                                  sv::resident_mesh const& mesh);
+
+/// The same, against a quadric batch.
+[[nodiscard]] resolved_material resolve_material(material_type const& type,
+                                                 material const& material,
+                                                 sv::resident_quadric_set const& set);
 
 /// The same, resolving `id` through `lib` — the form a renderer calls.
 /// `id` must be one `lib` minted.
 [[nodiscard]] resolved_material resolve_material(material_library const& lib,
                                                  material_id id,
                                                  sv::resident_mesh const& mesh);
+
+/// The same for a quadric batch.
+[[nodiscard]] resolved_material resolve_material(material_library const& lib,
+                                                 material_id id,
+                                                 sv::resident_quadric_set const& set);
 } // namespace sv

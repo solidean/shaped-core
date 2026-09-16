@@ -71,16 +71,30 @@ struct sv::quadric3
                 .constant = -radius * radius};
     }
 
-    /// The slab of half-height `half_height` about the origin, normal to unit `axis`: (p·axis)² - half_height².
+    /// The slab of half-height `half_height` centred at `offset` along unit `axis`: (p·axis - offset)² - half_height².
     ///
     /// This is the clipper that turns an infinite cylinder into a finite one, and its A is axis axisᵀ.
-    /// It is also where `per_quadric_end` reads its blend parameter from, since a slab IS an axis, an offset and a half-length.
+    ///
+    /// **A nonzero `offset` is what makes the axis recoverable from the clipper**, which is what `per_quadric_end` blends along.
+    /// A slab centred on the origin has b = 0, and A = axis axisᵀ is the same for `axis` and `-axis` — so the direction survives
+    /// but its SIGN does not, and the two ends of a segment become indistinguishable.
+    /// With an offset, b = -offset * axis carries both, and a shader recovers axis = -normalize(b) and offset = |b|.
+    /// That is why `create_cylinder` puts the origin at one endpoint rather than at the midpoint.
+    ///
     /// `axis` must be unit length.
-    [[nodiscard]] static constexpr quadric3 slab_about_origin(tg::vec3f const& axis, float half_height)
+    [[nodiscard]] static constexpr quadric3 slab(tg::vec3f const& axis, float offset, float half_height)
     {
         return {.diag = tg::vec3f(axis[0] * axis[0], axis[1] * axis[1], axis[2] * axis[2]),
                 .off_diag = tg::vec3f(axis[0] * axis[1], axis[0] * axis[2], axis[1] * axis[2]),
-                .constant = -half_height * half_height};
+                .linear = -offset * axis,
+                .constant = offset * offset - half_height * half_height};
+    }
+
+    /// The slab of half-height `half_height` about the origin, normal to unit `axis`.
+    /// Symmetric, so it carries no sign — see `slab`.
+    [[nodiscard]] static constexpr quadric3 slab_about_origin(tg::vec3f const& axis, float half_height)
+    {
+        return slab(axis, 0.0f, half_height);
     }
 
     [[nodiscard]] friend constexpr bool operator==(quadric3 const&, quadric3 const&) = default;
@@ -123,6 +137,17 @@ struct sv::quadric_primitive
     /// The outward unit normal at a world-space point on the surface.
     /// Undefined where the gradient vanishes, which for the shapes built here is only a degenerate primitive.
     [[nodiscard]] tg::vec3f normal_at(tg::pos3f const& p) const;
+
+    /// Where `p` lies along this primitive's own axis: 0 at the segment's first endpoint, 1 at its second.
+    ///
+    /// This is what a `per_quadric_end` attribute blends by, and it costs no bytes: the axis, the offset and the half-length all
+    /// come out of the clipping slab the primitive already carries.
+    /// A primitive with no meaningful clip — a sphere — has no two ends to blend between and reads 0.
+    ///
+    /// Clamped to [0, 1], so a hit slightly outside the slab reads its nearer end rather than extrapolating.
+    /// `sv::quadric_runtime`'s HLSL mirrors this exactly; a divergence between them is a bug in one rather than a difference of
+    /// intent.
+    [[nodiscard]] float end_parameter(tg::pos3f const& p) const;
 };
 
 namespace sv

@@ -105,6 +105,8 @@ struct imported_asset; // an import's output, before a library has minted its ma
 } // namespace impl
 
 // the material system (see material/)
+enum class geometry_kind : u8;           // which geometry a material is resolved against (material/resolve.hh)
+struct geometry_view;                    // what resolution needs to know about that geometry
 enum class material_frequency : u8;      // where an attribute's value came from; the ORDER is the precedence
 enum class material_source_kind : u8;    // a constant, or a uv-sampled texture
 enum class attribute_interpolation : u8; // how a mesh-sourced attribute is blended across a hit triangle

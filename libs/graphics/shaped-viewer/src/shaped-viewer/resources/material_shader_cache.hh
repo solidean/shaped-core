@@ -125,11 +125,17 @@ public:
     /// meshes instead of making the whole view a no-op.
     material_permutation const& acquire_fallback();
 
-    /// The neutral QUADRIC permutation — the same empty-signature material as `acquire_fallback`, spelled against the quadric
-    /// runtime and epilogue, so it carries an intersection shader and can trace a procedural BLAS.
+    /// The permutation for `r` spelled against the QUADRIC runtime and epilogue, generated and compiled on a miss.
     ///
-    /// This is what a quadric batch shades with until materials reach quadrics properly: one hard-coded neutral surface, which
-    /// is enough to see that the geometry is there and correct.
+    /// The same resolution a triangle permutation is built from, generated a second way — which is what makes one material
+    /// usable on both geometries without a second material system.
+    /// `r` must have been resolved against a `geometry_view` of kind `quadrics`, or it may name a frequency the quadric
+    /// runtime cannot read.
+    ///
+    /// It carries an `intersection` shader, which is what makes its hit group procedural.
+    material_permutation const& acquire_quadric(resolved_material const& r);
+
+    /// The neutral quadric permutation — `acquire_quadric` over the same empty-signature material `acquire_fallback` uses.
     material_permutation const& acquire_quadric_fallback();
 
     /// The permutation for `key`, or null if nothing has acquired it.

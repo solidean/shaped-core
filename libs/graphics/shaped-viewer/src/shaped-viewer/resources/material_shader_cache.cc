@@ -79,10 +79,13 @@ material_shader_options material_shader_cache::quadric_generation_options() cons
 
 material_permutation const& material_shader_cache::acquire_quadric_fallback()
 {
-    // The same material `acquire_fallback` uses, spelled against the quadric runtime and epilogue — which is the whole point
-    // being demonstrated: one material, two geometry kinds, two permutations, one cache.
-    auto const resolved = fallback_resolution();
+    // The same material `acquire_fallback` uses, spelled against the quadric runtime and epilogue — which is the whole point:
+    // one material, two geometry kinds, two permutations, one cache.
+    return acquire_quadric(fallback_resolution());
+}
 
+material_permutation const& material_shader_cache::acquire_quadric(resolved_material const& resolved)
+{
     auto const opts = quadric_generation_options();
     auto const key = material_shader_key(resolved.permutation_key, opts);
     if (auto const* const resident = _by_key.get_ptr(key); resident != nullptr)

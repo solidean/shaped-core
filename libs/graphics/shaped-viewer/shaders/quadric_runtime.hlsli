@@ -169,13 +169,39 @@ quadric_result intersect_quadric(quadric_primitive prim, float3 origin, float3 d
     return r;
 }
 
-/// The shading context for a hit on a quadric.
+/// Where `p` lies along the primitive's own axis: 0 at its first end, 1 at its second.
 ///
-/// The three triangle fields are stubbed: a quadric has no corners and no barycentrics, so a `per_vertex` or `per_corner`
-/// attribute has nothing to read and is not resolvable onto one.
-/// Giving quadrics their own frequencies — `per_quadric` and `per_quadric_end`, the latter blended by the clip slab's own
-/// parameter — is the next step, and is what makes this stub go away.
-shading_context make_quadric_context(instance inst, uint primitive)
+/// **The axis costs no bytes, because the clipping slab already carries it.**
+/// A slab is (x·n - offset)^2 - h^2, so its linear term is -offset * n and its constant is offset^2 - h^2 — which gives back the
+/// axis, its SIGN, and the half-length.
+/// The sign is the part that matters and the part a centred slab would lose: A = n nᵀ is identical for n and -n, so the two ends
+/// of a segment would be indistinguishable.
+/// `sv::quadric_primitive::create_cylinder` puts the primitive's origin at one endpoint precisely so the offset is nonzero.
+///
+/// A primitive with no meaningful clip — a sphere — has no two ends to blend between and reads 0.
+/// Mirrors `sv::quadric_primitive::end_parameter` (scene/quadric.hh) exactly.
+float quadric_end_parameter(quadric_primitive prim, float3 p)
+{
+    float3 b = prim.clip.linear_term;
+    float offset = length(b);
+    if (offset <= 1e-20)
+        return 0.0; // a symmetric or absent clipper names no first end
+
+    float3 axis = -b / offset;
+    float half_height = sqrt(max(0.0, offset * offset - prim.clip.constant));
+    if (half_height <= 1e-20)
+        return 0.0;
+
+    float along = dot(p - prim.origin, axis);
+    return saturate((along - offset + half_height) / (2.0 * half_height));
+}
+
+/// The shading context for a hit on a quadric, at object-space point `p`.
+///
+/// The triangle fields are zeroed rather than faked: a quadric has no corners and no barycentrics, and resolution refuses to
+/// source an attribute at a frequency this geometry does not number — so nothing generated for a quadric ever reads them.
+/// What a quadric does carry is `end_blend`, which `per_quadric_end` blends by.
+shading_context make_quadric_context(instance inst, uint primitive, quadric_primitive prim, float3 p)
 {
     shading_context ctx;
     ctx.param_buffer = inst.param_buffer;
@@ -183,6 +209,7 @@ shading_context make_quadric_context(instance inst, uint primitive)
     ctx.primitive = primitive;
     ctx.corner = uint3(0, 0, 0);
     ctx.barycentrics = float3(1, 0, 0);
+    ctx.end_blend = quadric_end_parameter(prim, p);
     return ctx;
 }
 } // namespace sv

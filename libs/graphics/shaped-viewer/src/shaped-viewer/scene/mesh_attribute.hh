@@ -112,6 +112,19 @@ struct sv::attribute_format
 /// `per_corner` is 3 elements per triangle, in triangle order — what a hard edge needs, since the two triangles then carry their own normal at the shared vertex.
 /// `per_triangle` is one element per triangle, indexed by `PrimitiveIndex()`.
 ///
+/// **The geometric frequencies are per geometry KIND**, and only `per_instance` is shared.
+/// A quadric has no vertices, corners or triangles, so it carries `per_quadric` — one value per primitive, indexed by
+/// `PrimitiveIndex()` exactly as `per_triangle` is — and `per_quadric_end`, which is two values blended along the primitive's own
+/// axis.
+/// `per_triangle` keeps its name rather than being generalized: it says exactly what it indexes, and a name covering both would
+/// read as a category containing `per_vertex` and `per_edge` rather than as a peer of them.
+/// A frequency the geometry cannot serve loses to the next-coarsest rank, like any other unusable candidate — see
+/// `resolve_material`.
+///
+/// `per_quadric_end` is what an edge that fades along its length is written with.
+/// Its two values are elements `2 * primitive` and `2 * primitive + 1`, and the blend parameter is the primitive's own — recovered
+/// from the clipping slab it already carries, so it costs no bytes (see `quadric_primitive::end_parameter`).
+///
 /// `per_edge` is RESERVED and rejected by `mesh_attribute::create` for now.
 /// The other geometric frequencies index something the geometry already numbers; an edge is not numbered at all, so per-edge data needs an edge table on triangle_geometry first —
 /// the edges themselves (each naming its two vertices) plus each triangle's three edge indices, which is also what decides whether opposite half-edges share one entry.
@@ -119,10 +132,16 @@ struct sv::attribute_format
 enum class sv::attribute_frequency : sv::u8
 {
     per_instance,
+
+    // Triangle geometry only.
     per_vertex,
     per_corner,
     per_triangle,
     per_edge,
+
+    // Quadric geometry only.
+    per_quadric,
+    per_quadric_end,
 };
 
 namespace sv
@@ -267,6 +286,9 @@ struct sv::mesh_attribute
 
         CC_ASSERT(frequency != attribute_frequency::per_instance || pinned.size() == 1, "a per_instance attribute "
                                                                                         "carries exactly one element");
+
+        CC_ASSERT(frequency != attribute_frequency::per_quadric_end || pinned.size() % 2 == 0,
+                  "a per_quadric_end attribute carries two elements per primitive");
 
         auto bytes = pinned.as_bytes();
         auto const hash = cc::hash128::create(bytes.span(), impl::attribute_hash_seed);
