@@ -85,7 +85,7 @@ One-liner per library:
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan are real across the surface.
-  **metal** is real on Metal 4 (macOS / iOS 26 floor, Apple silicon) through presentation, transfer and streaming, with ray tracing and GPU timestamps still open.
+  **metal** is real on Metal 4 (macOS / iOS 26 floor, Apple silicon) through presentation, transfer, streaming and ray tracing, with GPU timestamps still open.
   webgpu, opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
   Namespace `sg`. Depends on clean-core + typed-geometry.

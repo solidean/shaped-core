@@ -10,7 +10,7 @@ Three exist: the two tier-1 backends, and **metal**, which is being built out.
 
 The library is at an **early stage**, though not a stub: the sg core and the **dx12** backend are real across transfer, barriers, bindings, pipelines, raytracing, queries and presentation.
 **vulkan** is real across the same surface and runs the same tier-1 API suite.
-**metal** brings up a Metal 4 device, its queue, the epoch timelines and the command-list lifecycle, and everything else still asserts — see its [readme](backends/metal/readme.md).
+**metal** is real across presentation, transfer, streaming and ray tracing, with GPU timestamps the remaining gap — see its [readme](backends/metal/readme.md).
 Which windowing systems it can present to is decided at build time, by which of their development headers were installed.
 [docs/structure.md](docs/structure.md) is the per-module `[done]` / `[in progress]` / `[planned]` roadmap.
 

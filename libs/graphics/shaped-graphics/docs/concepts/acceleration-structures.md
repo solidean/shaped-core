@@ -33,10 +33,10 @@ buffer for procedural primitives), an opaque flag, and an optional per-geometry 
 A **TLAS** takes *instances*. Each instance names a `blas_handle`, a world transform, and a few small
 fields (below). Holding the handle is the ownership edge: **a TLAS instance keeps its BLAS alive**, and the
 **BLAS must be fully built before the TLAS that references it is built** — the top-level build reads each
-referenced BLAS's storage.
+referenced BLAS.
 
 Build-input buffers — vertices, indices, AABBs, transforms — must carry the [`accel_structure_build_input`](../../src/shaped-graphics/types.hh) usage.
-The result lives in an `accel_structure_storage` buffer.
+What the result lives in is the backend's, and differs by API — see the paragraph above.
 
 ## Build inputs are a backend-neutral common denominator
 
@@ -73,7 +73,7 @@ Every other sg resource is created by a `ctx.*` factory that just allocates.
 An acceleration structure cannot be: its result size comes from a **prebuild query over the build inputs**, and producing it is GPU work.
 Allocation and build are therefore one **recorded** step, and sg never records command work from a `ctx.*` method.
 So creation is a command-list op on the **`cmd.raytracing`** scope, which also carries `dispatch_rays`.
-`cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the result buffer, record the build with **transient** scratch, and return the handle.
+`cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the structure, record the build with **transient** scratch, and return the handle.
 
 The returned handle is **persistent — valid across epochs**.
 "How long may I use this handle" *is* the persistent-vs-transient axis — see [memory](memory.md).
@@ -82,7 +82,7 @@ A **transient (single-epoch) variant may come later** for structures rebuilt fro
 Build scratch is transient either way.
 
 Ordering is inferred, never hand-synchronized.
-A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over its storage, and `accel_read` over each referenced BLAS.
+A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over the structure it produces, and `accel_read` over each referenced BLAS.
 A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
 ## Load-bearing invariants

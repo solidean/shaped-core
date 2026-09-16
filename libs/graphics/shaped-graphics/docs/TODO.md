@@ -129,6 +129,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
+- **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
+  `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
+  nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
+  queue-scoped form or an encoder boundary, which is the raster milestone's problem".
+  Raster landed after that was written, so the premise no longer holds.
+  The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
+  `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
+  What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
+  clamped away, and that cannot be established without a Metal device.
+  If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
+  rather than leaving a deferral to a milestone that has already arrived.
+
 - **No metal shader toolchain exists.**
   `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
   `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.

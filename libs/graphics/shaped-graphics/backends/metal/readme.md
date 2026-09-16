@@ -22,6 +22,10 @@ A Metal 3 path would therefore be a second recording backend behind one context,
 That is the shape [writing-a-backend](../../docs/writing-a-backend.md) argues against for capability probes generally.
 So the floor is stated once, checked before any `MTL4` selector is touched, and reported with a message naming the OS and the chip.
 
+**MoltenVK is not an alternative to this backend**, and the reason is a hard requirement rather than a performance one.
+sg's vulkan backend requires `VK_EXT_descriptor_buffer`, which its whole bind path is built on, and MoltenVK does not implement it — so that route does not start, rather than running slower on macOS.
+`vulkan_swapchain.cc`'s refusal of the cocoa window platform records the same fact from the other side.
+
 The OS check comes first on purpose.
 This backend is compiled against the macOS 26 SDK, so on an older OS the MTL4 selectors do not exist and calling one is a crash rather than a diagnosable failure.
 
@@ -40,13 +44,13 @@ The pin tracks the installed SDK rather than the newest release: a wrapper newer
 
 Each of these is a fact about Metal rather than a gap in the backend.
 
-- **Textures have no layouts.**
-  `sg::texture_layout` has a D3D12 spelling and a Vulkan one and no Metal one, so a transition carries no layout half and `current_texture_layout` answers `general` always.
-  What survives of a barrier is the stage and cache half, which MTL4 spells `barrierAfterEncoderStages:beforeEncoderStages:visibilityOptions:`.
 - **There is no blit encoder.**
   MTL4's compute encoder carries `copyFromBuffer`, `copyFromTexture` and `fillBuffer` alongside dispatch, where dx12 and vulkan each have a distinct copy path.
   So one encoder serves both, and a barrier on it may name `MTLStageBlit` and `MTLStageDispatch` alike — but *only* those, plus `MTLStageAccelerationStructure`.
   `barrierAfterEncoderStages` refuses any other stage outright, which is why the translation clamps.
+  **A barrier names stages, not resources.**
+  `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
+  The resource list an sg barrier carries has nowhere to go.
 - **Residency is declared, and nothing reports its absence.**
   MTL4 removed `useResource`: a resource outside every `MTLResidencySet` the queue knows about is simply not there when the GPU runs, so a copy from it reads zeroes and a copy to it writes nowhere.
   It is not an API misuse, so the validation layer says nothing either.
@@ -90,7 +94,9 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.
 - **Bindings reach a dispatch through an argument table, not per-encoder setters.**
   One `MTL4ArgumentTable` serves a command list, and a group bound at slot N writes its argument buffer's address into buffer-binding N — so sg's `group_index` *is* the MSL `[[buffer(N)]]` index.
-- **A texture has no layout, so one access tracker serves both resource kinds.**
+- **Textures have no layouts, so one access tracker serves both resource kinds.**
+  `sg::texture_layout` has a D3D12 spelling and a Vulkan one and no Metal one, so a transition carries no layout half.
+  What survives of a barrier is the stage and cache half, which MTL4 spells `barrierAfterEncoderStages:beforeEncoderStages:visibilityOptions:`.
   dx12 and vulkan each need two — a texture's tracker carries its layout and partitions it by subresource — and here a
   texture has no state a buffer does not also have.
   `metal_resource_access` is that one type, and `current_texture_layout` answers `general` for every texture and range
@@ -104,11 +110,6 @@ Each of these is a fact about Metal rather than a gap in the backend.
   recycled, so an address-keyed cache hands a new texture the previous one's view, of an object that no longer exists.
   It needs an allocator to reuse an address, so a suite reports it as flaky and a frame loop reports it every few
   seconds.
-- **A barrier names stages, not resources.**
-  `sg::pipeline_stage_flags` maps onto `MTLStages` directly: `vertex` to `MTLStageVertex`, `compute` to `MTLStageDispatch`, `copy` to `MTLStageBlit`.
-  The resource list an sg barrier carries has nowhere to go.
-- **Residency is declared, not inferred.**
-  MTL4 has no `useResource`; a command buffer names an `MTLResidencySet` instead, which is what a list's touched-resource set becomes.
 - **Host-visible memory is free.**
   `MTLStorageModeShared` on unified memory is exactly the thing whose absence blocked every one of the vulkan backend's transfer paths.
 - **A heap reports a size that is not a multiple of its own alignment.**
@@ -256,8 +257,7 @@ There `TraceRay`'s `MissShaderIndex` and hit-group offsets are equally raw indic
 What *is* checked, since Metal has no validation-message callback to lean on:
 
 - a `functionHandle` that comes back null — an un-linked or misspelled function — fails the table build rather than becoming a wrong call at trace time;
-- handle ranges are bounds-checked against the pipeline;
-- `max_recursion_depth > 1` is refused with a message naming why.
+- handle ranges are bounds-checked against the pipeline.
 
 **It does not make `sv` run on macOS.**
 `sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL; nothing in the tree compiles MSL yet.
@@ -296,6 +296,10 @@ The alternative is the failure mode [testing](../../docs/testing.md) records, wh
 **The gate is proved rather than assumed.**
 `sg metal - the validation gate aborts on a violation` is `nx::config::disabled`, because passing it means ending the process.
 Run it by name and read the abort as the pass; a run that finishes means the layer is not armed.
+
+**Parsing stderr is not an alternative.**
+It would mean deriving a correctness signal from message text nobody controls, and redirecting a descriptor Metal writes to from its own threads.
+A miss would then be silent, which is the same failure as having no oracle at all — and the abort's whole value is that it cannot be missed.
 
 ### Commit feedback is the one programmatic channel
 

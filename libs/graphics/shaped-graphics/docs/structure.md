@@ -135,7 +135,7 @@ backends/                                       # each subclasses the abstract s
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): device + resource creation; recording is stubbed
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real through presentation, transfer and streaming — the whole tier-1 suite passes; ray tracing and GPU timestamps are the gaps
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real through presentation, transfer, streaming and ray tracing — the whole tier-1 suite passes; GPU timestamps are the gap
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -150,7 +150,7 @@ backends/                                       # each subclasses the abstract s
 - **Tier 2 (soon):** metal, webgpu.
   metal is under construction.
   It creates a Metal 4 device and refuses below its floor (macOS / iOS 26, Apple silicon), realizes the epochs on a pair of MTLSharedEvents, and opens, submits and drops command lists.
-  Every resource, binding and recording seam still asserts, so its tier-1 driver registers but stays disabled.
+  Its tier-1 driver registers but stays disabled — the seams no longer assert, it simply has not been re-enabled.
 - **Legacy compat (planned):** opengl, webgl.
 
 A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).
