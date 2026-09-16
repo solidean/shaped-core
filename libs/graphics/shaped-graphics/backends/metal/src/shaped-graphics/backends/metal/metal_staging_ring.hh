@@ -2,6 +2,8 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
@@ -14,11 +16,17 @@
 /// On unified memory `MTLStorageModeShared` is the default answer rather than a hunt — the CPU pointer is just
 /// `contents()`.
 ///
-/// **A head and a tail, not a bump-and-reset.**
-/// Reservations advance the head; an epoch boundary records where it stood, and retiring that epoch moves the tail there.
-/// Resetting the head outright at retire is the obvious shape and is wrong: reservations made after the advance belong to
-/// a newer epoch and already sit past that point, so rewinding hands the same bytes out twice and the older transfer's
-/// data is overwritten before its copy runs.
+/// **Two logical cursors that only ever increase**, with the byte offset derived as `cursor % capacity` at the point of
+/// use, and fullness tested as the difference `end - freed > capacity`.
+/// That is the shape dx12 and vulkan already use, and the reason is that the obvious alternative cannot be made safe:
+/// a head and a tail rewound to zero once they meet hands the same bytes out twice.
+/// An epoch that stages nothing captures the same boundary as the epoch before it, so after a rewind the second retire
+/// arrives carrying a pre-rewind boundary, drags the tail past the head, and the next reservation sees an empty ring
+/// while reservations are still live.
+/// Nothing asserts on that; it surfaces as corrupted transfer bytes somewhere else entirely.
+///
+/// **The ring owns the invariant**, rather than trusting a caller to hand back a boundary that is still meaningful.
+/// Epoch boundaries are checkpoints in its own state, retired by walking them against the completed epoch.
 ///
 /// A reservation the ring cannot fit gets a dedicated buffer of its own instead of failing.
 /// A transfer larger than the whole ring is legitimate, and so is a frame that stages more than the budget.
@@ -58,13 +66,18 @@ public:
 
     /// Reserve `size` bytes, from the ring where it fits and from a dedicated buffer where it does not.
     /// Never fails: a reservation always comes back valid.
+    ///
+    /// The span is always contiguous, so a request that would straddle the seam skips to it and leaves the tail unused.
+    /// dx12 splits at the seam instead and has its callers walk the windows; here one reservation is one span, which is
+    /// what every call site expects.
     [[nodiscard]] reservation reserve(isize size);
 
-    /// Where the head stands now, to be handed back to `release_to` when the epoch that ends here retires.
-    [[nodiscard]] isize mark() const { return _head; }
+    /// Records where the closing epoch's staging ends, so its bytes are reclaimed when it retires.
+    void on_epoch_advance(sg::epoch closed);
 
-    /// Reclaim everything staged before `mark`. Called when the epoch that ended there has retired.
-    void release_to(isize mark);
+    /// Frees every checkpoint up to and including `completed`.
+    /// Walking rather than assigning is what makes a repeated or out-of-order retire harmless.
+    void on_epochs_completed(sg::epoch completed);
 
     [[nodiscard]] isize capacity() const { return _capacity; }
 
@@ -74,13 +87,38 @@ public:
     /// Releases the backing buffer; the ring is unusable afterwards.
     void shutdown();
 
+    // --- test-only escape hatch ----------------------------------------------------------------------
+    // The tier-2 tests assert cursor behaviour directly, because the defect this shape exists to prevent is invisible
+    // from the outside until bytes are already wrong — see libs/graphics/shaped-graphics/docs/testing.md.
+
+    struct debug_cursors
+    {
+        u64 next_pos = 0;
+        u64 freed_pos = 0;
+        isize checkpoints = 0;
+    };
+    [[nodiscard]] debug_cursors debug_cursor_state();
+
 private:
     MTL::Device* _device = nullptr;
     MTL::Buffer* _buffer = nullptr;
     isize _capacity = 0;
 
-    /// Next free byte, and the oldest byte still in use by an epoch that has not retired.
-    /// Both only grow; they rewind together once everything staged has been reclaimed.
-    isize _head = 0;
-    isize _tail = 0;
+    /// A closed epoch and where its staging ended; its bytes free once that epoch retires.
+    struct epoch_checkpoint
+    {
+        sg::epoch epoch_id = sg::epoch::invalid;
+        u64 end_pos = 0;
+    };
+
+    struct ring_state
+    {
+        u64 next_pos = 0;                         ///< logical bump cursor over the u64 space, never rewound
+        u64 freed_pos = 0;                        ///< everything logically below this is reclaimable
+        cc::vector<epoch_checkpoint> checkpoints; ///< FIFO, oldest epoch at the front
+    };
+
+    /// The lock lives here rather than around the whole ring, because the cursors and the checkpoint FIFO have to move
+    /// together for the invariant to hold.
+    cc::mutex<ring_state> _state;
 };

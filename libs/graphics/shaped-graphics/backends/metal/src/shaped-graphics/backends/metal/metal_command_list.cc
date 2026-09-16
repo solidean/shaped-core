@@ -353,8 +353,7 @@ void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::sp
     if (data.empty())
         return;
 
-    auto const staging
-        = _metal_context.upload_ring().lock([&](metal_staging_ring& r) { return r.reserve(isize(data.size())); });
+    auto const staging = _metal_context.upload_ring().reserve(isize(data.size()));
 
     adopt_overflow_staging(staging);
 
@@ -383,8 +382,7 @@ void metal_command_list::upload_bytes_to_texture(raw_texture_handle texture,
     auto const layout = staging_layout_of(texture->description().format, region);
     CC_ASSERT(pixels.size() == layout.size_in_bytes, "pixel data size does not match the copy region");
 
-    auto const staging
-        = _metal_context.upload_ring().lock([&](metal_staging_ring& r) { return r.reserve(layout.size_in_bytes); });
+    auto const staging = _metal_context.upload_ring().reserve(layout.size_in_bytes);
     adopt_overflow_staging(staging);
 
     cc::memcpy(staging.bytes().data(), pixels.data(), size_t(layout.size_in_bytes));
@@ -414,8 +412,7 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     if (size_in_bytes == 0)
         return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
-    auto const staging
-        = _metal_context.download_ring().lock([&](metal_staging_ring& r) { return r.reserve(size_in_bytes); });
+    auto const staging = _metal_context.download_ring().reserve(size_in_bytes);
 
     adopt_overflow_staging(staging);
 
@@ -464,8 +461,7 @@ sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_han
     if (layout.size_in_bytes == 0)
         return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
-    auto const staging
-        = _metal_context.download_ring().lock([&](metal_staging_ring& r) { return r.reserve(layout.size_in_bytes); });
+    auto const staging = _metal_context.download_ring().reserve(layout.size_in_bytes);
     adopt_overflow_staging(staging);
 
     declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);

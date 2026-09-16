@@ -189,5 +189,17 @@ private:
     ///
     /// `std::atomic` rather than `cc::atomic`, for the reason `callback_mutex` exists: a commit handler decrements
     /// this from a dispatch queue Apple owns, and `cc::atomic` is a plain value once `SC_THREADS` is off.
+
+    /// Serializes claim, record, commit and signal on the transfer queue, so a claimed value is signalled in the order
+    /// it was claimed in.
+    ///
+    /// The direct queue gets this by holding one lock across submit; here the claim happens at the top of each path and
+    /// the commit well after the copy is recorded, so there is no existing section to widen.
+    /// Without it two concurrent transfers can interleave between taking a value and signalling it, which moves the
+    /// timeline backwards exactly as an out-of-order submit would.
+    /// The CPU copy into staging stays outside it — it runs before the claim in every path, and it is the only
+    /// expensive step, so uploads serialize their recording but not their copying.
+    cc::mutex<int> _submit;
+
     std::atomic<int> _pending = 0;
 };

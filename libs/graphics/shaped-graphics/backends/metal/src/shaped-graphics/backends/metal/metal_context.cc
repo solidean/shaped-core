@@ -44,11 +44,11 @@ void metal_context::create_staging_rings(isize upload_bytes, isize download_byte
     _transfers.create(*this);
     _streams.create(*this);
 
-    _upload_ring.lock([&](metal_staging_ring& r) { r.create(_device, upload_bytes, "sg inline upload ring"); });
-    _download_ring.lock([&](metal_staging_ring& r) { r.create(_device, download_bytes, "sg inline download ring"); });
+    _upload_ring.create(_device, upload_bytes, "sg inline upload ring");
+    _download_ring.create(_device, download_bytes, "sg inline download ring");
 
-    _upload_ring.lock([&](metal_staging_ring& r) { _residency.add(r.buffer()); });
-    _download_ring.lock([&](metal_staging_ring& r) { _residency.add(r.buffer()); });
+    _residency.add(_upload_ring.buffer());
+    _residency.add(_download_ring.buffer());
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
@@ -124,17 +124,16 @@ void metal_context::advance_epoch()
 
     // The rings' bytes were read (or written) by copies recorded in the closing epoch, so they are only reclaimable
     // once that epoch retires.
-    //
-    // Where the head stands NOW is what that epoch owns; anything staged after this advance belongs to the next one
-    // and must survive.
-    // Rewinding to zero instead would hand those bytes out twice.
-    auto const upload_mark = _upload_ring.lock([](metal_staging_ring& r) { return r.mark(); });
-    auto const download_mark = _download_ring.lock([](metal_staging_ring& r) { return r.mark(); });
+    // Each ring records its own checkpoint here and frees it when told the epoch completed, so nothing outside carries
+    // a boundary that could go stale — see metal_staging_ring.
+    auto const closing = current_epoch();
+    _upload_ring.on_epoch_advance(closing);
+    _download_ring.on_epoch_advance(closing);
     _epochs.defer(
-        [this, upload_mark, download_mark]
+        [this, closing]
         {
-            _upload_ring.lock([&](metal_staging_ring& r) { r.release_to(upload_mark); });
-            _download_ring.lock([&](metal_staging_ring& r) { r.release_to(download_mark); });
+            _upload_ring.on_epochs_completed(closing);
+            _download_ring.on_epochs_completed(closing);
         });
 
     _epochs.advance();
@@ -163,54 +162,65 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
     wait_for_streams(list);
 
-    // Finalize every buffer this list touched, in submission order — that ordering is what makes each resource's
-    // `current` mean "after everything submitted so far".
-    finalize_touched_buffers(list);
-
-    // The token is claimed here rather than after the commit so the stamp below lands before submit returns: a caller
-    // that issues an async transfer on the very next line must find this list already named.
-    auto const token = _epochs.claim_submission_token();
-    stamp_touched_resources(list, token);
-
+    // **Finalize, claim, commit and signal are one step in a single global order.**
+    //
+    // The queue is free-threaded, and that is the hazard: two threads may claim tokens 5 and 6 and reach the commit in
+    // the other order, which either releases a waiter on 5 before list 5 has run, or drives the shared event backwards
+    // from 6 to 5 and breaks is_submission_complete.
+    // Finalize is inside for a second reason — finalize order must equal execute order, which is what makes a
+    // resource's `current` mean "after everything submitted so far".
+    // Work that neither orders against another submit nor names a token runs after the lock.
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
-    list.release_ownership();
 
-    // Every commit carries a feedback handler, because it is the only channel Metal has for a failure that arrives
-    // after the call that caused it — the validation layer speaks only to stderr.
-    // The handler captures the sink rather than this context: it runs on a dispatch queue at a time nothing here
-    // controls, which can be after shutdown.
-    // See metal_feedback.hh.
-    auto sink = _feedback;
+    auto const token = _submission.lock(
+        [&](int&)
+        {
+            finalize_touched_buffers(list);
 
-    // The list's downloads: their bytes are in the staging ring and become readable when this commit completes, which
-    // is precisely when the feedback handler runs.
-    auto downloads = std::make_shared<cc::vector<cc::unique_function<void()>>>(list.take_pending_downloads());
-    auto const has_downloads = !downloads->empty();
-    auto* const pending_counter = &_pending_downloads;
-    if (has_downloads)
-        pending_counter->fetch_add(1, std::memory_order_acq_rel);
+            // Claimed inside, so the stamp lands before submit returns: a caller that issues an async transfer on the
+            // very next line must find this list already named.
+            auto const claimed = _epochs.claim_submission_token();
+            stamp_touched_resources(list, claimed);
+            list.release_ownership();
 
-    auto* const options = MTL4::CommitOptions::alloc()->init();
-    options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
-      auto* const error = feedback->error();
-      if (error != nullptr)
-          sink->report(device_error_kind_of(NS::UInteger(error->code())), describe_error(error, "a metal command "
-                                                                                                "buffer failed"));
+            // Every commit carries a feedback handler, because it is the only channel Metal has for a failure that
+            // arrives after the call that caused it — the validation layer speaks only to stderr.
+            // The handler captures the sink rather than this context: it runs on a dispatch queue at a time nothing
+            // here controls, which can be after shutdown.
+            // See metal_feedback.hh.
+            auto sink = _feedback;
 
-      for (auto& copy_out : *downloads)
-          copy_out();
-      downloads->clear();
+            // The list's downloads: their bytes are in the staging ring and become readable when this commit
+            // completes, which is precisely when the feedback handler runs.
+            auto downloads = std::make_shared<cc::vector<cc::unique_function<void()>>>(list.take_pending_downloads());
+            auto const has_downloads = !downloads->empty();
+            auto* const pending_counter = &_pending_downloads;
+            if (has_downloads)
+                pending_counter->fetch_add(1, std::memory_order_acq_rel);
 
-      if (has_downloads)
-          pending_counter->fetch_sub(1, std::memory_order_acq_rel);
-    });
+            auto* const options = MTL4::CommitOptions::alloc()->init();
+            options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
+              auto* const error = feedback->error();
+              if (error != nullptr)
+                  sink->report(device_error_kind_of(NS::UInteger(error->code())),
+                               describe_error(error, "a metal command buffer failed"));
 
-    MTL4::CommandBuffer const* const buffers[] = {buffer};
-    _queue->commit(buffers, 1, options);
-    options->release();
+              for (auto& copy_out : *downloads)
+                  copy_out();
+              downloads->clear();
 
-    _epochs.signal_submission(token);
+              if (has_downloads)
+                  pending_counter->fetch_sub(1, std::memory_order_acq_rel);
+            });
+
+            MTL4::CommandBuffer const* const buffers[] = {buffer};
+            _queue->commit(buffers, 1, options);
+            options->release();
+
+            _epochs.signal_submission(claimed);
+            return claimed;
+        });
 
     // The allocator rides the epoch rather than going back to the pool here: resetting it while the buffer just
     // committed is still executing is exactly what MTL4 forbids.
@@ -375,8 +385,8 @@ void metal_context::shutdown()
     }
 
     // After the drain above, so nothing in flight still names these bytes.
-    _upload_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
-    _download_ring.lock([](metal_staging_ring& r) { r.shutdown(); });
+    _upload_ring.shutdown();
+    _download_ring.shutdown();
     // Before the transfer system: the actor commits onto its queue, and a job still in flight would name a queue
     // that is already gone.
     _streams.shutdown();

@@ -83,7 +83,8 @@ It sweeps until its submission completes and only then falls through to the fenc
 
 - **metal** — `multi_threaded`, mirroring dx12.
   The command-list slot allocator, the residency set, the staging rings and the transfer system's pending map are all mutex-guarded.
-  The submission token is claimed before the commit that signals it.
+  The submission token is assigned together with the queue commit and shared-event signal under one lock, so token order equals signal order.
+  The transfer queue has a lock of its own covering claim, record, commit and signal, because there its claim and its commit sit at opposite ends of recording a copy.
   `advance_epoch` and `shutdown` are externally synchronized.
   One divergence: **pipeline compilation is serialized process-wide**, because concurrent `MTL4Compiler` builds abort inside the driver.
   That is a lock the other two backends do not need — see [the backend's readme](../../backends/metal/readme.md).

@@ -102,8 +102,8 @@ public:
     [[nodiscard]] MTL4::Compiler* compiler() const { return _compiler; }
 
     /// The rings inline transfers stage through, guarded because a list may record on any thread.
-    [[nodiscard]] cc::mutex<metal_staging_ring>& upload_ring() { return _upload_ring; }
-    [[nodiscard]] cc::mutex<metal_staging_ring>& download_ring() { return _download_ring; }
+    [[nodiscard]] metal_staging_ring& upload_ring() { return _upload_ring; }
+    [[nodiscard]] metal_staging_ring& download_ring() { return _download_ring; }
 
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
@@ -324,8 +324,19 @@ private:
     metal_stream_system _streams;
     metal_texture_view_cache _texture_views;
     MTL4::Compiler* _compiler = nullptr;
-    cc::mutex<metal_staging_ring> _upload_ring;
-    cc::mutex<metal_staging_ring> _download_ring;
+    /// Serializes finalize, commit and signal on the direct queue, so a token's order is the order its work is
+    /// signalled in.
+    ///
+    /// The queue itself is free-threaded, and that is the problem: two threads may claim tokens 5 and 6 and reach the
+    /// commit in the other order, which either releases a waiter on 5 before list 5 has run, or drives the shared event
+    /// backwards from 6 to 5 and breaks `is_submission_complete`.
+    /// Finalize belongs inside the same section for a second reason — finalize order must equal execute order, which is
+    /// what makes a resource's `current` mean "after everything submitted so far".
+    /// dx12 and vulkan both hold one lock across the same three steps.
+    cc::mutex<int> _submission;
+
+    metal_staging_ring _upload_ring;
+    metal_staging_ring _download_ring;
 
     /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.
     ///

@@ -14,6 +14,11 @@ constexpr isize k_reservation_alignment = 256;
 /// ring exists.
 constexpr MTL::ResourceOptions k_staging_options
     = MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked;
+
+[[nodiscard]] u64 align_up(u64 value, u64 alignment)
+{
+    return (value + alignment - 1) / alignment * alignment;
+}
 } // namespace
 
 metal_staging_ring::~metal_staging_ring()
@@ -32,8 +37,7 @@ void metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc
 
     _buffer->setLabel(ns_string(label));
     _capacity = capacity_in_bytes;
-    _head = 0;
-    _tail = 0;
+    _state.lock([](ring_state& s) { s = {}; });
 }
 
 metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
@@ -41,23 +45,32 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     CC_ASSERT(_buffer != nullptr, "the staging ring has no storage");
     CC_ASSERT(size >= 0, "a reservation must be non-negative");
 
-    // Everything staged has been reclaimed, so the head may start over.
-    // This is the only moment it is safe: while anything is in flight, rewinding would hand out bytes a pending copy
-    // still reads.
-    if (_head == _tail)
-    {
-        _head = 0;
-        _tail = 0;
-    }
+    auto const capacity = u64(_capacity);
+    auto const from_ring = _state.lock(
+        [&](ring_state& s) -> cc::optional<isize>
+        {
+            if (u64(size) > capacity)
+                return {}; // larger than the whole ring: no reclaim makes this fit
 
-    auto const aligned_head = (_head + k_reservation_alignment - 1) / k_reservation_alignment * k_reservation_alignment;
-    if (aligned_head + size <= _capacity)
-    {
-        _head = aligned_head + size;
-        return {.buffer = _buffer, .offset = aligned_head, .size = size};
-    }
+            auto start = align_up(s.next_pos, u64(k_reservation_alignment));
 
-    // No room this epoch, so this transfer gets storage of its own rather than an error.
+            // A reservation is one contiguous span, so one that would straddle the seam skips to it instead.
+            // The skipped tail is still charged against the cursor below, which is what keeps the fullness test honest.
+            if (start % capacity + u64(size) > capacity)
+                start = (start / capacity + 1) * capacity;
+
+            auto const end = start + u64(size);
+            if (end - s.freed_pos > capacity)
+                return {}; // the space is still held by epochs that have not retired
+
+            s.next_pos = end;
+            return isize(start % capacity);
+        });
+
+    if (from_ring.has_value())
+        return {.buffer = _buffer, .offset = from_ring.value(), .size = size};
+
+    // No room, so this transfer gets storage of its own rather than an error.
     // A single transfer larger than the whole ring lands here too, and is perfectly legitimate.
     auto* const dedicated = _device->newBuffer(NS::UInteger(size > 0 ? size : 1), k_staging_options);
     CC_ASSERT(dedicated != nullptr, "the metal device refused a dedicated staging allocation");
@@ -66,12 +79,33 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     return {.buffer = dedicated, .offset = 0, .size = size, .owned = dedicated};
 }
 
-void metal_staging_ring::release_to(isize mark)
+void metal_staging_ring::on_epoch_advance(sg::epoch closed)
 {
-    CC_ASSERT(mark >= 0 && mark <= _capacity, "a staging mark must be inside the ring");
-    // Only ever forward: epochs retire in order, and a stale mark from a rewind must not pull the tail back.
-    if (mark > _tail)
-        _tail = mark;
+    _state.lock([&](ring_state& s) { s.checkpoints.push_back({closed, s.next_pos}); });
+}
+
+void metal_staging_ring::on_epochs_completed(sg::epoch completed)
+{
+    _state.lock(
+        [&](ring_state& s)
+        {
+            auto retired = isize(0);
+            for (auto const& cp : s.checkpoints)
+            {
+                if (u64(cp.epoch_id) > u64(completed))
+                    break;
+                s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and in end_pos
+                ++retired;
+            }
+            s.checkpoints.remove_from_to(0, retired);
+        });
+}
+
+metal_staging_ring::debug_cursors metal_staging_ring::debug_cursor_state()
+{
+    return _state.lock(
+        [](ring_state& s)
+        { return debug_cursors{.next_pos = s.next_pos, .freed_pos = s.freed_pos, .checkpoints = s.checkpoints.size()}; });
 }
 
 void metal_staging_ring::shutdown()
@@ -85,7 +119,6 @@ void metal_staging_ring::shutdown()
     _buffer = nullptr;
     _device = nullptr;
     _capacity = 0;
-    _head = 0;
-    _tail = 0;
+    _state.lock([](ring_state& s) { s = {}; });
 }
 } // namespace sg::backend::metal

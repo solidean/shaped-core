@@ -176,6 +176,8 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
     // is recorded rather than held until it runs.
     cc::memcpy(staging->contents(), data.data(), size_t(data.size()));
 
+    // Held past the commit below: a value claimed here must be the value signalled next on this queue.
+    auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(buffer.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
@@ -222,6 +224,8 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
     staging->setLabel(ns_string("sg async download"));
     _ctx->residency().add(staging);
 
+    // Held past the commit below: a value claimed here must be the value signalled next on this queue.
+    auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(buffer.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
@@ -285,6 +289,8 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     cc::memcpy(staging->contents(), pixels.data(), size_t(layout.size_in_bytes));
 
+    // Held past the commit below: a value claimed here must be the value signalled next on this queue.
+    auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(texture.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
@@ -326,6 +332,8 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
     staging->setLabel(ns_string("sg async texture download"));
     _ctx->residency().add(staging);
 
+    // Held past the commit below: a value claimed here must be the value signalled next on this queue.
+    auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(texture.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
