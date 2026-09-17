@@ -72,7 +72,9 @@ An undeclared record names its domain, text and site, and an unmet expectation s
 A nested `execute_tests` judges its own passes at its own end, so what an inner test logs never reaches the outer verdict.
 Only the outermost run claims the records under no test, and prints its verdicts to the console.
 
-A test failing only by this rule keeps no [recording](recording.md#a-failing-tests-recording): its bucket closes before the verdict.
+A recorded test's bucket closes before the verdict, so a passing one that may still fail by this rule is kept undecided and settled by the verdict.
+A test marked `recorded` always waits; under `--record` only one with a warning already delivered does, since holding every passing test's events would fill the pool.
+So under `--record`, a test failing by a record still in a thread's buffer when it ended keeps no [recording](recording.md#a-failing-tests-recording).
 
 ## The console
 

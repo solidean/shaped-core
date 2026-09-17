@@ -69,7 +69,13 @@ void open_test_bucket(cc::rec::trace_id id, cc::string_view test_name);
 /// A passing test drops its events here, which is what keeps the chunk pool from filling with history nobody wants.
 /// A failing one is kept until the end of the run and written out there — deferred rather than flushed per test,
 /// because a flush per test is a process-wide drain thousands of times over, and a dump is read after the run anyway.
-void close_test_bucket(cc::rec::trace_id id, bool failed);
+///
+/// `await_log_verdict` keeps a passing test's events too, undecided, because the log rule may still fail it; see
+/// settle_test_bucket.
+void close_test_bucket(cc::rec::trace_id id, bool failed, bool await_log_verdict);
+
+/// Decides a bucket closed undecided, once the log rule has judged its test.
+void settle_test_bucket(cc::rec::trace_id id, bool failed);
 
 /// Takes everything bucketed for `id` since the last take.
 [[nodiscard]] cc::rec::recording take_test_bucket(cc::rec::trace_id id);
@@ -89,6 +95,10 @@ struct kept_log_record
 
 /// Takes the records kept under `owner`.
 [[nodiscard]] cc::vector<kept_log_record> take_log_records(u64 owner);
+
+/// Whether any record is kept under one of `owners` yet.
+/// Only what the recorder has already delivered, so a record still in a thread's buffer answers false.
+[[nodiscard]] bool has_log_records(cc::span<u64 const> owners);
 
 /// Takes the records kept under no owner at all.
 [[nodiscard]] cc::vector<kept_log_record> take_unattributed_log_records();

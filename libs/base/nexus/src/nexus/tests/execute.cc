@@ -576,6 +576,22 @@ void begin_pass(test_context& ctx)
     ctx.aborted_by_check_throw.store(false, cc::memory_order_release);
 }
 
+/// Whether a passing test's recording must wait for the log rule, which may still fail it at the end of the run.
+///
+/// A test that opted in with `recorded` always waits: it asked for its events, and there are few of them.
+/// Under `--record` only a test with a warning already kept waits, since holding every passing test's chunks until the
+/// run ends would fill the pool; a record still in a thread's buffer at this point is the case that loses its dump.
+[[nodiscard]] bool awaits_log_verdict(nx::test_execution const& execution)
+{
+    if (execution.instance.declaration->test_config.recorded)
+        return true;
+
+    auto owners = cc::vector<u64>();
+    for (auto const& pass : execution.log_passes)
+        owners.push_back(pass.owner);
+    return nx::impl::has_log_records(owners);
+}
+
 /// Record that a test ended a pass with async work still carrying its context.
 ///
 /// That work will run during a LATER pass or test and report there, so it is interference rather than cleanup someone else will do.
@@ -1099,7 +1115,9 @@ void finish_async_test(async_test_state& state)
     // The run's recorder comes back BEFORE the bucket is closed against it, which is the order the synchronous path
     // gets from scoping alone.
     state.record_handover = {};
-    nx::impl::close_test_bucket(state.record_trace, state.execution->is_considered_failing());
+    state.execution->record_trace = u64(state.record_trace);
+    nx::impl::close_test_bucket(state.record_trace, state.execution->is_considered_failing(),
+                                state.record_trace != cc::rec::trace_id::none && awaits_log_verdict(*state.execution));
 }
 
 /// Drive one poll of an async test's wrapper node.
@@ -2059,7 +2077,9 @@ void nx::impl::run_test_body(nx::test_execution& execution,
 
     // After the link is gone and the verdict is in.
     // A passing test's events are dropped here, which is what returns their chunks to the pool.
-    nx::impl::close_test_bucket(record_trace, execution.is_considered_failing());
+    execution.record_trace = u64(record_trace);
+    nx::impl::close_test_bucket(record_trace, execution.is_considered_failing(),
+                                record_trace != cc::rec::trace_id::none && awaits_log_verdict(execution));
 
     if (config.verbose)
     {

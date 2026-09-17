@@ -83,3 +83,20 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
                  "logs each message from one context only; a failure here means it no longer does, and that "
                  "dedupe in dx12_context.create.cc should go");
 }
+
+TEST("sg dx12 - a debug-layer message is logged once however many contexts are alive")
+{
+    // Two contexts, neither with a listener: both callbacks receive the message, and only one of them may log it.
+    auto first = dx12::make_fresh_context();
+    if (first == nullptr)
+        SKIP("no dx12 adapter");
+    auto second = dx12::make_fresh_context();
+    if (second == nullptr)
+        SKIP("could not create a second dx12 context");
+
+    // Exactly once whichever context is oldest, since the provoking thread is what attributes the record to this test.
+    nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
+
+    provoke_validation_message(*first);
+    CHECK(true);
+}

@@ -139,6 +139,9 @@ struct nx::test_execution
     // One entry per section pass, for the log rule to judge once the run's records are all delivered — see tests/logs.hh.
     cc::vector<impl::log_pass> log_passes;
 
+    // The trace this test's recording was bucketed under, or 0; the log verdict settles a bucket left undecided.
+    u64 record_trace = 0;
+
     // Failing if this test's own tree fails or any dispatched child fails.
     [[nodiscard]] bool is_considered_failing() const;
 };

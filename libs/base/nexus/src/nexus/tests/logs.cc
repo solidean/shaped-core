@@ -164,6 +164,9 @@ void judge_execution(nx::test_execution& exec, bool outermost)
 
     for (auto& child : exec.nested)
         judge_execution(child, outermost);
+
+    // After the children, whose failures count toward this test's.
+    nx::impl::settle_test_bucket(cc::rec::trace_id(exec.record_trace), exec.is_considered_failing());
 }
 } // namespace
 } // namespace nx

@@ -391,7 +391,7 @@ void nx::impl::open_test_bucket(cc::rec::trace_id id, cc::string_view test_name)
     g_buckets.lock([&](bucket_table& t) { t.by_trace[u64(id)] = bucket{.test_name = test_name}; });
 }
 
-void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed)
+void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed, bool await_log_verdict)
 {
     if (!g_active || id == cc::rec::trace_id::none)
         return;
@@ -402,6 +402,13 @@ void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed)
             auto* const b = t.by_trace.get_ptr(u64(id));
             if (b == nullptr)
                 return;
+
+            if (!failed && await_log_verdict)
+            {
+                // Kept, but not written out unless settle_test_bucket says the test failed after all.
+                b->closed = true;
+                return;
+            }
 
             if (!failed)
             {
@@ -501,4 +508,36 @@ void nx::impl::report_withheld_log_records() noexcept
         });
     if (!printed)
         cc::eprint("  (withheld log records not shown: their store was locked when the crash happened)\n");
+}
+
+void nx::impl::settle_test_bucket(cc::rec::trace_id id, bool failed)
+{
+    // A failing test's bucket was kept at close already; only an undecided one has anything left to decide.
+    if (!g_active || id == cc::rec::trace_id::none)
+        return;
+
+    g_buckets.lock(
+        [&](bucket_table& t)
+        {
+            auto* const b = t.by_trace.get_ptr(u64(id));
+            if (b == nullptr || b->failed)
+                return;
+
+            if (failed)
+                b->failed = true;
+            else
+                t.by_trace.erase(u64(id));
+        });
+}
+
+bool nx::impl::has_log_records(cc::span<u64 const> owners)
+{
+    return g_log_store.lock(
+        [&](log_store& s)
+        {
+            for (auto const owner : owners)
+                if (s.by_owner.contains(owner))
+                    return true;
+            return false;
+        });
 }

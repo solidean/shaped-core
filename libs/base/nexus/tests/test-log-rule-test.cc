@@ -1,4 +1,5 @@
 #include <clean-core/common/log.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string.hh>
@@ -305,4 +306,66 @@ TEST("log rule - a failed check is not also an undeclared error", no_scheduler)
     REQUIRE(exec.executions.size() == 1);
     CHECK(exec.count_failed_checks() == 1);
     CHECK(!mentions(exec.executions[0].root.errors, "undeclared"));
+}
+
+// Registered for this whole binary, which is what the allowance is: no test below declares the record it matches.
+NX_ALLOW_LOGS(cc::rec::level::warning, "", "log rule probe: allowed across the binary");
+
+TEST("log rule - NX_ALLOW_LOGS allows a record in every test of the binary", no_scheduler)
+{
+    if (!has_recorder())
+        SKIP("the run has no recorder (--no-recording)");
+
+    auto const exec = run_one(
+        []
+        {
+            CC_LOG_WARNING("log rule probe: allowed across the binary");
+            CHECK(true);
+        });
+    CHECK(exec.count_failed_tests() == 0);
+
+    // At or below its level only: the same text as an error is still undeclared.
+    auto const as_error = run_one(
+        []
+        {
+            CC_LOG_ERROR("log rule probe: allowed across the binary");
+            CHECK(true);
+        });
+    CHECK(as_error.count_failed_tests() == 1);
+}
+
+TEST("log rule - a recorded test that fails only by the rule keeps its recording", no_scheduler)
+{
+    if (!has_recorder())
+        SKIP("the run has no recorder (--no-recording)");
+
+    auto const recorded = nx::impl::merge_config(nx::config::recorded);
+
+    // Its bucket closes before the verdict, so it is kept undecided until the rule has judged the test.
+    auto const failing = run_one(
+        []
+        {
+            CC_RECORD_MARK("log rule probe: recorded before the warning");
+            CC_LOG_WARNING("log rule probe: fails a recorded test");
+            CHECK(true);
+        },
+        recorded);
+    REQUIRE(failing.executions.size() == 1);
+    CHECK(failing.count_failed_tests() == 1);
+    REQUIRE(failing.executions[0].record_trace != 0);
+    CHECK(nx::impl::take_test_bucket(cc::rec::trace_id(failing.executions[0].record_trace))
+              .count("log rule probe: recorded before the warning")
+          == 1);
+
+    // A passing one still lets its events go.
+    auto const passing = run_one(
+        []
+        {
+            CC_RECORD_MARK("log rule probe: a passing recorded test");
+            CHECK(true);
+        },
+        recorded);
+    REQUIRE(passing.executions.size() == 1);
+    CHECK(passing.count_failed_tests() == 0);
+    CHECK(nx::impl::take_test_bucket(cc::rec::trace_id(passing.executions[0].record_trace)).empty());
 }
