@@ -150,17 +150,28 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
   `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
   tier-1 invocables stay alias-reachable and un-orphaned.
-  Without it the binary aborts before any test reports: metal settles its transfer completions from the
-  `MTL4CommitFeedback` handler, on a queue Apple owns, and `cc::async`'s single-threaded scheduler refuses to wait on a
-  node pushed from a thread it does not drive — "parked on an external push".
-  Closing it means routing that settle through something the pump drives, rather than pushing the node from Apple's
-  thread.
+  Without it the binary aborts before any test reports, with "parked on an external push".
+
+  **The immediate cause is in nexus rather than in this backend.**
+  `execute.cc` drives a parallel test batch with `cc::async_blocking_get_on`, which neither sweeps the pump registry nor parks.
+  `drive_serially`, in the same file, does both — and its comment says why a drive that skips them cannot complete an unthreaded graph.
+  Giving the batch path that same loop takes the sweep from aborting before the first test to running all 293.
+
+  **Behind it sits a question this backend has to answer.**
+  `SC_THREADS=OFF` compiles cc's locks and atomics out, and Apple's `MTL4CommitFeedback` queue does not go away with them.
+  So every node metal settles from a completion handler is a cross-thread push into a build that has no synchronization left.
+  `callback_mutex` covers the backend's own state; the async nodes it pushes are not covered by anything.
+  Measured, with the nexus path patched: deferring the download pushes to a registered pump passes 291 of 293, and a direct push passes all 293.
+  That says the race is not reliably observable, not that it is absent.
+  The two that fail under deferral both read a download straight after `co_await idle_completion()`, whose contract is delivery.
+  So a deferral covering only downloads breaks that guarantee, and covering every completion is the shape of the real fix.
+  A pump reporting outstanding GPU work is needed either way, so that an unthreaded blocking drive keeps sweeping instead of declaring the graph deadlocked; without one the sweep segfaults.
   It is a property of the backend's completion routing rather than of any one test, which is why the pin is at the
   preset.
   **The tier-2 suite pays the same toll in a smaller way**: its tests block on `block_until_idle` rather than awaiting
   `idle_completion()`, and `.shaped-lint.yml` allows that by name.
   Converting them to await was tried and reverted — it works in a threaded build and aborts the `SC_THREADS=OFF` one
-  at the first download, on the same push.
+  at the first download, on the same drive.
   So one piece of work closes both.
 
 - **No metal shader toolchain exists.**
@@ -251,12 +262,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
 - **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
-  dx12 and vulkan are real, windowed and headless.
-  Metal presents headless; its windowed path is written against a `CAMetalLayer` and nothing in the tree reaches it,
-  because shaped-rendering's SDL window has no cocoa arm — see its [TODO](../../shaped-rendering/docs/TODO.md).
+  All three backends are real, windowed and headless.
   Still open:
-  - the **sr cocoa arm** that would hand `native_window::from_cocoa` a layer, and with it the first exercise of metal's
-    windowed chain;
   - **deeper HDR** — metadata and tone-mapping beyond the colorspace set.
     Including whether the request was *granted*: `enable_hdr` is best-effort on both backends and `is_hdr_enabled()`
     reports what was asked for, so nothing tells a caller which colorspace it actually got;

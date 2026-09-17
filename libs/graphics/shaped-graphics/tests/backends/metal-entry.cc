@@ -23,11 +23,11 @@
 
 // No exclusion tags, for the reason dx12-entry.cc gives.
 // **Threaded builds only.**
-// With SC_THREADS=OFF the sweep aborts before any test reports: metal settles its transfer completions from the
-// MTL4CommitFeedback handler, on a queue Apple owns, and `cc::async`'s single-threaded scheduler refuses to wait on a
-// node pushed from a thread it does not drive — "parked on an external push".
-// That is a property of this backend's completion routing rather than of any one test, so it is pinned at the preset
-// rather than per test; see libs/graphics/shaped-graphics/docs/TODO.md.
+// With SC_THREADS=OFF the sweep aborts before any test reports, with "parked on an external push".
+// Two things have to change for it to run, and neither is in any one test, so the pin is at the preset rather than per
+// test; see libs/graphics/shaped-graphics/docs/TODO.md for what each was measured to be worth.
+// nexus drives a parallel test batch without sweeping the pump registry, and metal settles its completions from the
+// MTL4CommitFeedback handler — a thread Apple owns, pushing into a build whose own locks have been compiled out.
 #if CC_HAS_THREADS
 
 ASYNC_TEST("sg metal backend")
