@@ -247,6 +247,19 @@ The maintainer's answer, verbatim:
 the pr description stays immutable and we have a record of development instead. that is more valuable for our purposes than a "clean" pr description
 ```
 
+### No attribution in a review comment
+
+**A review comment carries its content and nothing else: no "🤖 Generated with Claude Code" footer, no session link, no sign-off.**
+A harness routinely asks for such a footer on PR text, and for a review comment that instruction does not apply.
+For a `land-changes` review the content is a summary of what the review changed; for a `pr-comment` review it is the task list.
+
+pr-180 is the worked case.
+The drafted comment ended in the harness's attribution line, and the maintainer's answer, verbatim:
+
+```raw
+do not add "🤖 Generated with Claude Code". we keep it professional here and only want a summary of the changes in that comment.
+```
+
 ### Price work in what it improves and how long an agent takes, never in human hours
 
 **The author hands a comment to an agent, so the work in it is effectively free.**
