@@ -74,6 +74,7 @@ ASYNC_INVOCABLE_TEST("sg - async texture upload then download round-trips", (sg:
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_transfer_texture(ctx);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // only where the backend's resting layout differs
 
     // Fire-and-forget in both directions: no wait between them, so the readback has to order itself behind the copy.
     ctx->upload.bytes_to_texture(tex, pinned_pattern(k_bytes, 11));
@@ -95,6 +96,7 @@ ASYNC_INVOCABLE_TEST("sg - async upload to a dropped texture still releases it",
 
     auto released = std::make_shared<std::atomic<bool>>(false);
     auto const keep = make_transfer_texture(ctx);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // only where the backend's resting layout differs
 
     {
         auto const dropped = make_transfer_texture(ctx);

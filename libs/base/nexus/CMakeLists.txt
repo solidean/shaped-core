@@ -35,6 +35,7 @@ add_library(nexus
     src/nexus/tests/entry.cc
     src/nexus/tests/invoke_tests.cc
     src/nexus/tests/execute.cc
+    src/nexus/tests/logs.cc
     src/nexus/tests/registry.cc
     src/nexus/tests/schedule.cc
     src/nexus/tests/export/xml.cc
@@ -102,6 +103,7 @@ target_sources(nexus
     src/nexus/tests/entry.hh
     src/nexus/tests/invoke_tests.hh
     src/nexus/tests/execute.hh
+    src/nexus/tests/logs.hh
     src/nexus/tests/registry.hh
     src/nexus/tests/schedule.hh
     src/nexus/tests/seed.hh
@@ -202,6 +204,7 @@ if(SC_BUILD_TESTS)
         tests/test-cli-test.cc
         tests/test-test-args-test.cc
         tests/test-check-test.cc
+        tests/test-log-rule-test.cc
         tests/test-recording-test.cc
         tests/test-check-render-test.cc
         tests/test-threaded-check-test.cc

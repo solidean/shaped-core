@@ -14,6 +14,11 @@ enum class cc::glob_option
     /// Run both sides through glob_normalize_path first.
     /// Leave it off only when the caller normalized already — a config comparing one path against many, say, which would otherwise renormalize it per candidate.
     normalize,
+
+    /// Match free text rather than a path: `/` is an ordinary character.
+    /// `*` and `?` cross it, `**` means the same as `*`, and a trailing `/` is literal rather than the subtree shorthand.
+    /// Must not be combined with `normalize`, which only means anything for a path.
+    text,
 };
 
 CC_FLAG_ENUM_INDEXED(cc, glob_option, u32);
@@ -30,7 +35,7 @@ namespace cc
 /// This is a *lexical* normalization for matching, not a filesystem one: `.`, `..` and symlinks are left as written.
 cc::string glob_normalize_path(cc::string_view path);
 
-/// Match a path against a glob.
+/// Match a path (or, under `glob_option::text`, any text) against a glob.
 ///
 /// `?` is one character, `*` a run of them, and neither crosses a `/`.
 /// `**` is the one that does: `src/**` is everything below `src/`, and `src/**/x.hh` also matches `src/x.hh`

@@ -71,7 +71,7 @@ char const* vk_result_name(VkResult r)
 
 // One validation message, to the installed callback or to the log.
 // The layer already decided how bad it is, so the severity maps straight across rather than flattening onto one level.
-void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const
+void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message)
 {
     if (_message_callback)
     {
@@ -79,13 +79,17 @@ void vulkan_context::dispatch_validation_message(vulkan_message_severity severit
         return;
     }
 
+    // A hazard between two copies is only diagnosable with their ranges and order, which the message lacks.
+    auto const windows
+        = message.contains("_AFTER_WRITE") ? cc::format("\n{}", describe_recent_transfer_windows()) : cc::string();
+
     switch (severity)
     {
     case vulkan_message_severity::error:
-        CC_LOG_ERROR("validation: {}", message);
+        CC_LOG_ERROR("validation: {}{}", message, windows);
         break;
     case vulkan_message_severity::warning:
-        CC_LOG_WARNING("validation: {}", message);
+        CC_LOG_WARNING("validation: {}{}", message, windows);
         break;
     case vulkan_message_severity::info:
         CC_LOG_INFO("validation: {}", message);

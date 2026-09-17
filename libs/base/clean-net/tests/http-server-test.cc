@@ -292,6 +292,7 @@ CNET_IO_TEST("cnet - a connection past the limit is closed rather than queued")
     auto fixture = server_fixture({.max_connections = 1});
     fixture.server->route(http_method::get, "/",
                           [](http_server_request const&) { return http_server_response::text("ok"); });
+    nx::expect_warning("refusing a connection", nx::exactly(1));
 
     auto first = tcp_connect(*fixture.net, fixture.server->local());
     CHECK(pump_for([&] { return first->is_ready(); }));

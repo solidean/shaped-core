@@ -109,7 +109,7 @@ struct sg::backend::dx12::dx12_config
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
-    isize upload_ring_bytes = isize(16) * 1024 * 1024;
+    isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
 
     /// Capacity of the inline READBACK ring buffer, in bytes.
     /// Bounds the in-flight inline download volume.
@@ -199,7 +199,9 @@ public:
         return false;
     }
 
-    /// Routes this device's debug-layer messages to `callback` instead of stderr.
+    /// Routes this device's debug-layer messages to `callback` instead of the log.
+    /// D3D12 delivers a message to every context on the device that raised it, and two contexts on one adapter share a device, so a listener sees messages its sibling contexts raised too.
+    /// Without listeners a message is logged once per device, by the oldest context on it that has none.
     /// Only ever called while the debug layer is active in this process, and only for messages raised after creation returned.
     /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.
     /// Passing an empty function restores the stderr default.

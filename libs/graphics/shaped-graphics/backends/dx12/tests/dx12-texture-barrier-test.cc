@@ -140,6 +140,7 @@ TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to CO
 {
     // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to the COMMON (general) layout.
     // They arrive as a single barrier carrying both accesses, plus a one-time perf warning.
+    nx::expect_warning("bound as both a sampled and a storage view", nx::exactly(1));
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const slot = sg::command_list_slot(0);

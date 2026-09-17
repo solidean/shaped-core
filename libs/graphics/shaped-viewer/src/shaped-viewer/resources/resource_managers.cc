@@ -22,6 +22,13 @@ namespace
 // back (as StructuredBuffers) to recompute the flat face normal.
 constexpr auto geometry_usage
     = sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
+
+// A quadric batch splits what a mesh keeps in one kind of buffer, so the two usages are narrower than geometry_usage.
+// The boxes are build input only — no shader reads them, because an intersection shader cannot reach the boxes its own
+// acceleration structure was built from.
+// The primitives are the opposite: read through the bindless table by PrimitiveIndex(), and never seen by the hardware.
+constexpr auto quadric_aabb_usage = sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst;
+constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 } // namespace
 
 namespace impl
@@ -31,7 +38,7 @@ namespace impl
 // Attributes outrank the geometry that indexes them, and that ordering is a correctness argument rather than a
 // preference: a mesh becomes drawable the moment its BLAS is built, and if its uv set were still in flight then it
 // would draw its real triangles against zeroed attribute bytes for a frame or two.
-// Geometry outranks textures for the reason the design gives: a grey model beats a floating albedo map.
+// Geometry outranks textures for the reason the design gives: a gray model beats a floating albedo map.
 constexpr i32 attribute_stream_priority = 20;
 constexpr i32 geometry_stream_priority = 10;
 constexpr i32 texture_stream_priority = 0;
@@ -241,6 +248,133 @@ sg::buffer<u32> mesh_manager::_acquire_index_stand_in(sg::command_list& cmd)
     return _index_stand_in;
 }
 
+quadric_manager quadric_manager::create(sg::context& ctx, manager_config const& cfg)
+{
+    auto manager = quadric_manager(ctx);
+    manager.set_limits(cfg.budget.max_bytes, cfg.budget.max_idle_epochs);
+    return manager;
+}
+
+quadric_set_id quadric_manager::acquire(quadric_data const& set)
+{
+    if (auto const id = find_by_hash(set.hash); id.has_value())
+        return id.value();
+
+    auto const primitives = set.primitives;
+    CC_ASSERT(!primitives.empty(), "quadric_manager::acquire expects at least one primitive");
+
+    // The split the authored form cannot avoid: a primitive carries its box beside it, and the two go to different
+    // buffers — the boxes to the acceleration structure's build input, the rest to what the intersection shader reads.
+    // It happens HERE rather than at authoring time because it is only paid on a miss, which is what lets a batch be
+    // re-acquired every frame for the cost of a hash lookup.
+    auto packed = cc::vector<quadric_gpu>();
+    auto boxes = cc::vector<tg::aabb3f>();
+    packed.reserve(primitives.size());
+    boxes.reserve(primitives.size());
+    for (auto const& p : primitives)
+    {
+        packed.push_back(quadric_gpu::of(p));
+        boxes.push_back(p.bounds);
+    }
+
+    // As for a mesh: the buffers are created here and the bytes are not, so a large batch does not stall the frame
+    // that asked for it.
+    auto primitive_buffer = _ctx.persistent.create_buffer<quadric_gpu>(packed.size(), quadric_primitive_usage);
+    auto aabb_buffer = _ctx.persistent.create_buffer<tg::aabb3f>(boxes.size(), quadric_aabb_usage);
+
+    // The BLAS is not charged yet, since it is not built: `record_settled` adds its size once it is.
+    auto const size_in_bytes = primitive_buffer.size_in_bytes() + aabb_buffer.size_in_bytes();
+
+    auto primitive_transfer = _ctx.stream.data_to_buffer(primitive_buffer, cc::make_pinned_data(cc::move(packed)));
+    auto aabb_transfer = _ctx.stream.data_to_buffer(aabb_buffer, cc::make_pinned_data(cc::move(boxes)));
+    primitive_transfer.set_priority(impl::geometry_stream_priority);
+    aabb_transfer.set_priority(impl::geometry_stream_priority);
+
+    auto const id = insert(set.hash,
+                           {.state = residency::pending,
+                            .primitives = cc::move(primitive_buffer),
+                            .aabbs = cc::move(aabb_buffer),
+                            .primitive_count = primitives.size(),
+                            .bounds = set.bounds},
+                           size_in_bytes);
+
+    _settling[id]
+        = {.primitives = cc::move(primitive_transfer), .aabbs = cc::move(aabb_transfer), .bytes = size_in_bytes};
+    return id;
+}
+
+bool quadric_manager::_try_settle(sg::command_list& cmd, quadric_set_id id, pending_set& p)
+{
+    if (!p.primitives.is_settled() || !p.aabbs.is_settled())
+        return false;
+
+    auto* const record = mutable_record(id);
+    if (record == nullptr)
+        return true; // evicted while streaming; dropping the entry cancels whatever is left
+
+    // Settled without delivering — cancelled, or the transfer failed.
+    // `failed` rather than leaving it pending, so nothing waits on it forever and the placeholder is known to be final.
+    if (!p.primitives.is_complete() || !p.aabbs.is_complete())
+    {
+        record->state = residency::failed;
+        return true;
+    }
+
+    // Only the BOXES are the build input; the primitive buffer is the shader's and the hardware never sees it.
+    // `tg::aabb3f` is already the six-float min-then-max layout a procedural BLAS wants, so the stride is its own size.
+    auto const geometry = sg::blas_aabbs{.aabbs = record->aabbs.raw(),
+                                         .aabb_count = record->primitive_count,
+                                         .aabb_stride_in_bytes = isize(sizeof(tg::aabb3f))};
+
+    // Recorded only now that completion has been observed, which is what the streaming contract asks: a list touching
+    // a streamed extent must be SUBMITTED after that observation, and `cmd` is the caller's to submit after this.
+    record->blas = cmd.raytracing.build_blas(cc::span<sg::blas_aabbs const>(&geometry, 1));
+    record->state = residency::complete;
+
+    // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
+    add_bytes(id, record->blas->size_in_bytes());
+    return true;
+}
+
+isize quadric_manager::record_settled(sg::command_list& cmd)
+{
+    if (_settling.empty())
+        return 0;
+
+    auto finished = isize(0);
+    auto keep = cc::map<quadric_set_id, pending_set>();
+    for (auto&& [id, p] : _settling)
+    {
+        if (_try_settle(cmd, id, p))
+            ++finished;
+        else
+            keep[id] = cc::move(p);
+    }
+
+    _settling = cc::move(keep);
+    return finished;
+}
+
+void quadric_manager::wait_for_settled()
+{
+    if (_settling.empty())
+        return;
+
+    // Promoted first: with the automatic waits back on, a list recorded after this needs no ordering of its own.
+    for (auto&& [id, p] : _settling)
+    {
+        (void)id;
+        p.primitives.promote_to_async();
+        p.aabbs.promote_to_async();
+        (void)cc::try_async_blocking_get(p.primitives.completion());
+        (void)cc::try_async_blocking_get(p.aabbs.completion());
+    }
+
+    auto cmd = _ctx.create_command_list();
+    (void)record_settled(*cmd);
+    _ctx.submit_command_list(cc::move(cmd));
+}
+
 material_manager material_manager::create(sg::context& ctx, manager_config const& cfg)
 {
     auto manager = material_manager(ctx);
@@ -324,7 +458,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
 
     // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
     // this call without the manager holding a copy of it.
-    // Below the geometry priority: a grey model beats a floating albedo map.
+    // Below the geometry priority: a gray model beats a floating albedo map.
     auto transfers = cc::vector<sg::stream_upload_handle>();
     auto offset = isize(0);
     for (auto mip = i32(0); mip < texture.mip_count; ++mip)

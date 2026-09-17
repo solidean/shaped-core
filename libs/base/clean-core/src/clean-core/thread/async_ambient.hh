@@ -19,7 +19,7 @@
 // Only lookup is O(consumers), since it walks until the tag matches.
 //
 // That asymmetry is the point: lookup happens inside a CHECK or a profiler zone-enter, never per spawn and never per poll.
-// If it ever shows up in a profile, add a present_mask to the link so a miss costs one AND.
+// Each link also carries a mask of the tags on its chain, so a miss — the common answer — costs one AND rather than a walk.
 //
 // The chain is already a stack, so a profiler gets enclosing-scope nesting for free.
 
@@ -40,10 +40,21 @@ struct cc::async_ambient_link
     cc::u64 value = 0;
     async_ambient_link* parent = nullptr;
     cc::atomic<i32> refs = {1};
+
+    /// One bit per tag on this chain, this link's included — see impl::async_ambient_tag_bit.
+    /// A walk for a tag whose bit is clear here stops, since no link from here to the root carries it.
+    cc::u64 present_mask = 0;
 };
 
 namespace cc::impl
 {
+/// The bit a tag sets in a link's present_mask: a hash of its address folded to 64 buckets.
+/// Two tags may share a bit, which only costs the walk the mask would have skipped.
+[[nodiscard]] inline u64 async_ambient_tag_bit(void const* tag)
+{
+    return u64(1) << ((u64(reinterpret_cast<uintptr_t>(tag)) * 0x9E3779B97F4A7C15ull) >> 58);
+}
+
 /// Free `l` and every ancestor whose count its release drops to zero.
 /// Iterative rather than recursive: chain depth is a consumer's business, not ours.
 void async_ambient_free(async_ambient_link* l);
@@ -183,7 +194,9 @@ namespace cc
 /// A consumer whose slot holds a pointer wants async_ambient_lookup_ptr_in, which spells the cast once.
 [[nodiscard]] inline u64 async_ambient_lookup_in(void const* head, void const* tag)
 {
-    for (auto const* l = static_cast<async_ambient_link const*>(head); l != nullptr; l = l->parent)
+    auto const bit = impl::async_ambient_tag_bit(tag);
+    for (auto const* l = static_cast<async_ambient_link const*>(head); l != nullptr && (l->present_mask & bit) != 0;
+         l = l->parent)
         if (l->tag == tag)
             return l->value;
     return 0;

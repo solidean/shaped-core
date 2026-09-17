@@ -126,6 +126,68 @@ private:
 
 bucketing_listener g_bucketing;
 
+/// Everything the log rule may still judge.
+struct log_store
+{
+    cc::map<u64, cc::vector<nx::impl::kept_log_record>> by_owner;
+    cc::vector<nx::impl::kept_log_record> unattributed;
+};
+
+/// Taken per kept record and per judgement, never across a cc::rec call.
+cc::mutex<log_store> g_log_store;
+
+[[nodiscard]] bool is_judged_record(cc::rec::event_view const& e)
+{
+    return e.kind() == cc::rec::event_kind::log && e.level() >= cc::rec::level::warning
+        && e.domain() != &nx::g_rec_domain;
+}
+
+/// Copies every warning and error out of the run's chunks, keyed by the owner it was recorded under.
+struct log_store_listener final : cc::rec::listener
+{
+    void on_chunk(cc::rec::chunk_view const& view) override
+    {
+        auto& running = _attribution.for_block(view);
+        for (auto it = view.begin(); it != view.end(); ++it)
+        {
+            auto const e = *it;
+            auto const owner = u64(cc::rec::attribution_cursor::observe(running, e).owner);
+            if (!is_judged_record(e))
+                continue;
+
+            auto record = nx::impl::kept_log_record{
+                .level = e.level(),
+                .domain = e.domain()->name(),
+                .text = cc::string(e.payload.empty() ? e.name() : e.payload_as_text()),
+                .file = e.site().file,
+                .line = e.site().line,
+            };
+            g_log_store.lock(
+                [&](log_store& s)
+                {
+                    if (owner == 0)
+                        s.unattributed.push_back(cc::move(record));
+                    else
+                        s.by_owner[owner].push_back(cc::move(record));
+                });
+        }
+    }
+
+    [[nodiscard]] cc::string_view listener_name() const override { return "nexus log rule"; }
+
+private:
+    cc::rec::attribution_cursor _attribution;
+};
+
+log_store_listener g_log_store_listener;
+cc::rec::listener_handle g_log_store_handle;
+
+/// Holds back what the log rule will judge: an attributed warning or error prints only if it turns out undeclared.
+bool withhold_judged_records(cc::rec::event_view const& e, cc::rec::trace_id owner, void*)
+{
+    return owner == cc::rec::trace_id::none || !is_judged_record(e);
+}
+
 /// Everything the run recorded, kept whole for `--benchmark-rec`.
 ///
 /// No slicing and no attribution: the question this answers is "what happened during the run", which is exactly what
@@ -164,6 +226,7 @@ cc::rec::console_listener& run_console()
     static auto listener = cc::rec::console_listener(cc::rec::console_options::from_environment({
         .min_level = cc::rec::level::info,
         .time = cc::rec::console_time::elapsed,
+        .filter = &withhold_judged_records,
     }));
     return listener;
 }
@@ -207,6 +270,7 @@ bool nx::impl::begin_run_recording()
 
     g_console_handle = cc::rec::register_listener(run_console());
     g_bucketing_handle = cc::rec::register_listener(g_bucketing);
+    g_log_store_handle = cc::rec::register_listener(g_log_store_listener);
     g_active = true;
     return true;
 }
@@ -286,8 +350,10 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
 
     cc::rec::unregister_listener(g_bucketing_handle);
     cc::rec::unregister_listener(g_console_handle);
+    cc::rec::unregister_listener(g_log_store_handle);
     g_bucketing_handle = {};
     g_console_handle = {};
+    g_log_store_handle = {};
     g_active = false;
 
     cc::rec::shutdown();
@@ -325,7 +391,7 @@ void nx::impl::open_test_bucket(cc::rec::trace_id id, cc::string_view test_name)
     g_buckets.lock([&](bucket_table& t) { t.by_trace[u64(id)] = bucket{.test_name = test_name}; });
 }
 
-void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed)
+void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed, bool await_log_verdict)
 {
     if (!g_active || id == cc::rec::trace_id::none)
         return;
@@ -336,6 +402,13 @@ void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed)
             auto* const b = t.by_trace.get_ptr(u64(id));
             if (b == nullptr)
                 return;
+
+            if (!failed && await_log_verdict)
+            {
+                // Kept, but not written out unless settle_test_bucket says the test failed after all.
+                b->closed = true;
+                return;
+            }
 
             if (!failed)
             {
@@ -382,4 +455,89 @@ cc::rec::recording nx::test_recorder::sync()
     auto fresh = nx::impl::take_test_bucket(_trace);
     _all.append(fresh);
     return fresh;
+}
+
+cc::rec::trace_id nx::impl::new_pass_owner()
+{
+    return g_active ? cc::rec::new_trace_id() : cc::rec::trace_id::none;
+}
+
+cc::vector<nx::impl::kept_log_record> nx::impl::take_log_records(u64 owner)
+{
+    return g_log_store.lock(
+        [&](log_store& s)
+        {
+            auto out = cc::vector<kept_log_record>();
+            if (auto* const kept = s.by_owner.get_ptr(owner); kept != nullptr)
+            {
+                out = cc::move(*kept);
+                s.by_owner.erase(owner);
+            }
+            return out;
+        });
+}
+
+cc::vector<nx::impl::kept_log_record> nx::impl::take_unattributed_log_records()
+{
+    return g_log_store.lock([&](log_store& s) { return cc::exchange(s.unattributed, {}); });
+}
+
+void nx::impl::discard_log_records()
+{
+    g_log_store.lock([&](log_store& s) { s = {}; });
+}
+
+void nx::impl::report_withheld_log_records() noexcept
+{
+    auto const printed = g_log_store.try_lock(
+        [&](log_store& s)
+        {
+            auto const print = [](kept_log_record const& r)
+            {
+                cc::eprint(r.level == cc::rec::level::error ? "  withheld error [" : "  withheld warning [");
+                cc::eprint(r.domain);
+                cc::eprint("] ");
+                cc::eprint(r.text);
+                cc::eprint("\n");
+            };
+            for (auto const& [owner, records] : s.by_owner)
+                for (auto const& r : records)
+                    print(r);
+            for (auto const& r : s.unattributed)
+                print(r);
+        });
+    if (!printed)
+        cc::eprint("  (withheld log records not shown: their store was locked when the crash happened)\n");
+}
+
+void nx::impl::settle_test_bucket(cc::rec::trace_id id, bool failed)
+{
+    // A failing test's bucket was kept at close already; only an undecided one has anything left to decide.
+    if (!g_active || id == cc::rec::trace_id::none)
+        return;
+
+    g_buckets.lock(
+        [&](bucket_table& t)
+        {
+            auto* const b = t.by_trace.get_ptr(u64(id));
+            if (b == nullptr || b->failed)
+                return;
+
+            if (failed)
+                b->failed = true;
+            else
+                t.by_trace.erase(u64(id));
+        });
+}
+
+bool nx::impl::has_log_records(cc::span<u64 const> owners)
+{
+    return g_log_store.lock(
+        [&](log_store& s)
+        {
+            for (auto const owner : owners)
+                if (s.by_owner.contains(owner))
+                    return true;
+            return false;
+        });
 }

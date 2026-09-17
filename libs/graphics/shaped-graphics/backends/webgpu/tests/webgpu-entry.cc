@@ -5,6 +5,7 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
+#include <nexus/tests/logs.hh>
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/thread_scope.hh>
 
@@ -14,6 +15,11 @@
 // It runs on the main thread, and its invoked tests inherit that home, because in a threaded wasm build WebGPU objects exist only on the thread that requested the device.
 //
 // The invocables run serially on this context, so each leaves it clean: every list submitted or dropped, and every async it started settled.
+
+// wasm has no SQLite backend, so the persistent blob cache behind ctx.cached degrades to always-miss and says so once,
+// on whichever test first builds a cached pipeline.
+// Correctness never depended on it — a cache miss is what an empty cache is — so this is expected here rather than a defect.
+NX_ALLOW_LOGS(cc::rec::level::warning, "bcache", "cache degraded to always-miss");
 
 namespace
 {

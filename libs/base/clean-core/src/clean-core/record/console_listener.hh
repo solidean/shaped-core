@@ -68,6 +68,14 @@ struct cc::rec::console_options
     /// symbol and prefix_base mean something rather than being carried and ignored.
     bool show_stats = false;
 
+    /// Decides whether an event that passed every other option prints; null prints all of them.
+    ///
+    /// Handed the owner the event was recorded under (cc::rec::owner_scope), which is what lets a harness hold back
+    /// what it will judge per owner later.
+    /// Runs under the recorder's processing mutex, so it must not flush or register listeners.
+    bool (*filter)(rec::event_view const& e, rec::trace_id owner, void* user) = nullptr;
+    void* filter_user = nullptr;
+
     /// Send warnings and errors to stderr, everything else to stdout.
     bool split_streams = true;
 
@@ -149,6 +157,9 @@ private:
 
     cc::vector<pending_line> _pending;
     isize _printed = 0;
+
+    /// Maintained only while a filter is set; nothing else needs to know an event's owner.
+    rec::attribution_cursor _attribution;
 
     /// The wall clock of the earliest event this listener has printed, so an elapsed time reads as an offset into
     /// the run rather than into whichever batch happened to arrive first.

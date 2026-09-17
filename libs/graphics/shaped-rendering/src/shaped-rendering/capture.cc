@@ -125,7 +125,11 @@ cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const&
 {
     CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
 
-    auto future = ctx.download.bytes_from_texture(texture.raw());
+    // Read back through a list rather than the async tier: the target rests in a render-target layout the transfer queue
+    // cannot use, and a list transitions it inline where the async tier would submit a list of its own to do so.
+    auto cmd = ctx.create_command_list();
+    auto future = cmd->download.bytes_from_texture(texture.raw());
+    (void)ctx.submit_command_list(cc::move(cmd));
     ctx.block_until_idle();
     auto const bytes = future.try_get_bytes();
     if (!bytes.has_value())
@@ -141,7 +145,11 @@ cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ct
     CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
 
     auto const size = tg::vec2i(texture.width(), texture.height());
-    auto const future = ctx.download.bytes_from_texture(texture.raw());
+
+    // Through a list for the reason the blocking twin gives: the target's layout is one the transfer queue cannot read.
+    auto cmd = ctx.create_command_list();
+    auto const future = cmd->download.bytes_from_texture(texture.raw());
+    (void)ctx.submit_command_list(cc::move(cmd));
 
     // The download settles wherever the backend delivers it, and the encode below touches only the bytes and the file,
     // so this needs no home of its own.

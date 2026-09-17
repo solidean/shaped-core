@@ -11,6 +11,7 @@
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
+#include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
 #include <shaped-viewer/scene/pbr_material.hh>
@@ -181,6 +182,93 @@ private:
     sg::blas_handle _placeholder_blas;
     sg::buffer<tg::pos3f> _placeholder_vertices;
     cc::map<mesh_id, pending_mesh> _settling;
+};
+
+/// One uploaded quadric batch: its two buffers and the procedural BLAS built over them.
+///
+/// Two buffers rather than one, because the hardware and the shader want different things.
+/// `aabbs` is the acceleration structure's build input and nothing reads it afterwards — an intersection shader cannot reach the
+/// boxes the BLAS was built from.
+/// `primitives` is what the intersection shader reads by `PrimitiveIndex()`, through the bindless table.
+///
+/// The BLAS is built once, when the batch settles, exactly as a mesh's is: a scene item then references the batch and only the
+/// (cheap) TLAS is rebuilt per frame.
+struct sv::quadric_set_record
+{
+    /// `complete` once both buffers are uploaded and the BLAS is built.
+    /// While `pending` there is no BLAS to trace, so the batch is drawn as the shared placeholder box scaled onto `bounds`.
+    residency state = residency::pending;
+
+    /// the intersection shader's own data, read by `PrimitiveIndex()`
+    sg::buffer<quadric_gpu> primitives;
+
+    /// the BLAS build input, one box per primitive; its layout is `D3D12_RAYTRACING_AABB`, which `tg::aabb3f` already is
+    sg::buffer<tg::aabb3f> aabbs;
+
+    isize primitive_count = 0;
+    sg::blas_handle blas;
+
+    /// The extent in the batch's own frame, when the payload declared one — the summary half of the record.
+    /// It outlives the payload, which is the point: a pending batch is drawn as the placeholder box scaled onto this, and one
+    /// whose bounds nobody stated is skipped instead, since guessing an extent would place it wrong.
+    cc::optional<tg::aabb3f> bounds;
+};
+
+/// Hands out `quadric_set_id`s and owns the two buffers + procedural BLAS behind each, with LRU budgeting.
+///
+/// The quadric counterpart of `mesh_manager`, and deliberately the same shape: acquire queues transfers and returns at once,
+/// `record_settled` builds the acceleration structure behind them, and residency says how far along a batch is.
+/// What differs is only that the BLAS is built over AABBs rather than triangles, and that the payload has to be SPLIT on the way
+/// out — the authored form carries each primitive's box beside it, and the two go to different buffers.
+class sv::quadric_manager : public impl::lru_pool<quadric_set_id, quadric_set_record>
+{
+public:
+    /// A manager that records every acquire into `ctx` (which must outlive it), budgeted by `cfg`.
+    [[nodiscard]] static quadric_manager create(sg::context& ctx, manager_config const& cfg = {});
+
+    /// The quadric_set_id for `set.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
+    ///
+    /// On a miss the two buffers are created, the authored primitives are split into them, and both payloads go to `ctx.stream`
+    /// — so an acquire costs two allocations and a hash lookup rather than a transfer.
+    /// **The split happens only on a miss**, which is why `quadric_data` borrows its span instead of pinning it: a batch
+    /// re-acquired every frame touches none of its bytes.
+    /// The id is usable at once and the batch is `pending` until `record_settled` builds its BLAS.
+    /// Ray tracing must be supported on the context.
+    [[nodiscard]] quadric_set_id acquire(quadric_data const& set);
+
+    /// Builds the procedural BLAS for every batch whose buffers have finished streaming, recording onto `cmd`.
+    ///
+    /// Same contract as `mesh_manager::record_settled`: the build may only be recorded once the transfers are observed done, and
+    /// `cmd` is submitted by the caller after this returns.
+    /// A transfer that settled without delivering leaves its batch `failed` rather than pending.
+    /// Returns how many batches it finished.
+    isize record_settled(sg::command_list& cmd);
+
+    /// Blocks until every queued transfer has landed, then finishes them all.
+    /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
+    void wait_for_settled();
+
+    /// How many batches are still streaming.
+    [[nodiscard]] isize settling_count() const { return _settling.size(); }
+
+private:
+    explicit quadric_manager(sg::context& ctx) : _ctx(ctx) {}
+
+    /// The transfers one queued batch is waiting on.
+    /// The payload is NOT held here: `ctx.stream` took the pins, so dropping this entry cancels whatever has not been sent —
+    /// which is what makes evicting a still-streaming batch free.
+    struct pending_set
+    {
+        sg::stream_upload_handle primitives;
+        sg::stream_upload_handle aabbs;
+        isize bytes = 0;
+    };
+
+    /// Finishes `id` if its transfers have settled; returns whether it did.
+    [[nodiscard]] bool _try_settle(sg::command_list& cmd, quadric_set_id id, pending_set& p);
+
+    sg::context& _ctx;
+    cc::map<quadric_set_id, pending_set> _settling;
 };
 
 /// One uploaded material set: a StructuredBuffer of `pbr_material_gpu`, one entry per triangle, indexed by

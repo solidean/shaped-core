@@ -20,6 +20,19 @@ void mesh_ref::transform(tg::affine_transform3f const& t)
     target().transform = t;
 }
 
+scene_item& quadric_ref::target() const
+{
+    return _frame->_views[u32(_view)].layers[_layer].items[_item];
+}
+
+void quadric_ref::transform(tg::affine_transform3f const& t)
+{
+    if (_item == no_item)
+        return; // an empty batch was never placed, so there is nothing to move
+
+    target().transform = t;
+}
+
 area_light& light_ref::target() const
 {
     return _frame->_views[u32(_view)].layers[_layer].area_lights[_light];
@@ -50,6 +63,66 @@ mesh_ref scene_ref::add_mesh(sv::resident_mesh const& mesh)
     auto& items = target().items;
     items.push_back(_frame->resources().acquire_scene_item(mesh));
     return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+quadric_ref scene_ref::add_quadrics(sv::quadric_set const& set)
+{
+    // An empty batch draws nothing, so it is filtered out here rather than asserted on: a caller building a set from a
+    // loop that happened to produce no primitives has not made a mistake, and `frame::_flush_immediate_quadrics`
+    // already skips one for the same reason.
+    // The lower-level asserts stay as contracts — see `gpu_resource_manager::create_quadric_set`.
+    if (set.is_empty())
+        return quadric_ref(_frame, _view, _layer, quadric_ref::no_item);
+
+    // Content-keyed like `add_mesh`, so a caller re-adding an unchanged batch every frame pays lookups.
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_scene_item(set));
+    return quadric_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+quadric_ref scene_ref::add_quadrics(sv::resident_quadric_set const& set)
+{
+    if (set.primitive_count == 0)
+        return quadric_ref(_frame, _view, _layer, quadric_ref::no_item);
+
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_scene_item(set));
+    return quadric_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
+void scene_ref::add_sphere(tg::sphere3f const& sphere, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_sphere(sphere);
+}
+
+void scene_ref::add_line(tg::segment3f const& segment, line_style const& style, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_line(segment, style);
+}
+
+void scene_ref::add_line(tg::segment3f const& segment, float radius, material_id material)
+{
+    add_line(segment, line_style{.radius = radius}, material);
+}
+
+void scene_ref::add_cone(tg::segment3f const& base_to_apex, float base_radius, material_id material, bool capped)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_cone(base_to_apex, base_radius, capped);
+}
+
+void scene_ref::add_arrow(tg::segment3f const& segment, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment);
+}
+
+void scene_ref::add_arrow(tg::segment3f const& segment, float shaft_radius, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, shaft_radius);
+}
+
+void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material)
+{
+    _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
 light_ref scene_ref::add_light(area_light const& light)

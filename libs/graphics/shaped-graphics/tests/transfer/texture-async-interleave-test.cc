@@ -88,6 +88,9 @@ ASYNC_INVOCABLE_TEST("sg - async texture upload composes after a list that wrote
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
+    // Allowed rather than expected: whether the fix-up has work depends on where the backend rests a sampled texture,
+    // and a backend that tracks no layouts at all — webgpu, where every layout is `general` — never does it.
+    nx::allow_warnings("in a layout its transfer queue cannot use");
 
     // The reverse edge: the list submits first, and the async upload must land after it rather than under it.
     // Nothing here waits, so the ordering is entirely the reverse stamp's.
@@ -114,6 +117,9 @@ ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-re
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
+    // Allowed rather than expected: whether the fix-up has work depends on where the backend rests a sampled texture,
+    // and a backend that tracks no layouts at all — webgpu, where every layout is `general` — never does it.
+    nx::allow_warnings("in a layout its transfer queue cannot use");
 
     // Nothing restores a layout any more: the transfer leaves the texture where it needed it, and the next list's
     // entry barrier repairs that like it would after any other predecessor.
@@ -196,6 +202,9 @@ ASYNC_INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, an
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
+    // Allowed rather than expected: whether the fix-up has work depends on where the backend rests a sampled texture,
+    // and a backend that tracks no layouts at all — webgpu, where every layout is `general` — never does it.
+    nx::allow_warnings("in a layout its transfer queue cannot use");
 
     // The scenario the entry-barrier model exists for, end to end.
     //

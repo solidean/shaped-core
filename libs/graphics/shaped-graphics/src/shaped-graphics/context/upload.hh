@@ -68,6 +68,9 @@ public:
     /// Distinct from set_async_window_size, which sizes this async (ctx.upload) path's staging buffer.
     void set_inline_budget(isize bytes);
 
+    /// The inline-upload ring a context starts with, unless its backend config says otherwise.
+    static constexpr isize default_inline_budget_bytes = isize(16) * 1024 * 1024;
+
     // Pinned to its owning context: neither copyable nor movable.
     context_upload_scope(context_upload_scope const&) = delete;
     context_upload_scope(context_upload_scope&&) = delete;

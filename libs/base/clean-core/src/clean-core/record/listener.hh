@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/map.hh>
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/fwd.hh>
 #include <clean-core/string/string_view.hh>
@@ -69,6 +70,41 @@ struct cc::rec::listener
 
     /// What this listener is called in diagnostics.
     [[nodiscard]] virtual cc::string_view listener_name() const { return "listener"; }
+};
+
+/// The trace and owner (cc::rec::owner_scope) an event was recorded under.
+struct cc::rec::attribution
+{
+    rec::trace_id trace = rec::trace_id::none;
+    rec::trace_id owner = rec::trace_id::none;
+};
+
+/// Carries each thread's attribution across the blocks a listener is handed.
+///
+/// A thread publishes attribution as state — the chunk preamble states it, an ambient delta changes it — so an event
+/// carries none of its own, and a block that is a later slice of a chunk carries no preamble either.
+/// **Every event of every block must pass through `observe`, in order**, deltas included, or the state goes stale.
+///
+///   auto& running = _cursor.for_block(view);
+///   for (auto it = view.begin(); it != view.end(); ++it)
+///       auto const a = rec::attribution_cursor::observe(running, *it);
+struct cc::rec::attribution_cursor
+{
+    /// The running attribution for `view`'s thread, reset when `view` starts a chunk this cursor has not seen.
+    [[nodiscard]] rec::attribution& for_block(rec::chunk_view const& view);
+
+    /// Applies `e` to `running` when it is a preamble or an ambient delta, and returns the attribution `e` belongs to.
+    /// A delta belongs to the context it names.
+    static rec::attribution observe(rec::attribution& running, rec::event_view const& e);
+
+private:
+    struct thread_state
+    {
+        u64 chunk_seq = ~u64(0);
+        rec::attribution running;
+    };
+
+    cc::map<u32, thread_state> _threads;
 };
 
 /// Feeds a listener one event at a time instead of one block at a time.

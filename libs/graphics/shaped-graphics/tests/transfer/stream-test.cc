@@ -166,10 +166,15 @@ ASYNC_INVOCABLE_TEST("sg stream - a list touching a streamed buffer waits for it
 
     auto stream = c.stream.bytes_to_buffer(buf, cc::make_pinned_data(src));
     REQUIRE(stream.is_valid());
+    nx::allow_warnings("waiting on an in-flight streaming transfer");
+    // A backend that cannot wait brings the rest of the stream forward at submit instead, which satisfies the same
+    // contract by a different route and says so in its own words.
+    nx::allow_warnings("a command list touches a resource a stream is still filling");
 
     // No promotion, and no explicit wait on the handle: a list recorded now still reads the whole streamed payload,
     // because a list touching a resource a stream is still filling waits for it at submit.
-    // It also warns once that it did, since the stall is the caller's to know about.
+    // It also warns once that it did, since the stall is the caller's to know about — but only while the stream is still
+    // in flight at submit, which is a race this test does not control.
     //
     // A command list rather than ctx.download: the wait lives in the list's submit, and the async tier reaches the
     // copy queue without one.
@@ -450,6 +455,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     desc.height = 64;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     isize const row_bytes = 64 * 4;
@@ -550,6 +556,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed r
     desc.height = 32;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     isize const row_bytes = 32 * 4;

@@ -5,11 +5,14 @@
 #include <typed-geometry/transform/transform.hh>
 
 /// What kind of thing a scene item is.
-/// Exactly one kind exists today; the tag is here so more kinds (point clouds, procedural primitives, volumes, …) slot in without every consumer switching on a variant yet.
+/// More kinds (point clouds, volumes, …) slot in the same way, without every consumer switching on a variant.
 /// Lights are *not* items — a view holds them in its own typed lists (see view.hh / light.hh).
 enum class sv::scene_item_kind : sv::u8
 {
     triangle_mesh,
+
+    /// A batch of analytic quadrics, traced through a procedural BLAS — see libs/graphics/shaped-viewer/docs/quadrics.md.
+    quadric_set,
 };
 
 /// One concrete object in a view: a mesh placed into the world with a transform, shaded by one material permutation.
@@ -22,6 +25,7 @@ enum class sv::scene_item_kind : sv::u8
 /// it — so the two are deliberately not spelled alike.
 /// `gpu_resource_manager::acquire_scene_item` is what fills all three; nothing else should mint one by hand, since the
 /// three have to come from one resolution.
+/// There is one overload per geometry kind, and each sets `kind` along with the id that kind uses.
 ///
 /// `transform` is affine because a placement may scale or shear; build one from tg's factories
 /// (`make_rotation`, `make_translation`, `make_from_linear_mat`, …) and `tg::compose` them.
@@ -30,7 +34,12 @@ struct sv::scene_item
 {
     scene_item_kind kind = scene_item_kind::triangle_mesh;
 
+    /// live at `triangle_mesh`
     mesh_id mesh = mesh_id::invalid;
+
+    /// live at `quadric_set`
+    quadric_set_id quadrics = quadric_set_id::invalid;
+
     instance_id instance = instance_id::invalid;
 
     cc::hash128 shader_key;

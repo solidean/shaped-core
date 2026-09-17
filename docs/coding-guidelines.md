@@ -33,6 +33,16 @@ Churn that would bury the actual point of a diff — do it separately.
 
 ---
 
+## Spelling — American English
+
+**We write American English**, in prose and in identifiers alike: `color`, not `colour`; `center`, not `centre`; `gray`, not `grey`; `behavior`, `neighbor`, `parameterize`.
+
+It binds identifiers because they are read alongside the API they sit next to.
+`sv::mesh_attribute::create("base_color", ...)` beside a local named `colours` is the mismatch that makes someone look twice.
+It binds `///` and `//` comments, `#` comments in CMake and Python, docstrings, every `.md` file, commit messages and PR descriptions — the same surface the line rule below binds.
+
+Quoted material keeps its own spelling: an error message from a third-party tool, a standard's wording, a name someone chose.
+
 ## Prose style — one semantic point per line
 
 **Never reflow prose into a justified block.

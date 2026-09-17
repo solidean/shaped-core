@@ -162,6 +162,24 @@ A chain of `co_await`s that logs nothing would be billed to whatever context pre
 The cost at each restore site is a short chain walk for the id plus one compare, and a node carrying no ambient token never reaches even that.
 A worker draining related items restores the same context repeatedly, and those repeats stop at the compare.
 
+The delta gates on its own `category::attribution`, not on profiling.
+Silencing profiling therefore cannot silently drop the attribution a harness judges by.
+
+#### An owner beside the trace
+
+```cpp
+cc::rec::owner_scope const owner(id);                     // everything recorded under it answers to `id`
+auto const o = cc::rec::current_owner_id();               // the owner in effect, or none
+```
+
+**A trace cannot attribute work to whoever runs it**, because every `CC_RECORD_ASYNC_SCOPE` mints a fresh trace with no link to the enclosing one.
+A harness keying on the trace loses whatever a library records inside its own async scope.
+
+`cc::rec::owner_scope` installs a second id on the ambient chain, and async scopes leave it alone.
+It follows the work exactly as a trace does, and a `none` id installs nothing.
+The delta carries it as an `owner` field beside `trace`, found in the same chain walk, and is written when either changes.
+Until some `owner_scope` has ever been installed the walk does not look for one, so a process without a harness pays one load.
+
 **The delta carries the ID rather than the ambient address**, which is what makes it free.
 An address is unique only while its link lives, so an earlier version pinned each head into the chunk to reserve it.
 That cost one pin per context switch against a 64-slot array, force-rotating a whole megabyte chunk every 64 switches.
@@ -328,7 +346,8 @@ So there is no separate trace scope: `CC_RECORD_ASYNC_SCOPE` opens one, minting 
 `cc::rec::current_trace_id()` reads the chain, so it is correct on whichever worker resumed the work.
 
 What stays here is minting, the relation vocabulary and recording an edge.
-A relation gates on `category::tracing`; the scope itself is an async scope and gates on `category::profiling`.
+A relation gates on `category::tracing`; the scope's begin and end are an async scope's and gate on `category::profiling`.
+The ambient delta that carries membership gates on `category::attribution`.
 
 ### The console
 
@@ -376,7 +395,7 @@ A half-full listener chunk sitting in the ordinary queue would stall everything 
 
 ## The chunk preamble
 
-The current trace id is stream **state**, not a per-event field.
+The current trace and owner ids are stream **state**, not per-event fields.
 A thread emits a delta only when it changes, at the four sites in `cc::async` that install or adopt an ambient context, and a reader carries the running value forward.
 
 Each chunk still has to be independently decodable, or ring capture and crash dumps could not start reading in the middle.
@@ -387,7 +406,7 @@ A trace could be — a consumer reading a thread in order has seen every delta �
 Imagine one or two frame or worker scopes per thread, opened at startup and never re-opened.
 A window that outlived their `scope_begin` — a ring buffer, a decimated capture, the tail of a crash dump — has nothing left to learn from, and would render everything inside them at the wrong depth.
 
-The preamble is a fixed forty bytes, which is what keeps a rotation's cost independent of how deep the thread happens to be:
+The preamble is a fixed 48 bytes, which is what keeps a rotation's cost independent of how deep the thread happens to be:
 
 | field | meaning |
 |---|---|
@@ -395,6 +414,9 @@ The preamble is a fixed forty bytes, which is what keeps a rotation's cost indep
 | `scope_depth` | how many scopes are open, in full |
 | `named_scopes` | how many of the three slots below are filled |
 | `scope0`–`scope2` | the **outermost** open scopes, as `type_code::desc_ref` |
+| `owner` | the owner id in effect (`cc::rec::owner_scope`) |
+
+A descriptor describes its own fields, so a recording from before `owner` existed simply lacks it, and `attribution_cursor` reads that as `none`.
 
 The two counts are deliberately separate.
 A preamble reporting depth 7 with 2 names says exactly what it does and does not know, so a reader nests correctly and renders the rest unnamed rather than guessing.
@@ -434,6 +456,18 @@ That holds whether the background consumer or an explicit `flush_blocking()` is 
 
 The raw interface is per chunk rather than per event, which is what keeps the consumer cheap: one virtual call per megabyte instead of one per event.
 `cc::rec::event_listener<Derived>` is the CRTP adapter for listeners that would rather have per-event dispatch.
+
+**An event carries no attribution of its own**, and a block that is a later slice of a chunk carries no preamble either.
+A listener that needs an event's trace or owner keeps a `cc::rec::attribution_cursor`:
+
+```cpp
+auto& running = _cursor.for_block(view);                             // this thread's state, reset on a chunk it has not seen
+for (auto it = view.begin(); it != view.end(); ++it)
+    auto const a = cc::rec::attribution_cursor::observe(running, *it); // a.trace, a.owner
+```
+
+Every event of every block must pass through `observe` in order, deltas included, or the running state goes stale.
+A preamble or delta belongs to the context it names.
 
 A listener may record events of its own — logging from a listener is entirely normal — and the **layer rule** is what stops that from becoming a cycle.
 

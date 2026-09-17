@@ -19,6 +19,16 @@
 // An id compares soundly with no pin, no atomic and no lifetime.
 //
 // What a restore site pays is a short chain walk for the id, which measures as free beside the event it gates.
+//
+// **Leaving every context is the one lazy transition.**
+// A pool worker leaves its context before each queued item and, draining one test's work, re-enters that same context
+// right after, so an eager delta would be two events per item under a harness that installs owners.
+// The reset is only marked; the next event writes it first, and re-entering the same context cancels it.
+// What it gives up is the time between the two: a gap with no events in it stays billed to the context before it.
+//
+// **The owner id (cc::rec::owner_scope) is found in the same walk.**
+// Until some owner_scope has ever been installed the walk stops at the trace, so a process without a harness pays one
+// relaxed load for it.
 
 namespace
 {
@@ -26,33 +36,93 @@ using namespace cc::primitive_defines;
 
 constexpr cc::rec::field ambient_fields[] = {
     {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
+    {.name = "owner", .type = cc::rec::type_code::u64_, .offset = 8, .size = 8},
+};
+
+struct ambient_payload
+{
+    u64 trace = 0;
+    u64 owner = 0;
 };
 
 constexpr cc::rec::desc ambient_desc = {
     .kind = cc::rec::event_kind::ambient_changed,
-    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::profiling),
+    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::attribution),
     .name = "async.ambient",
     .dom = &cc::rec::g_system_domain,
     .fields = ambient_fields,
-    .field_count = 1,
-    .fixed_payload_size = 8,
+    .field_count = 2,
+    .fixed_payload_size = sizeof(ambient_payload),
 };
 } // namespace
 
 void cc::rec::impl::note_ambient_change(void* head)
 {
-    // Before the walk, so a build with profiling silenced pays one load and a branch.
+    // Before the walk, so a build with attribution silenced pays one load and a branch.
     if (!rec::is_recording(ambient_desc))
         return;
 
-    auto const trace = head == nullptr ? u64(0) : cc::async_ambient_lookup_in(head, rec::impl::trace_tag());
+    auto& w = t_writer;
+    if (head == nullptr)
+    {
+        if (w.last_trace != 0 || w.last_owner != 0)
+            w.ambient_reset_pending = true;
+        return;
+    }
+
+    auto payload = ambient_payload{};
+    auto const* const trace_t = rec::impl::trace_tag();
+    auto const* const owner_t = rec::impl::owner_tag();
+    auto const trace_bit = cc::impl::async_ambient_tag_bit(trace_t);
+    auto const owner_bit = cc::impl::async_ambient_tag_bit(owner_t);
+    auto found_trace = false;
+    auto found_owner = !rec::impl::g_owner_ever_installed.load(cc::memory_order_relaxed);
+
+    // The innermost link of each tag wins, and the walk ends once both are known — or once the mask says neither of
+    // the ones still missing is anywhere further down.
+    for (auto const* l = static_cast<cc::async_ambient_link const*>(head); l != nullptr; l = l->parent)
+    {
+        auto const wanted = (found_trace ? 0 : trace_bit) | (found_owner ? 0 : owner_bit);
+        if ((l->present_mask & wanted) == 0)
+            break;
+
+        if (!found_trace && l->tag == trace_t)
+        {
+            payload.trace = l->value;
+            found_trace = true;
+        }
+        else if (!found_owner && l->tag == owner_t)
+        {
+            payload.owner = l->value;
+            found_owner = true;
+        }
+
+        if (found_trace && found_owner)
+            break;
+    }
 
     // A worker draining related items restores the same context over and over, and two different heads under one
-    // trace are the same attribution anyway — so this skips strictly more than an address compare could.
-    auto& w = t_writer;
-    if (w.last_trace == trace)
+    // attribution are the same attribution anyway — so this skips strictly more than an address compare could.
+    // A pending reset is cancelled by coming back to where the thread was: no event saw the gap.
+    auto const unchanged = w.last_trace == payload.trace && w.last_owner == payload.owner;
+    w.ambient_reset_pending = false;
+    if (unchanged)
         return;
 
-    rec::record_event(ambient_desc, trace);
-    w.last_trace = trace;
+    rec::record_event(ambient_desc, payload);
+    w.last_trace = payload.trace;
+    w.last_owner = payload.owner;
+}
+
+void cc::rec::impl::flush_ambient_reset()
+{
+    auto& w = t_writer;
+    w.ambient_reset_pending = false; // first: the write below goes through the same check
+
+    if (!rec::is_recording(ambient_desc))
+        return;
+
+    rec::record_event(ambient_desc, ambient_payload{});
+    w.last_trace = 0;
+    w.last_owner = 0;
 }

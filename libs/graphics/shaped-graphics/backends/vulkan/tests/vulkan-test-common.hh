@@ -15,20 +15,8 @@
 
 namespace sg::backend::vulkan::test
 {
-/// Fails whichever test provoked it on any validation message of warning severity or worse.
-/// That is what makes the layer a gate rather than log noise.
-/// A test that installs a callback of its own reinstalls this one before it returns, since the context outlives it.
-inline void fail_on_validation_messages(vulkan_context& ctx)
-{
-    ctx.set_message_callback(
-        [](vulkan_message_severity severity, cc::string_view message)
-        {
-            if (severity <= vulkan_message_severity::warning)
-                CHECK(false).context(cc::format("vulkan validation: {}", message));
-        });
-}
-
-/// A fresh context with validation, sync validation and the fail-on-validation listener, or nullptr on a host with no Vulkan device.
+/// A fresh context with validation and sync validation, or nullptr on a host with no Vulkan device.
+/// A validation message fails the running test through the log rule.
 ///
 /// The caller takes `exclusive("vulkan-device")`.
 /// Device creation and teardown are serialized process-wide (shaped-graphics/context/impl/device_lifecycle.hh), and a teardown slows with every other device still alive.
@@ -44,8 +32,6 @@ inline void fail_on_validation_messages(vulkan_context& ctx)
     if (ctx.has_error())
         return nullptr;
 
-    auto typed = std::static_pointer_cast<vulkan_context>(ctx.value());
-    fail_on_validation_messages(*typed);
-    return typed;
+    return std::static_pointer_cast<vulkan_context>(ctx.value());
 }
 } // namespace sg::backend::vulkan::test

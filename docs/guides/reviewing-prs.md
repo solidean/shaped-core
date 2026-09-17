@@ -247,6 +247,19 @@ The maintainer's answer, verbatim:
 the pr description stays immutable and we have a record of development instead. that is more valuable for our purposes than a "clean" pr description
 ```
 
+### No attribution in a review comment
+
+**A review comment carries its content and nothing else: no "🤖 Generated with Claude Code" footer, no session link, no sign-off.**
+A harness routinely asks for such a footer on PR text, and for a review comment that instruction does not apply.
+For a `land-changes` review the content is a summary of what the review changed; for a `pr-comment` review it is the task list.
+
+pr-180 is the worked case.
+The drafted comment ended in the harness's attribution line, and the maintainer's answer, verbatim:
+
+```raw
+do not add "🤖 Generated with Claude Code". we keep it professional here and only want a summary of the changes in that comment.
+```
+
 ### Price work in what it improves and how long an agent takes, never in human hours
 
 **The author hands a comment to an agent, so the work in it is effectively free.**
@@ -343,6 +356,12 @@ Its key was `resolved_material::permutation_key`, which covers the resolution's 
 The emitted text also depends on the bindless table counts, the entry point and both include paths.
 A `gpu_resource_manager` configured with non-default budgets generated a shader declaring the *default* array sizes against a group layout of a different size.
 
+**The same enumeration binds a fix the review recommends.**
+A payload's content hash covers its bytes, while the thing cached from it usually copies more.
+pr-179's first draft told the author to key sv's placement slots on each `mesh_attribute::hash`.
+The binding the slot holds also copies the attribute's `name`, `format` and `frequency`, so a rename over the same bytes would still have hit the stale fast path.
+List what the cached value copies, field by field, and key on all of it.
+
 ### Adding a member behind a seam means re-reading the seam's callers
 
 A vtable, a trait, an enum with a switch — the written contract covers the members that exist, and a caller is free to lean on a property all of them happen to share.
@@ -396,6 +415,24 @@ One arm called `slib::create_dxc_spirv_compiler()`, and the other called somethi
 
 The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
 That branch had two of them and its PR body named one, which is the ratio to expect.
+
+### A review of code nobody here can run says so, and hands verification to the author
+
+Some branches cannot be built on any machine the reviewer has — a Metal backend reviewed from Windows is the case that set this.
+Everything such a review finds is read off the source, and the comment must say that plainly rather than wear the register of a verified finding.
+
+- **Frame the whole comment as inferred from source only**, once, at the top.
+- **Make each item reverify → fix → test**, so the author's agent checks the mechanism before changing code.
+- **Mark the items that hinge on runtime ordering or vendor API behaviour as plausible**, to be confirmed on the author's machine first.
+- **Keep the plausible ones in the comment.**
+  Most of them end in a missing test, and the test is worth having even when the finding turns out wrong.
+
+pr-177 is the worked case: four parallel readers over a whole Metal backend, with nothing runnable.
+The maintainer's answer to the verdict, verbatim:
+
+```raw
+basically prepare the pr comment with what you found but keep it as "inferred from source only". lots of it are request for more tests, so always valuable. the other stuff julius' agent should just reverify and check
+```
 
 ### A one-for-one migration keeps the old idiom's breadth, and that is where to look
 
@@ -637,6 +674,17 @@ The maintainer's answer was a runtime assert at dispatch instead — a child's f
 The finding was right and the fix was unbuildable, and the review had even written "I have not checked how a driver's dispatched parameter type is known to the scheduler" beside it.
 A sentence like that is the check, left undone; do it before recommending, not after.
 
+**A member of the right type is not the mechanism wired.**
+A helper that notifies, retires or releases usually needs a call that connects it, and holding the helper proves nothing about that call.
+pr-177's first draft said metal's streams "do notify, through `sg::impl::transfer_drain`", because `metal_stream_system` holds one.
+It calls `_drain.start()` and never `_drain.notify_on_drained(&ctx)`, which every dx12 and vulkan drain calls, so none of metal's three drains notified.
+Grep for the connecting call, not for the member.
+
+**A fix names inputs, and each one has to be reachable where the fix goes.**
+The same draft told the author to call `impl::notify_transfer_drained(*ctx)` from a commit feedback handler that captures no context on purpose, because it can run after shutdown.
+It told them to push a cancellation into a completion hidden inside a `cc::unique_function`, and to assert against a raster pipeline layout with no accessor.
+Every mechanism was right and every fix was unbuildable as written.
+
 **So is the price of an option you did not recommend.**
 The WebGPU backend design needed a wasm test to wait for a WebGPU callback, and priced "make nexus's executor resumable" as much larger than linking JSPI into test binaries.
 It called the change "much larger" and one that "changes nexus on every platform to serve one", and rejected it on that.
@@ -648,6 +696,22 @@ The executor had not been read when the option was priced, and the inflated pric
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
+
+**A prescribed drain, wait or guard is a mechanism claim about what is outstanding.**
+Naming the remedy without naming what leaked is a guess.
+It is one that looks like diligence, because the remedy is usually sound in general.
+
+pr-179 again, and again conceded by the reviewer.
+A GPU test was reported as leaking "2 async item(s)" on a cold cache, with the nodes unidentified, and the prescription was to settle `sv::background_work` the way the neighbouring test files do.
+The two items were the second batch's STREAM UPLOADS: `quadrics.acquire` queues one transfer per buffer, and that test acquires again after its only drain.
+So `background_work` does not cover them at all, and `wait_for_pending_uploads` does.
+The leak was real and the prescription was inert.
+
+**Look for the configuration that makes the race deterministic before writing the item.**
+Here it was the `singlethreaded-*` preset: with no worker thread, work advances only when something pumps, so an undrained transfer fails every time instead of once per cold cache.
+That is a two-minute run and it converts "I saw it once and could not reproduce it" into a named mechanism.
+Reach for it whenever a finding rests on something that happened on one run — a leak, an ordering, a timeout.
+This repo keeps presets that remove exactly the concurrency such a finding depends on.
 
 ### A doc's statement of its own limits is a claim, not a boundary
 
@@ -701,6 +765,31 @@ The actual test was one line — a 50 ms sleep per frame — and it passed, beca
 **The check is to ask what the measurement would look like under the other hypothesis.**
 Where the answer is "the same", it is not evidence.
 A timing taken from a system that is doing nothing almost always fails that test.
+
+### Measure the code, not a model of it
+
+**A number taken from a re-implementation is a claim about the re-implementation.**
+Modelling the code in numpy or in a scratch program is the natural way to check a numerical claim.
+It is right up to the point where the model and the code round differently, which for a precision finding is the whole subject.
+
+pr-179 is the worked case, and the reviewer caught it themselves.
+The finding was that a thin quadric loses its silhouette at distance, because `qc = |o|² − r²` swamps the radius in float32 and the discriminant's sign becomes rounding noise.
+That was right, and the fix — shifting the solve to the ray's closest approach — was right.
+The reported SYMPTOM was not.
+The table came from a numpy float32 model whose ray directions were built in float64 and cast down, and it showed a mix of missed hits and false hits, described as tubes "dissolving".
+Run against `sv::intersect` itself, with rays built the way the code builds them, every ray aimed *outside* the sphere reports a hit from 50 units out.
+Nothing dissolves; the silhouette inflates.
+
+Which side the error lands on depends on exactly how the ray is constructed, so a model that builds them differently answers a different question.
+
+**The remedy is usually cheaper than the model.**
+`sv::intersect` is a plain CPU function with no device behind it, so a test could have called it directly.
+That is what the eventual test does, and what produced the real number.
+Before modelling, ask whether the thing under test is already callable.
+Where it is, the model is strictly worse evidence than the call.
+
+**A finding can be right about the cause and wrong about the symptom**, and that is worth stating rather than smoothing over.
+The fix survives and the description does not, and an author who checks the description first will conclude the whole item is wrong.
 
 ### "The only X" is a count
 
@@ -812,6 +901,12 @@ A long comment is written item by item, and an instruction's target wording in o
 pr-164's follow-up told the author to let non-address `[[vk::…]]` attributes through in a dialect file.
 Four items later it told them to document that a hand-written `[[vk::…]]` is valid only in a file with no attribute.
 Read the draft once for exactly that before handing it over.
+
+**A test one item asks for is checked against the fixes the other items ask for.**
+pr-179's first draft asked for a trace test proving a still-streaming quadric batch draws its placeholder.
+Two items later it moved the procedural stand-in's acquire earlier, and a trace declines until that stand-in compiles.
+So the test would have raced both the upload and the new compile.
+The instruction that survived checks the bindless index `describe_instance` returns before anything drains, which is deterministic and needs no trace at all.
 
 ### A bound is checked against every path the code dispatches to
 

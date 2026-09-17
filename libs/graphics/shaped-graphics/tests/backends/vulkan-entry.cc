@@ -3,7 +3,6 @@
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
-#include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
 
 // vulkan entry-point driver inside the sg API test binary (shaped-graphics-test).
@@ -19,32 +18,6 @@ namespace
 {
 namespace vulkan = sg::backend::vulkan;
 
-// Fails whichever test provoked it on any validation message of warning severity or worse.
-// Without this a validation error is a line in the log nobody reads, and the run stays green — which is what the dx12
-// backend did for ~680 of them before it grew the same listener.
-// The Khronos layer is stricter than D3D12's, so this is the primary oracle while the backend is written.
-// Per-context rather than thread-scoped, unlike dx12's: a Vulkan messenger belongs to one instance and delivers only
-// that instance's messages.
-// See vulkan_context::set_message_callback.
-//
-// A message raised where no test is installed lands on this driver.
-// Synchronization validation can raise one inside a later, unrelated submission when it re-checks a deferred one.
-// The context is the driver's own, so the captured driver is released with it, before the driver ends.
-void fail_on_validation_messages(sg::context_handle const& ctx)
-{
-    auto& vk = static_cast<vulkan::vulkan_context&>(*ctx);
-    vk.set_message_callback(
-        [&vk, driver = nx::capture_current_test()](vulkan::vulkan_message_severity severity, cc::string_view message)
-        {
-            if (severity > vulkan::vulkan_message_severity::warning)
-                return;
-
-            // A hazard between two copies is only diagnosable with their ranges and order, which the message lacks.
-            auto const windows = message.contains("_AFTER_WRITE") ? vk.describe_recent_transfer_windows() : cc::string();
-            nx::with_fallback_test(
-                driver, [&] { CHECK(false).context(cc::format("vulkan validation: {}\n{}", message, windows)); });
-        });
-}
 } // namespace
 
 // No exclusion tags, for the reason dx12-entry.cc gives.
@@ -59,7 +32,6 @@ ASYNC_TEST("sg vulkan backend")
         SKIP("no vulkan device");
     else
     {
-        fail_on_validation_messages(ctx.value());
         co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
@@ -84,7 +56,6 @@ ASYNC_TEST("sg vulkan never-block backend")
         SKIP("no vulkan device");
     else
     {
-        fail_on_validation_messages(ctx.value());
         co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",

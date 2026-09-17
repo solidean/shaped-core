@@ -1,6 +1,7 @@
 #include "event_view.hh"
 
 #include <clean-core/record/chunk.hh>
+#include <clean-core/record/listener.hh>
 #include <clean-core/record/system.hh>
 
 using namespace cc::primitive_defines;
@@ -269,4 +270,27 @@ f64 cc::rec::chunk_view::wall_secs_of(u64 cycles) const
         return base_wall_secs;
 
     return base_wall_secs + f64(i64(cycles - base_cycles)) / rate;
+}
+
+cc::rec::attribution& cc::rec::attribution_cursor::for_block(cc::rec::chunk_view const& view)
+{
+    auto& t = _threads[view.thread.index];
+    if (t.chunk_seq != view.chunk_seq)
+    {
+        // A chunk not seen before opens with its preamble, which states the attribution outright.
+        t.chunk_seq = view.chunk_seq;
+        t.running = {};
+    }
+    return t.running;
+}
+
+cc::rec::attribution cc::rec::attribution_cursor::observe(cc::rec::attribution& running, cc::rec::event_view const& e)
+{
+    if (e.kind() == rec::event_kind::ambient_changed || e.kind() == rec::event_kind::stream_state)
+    {
+        // Raw u64s: an id is opaque, and a double would quietly lose everything past 2^53.
+        running.trace = rec::trace_id(e.field_as_u64("trace").value_or(0));
+        running.owner = rec::trace_id(e.field_as_u64("owner").value_or(0));
+    }
+    return running;
 }

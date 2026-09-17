@@ -29,6 +29,7 @@ One-liner per library:
   [docs/systems/system-info.md](libs/base/clean-core/docs/systems/system-info.md) is the map; GPU load and VRAM live in `sg`, since no OS reports them.
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
+  **A passing test logs no warning or error it did not declare** — [docs/log-rule.md](libs/base/nexus/docs/log-rule.md).
   Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.

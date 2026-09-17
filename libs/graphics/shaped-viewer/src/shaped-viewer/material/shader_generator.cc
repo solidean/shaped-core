@@ -122,13 +122,30 @@ constexpr i32 sample_transform_size = 32; ///< two float4s: the scale, then the 
     return cc::format("{}({})", hlsl_type_of(format), args);
 }
 
-/// The expression naming the three element indices a frequency reads, and whether it interpolates at all.
-/// `per_triangle` is flat — one element for the whole primitive — so it loads rather than interpolates.
-[[nodiscard]] bool interpolates(attribute_frequency f)
+/// How a frequency is read: one element, or three blended across a triangle.
+enum class load_shape
 {
-    return f != attribute_frequency::per_triangle;
+    flat,        ///< one element, indexed directly
+    barycentric, ///< three corners weighted by `ctx.barycentrics`
+};
+
+[[nodiscard]] load_shape shape_of(attribute_frequency f)
+{
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+    case attribute_frequency::per_corner:
+        return load_shape::barycentric;
+    default:
+        // `per_triangle` is one element for the whole primitive, whichever geometry numbered it.
+        return load_shape::flat;
+    }
 }
 
+/// The expression naming the element index (or indices) a frequency reads.
+///
+/// `per_triangle` is `ctx.primitive` whichever geometry numbered it, which is what makes one generated body serve a mesh and a
+/// quadric batch alike.
 [[nodiscard]] cc::string element_expression(attribute_frequency f)
 {
     switch (f)
@@ -432,18 +449,23 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                   "+ {});\n",
                                   s.offset);
                 auto const buffer = buffer_expression("desc");
-                if (interpolates(a.attribute->frequency))
+                auto const rotates = a.interpolation == attribute_interpolation::rotation;
+                auto const blend = rotates ? cc::string("rotation") : cc::string(load_suffix(components));
+
+                switch (shape_of(a.attribute->frequency))
+                {
+                case load_shape::barycentric:
                     // A rotation blends as one: the three corners are aligned into a common hemisphere before they are summed.
-                    // Flat frequencies fall through to the plain load below, where there is nothing to blend and the mode
-                    // therefore means nothing.
-                    cc::format_append(
-                        src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n", a.name,
-                        a.interpolation == attribute_interpolation::rotation ? cc::string("rotation")
-                                                                             : cc::string(load_suffix(components)),
-                        buffer, element_expression(a.attribute->frequency));
-                else
+                    cc::format_append(src, "            {} = sv::interpolate_{}({}, desc, {}, ctx.barycentrics);\n",
+                                      a.name, blend, buffer, element_expression(a.attribute->frequency));
+                    break;
+
+                case load_shape::flat:
+                    // One element for the whole primitive, so there is nothing to blend and the mode means nothing.
                     cc::format_append(src, "            {} = sv::load_element_{}({}, desc, {});\n", a.name,
                                       load_suffix(components), buffer, element_expression(a.attribute->frequency));
+                    break;
+                }
                 src += "        }\n";
                 break;
             }
@@ -460,7 +482,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                   uv_slot.offset);
 
                 auto const uv_buffer = buffer_expression("uv_desc");
-                if (interpolates(a.uv->frequency))
+                // A uv is only ever a triangle attribute — `find_uv_attribute` refuses a quadric — so the two shapes here are
+                // the barycentric one and the flat one.
+                if (shape_of(a.uv->frequency) == load_shape::barycentric)
                     cc::format_append(
                         src, "            float2 uv = sv::interpolate_f2({}, uv_desc, {}, ctx.barycentrics);\n",
                         uv_buffer, element_expression(a.uv->frequency));

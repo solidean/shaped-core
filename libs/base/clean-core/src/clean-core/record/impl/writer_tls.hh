@@ -45,6 +45,14 @@ struct cc::rec::impl::writer_tls
     /// An id rather than the chain head, because an ADDRESS is unique only while its link lives.
     u64 last_trace;
 
+    /// The owner id this thread last published an ambient delta for; see cc::rec::owner_scope.
+    /// Deduplicated together with `last_trace`, so a delta is written when either changes.
+    u64 last_owner;
+
+    /// Set when the thread left every context, and the delta saying so has not been written yet.
+    /// See note_ambient_change: the next event writes it first, and re-entering the same context cancels it.
+    bool ambient_reset_pending;
+
     /// How many profiling scopes are open on this thread.
     u32 scope_depth;
 

@@ -34,7 +34,8 @@ cc::async_ambient_scope::async_ambient_scope(void const* tag, u64 value)
     auto* const parent = static_cast<async_ambient_link*>(impl::async_tls().ambient);
     impl::async_ambient_retain(parent); // the link holds its parent strongly, so retaining a head retains the chain
 
-    _link = new (cc::placement_new, raw) async_ambient_link{tag, value, parent, {1}};
+    auto const mask = impl::async_ambient_tag_bit(tag) | (parent != nullptr ? parent->present_mask : 0);
+    _link = new (cc::placement_new, raw) async_ambient_link{tag, value, parent, {1}, mask};
     impl::async_tls().ambient = _link;
 
     // Creating a scope always changes the context, so this never needs the compare the poll sites do.

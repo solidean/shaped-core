@@ -335,7 +335,10 @@ int report_run(nx::test_schedule_config const& config,
     // Each one was already printed where it happened; this is the summary that makes the run's exit code say so.
     int const orphan_checks = execution.orphan_checks;
 
-    if (failed_tests > 0 || orphan_count > 0 || orphan_checks > 0)
+    // A warning or error under no test is a defect for the same reason, and each was already printed when it was logged.
+    auto const unattributed_logs = execution.unattributed_logs.size();
+
+    if (failed_tests > 0 || orphan_count > 0 || orphan_checks > 0 || unattributed_logs > 0)
     {
         if (failed_tests > 0)
         {
@@ -356,6 +359,13 @@ int report_run(nx::test_schedule_config const& config,
             for (auto const& e : execution.orphan_errors)
                 cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
             cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
+        }
+        if (unattributed_logs > 0)
+        {
+            cc::eprintln("\nWarnings and errors logged outside any test:");
+            for (auto const& e : execution.unattributed_logs)
+                cc::eprintln("  {} ({})", e.expanded, e.extra_lines.empty() ? cc::string() : e.extra_lines[0]);
+            cc::eprintln("\n{} warning(s) or error(s) were logged outside any test", unattributed_logs);
         }
         if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
             cc::eprintln("{}", described);

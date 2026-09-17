@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/logs.hh>
 #include <nexus/tests/thread_scope.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh> // sg::request_webgpu_context
 
@@ -11,6 +12,11 @@
 // Compiled only for the Emscripten WebGPU presets; under node the `webgpu` package installs navigator.gpu, and a runtime without it SKIPs.
 // The sweep runs under both node (Dawn) and deno (wgpu), which between them are the two browser WebGPU implementations.
 // It runs on the main thread, and its invoked tests inherit that home, because in a threaded wasm build WebGPU objects exist only on the thread that requested the device.
+
+// wasm has no SQLite backend, so the persistent blob cache behind ctx.cached degrades to always-miss and says so once,
+// on whichever test first builds a cached pipeline.
+// Correctness never depended on it — a cache miss is what an empty cache is — so this is expected here rather than a defect.
+NX_ALLOW_LOGS(cc::rec::level::warning, "bcache", "cache degraded to always-miss");
 
 namespace
 {

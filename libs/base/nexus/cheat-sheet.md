@@ -534,6 +534,28 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 
 [docs/recording.md](docs/recording.md) has the mechanism and the measurements.
 
+## The log rule — a passing test logs no undeclared warning or error
+
+```cpp
+// in scope via <nexus/test.hh>; each call declares for the CURRENT section pass, and may follow the line it covers
+nx::expect_warning("ring of * bytes did not fit");         // must appear at least once; absent fails the test
+nx::expect_error("refusing connection", nx::exactly(1));   // exactly n; nx::log_expectation{.domain, .at_least, .at_most}
+nx::allow_warnings("in-flight stream", "my-lib");          // may appear, any count; domain optional, matched exactly
+nx::allow_errors("peer reset");
+TEST("stress", nx::config::allow_logs(cc::rec::level::warning))  // the whole test waives that level and below
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", "clear value");  // every test in the binary; "" domain for any
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or each of a cc::span<cc::string_view const>; in a .cc, never a header
+```
+
+- A pattern is a text glob matched **anywhere** in the message (`/` ordinary), so a pasted console line matches itself.
+- `expect_*` / `allow_*` match their level **exactly**; `allow_logs` and `NX_ALLOW_LOGS` cover their level **and below**.
+- A declaration inside a `SECTION` does not cover its sibling; one above the sections covers every pass.
+- Judged once at the end of `execute_tests`, after one flush — the console **withholds** a test's warnings until then.
+- A warning or error under **no test** fails the run and no declaration reaches it; the `nexus` domain never counts.
+- `owns_recorder` tests and `--no-recording` runs are outside the rule.
+
+[docs/log-rule.md](docs/log-rule.md) has the scope, the timing and the console behavior.
+
 ## Gotchas
 
 - **Never run the `*-test` binary directly** — `uv run dev.py test` configures, builds, discovers and records results.
