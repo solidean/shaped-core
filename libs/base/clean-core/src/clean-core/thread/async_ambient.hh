@@ -50,7 +50,7 @@ namespace cc::impl
 {
 /// The bit a tag sets in a link's present_mask: a hash of its address folded to 64 buckets.
 /// Two tags may share a bit, which only costs the walk the mask would have skipped.
-[[nodiscard]] constexpr u64 async_ambient_tag_bit(void const* tag)
+[[nodiscard]] inline u64 async_ambient_tag_bit(void const* tag)
 {
     return u64(1) << ((u64(reinterpret_cast<uintptr_t>(tag)) * 0x9E3779B97F4A7C15ull) >> 58);
 }
