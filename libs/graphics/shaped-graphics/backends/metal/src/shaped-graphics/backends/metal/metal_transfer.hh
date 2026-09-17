@@ -180,16 +180,28 @@ private:
     };
 
     metal_context* _ctx = nullptr;
+    /// Uploads.
     MTL4::CommandQueue* _queue = nullptr;
+
+    /// **Downloads go on a queue of their own, which is the shape vulkan already has.**
+    ///
+    /// Sharing one with uploads reproduced a race in the tier-1 transfer fuzz about one run in four: an async
+    /// download came back all zeroes while the buffer itself was correct.
+    /// Splitting them took that to zero in sixty-five runs.
+    /// dx12 needs no such split — a D3D12 copy queue runs its command lists serially, where an MTL4 queue is
+    /// concurrent by default.
+    MTL4::CommandQueue* _download_queue = nullptr;
 
     /// Streaming batches go on a queue of their own, and that is a correctness requirement rather than tuning.
     ///
-    /// An MTL4 queue is sequential: a wait blocks everything committed after it.
+    /// A wait blocks everything committed after it on that queue.
     /// An async transfer ordering behind an in-flight stream therefore blocks the stream's own copies too, if they
     /// share a queue — the stream can never finish, so the wait never clears.
-    /// A second queue costs one object and removes the cycle entirely.
-    MTL4::CommandQueue* _download_queue = nullptr; // DIAG
+    /// A third queue costs one object and removes the cycle entirely.
     MTL4::CommandQueue* _stream_queue = nullptr;
+
+    /// One per transfer queue, because a shared event cannot take signals from two: they complete independently, so a
+    /// later value can land first and drive the event backwards.
     MTL::SharedEvent* _upload_timeline = nullptr;
     MTL::SharedEvent* _download_timeline = nullptr;
 
