@@ -344,6 +344,7 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 // '?' one char, '*' a run — neither crosses '/'; '**' does, and the '/' after it is optional ("src/**/x" matches "src/x").
 // A pattern ending in '/' means the subtree. Nothing is anchored for you: match a suffix with a leading "**/".
 // Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
+cc::glob_matches("*did not fit*", text, cc::glob_option::text);   // free text: '/' is ordinary, no subtree shorthand; never with normalize
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 cc::to_chars(buf, v)                             // -> isize written; the same rendering into a char buffer, no allocation

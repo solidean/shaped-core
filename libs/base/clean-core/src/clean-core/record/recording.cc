@@ -564,24 +564,11 @@ cc::rec::recording cc::rec::recording::from_trace(cc::rec::trace_id id) const
     // Two kinds set it: a chunk's preamble, which states the trace outright, and an ambient delta, which changes it.
     // The preamble is why a capture that starts mid-trace still attributes — before it existed, a recording missing
     // the original delta attributed nothing at all.
-    cc::map<cc::thread_id, rec::trace_id> current;
+    cc::map<cc::thread_id, rec::attribution> current;
 
-    return filtered(
-        [&](rec::chunk_view const& v, rec::event_view const& e)
-        {
-            auto& running = current[v.thread.id];
-
-            if (e.kind() == rec::event_kind::ambient_changed || e.kind() == rec::event_kind::stream_state)
-            {
-                // Read as a raw u64: a trace id is opaque, and a double would quietly lose everything past 2^53.
-                running = rec::trace_id(e.field_as_u64("trace").value_or(0));
-
-                // Either belongs to the context it names, so entering a trace is visible inside it.
-                return running == id;
-            }
-
-            return running == id;
-        });
+    // Either kind belongs to the context it names, so entering a trace is visible inside it.
+    return filtered([&](rec::chunk_view const& v, rec::event_view const& e)
+                    { return rec::attribution_cursor::observe(current[v.thread.id], e).trace == id; });
 }
 
 cc::vector<cc::rec::trace_relation> cc::rec::recording::trace_relations() const

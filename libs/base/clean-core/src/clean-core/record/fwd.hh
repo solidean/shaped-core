@@ -98,6 +98,10 @@ enum class cc::rec::category : cc::u8
     stats,
     tracing,
 
+    /// Which trace and owner the following events belong to: the ambient delta.
+    /// Its own bit, so silencing profiling cannot silently drop the attribution a harness judges by.
+    attribution,
+
     count,
 };
 
@@ -215,6 +219,9 @@ struct event_iterator;
 
 struct listener;
 struct listener_handle;
+struct attribution;
+struct owner_scope;
+struct attribution_cursor;
 struct console_listener;
 struct console_options;
 enum class console_time; // which clock a console line is stamped with (record/console_listener.hh)

@@ -19,6 +19,10 @@
 // An id compares soundly with no pin, no atomic and no lifetime.
 //
 // What a restore site pays is a short chain walk for the id, which measures as free beside the event it gates.
+//
+// **The owner id (cc::rec::owner_scope) is found in the same walk.**
+// Until some owner_scope has ever been installed the walk stops at the trace, so a process without a harness pays one
+// relaxed load for it.
 
 namespace
 {
@@ -26,33 +30,66 @@ using namespace cc::primitive_defines;
 
 constexpr cc::rec::field ambient_fields[] = {
     {.name = "trace", .type = cc::rec::type_code::u64_, .offset = 0, .size = 8},
+    {.name = "owner", .type = cc::rec::type_code::u64_, .offset = 8, .size = 8},
+};
+
+struct ambient_payload
+{
+    u64 trace = 0;
+    u64 owner = 0;
 };
 
 constexpr cc::rec::desc ambient_desc = {
     .kind = cc::rec::event_kind::ambient_changed,
-    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::profiling),
+    .enable_bit = cc::rec::enable_bit_of(cc::rec::category::attribution),
     .name = "async.ambient",
     .dom = &cc::rec::g_system_domain,
     .fields = ambient_fields,
-    .field_count = 1,
-    .fixed_payload_size = 8,
+    .field_count = 2,
+    .fixed_payload_size = sizeof(ambient_payload),
 };
 } // namespace
 
 void cc::rec::impl::note_ambient_change(void* head)
 {
-    // Before the walk, so a build with profiling silenced pays one load and a branch.
+    // Before the walk, so a build with attribution silenced pays one load and a branch.
     if (!rec::is_recording(ambient_desc))
         return;
 
-    auto const trace = head == nullptr ? u64(0) : cc::async_ambient_lookup_in(head, rec::impl::trace_tag());
+    auto payload = ambient_payload{};
+    if (head != nullptr)
+    {
+        auto const* const trace_t = rec::impl::trace_tag();
+        auto const* const owner_t = rec::impl::owner_tag();
+        auto found_trace = false;
+        auto found_owner = !rec::impl::g_owner_ever_installed.load(cc::memory_order_relaxed);
+
+        // The innermost link of each tag wins, and the walk ends once both are known.
+        for (auto const* l = static_cast<cc::async_ambient_link const*>(head); l != nullptr; l = l->parent)
+        {
+            if (!found_trace && l->tag == trace_t)
+            {
+                payload.trace = l->value;
+                found_trace = true;
+            }
+            else if (!found_owner && l->tag == owner_t)
+            {
+                payload.owner = l->value;
+                found_owner = true;
+            }
+
+            if (found_trace && found_owner)
+                break;
+        }
+    }
 
     // A worker draining related items restores the same context over and over, and two different heads under one
-    // trace are the same attribution anyway — so this skips strictly more than an address compare could.
+    // attribution are the same attribution anyway — so this skips strictly more than an address compare could.
     auto& w = t_writer;
-    if (w.last_trace == trace)
+    if (w.last_trace == payload.trace && w.last_owner == payload.owner)
         return;
 
-    rec::record_event(ambient_desc, trace);
-    w.last_trace = trace;
+    rec::record_event(ambient_desc, payload);
+    w.last_trace = payload.trace;
+    w.last_owner = payload.owner;
 }

@@ -53,6 +53,7 @@ constexpr cc::rec::field stream_state_fields[] = {
     {.name = "scope0", .type = cc::rec::type_code::desc_ref, .offset = 16, .size = 8},
     {.name = "scope1", .type = cc::rec::type_code::desc_ref, .offset = 24, .size = 8},
     {.name = "scope2", .type = cc::rec::type_code::desc_ref, .offset = 32, .size = 8},
+    {.name = "owner", .type = cc::rec::type_code::u64_, .offset = 40, .size = 8},
 };
 
 struct stream_state_payload
@@ -68,8 +69,11 @@ struct stream_state_payload
     /// A field's offset and size live in the descriptor, so letting them follow `sizeof(void*)` would make the wire
     /// layout depend on the writer's architecture.
     u64 scopes[cc::rec::impl::named_scope_capacity] = {};
+
+    /// See cc::rec::owner_scope.
+    u64 owner = 0;
 };
-static_assert(sizeof(stream_state_payload) == 40, "the preamble layout is what stream_state_fields describes");
+static_assert(sizeof(stream_state_payload) == 48, "the preamble layout is what stream_state_fields describes");
 
 constexpr cc::rec::desc stream_state_desc = {
     .kind = cc::rec::event_kind::stream_state,
@@ -77,7 +81,7 @@ constexpr cc::rec::desc stream_state_desc = {
     .name = "record.stream_state",
     .dom = &cc::rec::g_system_domain,
     .fields = stream_state_fields,
-    .field_count = 6,
+    .field_count = 7,
     .fixed_payload_size = sizeof(stream_state_payload),
 };
 
@@ -220,12 +224,13 @@ bool cc::rec::impl::writer_rotate(isize needed)
     // scope opens once, and a window that outlived its `scope_begin` has nothing else to learn from.
     // Forty bytes against a megabyte of chunk is the whole price.
     //
-    // `last_trace` is deliberately NOT reset here: the preamble states the trace, so the next ambient delta is only
+    // `last_trace` and `last_owner` are deliberately NOT reset here: the preamble states both, so the next ambient delta is only
     // written if the trace actually changes.
     auto preamble = stream_state_payload{
         .trace = w.last_trace,
         .scope_depth = w.scope_depth,
         .named_scopes = cc::min(w.scope_depth, rec::impl::named_scope_capacity),
+        .owner = w.last_owner,
     };
     for (u32 i = 0; i < preamble.named_scopes; ++i)
         preamble.scopes[i] = u64(reinterpret_cast<uintptr_t>(w.scope_descs[i]));
