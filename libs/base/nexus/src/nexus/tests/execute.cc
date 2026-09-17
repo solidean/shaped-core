@@ -218,6 +218,11 @@ struct nx::impl::test_context
     // after a run, all checks & errors are associated to the current leaf
     test_section* leaf_section = nullptr;
 
+    // The owner id the running pass is recorded under, and the nx::expect_* / nx::allow_* calls made in it.
+    // Behind a mutex because an async body declares from whichever worker runs it.
+    u64 pass_owner = 0;
+    cc::mutex<cc::vector<impl::log_declaration>> log_declarations;
+
     int exec_count = 0;
 };
 
@@ -564,6 +569,8 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
 void begin_pass(test_context& ctx)
 {
     ctx.exec_count++;
+    ctx.pass_owner = u64(nx::impl::new_pass_owner());
+    ctx.log_declarations.lock([](cc::vector<impl::log_declaration>& d) { d.clear(); });
     ctx.leaf_section = nullptr;
     ctx.root_section->next_open_section = nullptr;
     ctx.aborted_by_check_throw.store(false, cc::memory_order_release);
@@ -589,6 +596,21 @@ void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl,
         });
 }
 
+/// Appends the indices leading from `at` to `target` through `subsections_ordered`, which is the order the finalized tree keeps.
+bool find_section_path(test_section const& at, test_section const& target, cc::vector<int>& path)
+{
+    if (&at == &target)
+        return true;
+    for (auto i = 0; i < int(at.subsections_ordered.size()); ++i)
+    {
+        path.push_back(i);
+        if (find_section_path(*at.subsections_ordered[i], target, path))
+            return true;
+        path.remove_back();
+    }
+    return false;
+}
+
 /// File the pass that just ended under its leaf, and say whether another one runs.
 ///
 /// Everything the pass reported belongs to it, whoever reported it: the body's own plain counters and the side path both.
@@ -612,6 +634,13 @@ void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl,
             sec->errors.push_back_range(cc::move(errors));
             errors.clear(); // push_back_range moves the elements out but leaves the husks behind
         });
+
+    // The leaf's path, as the finalized tree will index it, so the run can file a log verdict there later.
+    auto pass = impl::log_pass{.owner = ctx.pass_owner};
+    find_section_path(*ctx.root_section, *sec, pass.section_path);
+    pass.declarations
+        = ctx.log_declarations.lock([](cc::vector<impl::log_declaration>& d) { return cc::exchange(d, {}); });
+    ctx.execution->log_passes.push_back(cc::move(pass));
 
     // no new sections to execute? then the root is done, which is also what keeps it from reporting itself unreachable
     auto const explored = ctx.root_section->next_open_section == nullptr;
@@ -861,6 +890,9 @@ struct async_test_state
     // One link, not one per poll, because the leak check counts what still holds it.
     cc::async_ambient_handle ambient;
 
+    // The running pass's owner link, kept alive while its body runs and released before the leak check counts.
+    cc::async_ambient_handle pass_ambient;
+
     // The running pass's body; both null between passes.
     cc::shared_async<cc::unit> root;
     cc::shared_async<int> command_root; // set instead of `root` for an ASYNC_COMMAND
@@ -958,6 +990,10 @@ void start_async_pass(async_test_state& state)
     }
     state.pass_started_at = cc::current_time_steady_secs();
 
+    // Above the test's own link, so the scheduled body carries both; the handle keeps it alive past this poll.
+    cc::rec::owner_scope const pass_owner(cc::rec::trace_id(ctx.pass_owner));
+    state.pass_ambient = cc::async_ambient_handle();
+
     {
         auto sink = run_async_prologue(ctx, decl, state.values, state.pass);
         state.root = cc::move(sink.root);
@@ -1046,6 +1082,7 @@ void start_async_pass(async_test_state& state)
     // Drop the roots before counting: a ready node carries no context, but whatever it left behind still does.
     state.root = {};
     state.command_root = {};
+    state.pass_ambient = {};
 
     // `ambient` holds exactly one reference; anything beyond it is work that outlived the pass still naming the test.
     auto const outstanding = cc::async_ambient_outstanding(state.ambient.head());
@@ -1545,6 +1582,9 @@ void nx::impl::report_running_test() noexcept
 
     if (reported == 0)
         cc::eprint("running test: <none>\n");
+
+    // The console holds back attributed warnings until the run judges them, so a crash would otherwise lose them.
+    nx::impl::report_withheld_log_records();
 }
 
 bool nx::recorded_metric::higher_is_better() const
@@ -1555,6 +1595,14 @@ bool nx::recorded_metric::higher_is_better() const
 cc::string_view nx::recorded_metric::unit_symbol() const
 {
     return unit != nullptr ? cc::string_view(unit->symbol) : cc::string_view();
+}
+
+void nx::impl::add_log_declaration(impl::log_declaration declaration)
+{
+    auto* const ctx = current_context();
+    CC_ASSERT(ctx != nullptr, "nx::expect_* and nx::allow_* declare for the running test, so they must be called "
+                              "inside one");
+    ctx->log_declarations.lock([&](cc::vector<impl::log_declaration>& d) { d.push_back(cc::move(declaration)); });
 }
 
 void nx::impl::record_metric(cc::string_view name, double value, cc::rec::unit const& unit)
@@ -1950,45 +1998,50 @@ void nx::impl::run_test_body(nx::test_execution& execution,
             section_num++;
             auto const t_section_start = cc::current_time_steady_secs();
 
-            try
+            // Scoped to end before the leak check below, which would otherwise count the pass's own owner link as work left running.
             {
-                auto _ = scoped_test_assertion_handler(); // a failing CC_ASSERT aborts the body like a REQUIRE
-                if (skip_as_not_thorough)
-                    SKIP("runs only under --thorough");
-                else
-                    body();
-            }
-            catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
-            {
-                // REQUIRE failure already logged in report_check_result, this catch
-                // only serves to abort test execution without treating it as a further error
-            }
-            catch (test_skipped const&) // NOLINT(bugprone-empty-catch)
-            {
-                // SKIP already counted as a successful check in report_check_result, this catch
-                // only serves to abort test execution
-            }
-            catch (test_duplicate_section const&) // NOLINT(bugprone-empty-catch)
-            {
-                // already recorded by test_open_section, whose flag also ends the replay
-            }
-            catch (std::exception const& e)
-            {
-                ctx.errors.push_back(test_error{
-                    .expr = cc::format("uncaught exception: {}", e.what()),
-                    .location = decl.location,
-                    .extra_lines = {},
-                    .expanded = cc::format("uncaught exception: {}", e.what()),
-                });
-            }
-            catch (...)
-            {
-                ctx.errors.push_back(test_error{
-                    .expr = "uncaught unknown exception",
-                    .location = decl.location,
-                    .extra_lines = {},
-                    .expanded = "uncaught unknown exception",
-                });
+                cc::rec::owner_scope const pass_owner(cc::rec::trace_id(ctx.pass_owner));
+
+                try
+                {
+                    auto _ = scoped_test_assertion_handler(); // a failing CC_ASSERT aborts the body like a REQUIRE
+                    if (skip_as_not_thorough)
+                        SKIP("runs only under --thorough");
+                    else
+                        body();
+                }
+                catch (test_require_failed const&) // NOLINT(bugprone-empty-catch)
+                {
+                    // REQUIRE failure already logged in report_check_result, this catch
+                    // only serves to abort test execution without treating it as a further error
+                }
+                catch (test_skipped const&) // NOLINT(bugprone-empty-catch)
+                {
+                    // SKIP already counted as a successful check in report_check_result, this catch
+                    // only serves to abort test execution
+                }
+                catch (test_duplicate_section const&) // NOLINT(bugprone-empty-catch)
+                {
+                    // already recorded by test_open_section, whose flag also ends the replay
+                }
+                catch (std::exception const& e)
+                {
+                    ctx.errors.push_back(test_error{
+                        .expr = cc::format("uncaught exception: {}", e.what()),
+                        .location = decl.location,
+                        .extra_lines = {},
+                        .expanded = cc::format("uncaught exception: {}", e.what()),
+                    });
+                }
+                catch (...)
+                {
+                    ctx.errors.push_back(test_error{
+                        .expr = "uncaught unknown exception",
+                        .location = decl.location,
+                        .extra_lines = {},
+                        .expanded = "uncaught unknown exception",
+                    });
+                }
             }
 
             auto const outstanding = test_ambient.outstanding();
@@ -2518,6 +2571,7 @@ nx::test_schedule_execution nx::execute_tests(test_schedule const& schedule, tes
     if (cc::current_thread_id() == cc::thread_id::main)
         cc::main_thread_scheduler().drain();
 
+    nx::impl::judge_logs(result, is_outermost_execution());
     drain_orphan_checks(result);
 
     // A registered pump outliving the run means a semantic thread was never torn down.

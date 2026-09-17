@@ -3,6 +3,7 @@
 #include <clean-core/record/fwd.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fwd.hh>
 
 // The run's side of per-test recording: standing the recorder up, attributing each test, and bucketing what lands.
 //
@@ -72,4 +73,30 @@ void close_test_bucket(cc::rec::trace_id id, bool failed);
 
 /// Takes everything bucketed for `id` since the last take.
 [[nodiscard]] cc::rec::recording take_test_bucket(cc::rec::trace_id id);
+
+/// A warning or error the run kept for the log rule, copied out of its chunk so it outlives the recorder.
+struct kept_log_record
+{
+    cc::rec::level level = {};
+    cc::string_view domain; ///< a domain is a static object, so its name outlives the run
+    cc::string text;
+    char const* file = nullptr; ///< a site is static too
+    u32 line = 0;
+};
+
+/// Mints the owner id one section pass runs under, or `none` when the run is not recording.
+[[nodiscard]] cc::rec::trace_id new_pass_owner();
+
+/// Takes the records kept under `owner`.
+[[nodiscard]] cc::vector<kept_log_record> take_log_records(u64 owner);
+
+/// Takes the records kept under no owner at all.
+[[nodiscard]] cc::vector<kept_log_record> take_unattributed_log_records();
+
+/// Drops every record still kept, for owners nobody judged.
+void discard_log_records();
+
+/// Writes the records still kept to stderr, for a crash handler.
+/// Best effort: skipped, and said so, when the store is locked, since a crash handler must not wait.
+void report_withheld_log_records() noexcept;
 } // namespace nx::impl
