@@ -12,7 +12,7 @@ using namespace bcache::test;
 
 // exclusive() because the subject IS the window between expired and deleted, and a sibling test sweeping the pump
 // registry drives this store's on_process — which closes that window — at a moment this test did not choose.
-ASYNC_TEST("bcache treats an expired entry as a miss before anything deletes it", exclusive(), main_thread)
+ASYNC_TEST("bcache treats an expired entry as a miss before anything deletes it", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -34,7 +34,7 @@ ASYNC_TEST("bcache treats an expired entry as a miss before anything deletes it"
     CHECK(f.cache().get_stats().entry_count == 1);
 }
 
-ASYNC_TEST("bcache collects an expired entry and the object behind it", main_thread)
+ASYNC_TEST("bcache collects an expired entry and the object behind it")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -58,7 +58,7 @@ ASYNC_TEST("bcache collects an expired entry and the object behind it", main_thr
     CHECK(f.cache().get_stats().stored_bytes == 0);
 }
 
-ASYNC_TEST("bcache tells a ttl of zero apart from no ttl at all", main_thread)
+ASYNC_TEST("bcache tells a ttl of zero apart from no ttl at all")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -78,7 +78,7 @@ ASYNC_TEST("bcache tells a ttl of zero apart from no ttl at all", main_thread)
     CHECK(f.cache().get_stats().expired_as_miss == 1);
 }
 
-ASYNC_TEST("bcache leaves an entry with no ttl alone forever", main_thread)
+ASYNC_TEST("bcache leaves an entry with no ttl alone forever")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -101,7 +101,7 @@ ASYNC_TEST("bcache leaves an entry with no ttl alone forever", main_thread)
 
 // exclusive() for the same reason: it counts what ONE pass expired, and a sibling's sweep would have run passes of
 // its own over this store first.
-ASYNC_TEST("bcache expiry beats eviction scoring", exclusive(), main_thread)
+ASYNC_TEST("bcache expiry beats eviction scoring", exclusive())
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -127,7 +127,7 @@ ASYNC_TEST("bcache expiry beats eviction scoring", exclusive(), main_thread)
     CHECK((co_await f.cache().get(cheap_but_permanent)).has_value());
 }
 
-ASYNC_TEST("bcache acquire recomputes once its ttl has run out", main_thread)
+ASYNC_TEST("bcache acquire recomputes once its ttl has run out")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

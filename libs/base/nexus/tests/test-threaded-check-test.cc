@@ -254,6 +254,86 @@ TEST("threaded check - attributed_to_current_test rescues a bare thread", no_sch
     CHECK(exec.count_failed_tests() == 1);
 }
 
+TEST("threaded check - an attributed thread's checks are filed under the section that ran it", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("threads_in_sections", {},
+                        []
+                        {
+                            SECTION("threaded")
+                            {
+                                std::thread t(nx::attributed_to_current_test(
+                                    []
+                                    {
+                                        CHECK(true);
+                                        CHECK(true);
+                                    }));
+                                t.join();
+                            }
+                            SECTION("plain")
+                            {
+                                CHECK(true);
+                            }
+                        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    REQUIRE(exec.executions.size() == 1);
+    auto const& root = exec.executions[0].root;
+    CHECK(exec.count_failed_tests() == 0); // "threaded" is not an empty section: the thread's checks count there
+    REQUIRE(root.subsections.size() == 2);
+    CHECK(root.subsections[0].executed_checks == 2);
+    CHECK(root.subsections[1].executed_checks == 1);
+}
+
+TEST("threaded check - with_fallback_test bills a bare thread to the fallback and a test's thread to its own test",
+     no_scheduler)
+{
+    // This outer test's own context, as a fallback no inner test should ever reach.
+    auto outer = nx::capture_current_test();
+
+    nx::test_registry reg;
+    reg.add_declaration("installer", {},
+                        [&]
+                        {
+                            auto fallback = nx::capture_current_test();
+
+                            // A thread no test started: the report lands on the installer instead of on no test.
+                            std::thread t([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
+                            t.join();
+                            fallback.reset();
+                        });
+    reg.add_declaration("bystander", {},
+                        [&]
+                        {
+                            // This thread carries a test of its own, so the fallback is ignored.
+                            nx::with_fallback_test(outer, [] { CHECK(true); });
+                        });
+
+    auto config = nx::test_schedule_config{};
+    config.jobs = 1;
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, config);
+    outer.reset();
+
+    CHECK(exec.orphan_checks == 0);
+    REQUIRE(exec.executions.size() == 2);
+    for (auto const& e : exec.executions)
+    {
+        if (e.instance.declaration->name == "installer")
+        {
+            CHECK(e.root.executed_checks == 1);
+            CHECK(e.root.failed_checks == 1);
+        }
+        else
+        {
+            CHECK(e.root.executed_checks == 1); // reached the bystander, never the outer test
+            CHECK(e.root.failed_checks == 0);
+        }
+    }
+}
+
 TEST("threaded check - a REQUIRE on an attributed bare thread records instead of throwing", no_scheduler)
 {
     nx::test_registry reg;

@@ -1,23 +1,86 @@
 #include "resolve.hh"
 
+#include <clean-core/common/log.hh>
 #include <clean-core/container/byte_stream_builder.hh>
+#include <clean-core/container/set.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 #include <shaped-viewer/material/impl/material_hash.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/scene/quadric_set.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 
 namespace sv
 {
+geometry_view geometry_view::of(sv::resident_mesh const& mesh)
+{
+    return {.kind = geometry_kind::triangles, .attributes = mesh.attributes, .textures = mesh.textures};
+}
+
+geometry_view geometry_view::of(sv::resident_quadric_set const& set)
+{
+    // No textures, and that is the rule rather than an omission: see `serves`.
+    return {.kind = geometry_kind::quadrics, .attributes = set.attributes};
+}
+
+bool serves(geometry_kind kind, attribute_frequency f)
+{
+    switch (f)
+    {
+    case attribute_frequency::per_instance:
+        return true; // one value for the whole placement, which any geometry has
+
+    case attribute_frequency::per_triangle:
+        // One value per element of the geometry's own primitive stream, indexed by PrimitiveIndex().
+        // Both geometries number that, and the generated load is the same for either — which is the whole reason the
+        // frequencies are one set rather than one per kind.
+        return true;
+
+    case attribute_frequency::per_vertex:
+    case attribute_frequency::per_corner:
+    case attribute_frequency::per_edge:
+        return kind == geometry_kind::triangles;
+    }
+
+    return false;
+}
+
 namespace
 {
+/// Says once that `name` was passed over because `kind` cannot number `f`.
+///
+/// Keyed on all three, because the same material on a mesh and on a batch is a different answer and both are worth hearing.
+/// Unbounded in principle and bounded in practice: the set is one entry per attribute a material actually mismatched, which is
+/// a handful, and it exists because resolution runs per placement per frame.
+void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_kind kind)
+{
+    static auto said = cc::mutex<cc::set<cc::string>>();
+
+    auto const key = cc::format("{}/{}/{}", name, int(f), int(kind));
+    auto const first = said.lock([&](cc::set<cc::string>& s) { return s.insert(key); });
+    if (!first)
+        return;
+
+    CC_LOG_WARNING("attribute '{}' is bound at a frequency {} geometry cannot number, so the material falls back to "
+                   "its own constant for it",
+                   name, kind == geometry_kind::quadrics ? "quadric" : "triangle");
+}
+
 /// The uv attribute a sample needs: two floats, indexed by something the geometry numbers.
 /// A `per_instance` uv would be one coordinate for the whole mesh, which samples a single texel — so it does not count as carrying
 /// uvs at all.
-[[nodiscard]] mesh_attribute_binding const* find_uv_attribute(sv::resident_mesh const& mesh, cc::string_view name)
+[[nodiscard]] mesh_attribute_binding const* find_uv_attribute(geometry_view const& geometry, cc::string_view name)
 {
-    for (auto const& a : mesh.attributes)
+    // A quadric carries no uv at all, which is what makes both texture ranks unreachable on one.
+    // It follows from the geometry rather than from a policy: a general quadric has no natural surface parameterization, so
+    // there is no frequency a uv could be interpolated at.
+    if (geometry.kind != geometry_kind::triangles)
+        return nullptr;
+
+    for (auto const& a : geometry.attributes)
         if (a.name == name && a.format == attribute_format::of_vector(scalar_type::f32, 2)
             && a.frequency != attribute_frequency::per_instance)
             return &a;
@@ -27,24 +90,40 @@ namespace
 /// The mesh attribute named `name` at the declared format, at `per_instance` or at a geometric frequency.
 /// A format mismatch resolves to null rather than asserting: the mesh and the material were authored apart, and the material is
 /// what falls back.
-[[nodiscard]] mesh_attribute_binding const* find_attribute(sv::resident_mesh const& mesh,
+[[nodiscard]] mesh_attribute_binding const* find_attribute(geometry_view const& geometry,
                                                            cc::string_view name,
                                                            attribute_format format,
                                                            bool per_instance)
 {
-    for (auto const& a : mesh.attributes)
+    for (auto const& a : geometry.attributes)
     {
         if (a.name != name || a.format != format)
             continue;
-        if ((a.frequency == attribute_frequency::per_instance) == per_instance)
-            return &a;
+        if ((a.frequency == attribute_frequency::per_instance) != per_instance)
+            continue;
+
+        // A frequency this geometry does not number is one more unusable candidate, so it loses to the coarser rank the way a
+        // format mismatch does — which is what keeps a set authored for one geometry from failing on the other.
+        //
+        // Said out loud, because this is the one fallback a caller cannot see: a format mismatch is a mistake in the
+        // attribute, and this is a mistake in pairing the attribute with the GEOMETRY.
+        // The data is there, correctly formatted, and the drawing silently takes the material's constant instead.
+        // Warned rather than refused, so an attribute list genuinely shared between a mesh and a batch still works —
+        // and once per (name, frequency, kind), since resolution runs per placement and this sits on the frame path.
+        if (!serves(geometry.kind, a.frequency))
+        {
+            warn_unservable_once(name, a.frequency, geometry.kind);
+            continue;
+        }
+
+        return &a;
     }
     return nullptr;
 }
 
-[[nodiscard]] texture_sample_source const* find_mesh_texture(sv::resident_mesh const& mesh, cc::string_view name)
+[[nodiscard]] texture_sample_source const* find_mesh_texture(geometry_view const& geometry, cc::string_view name)
 {
-    for (auto const& t : mesh.textures)
+    for (auto const& t : geometry.textures)
         if (t.name == name)
             return &t.source;
     return nullptr;
@@ -53,7 +132,7 @@ namespace
 /// Which rank supplies `d`, and what it supplies — the walk itself, without the declaration's own interpolation mode.
 [[nodiscard]] resolved_attribute resolve_source(material_signature_entry const& d,
                                                 material const& m,
-                                                sv::resident_mesh const& mesh)
+                                                geometry_view const& mesh)
 {
     auto winner = resolved_attribute{.name = d.name,
                                      .format = d.format,
@@ -127,9 +206,7 @@ namespace
 ///
 /// The interpolation mode is set once, after the walk: it is the declaration's whatever rank won, and none of the branches
 /// above has any say in it.
-[[nodiscard]] resolved_attribute resolve_one(material_signature_entry const& d,
-                                             material const& m,
-                                             sv::resident_mesh const& mesh)
+[[nodiscard]] resolved_attribute resolve_one(material_signature_entry const& d, material const& m, geometry_view const& mesh)
 {
     auto r = resolve_source(d, m, mesh);
     r.interpolation = d.interpolation;
@@ -138,6 +215,22 @@ namespace
 } // namespace
 
 resolved_material resolve_material(material_type const& type, material const& material, sv::resident_mesh const& mesh)
+{
+    return resolve_material(type, material, geometry_view::of(mesh));
+}
+
+resolved_material resolve_material(material_type const& type, material const& material, sv::resident_quadric_set const& set)
+{
+    return resolve_material(type, material, geometry_view::of(set));
+}
+
+resolved_material resolve_material(material_library const& lib, material_id id, sv::resident_quadric_set const& set)
+{
+    auto const& m = lib.get(id);
+    return resolve_material(lib.get_type(m.type), m, set);
+}
+
+resolved_material resolve_material(material_type const& type, material const& material, geometry_view const& mesh)
 {
     auto r = resolved_material{.type = &type, .source = &material};
     r.attributes.reserve(type.signature.size());

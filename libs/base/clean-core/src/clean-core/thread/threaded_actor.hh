@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
@@ -285,7 +286,12 @@ private:
         if (this->_is_shutting_down.load())
             return false;
 
-        this->_inbox.lock([&](cc::vector<cc::variant<MessageT...>>& queue) { queue.emplace_back(cc::move(msg)); });
+        // The sender's owner id travels with the message, so what the actor records while handling it — a warning above
+        // all — is attributed to that sender rather than to nobody; see cc::rec::owner_scope.
+        // The id and not the sender's ambient chain: holding the chain would keep the sender's context alive, and a
+        // fire-and-forget message still queued would read as work the sender left running.
+        this->_inbox.lock([&](cc::vector<envelope>& queue)
+                          { queue.push_back({.message = cc::move(msg), .owner = cc::rec::current_owner_id()}); });
         this->_inbox_cond_var.notify_one();
 
         // Unthreaded, the message waits for a sweep, so whoever is parked waiting for one has to hear about it.
@@ -297,13 +303,13 @@ private:
     void wake_after_shutdown_request() override
     {
         // Empty critical section on purpose: it only has to order this notify against a waiter's predicate check.
-        this->_inbox.lock([](cc::vector<cc::variant<MessageT...>>&) {});
+        this->_inbox.lock([](cc::vector<envelope>&) {});
         this->_inbox_cond_var.notify_one();
     }
 
     bool drain_inbox_messages(bool wait_on_cond_var) override
     {
-        auto const move_into_local = [&](cc::vector<cc::variant<MessageT...>>& queue)
+        auto const move_into_local = [&](cc::vector<envelope>& queue)
         {
             for (auto& msg : queue)
                 _local_inbox.push_back(cc::move(msg));
@@ -312,7 +318,7 @@ private:
 
         if (wait_on_cond_var)
             this->_inbox.wait(
-                this->_inbox_cond_var, [&](cc::vector<cc::variant<MessageT...>> const& queue)
+                this->_inbox_cond_var, [&](cc::vector<envelope> const& queue)
                 { return !queue.empty() || this->is_shutting_down(); }, move_into_local);
         else
             this->_inbox.lock(move_into_local);
@@ -321,8 +327,11 @@ private:
             return false;
 
         // dispatch each message to the matching on_message(T) via overload resolution
-        for (auto& msg : _local_inbox)
-            cc::move(msg).visit([&](auto&& alt) { _impl->on_message(cc::move(alt)); });
+        for (auto& e : _local_inbox)
+        {
+            cc::rec::owner_scope const attributed(e.owner);
+            cc::move(e.message).visit([&](auto&& alt) { _impl->on_message(cc::move(alt)); });
+        }
 
         _local_inbox.clear(); // keep capacity
         return true;
@@ -330,11 +339,18 @@ private:
 
     // members
 private:
+    /// A message and the owner id of whoever sent it, installed while the message is handled.
+    struct envelope
+    {
+        cc::variant<MessageT...> message;
+        cc::rec::trace_id owner = cc::rec::trace_id::none;
+    };
+
     /// Globally ordered inbox; one queue for all types preserves cross-type ordering.
-    cc::mutex<cc::vector<cc::variant<MessageT...>>> _inbox;
+    cc::mutex<cc::vector<envelope>> _inbox;
 
     /// Thread-local staging drained from _inbox, keeping the lock hold short.
-    cc::vector<cc::variant<MessageT...>> _local_inbox;
+    cc::vector<envelope> _local_inbox;
 
     /// std::unique_ptr, not cc::unique_ptr: ownership is polymorphic through the impl base.
     std::unique_ptr<threaded_actor_impl<MessageT...>> _impl;

@@ -64,7 +64,7 @@ struct sg::backend::vulkan::vulkan_config
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
     /// Matches the dx12 backend's default.
-    isize upload_ring_bytes = 16 * 1024 * 1024;
+    isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
 
     /// Capacity of the readback ring behind cmd.download, in bytes.
     isize download_ring_bytes = 16 * 1024 * 1024;
@@ -128,7 +128,11 @@ public:
     // A lost device makes the drain inside shutdown() throw sg::device_lost_exception, and a destructor reached while
     // that same exception is unwinding would then call std::terminate — turning a recoverable device loss into an
     // abort with no diagnostic, at the exact moment the caller's handler was about to run.
-    ~vulkan_context() override { shutdown_no_throw(); }
+    ~vulkan_context() override
+    {
+        hold_device_lifecycle_until_destroyed();
+        shutdown_no_throw();
+    }
 
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;
@@ -292,9 +296,16 @@ public:
     // Set by create_vulkan_context once the context exists, so the messenger can carry it as user data.
     void set_debug_messenger(VkDebugUtilsMessengerEXT messenger) { _debug_messenger = messenger; }
 
+    /// The last windows both transfer systems submitted, for reading a synchronization-validation hazard against.
+    /// A message names the command buffer and the resource; this adds the ranges, the slots and the order.
+    [[nodiscard]] cc::string describe_recent_transfer_windows()
+    {
+        return _upload_async.describe_recent_windows() + _download_async.describe_recent_windows();
+    }
+
     // Delivers one validation message to the installed callback, or to the log when none is installed.
     // Called from the debug messenger; body in vulkan_context.cc.
-    void dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const;
+    void dispatch_validation_message(vulkan_message_severity severity, cc::string_view message);
 
     // backend-typed API — prefer these when you already hold a vulkan_context
 

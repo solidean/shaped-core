@@ -28,10 +28,11 @@ INVOCABLE_TEST("sg - a fresh command list is stamped with the current epoch", (s
 // Regression, narrowed down from a transfer-fuzz finding: a command list left neither submitted nor dropped must NOT leak the open-list count.
 // If it did, a later advance_epoch would wrongly trip its "every list must be submitted or dropped before advancing" assert.
 // That is exactly how the fuzz's shared context got polluted across replays and reported a false [mk_trace, advance] failure.
-// Letting a list leave scope auto-drops it, clearing the count, and prints one warning to stderr — expected here.
+// Letting a list leave scope auto-drops it, clearing the count, and logs one warning — expected here.
 ASYNC_INVOCABLE_TEST("sg - an unsubmitted command list auto-drops on scope exit", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
 
     {
         auto cmd = ctx->create_command_list();

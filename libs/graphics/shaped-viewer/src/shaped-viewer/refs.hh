@@ -41,6 +41,32 @@ private:
     u32 _item = 0;
 };
 
+/// One quadric batch placed in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_quadrics`.
+///
+/// **A handle to an empty batch names no item**, since an empty set draws nothing and is not placed at all.
+/// Every method on it is then a no-op rather than an error, so a caller can place and transform in one expression
+/// without asking first whether there was anything to place.
+class sv::quadric_ref
+{
+public:
+    /// The item index an empty batch is handed back under — see the note above.
+    static constexpr u32 no_item = u32(-1);
+
+    quadric_ref(frame* f, view_index view, u32 layer, u32 item) : _frame(f), _view(view), _layer(layer), _item(item) {}
+
+    /// Where this placement puts the batch, overriding the transform the set itself carries.
+    /// A no-op on a handle to an empty batch.
+    void transform(tg::affine_transform3f const& t);
+
+private:
+    [[nodiscard]] scene_item& target() const;
+
+    frame* _frame = nullptr;
+    view_index _view = view_index(0);
+    u32 _layer = 0;
+    u32 _item = 0;
+};
+
 /// One light in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_light`.
 class sv::light_ref
 {
@@ -76,6 +102,56 @@ public:
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
     /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
     mesh_ref add_mesh(sv::resident_mesh const& mesh);
+
+    /// Places a batch of analytic quadrics in the scene, at the transform the set carries.
+    ///
+    /// The primitives, the attributes and the procedural BLAS are acquired here, keyed by the content hash the set already
+    /// carries — so calling this every frame with an unchanged set uploads nothing and stays O(1).
+    /// See libs/graphics/shaped-viewer/docs/quadrics.md.
+    quadric_ref add_quadrics(sv::quadric_set const& set);
+
+    /// The same for a batch already made of resources — nothing to look up, since its ids are minted.
+    quadric_ref add_quadrics(sv::resident_quadric_set const& set);
+
+    /// Adds one sphere to this scene's implicit quadric batch, drawn with `material`.
+    ///
+    /// Sugar over `add_quadrics`: the frame owns one set per (view, layer, material) and this appends to it, which is what
+    /// makes drawing three spheres cost three lines rather than a set a caller has to hold.
+    ///
+    /// **The implicit set hashes its CONTENTS**, so an unchanged frame still uploads nothing — the property the explicit
+    /// form has, kept rather than traded away for the convenience.
+    /// What it does cost is re-hashing the batch each frame, which is cheap against uploading it and is not free.
+    void add_sphere(tg::sphere3f const& sphere, material_id material = material_id::invalid);
+
+    /// The same for a segment drawn in `style` — see `sv::line_style`.
+    ///
+    /// `style.ends` picks what closes it: `round` is a capsule (three primitives), `flat` a capped cylinder (one), and
+    /// `open` an uncapped tube (one), which is what a mesh's edges want since their joints already carry vertex spheres.
+    void add_line(tg::segment3f const& segment, line_style const& style, material_id material = material_id::invalid);
+
+    /// The same at `radius`, with the default ends.
+    void add_line(tg::segment3f const& segment, float radius, material_id material = material_id::invalid);
+
+    /// Adds a cone whose base disc is the circle of radius `base_radius` about `base_to_apex.pos0`, tipped at `pos1`.
+    /// `capped` draws that base disc; without it the cone is open and shows its own interior.
+    void add_cone(tg::segment3f const& base_to_apex,
+                  float base_radius,
+                  material_id material = material_id::invalid,
+                  bool capped = true);
+
+    /// Adds an arrow from `segment.pos0` to `segment.pos1`, drawn with `material` — a shaft and a head, so two primitives.
+    ///
+    /// The tip is exactly `segment.pos1`: the head is taken out of the segment rather than added past its end, so an arrow
+    /// between two points measures the distance between them.
+    /// This overload takes every length from the arrow's own, at 2% of it for the shaft radius.
+    void add_arrow(tg::segment3f const& segment, material_id material = material_id::invalid);
+
+    /// The same with the shaft radius given and the head scaled to it — what a field of arrows that must look alike wants,
+    /// since then only their LENGTH differs.
+    void add_arrow(tg::segment3f const& segment, float shaft_radius, material_id material = material_id::invalid);
+
+    /// The same with all three lengths given — see `sv::arrow_style`.
+    void add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material = material_id::invalid);
 
     /// Adds an area light.
     /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.

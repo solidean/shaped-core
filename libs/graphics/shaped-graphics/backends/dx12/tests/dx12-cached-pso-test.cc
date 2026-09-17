@@ -238,7 +238,8 @@ ASYNC_INVOCABLE_TEST("sg cached PSO - a garbage blob degrades to a fresh build",
     sg::context& ctx = *handle;
 
     // The unreadable cached blob below is the subject, so the debug layer's complaint about it is the expected outcome rather than a failure.
-    dx12::scoped_expected_validation_messages const expect_complaint;
+    nx::allow_errors("debug layer:", "sg.dx12");
+    nx::allow_warnings("debug layer:", "sg.dx12");
 
     sg::compiled_shader const shader = make_double_shader();
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);

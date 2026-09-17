@@ -10,8 +10,3 @@ The shape of what exists is in [parallel-execution](parallel-execution.md) and t
 - **A first `APP` / `COMMAND` consumer.**
   Nothing outside nexus's own wiring tests declares one yet, and no binary is registered `KINDS tool`.
   `tools/shaped-linter` is the case the design was built for: a `-core` library, a `main.cc` and a `-test` binary that collapse into one nexus binary with a `COMMAND("lint", default_entry)`.
-
-- **`SECTION` in an async body.**
-  It asserts today, because the section tree is replay state and an async body runs once — see [parallel-execution](parallel-execution.md).
-  A test that needs both sections and a `co_await` therefore stays sync and cannot wait on async work before it ends.
-  "sv - a view accumulates across frames under its id" in `libs/graphics/shaped-viewer/tests/view-accumulation-test.cc` is the one waiting on this, and migrates once it lands.

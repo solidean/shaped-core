@@ -30,21 +30,11 @@ namespace
 // `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
 using cnet::cc_rec_domain;
 
-bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
-{
-    CC_RECORD_SCOPE("cnet_test.pump_until");
-
-    for (i32 i = 0; i < rounds; ++i)
-    {
-        if (done())
-            return true;
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
-    }
-    return done();
-}
-
-/// Pump against the wall clock, which is what a real socket waits on.
+/// Pump against the wall clock rather than a round count.
+///
+/// Even over the virtual network a connect resolves `localhost` on the resolver's own thread, and a round count only
+/// measures how fast this machine spins while that thread waits for a core.
+/// The budget is a hang guard, never what a test asserts on.
 bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 {
     CC_RECORD_SCOPE("cnet_test.pump_for");
@@ -132,7 +122,7 @@ CNET_IO_TEST("cnet - a websocket carries a message each way")
                                     { fixture.accepted.push_back(cc::move(ws)); });
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url_for("/socket"));
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
 
     auto const client = connecting->value();
@@ -144,7 +134,7 @@ CNET_IO_TEST("cnet - a websocket carries a message each way")
     auto const server_side = fixture.accepted[0];
     auto received = server_side->receive();
 
-    CHECK(pump_until([&] { return sent->is_ready() && received->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready() && received->is_ready(); }));
     REQUIRE(received->try_error() == nullptr);
     CHECK(received->value().is_text);
     CHECK(received->value().text() == "ping from the client");
@@ -153,7 +143,7 @@ CNET_IO_TEST("cnet - a websocket carries a message each way")
     auto const answered = server_side->send_text("pong from the server");
     auto back = client->receive();
 
-    CHECK(pump_until([&] { return answered->is_ready() && back->is_ready(); }));
+    CHECK(pump_for([&] { return answered->is_ready() && back->is_ready(); }));
     REQUIRE(back->try_error() == nullptr);
     CHECK(back->value().text() == "pong from the server");
 }
@@ -169,7 +159,7 @@ CNET_IO_TEST("cnet - a websocket carries binary and large messages")
                                     { fixture.accepted.push_back(cc::move(ws)); });
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url_for("/socket"));
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
     auto const client = connecting->value();
 
@@ -182,7 +172,7 @@ CNET_IO_TEST("cnet - a websocket carries binary and large messages")
     auto const sent = client->send_binary(payload);
     auto received = fixture.accepted[0]->receive();
 
-    CHECK(pump_until([&] { return sent->is_ready() && received->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready() && received->is_ready(); }));
     REQUIRE(received->try_error() == nullptr);
     CHECK(!received->value().is_text);
     REQUIRE(received->value().data.size() == payload.size());
@@ -204,24 +194,24 @@ CNET_IO_TEST("cnet - a websocket message that arrived before anybody asked is no
                                     { fixture.accepted.push_back(cc::move(ws)); });
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url_for("/socket"));
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
     auto const client = connecting->value();
 
     // Two messages sent while nothing is receiving; both must still be there afterwards, in order.
     auto const first = client->send_text("one");
     auto const second = client->send_text("two");
-    CHECK(pump_until([&] { return first->is_ready() && second->is_ready(); }));
+    CHECK(pump_for([&] { return first->is_ready() && second->is_ready(); }));
 
     auto const server_side = fixture.accepted[0];
 
     auto a = server_side->receive();
-    CHECK(pump_until([&] { return a->is_ready(); }));
+    CHECK(pump_for([&] { return a->is_ready(); }));
     REQUIRE(a->try_error() == nullptr);
     CHECK(a->value().text() == "one");
 
     auto b = server_side->receive();
-    CHECK(pump_until([&] { return b->is_ready(); }));
+    CHECK(pump_for([&] { return b->is_ready(); }));
     REQUIRE(b->try_error() == nullptr);
     CHECK(b->value().text() == "two");
 }
@@ -237,7 +227,7 @@ CNET_IO_TEST("cnet - closing a websocket ends the other end's receive")
                                     { fixture.accepted.push_back(cc::move(ws)); });
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url_for("/socket"));
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
     auto const client = connecting->value();
 
@@ -246,7 +236,7 @@ CNET_IO_TEST("cnet - closing a websocket ends the other end's receive")
 
     client->close();
 
-    CHECK(pump_until([&] { return waiting->is_ready(); }));
+    CHECK(pump_for([&] { return waiting->is_ready(); }));
     REQUIRE(waiting->try_error() != nullptr);
     CHECK(!server_side->is_open());
 }
@@ -261,7 +251,7 @@ CNET_IO_TEST("cnet - a request that is not an upgrade gets a 400 from a websocke
     auto client = native_http_client(*fixture.net, *fixture.res);
     auto response = http_get(client, cc::format("http://localhost:{}/socket", fixture.server->local().port));
 
-    CHECK(pump_until([&] { return response->is_ready(); }));
+    CHECK(pump_for([&] { return response->is_ready(); }));
     REQUIRE(response->try_error() == nullptr);
 
     // A 400 rather than a 404: the path exists, and a client that meant to upgrade learns more from that.
@@ -282,7 +272,7 @@ CNET_IO_TEST("cnet - a websocket route and an ordinary route can share a path")
                                     { fixture.accepted.push_back(cc::move(ws)); });
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url_for("/thing"));
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
 
     // The upgrade wins when the request asks for one, and the route is untouched otherwise -- which cannot be checked
     // here, because a plain GET on this path now answers 400 by the rule above.
@@ -295,7 +285,7 @@ CNET_IO_TEST("cnet - websocket_connect refuses a url that is not ws")
     auto fixture = ws_fixture();
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, "http://localhost/socket");
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() != nullptr);
 }
 
@@ -441,7 +431,7 @@ CNET_IO_TEST("cnet - a websocket over a real socket, both ends in one process")
     // handshake buffer that dies with the call that started the send is read after it is freed.
     auto connecting = websocket_connect(*io.value(), *res.value(),
                                         cc::format("ws://127.0.0.1:{}/socket", server.value()->local().port));
-    CHECK(pump_for([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
 
     auto const client = connecting->value();
@@ -499,7 +489,7 @@ CNET_IO_TEST("cnet - cancelling a websocket receive ends that receive and nothin
     auto fixture = keepalive_fixture({});
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url());
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
 
     auto const client = connecting->value();
@@ -512,7 +502,7 @@ CNET_IO_TEST("cnet - cancelling a websocket receive ends that receive and nothin
     CHECK(!pump_briefly([&] { return waiting->is_ready(); }));
 
     token.cancel();
-    CHECK(pump_until([&] { return waiting->is_ready(); }));
+    CHECK(pump_for([&] { return waiting->is_ready(); }));
 
     REQUIRE(waiting->try_error() != nullptr);
     CHECK(waiting->try_error()->is_cancelled());
@@ -523,7 +513,7 @@ CNET_IO_TEST("cnet - cancelling a websocket receive ends that receive and nothin
 
     auto const sent = fixture.accepted[0]->send_text("after the cancel");
     auto again = client->receive();
-    CHECK(pump_until([&] { return sent->is_ready() && again->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready() && again->is_ready(); }));
     REQUIRE(again->try_error() == nullptr);
     CHECK(again->value().text() == "after the cancel");
 }
@@ -538,7 +528,7 @@ CNET_IO_TEST("cnet - a receive's deadline bounds the receive rather than the con
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url(),
                                         {.ping_interval_ms = 10'000, .pong_timeout_ms = 5'000});
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
 
     auto const client = connecting->value();
@@ -549,7 +539,7 @@ CNET_IO_TEST("cnet - a receive's deadline bounds the receive rather than the con
     CHECK(!pump_briefly([&] { return waiting->is_ready(); }));
 
     fixture.clk.advance_ms(1'000);
-    CHECK(pump_until([&] { return waiting->is_ready(); }));
+    CHECK(pump_for([&] { return waiting->is_ready(); }));
     REQUIRE(waiting->try_error() != nullptr);
     CHECK(!waiting->try_error()->is_cancelled());
 
@@ -559,7 +549,7 @@ CNET_IO_TEST("cnet - a receive's deadline bounds the receive rather than the con
 
     auto const sent = fixture.accepted[0]->send_text("still connected");
     auto again = client->receive();
-    CHECK(pump_until([&] { return sent->is_ready() && again->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready() && again->is_ready(); }));
     REQUIRE(again->try_error() == nullptr);
     CHECK(again->value().text() == "still connected");
 }
@@ -573,7 +563,7 @@ CNET_IO_TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
 
     auto connecting = websocket_connect(*fixture.net, *fixture.res, fixture.url(),
                                         {.ping_interval_ms = 1'000, .pong_timeout_ms = 500});
-    CHECK(pump_until([&] { return connecting->is_ready(); }));
+    REQUIRE(pump_for([&] { return connecting->is_ready(); }));
     REQUIRE(connecting->try_error() == nullptr);
 
     auto const client = connecting->value();
@@ -595,7 +585,7 @@ CNET_IO_TEST("cnet - an idle websocket is pinged, and a pong keeps it alive")
     // And messages still work afterwards, so nothing the keepalive sent confused the framing.
     auto const sent = client->send_text("still here");
     auto received = fixture.accepted[0]->receive();
-    CHECK(pump_until([&] { return sent->is_ready() && received->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready() && received->is_ready(); }));
     REQUIRE(received->try_error() == nullptr);
     CHECK(received->value().text() == "still here");
 }
@@ -608,7 +598,7 @@ CNET_IO_TEST("cnet - a peer that stops answering fails the receive rather than h
     auto listener = net.listen(endpoint(ip_address::loopback(ip_family::v4), 0), {}).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
-    CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
+    CHECK(pump_for([&] { return accepted->is_ready() && connected->is_ready(); }));
 
     // Only ONE end becomes a WebSocket.
     // The other is a plain connection that reads bytes and answers nothing, which is what a peer whose machine
@@ -638,7 +628,7 @@ CNET_IO_TEST("cnet - keepalives can be turned off")
     auto listener = net.listen(endpoint(ip_address::loopback(ip_family::v4), 0), {}).value();
     auto accepted = listener->accept();
     auto connected = tcp_connect(net, listener->local());
-    CHECK(pump_until([&] { return accepted->is_ready() && connected->is_ready(); }));
+    CHECK(pump_for([&] { return accepted->is_ready() && connected->is_ready(); }));
 
     auto const ws = impl::adopt_websocket(
         *io, {.connection = connected->value(), .is_client = true, .ping_interval_ms = 0, .pong_timeout_ms = 0});

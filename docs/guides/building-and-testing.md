@@ -673,6 +673,10 @@ Never run a test binary directly — always go through `dev.py test`, so discove
 A run ends with one row per binary, longest first: its wall time, its test count, and what it cost the machine.
 That cost is average CPU load, cores kept busy, and peak resident memory, as nexus measured them around its tests.
 A binary with a long wall time and a low load is spending that time serialized, which is usually the thing to fix.
+`serial` says how much of that is declared: the share of wall time spent in tests that ran alone, plus the largest exclusion group, which `group` names.
+Alone means `exclusive()`, or any phase but the shared one, since phases run one after another.
+A group is a tag, or `main_thread` for synchronous bodies sharing the run thread; groups run beside each other, so only the largest counts.
+A low load under a low `serial` is waiting on something no test declared.
 `check` prints its per-preset timing lines instead.
 
 `uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.

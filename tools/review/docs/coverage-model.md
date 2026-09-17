@@ -98,7 +98,11 @@ It is reported, never enforced: a review is allowed to be unfinished, and rounds
 ## Superseding
 
 `sync` recomputes net space against the moved head.
-A change whose claim no longer meets net space is marked **superseded** and never deleted, so an entry that discussed it stays readable.
+A change whose claim no longer meets net space, and whose content no hunk at the new head carries, is marked **superseded**.
+It is never deleted, so an entry that discussed it stays readable.
+**Both conditions, never the claim alone.**
+A hunk that only moved — a comment removed above it — has its claim miss the new net space too.
+Superseding it would be permanent, because a superseded change is never re-pointed and a known digest is never re-created, so its lines would stay unaccounted however often `ingest` ran.
 In a `land-changes` review that mark is the evidence: the fix landed, so the hunk it was about is gone.
 
 ## Re-pointing

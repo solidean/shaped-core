@@ -30,24 +30,11 @@ namespace
 // `using namespace cnet` leaves the recording macros two domains to choose from; the scopes below are cnet's.
 using cnet::cc_rec_domain;
 
-bool pump_until(cc::function_ref<bool()> done, i32 rounds = 20000)
-{
-    CC_RECORD_SCOPE("cnet_test.pump_until");
-
-    for (i32 i = 0; i < rounds; ++i)
-    {
-        if (done())
-            return true;
-        if (!cc::thread_pump_all())
-            cc::this_thread_yield();
-    }
-    return done();
-}
-
 /// Pump against the wall clock rather than a round count.
 ///
-/// The round-counting one above is right for a virtual network, where nothing waits on the world; a real socket
-/// does, and counting rounds there measures how fast this machine spins rather than how long it was given.
+/// Even over the virtual network the fixture resolves `localhost` on the resolver's own thread, and a round count only
+/// measures how fast this machine spins while that thread waits for a core.
+/// The budget is a hang guard, never what a test asserts on.
 bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 10.0)
 {
     CC_RECORD_SCOPE("cnet_test.pump_for");
@@ -122,7 +109,7 @@ CNET_IO_TEST("cnet - a server answers a route")
                           [](http_server_request const&) { return http_server_response::text("hello, world"); });
 
     auto response = http_get(*fixture.client, fixture.url_for("/hello"));
-    CHECK(pump_until([&] { return response->is_ready(); }));
+    CHECK(pump_for([&] { return response->is_ready(); }));
     CHECK(response->try_error() == nullptr);
 
     CHECK(response->value().status() == 200);
@@ -142,7 +129,7 @@ CNET_IO_TEST("cnet - a path nothing serves is a 404, and a method nothing serves
                           [](http_server_request const&) { return http_server_response::text("here"); });
 
     auto missing = http_get(*fixture.client, fixture.url_for("/nowhere"));
-    CHECK(pump_until([&] { return missing->is_ready(); }));
+    CHECK(pump_for([&] { return missing->is_ready(); }));
     CHECK(missing->value().status() == 404);
 
     // The path exists and the method does not, which is a different fact and a client can act on it.
@@ -151,7 +138,7 @@ CNET_IO_TEST("cnet - a path nothing serves is a 404, and a method nothing serves
     request.target = http_target::parse(fixture.url_for("/only-get")).value();
 
     auto wrong_method = http_send(*fixture.client, cc::move(request));
-    CHECK(pump_until([&] { return wrong_method->is_ready(); }));
+    CHECK(pump_for([&] { return wrong_method->is_ready(); }));
     CHECK(wrong_method->value().status() == 405);
 }
 
@@ -181,7 +168,7 @@ CNET_IO_TEST("cnet - a handler sees the request it was sent")
     request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
-    CHECK(pump_until([&] { return response->is_ready(); }));
+    CHECK(pump_for([&] { return response->is_ready(); }));
     CHECK(response->try_error() == nullptr);
     CHECK(response->value().body_text() == payload);
 
@@ -200,11 +187,11 @@ CNET_IO_TEST("cnet - a wildcard route matches everything under it, and a specifi
                           [](http_server_request const& request) { return http_server_response::text(request.path); });
 
     auto specific = http_get(*fixture.client, fixture.url_for("/files/special"));
-    CHECK(pump_until([&] { return specific->is_ready(); }));
+    CHECK(pump_for([&] { return specific->is_ready(); }));
     CHECK(specific->value().body_text() == "the special one");
 
     auto under = http_get(*fixture.client, fixture.url_for("/files/a/b/c"));
-    CHECK(pump_until([&] { return under->is_ready(); }));
+    CHECK(pump_for([&] { return under->is_ready(); }));
     CHECK(under->value().body_text() == "/files/a/b/c");
 }
 
@@ -220,7 +207,7 @@ CNET_IO_TEST("cnet - a HEAD gets the head and none of the body")
     request.target = http_target::parse(fixture.url_for("/thing")).value();
 
     auto response = http_send(*fixture.client, cc::move(request));
-    CHECK(pump_until([&] { return response->is_ready(); }));
+    CHECK(pump_for([&] { return response->is_ready(); }));
     CHECK(response->try_error() == nullptr);
     CHECK(response->value().status() == 200);
 
@@ -239,11 +226,11 @@ CNET_IO_TEST("cnet - two requests share one connection")
                           [](http_server_request const&) { return http_server_response::text("second"); });
 
     auto first = http_get(*fixture.client, fixture.url_for("/a"));
-    CHECK(pump_until([&] { return first->is_ready(); }));
+    CHECK(pump_for([&] { return first->is_ready(); }));
     CHECK(first->value().body_text() == "first");
 
     auto second = http_get(*fixture.client, fixture.url_for("/b"));
-    CHECK(pump_until([&] { return second->is_ready(); }));
+    CHECK(pump_for([&] { return second->is_ready(); }));
     CHECK(second->value().body_text() == "second");
 
     // Both ends kept it: the client pooled it, and the server did not close it after answering.
@@ -267,7 +254,7 @@ CNET_IO_TEST("cnet - a body over the limit is refused rather than buffered")
     request.body = borrowed_body(payload);
 
     auto response = http_send(*fixture.client, cc::move(request));
-    CHECK(pump_until([&] { return response->is_ready(); }));
+    CHECK(pump_for([&] { return response->is_ready(); }));
     CHECK(response->try_error() == nullptr);
 
     // Read to the end and thrown away rather than buffered: the answer is a 413, and the handler never runs.
@@ -283,16 +270,16 @@ CNET_IO_TEST("cnet - a request nothing can parse gets a 400 and the connection e
 
     // Straight onto the wire, since no client of ours would send this.
     auto connected = tcp_connect(*fixture.net, fixture.server->local());
-    CHECK(pump_until([&] { return connected->is_ready(); }));
+    CHECK(pump_for([&] { return connected->is_ready(); }));
     CHECK(connected->try_error() == nullptr);
 
     auto const& raw = connected->value();
     auto sent = raw->send(bytes_of("GET / HTTP/1.1\r\nBad Header: x\r\n\r\n"));
-    CHECK(pump_until([&] { return sent->is_ready(); }));
+    CHECK(pump_for([&] { return sent->is_ready(); }));
 
     byte inbox[256] = {};
     auto received = raw->receive(cc::span<byte>(inbox, isize(sizeof(inbox))));
-    CHECK(pump_until([&] { return received->is_ready(); }));
+    CHECK(pump_for([&] { return received->is_ready(); }));
     CHECK(received->try_error() == nullptr);
 
     auto const answer = cc::string_view(reinterpret_cast<char const*>(inbox), received->value());
@@ -305,19 +292,20 @@ CNET_IO_TEST("cnet - a connection past the limit is closed rather than queued")
     auto fixture = server_fixture({.max_connections = 1});
     fixture.server->route(http_method::get, "/",
                           [](http_server_request const&) { return http_server_response::text("ok"); });
+    nx::expect_warning("refusing a connection", nx::exactly(1));
 
     auto first = tcp_connect(*fixture.net, fixture.server->local());
-    CHECK(pump_until([&] { return first->is_ready(); }));
-    CHECK(pump_until([&] { return fixture.server->open_connections() == 1; }));
+    CHECK(pump_for([&] { return first->is_ready(); }));
+    CHECK(pump_for([&] { return fixture.server->open_connections() == 1; }));
 
     auto second = tcp_connect(*fixture.net, fixture.server->local());
-    CHECK(pump_until([&] { return second->is_ready(); }));
+    CHECK(pump_for([&] { return second->is_ready(); }));
 
     // The connection is accepted and then closed, so the client learns immediately rather than waiting on a server
     // that will never read from it.
     byte inbox[16] = {};
     auto received = second->value()->receive(cc::span<byte>(inbox, isize(sizeof(inbox))));
-    CHECK(pump_until([&] { return received->is_ready(); }));
+    CHECK(pump_for([&] { return received->is_ready(); }));
     CHECK(received->try_error() != nullptr);
 
     CHECK(fixture.server->open_connections() == 1);
@@ -330,13 +318,13 @@ CNET_IO_TEST("cnet - stopping the server ends everything in flight")
                           [](http_server_request const&) { return http_server_response::text("ok"); });
 
     auto connected = tcp_connect(*fixture.net, fixture.server->local());
-    CHECK(pump_until([&] { return connected->is_ready(); }));
-    CHECK(pump_until([&] { return fixture.server->open_connections() == 1; }));
+    CHECK(pump_for([&] { return connected->is_ready(); }));
+    CHECK(pump_for([&] { return fixture.server->open_connections() == 1; }));
 
     // Shutdown goes through the server's own token, so the connection parked on a read ends at once rather than on
     // a deadline nobody set.
     fixture.server->stop();
-    CHECK(pump_until([&] { return fixture.server->open_connections() == 0; }));
+    CHECK(pump_for([&] { return fixture.server->open_connections() == 0; }));
 
     // And nothing new is accepted afterwards.
     //
@@ -393,14 +381,14 @@ CNET_IO_TEST("cnet - a streamed response arrives as chunks and keeps the connect
                           });
 
     auto response = http_get(*fixture.client, fixture.url_for("/stream"));
-    CHECK(pump_until([&] { return !opened.empty(); }));
+    CHECK(pump_for([&] { return !opened.empty(); }));
     REQUIRE(opened.size() == 1);
 
     auto const body = opened[0];
     auto const a = body->write_text("one ");
     auto const b = body->write_text("two ");
     auto const c = body->write_text("three");
-    CHECK(pump_until([&] { return a->is_ready() && b->is_ready() && c->is_ready(); }));
+    CHECK(pump_for([&] { return a->is_ready() && b->is_ready() && c->is_ready(); }));
 
     // Nothing has ended the body yet, so the client is still waiting on it.
     CHECK(!response->is_ready());
@@ -441,10 +429,10 @@ CNET_IO_TEST("cnet - an abandoned stream ends the response rather than hanging i
                           });
 
     auto response = http_get(*fixture.client, fixture.url_for("/stream"));
-    CHECK(pump_until([&] { return !opened.empty(); }));
+    CHECK(pump_for([&] { return !opened.empty(); }));
 
     auto const wrote = opened[0]->write_text("partial");
-    CHECK(pump_until([&] { return wrote->is_ready(); }));
+    CHECK(pump_for([&] { return wrote->is_ready(); }));
 
     // Dropping the last reference is what a handler that decided it has nothing more to say looks like.
     opened.clear();
@@ -468,12 +456,12 @@ CNET_IO_TEST("cnet - an empty chunk is dropped rather than ending the body")
                           });
 
     auto response = http_get(*fixture.client, fixture.url_for("/stream"));
-    CHECK(pump_until([&] { return !opened.empty(); }));
+    CHECK(pump_for([&] { return !opened.empty(); }));
 
     auto const body = opened[0];
     auto const empty = body->write({});
     auto const after = body->write_text("still arrives");
-    CHECK(pump_until([&] { return empty->is_ready() && after->is_ready(); }));
+    CHECK(pump_for([&] { return empty->is_ready() && after->is_ready(); }));
     CHECK(body->is_open());
 
     body->finish();
@@ -611,14 +599,14 @@ CNET_IO_TEST("cnet - a request body arrives, and the connection is still usable 
     request.body = borrowed_body(payload);
 
     auto posted = http_send(*fixture.client, cc::move(request));
-    CHECK(pump_until([&] { return posted->is_ready(); }));
+    CHECK(pump_for([&] { return posted->is_ready(); }));
     REQUIRE(posted->try_error() == nullptr);
     CHECK(posted->value().body_text() == "got some body bytes");
 
     // The one that matters: an unframed body would still be sitting on the connection, and this request would be
     // read as a continuation of it.
     auto second = http_get(*fixture.client, fixture.url_for("/after"));
-    CHECK(pump_until([&] { return second->is_ready(); }));
+    CHECK(pump_for([&] { return second->is_ready(); }));
     REQUIRE(second->try_error() == nullptr);
     CHECK(second->value().status() == 200);
     CHECK(second->value().body_text() == "second");

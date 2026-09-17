@@ -39,6 +39,7 @@ add_library(shaped-graphics
     src/shaped-graphics/routine/render_routine.cc
     src/shaped-graphics/routine/routine_registry.cc
     src/shaped-graphics/context/context.cc
+    src/shaped-graphics/context/impl/device_lifecycle.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/persistent.cc
     src/shaped-graphics/context/transient.cc
@@ -66,6 +67,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/types.hh
     src/shaped-graphics/exceptions.hh
     src/shaped-graphics/context/context.hh
+    src/shaped-graphics/context/impl/device_lifecycle.hh
     src/shaped-graphics/context/persistent.hh
     src/shaped-graphics/context/transient.hh
     src/shaped-graphics/context/upload.hh

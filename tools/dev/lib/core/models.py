@@ -146,3 +146,8 @@ class TestSummary:
     cpu_load: float | None = None
     cores_used: float | None = None
     peak_resident_bytes: int | None = None
+
+    # The part of the run no --jobs could shorten: exclusive() and non-shared phases, plus the largest exclusion group.
+    serial_s: float | None = None
+    serial_group: str | None = None
+    serial_group_s: float | None = None

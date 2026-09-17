@@ -89,6 +89,28 @@ TEST("glob - normalize folds both sides' spelling first")
     CHECK(glob_matches("LIBS\\base\\*.hh", "libs/base/a.hh", glob_option::normalize | glob_option::ignore_case));
 }
 
+TEST("glob - text makes a slash an ordinary character")
+{
+    constexpr auto text = cc::flags(glob_option::text);
+    CHECK(glob_matches("*did not fit*", "an upload of 3 bytes/s did not fit the ring", text));
+    CHECK(glob_matches("a?c", "a/c", text));
+    CHECK(glob_matches("a**c", "a/b/c", text));
+    CHECK(!glob_matches("a*c", "a/b/c", {}));
+
+    // A trailing slash is a literal, not the subtree shorthand.
+    CHECK(glob_matches("tests/", "tests/", text));
+    CHECK(!glob_matches("tests/", "tests/a.cc", text));
+}
+
+TEST("glob - under text, a verbatim pattern still matches its own wildcard characters")
+{
+    // A line pasted out of a log may itself contain `?` or `*`; a pattern copied from it can only match more, never less.
+    constexpr auto text = cc::flags(glob_option::text);
+    CHECK(glob_matches("*printed twice? no, once*", "printed twice? no, once", text));
+    CHECK(glob_matches("*a * b*", "x a * b y", text));
+    CHECK(glob_matches("*UPLOAD*", "an upload", glob_option::text | glob_option::ignore_case));
+}
+
 TEST("glob_normalize_path - separators, duplicates and a trailing slash")
 {
     CHECK(glob_normalize_path("libs\\base\\clean-core") == "libs/base/clean-core");

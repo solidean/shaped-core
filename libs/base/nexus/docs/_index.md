@@ -15,6 +15,8 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
   Why an unattributable check fails the run, and how to attribute a thread you started yourself.
 - [recording](recording.md) — `nx::test_recording()`, the per-test `cc::rec` bucket, the console logger, and a failing test's recording.
   Read the cost section before assuming the default is free.
+- [log-rule](log-rule.md) — a passing test logs no warning or error it did not declare: `nx::expect_*`, `nx::allow_*` and the broader waivers.
+  Covers which pass a declaration reaches, when the verdict is taken, and why the console withholds warnings until then.
 - [parallel-execution](parallel-execution.md) — a run is a graph of `cc::async` nodes: `--jobs`, per-test scheduler modes, `exclusive` tags, and `ASYNC_TEST`.
   Read the exclusion section before assuming two tests can share a resource.
 - [test-runtime](test-runtime.md) — keeping a test's runtime proportional to what it proves.

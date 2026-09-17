@@ -4,7 +4,6 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_driver_lock.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
@@ -72,7 +71,7 @@ char const* vk_result_name(VkResult r)
 
 // One validation message, to the installed callback or to the log.
 // The layer already decided how bad it is, so the severity maps straight across rather than flattening onto one level.
-void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const
+void vulkan_context::dispatch_validation_message(vulkan_message_severity severity, cc::string_view message)
 {
     if (_message_callback)
     {
@@ -80,13 +79,17 @@ void vulkan_context::dispatch_validation_message(vulkan_message_severity severit
         return;
     }
 
+    // A hazard between two copies is only diagnosable with their ranges and order, which the message lacks.
+    auto const windows
+        = message.contains("_AFTER_WRITE") ? cc::format("\n{}", describe_recent_transfer_windows()) : cc::string();
+
     switch (severity)
     {
     case vulkan_message_severity::error:
-        CC_LOG_ERROR("validation: {}", message);
+        CC_LOG_ERROR("validation: {}{}", message, windows);
         break;
     case vulkan_message_severity::warning:
-        CC_LOG_WARNING("validation: {}", message);
+        CC_LOG_WARNING("validation: {}{}", message, windows);
         break;
     case vulkan_message_severity::info:
         CC_LOG_INFO("validation: {}", message);
@@ -146,10 +149,10 @@ void vulkan_context::shutdown()
     if (_is_shut_down)
         return;
 
-    // The teardown half of the same exclusion the creation path takes; see vulkan_driver_lock.hh.
+    // The teardown half of the exclusion the creation path takes; see shaped-graphics/context/impl/device_lifecycle.hh.
     // Taken for the whole shutdown rather than around vkDestroyDevice alone: the drain above it submits, and a
     // ray-tracing build starting between the drain and the destroy would reopen the window.
-    scoped_device_lifecycle const driver_guard;
+    sg::impl::device_lifecycle_hold const lifecycle;
 
     // Release per-context routine instances first: they may cache epoch/allocator-managed resources
     // (e.g. an init_once buffer) that must be freed before the resource systems below are torn down.

@@ -7,7 +7,7 @@
 
 // Entry-point drivers for the dx12 backend suite (shaped-graphics-dx12-test).
 // Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
-// Both carry the debug layer and the fail-on-validation listener; see dx12-test-common.hh.
+// Both carry the debug layer, and a validation message fails the test that provoked it through the log rule.
 //
 // Two adapters, which is the point of having drivers at all:
 //   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
@@ -22,6 +22,10 @@ namespace dx12 = sg::backend::dx12;
 constexpr char const* warp_driver = "sg dx12 backend - warp";
 constexpr char const* hardware_driver = "sg dx12 backend - hardware";
 } // namespace
+
+// The debug-layer advisories sg provokes on purpose, allowed in every test of this binary.
+// Validation fails a test through the log rule, so a test provoking a message on purpose declares it with nx::expect_error.
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", sg::backend::dx12::k_expected_validation_messages);
 
 ASYNC_TEST("sg dx12 backend - warp")
 {

@@ -139,6 +139,16 @@ An unparseable value is ignored rather than diagnosed: a misspelled log setting 
 `from_environment(base)` applies the same overrides over defaults of your own, which is how a program moves one setting without giving up the rest.
 That is what nexus does: test binaries stamp `elapsed` because a run's question is "how far in", and `CC_LOG_LEVEL=debug uv run dev.py test "..."` still reaches them.
 
+`filter` holds events back past every other option, and is handed the owner each was recorded under (`cc::rec::owner_scope`):
+
+```cpp
+.filter = [](cc::rec::event_view const& e, cc::rec::trace_id owner, void* user) { return owner == cc::rec::trace_id::none; },
+.filter_user = nullptr,
+```
+
+It runs under the recorder's processing mutex, so it must not flush or register listeners.
+nexus uses it to withhold what its log rule will judge.
+
 **Neither form may run during static initialization.**
 Reading the environment and asking whether stdout is a terminal are questions with no answer that early, so a process-wide listener is built on first use rather than as a global.
 
@@ -163,6 +173,9 @@ A recording holds chunk references, and letting `shutdown()` free the pool under
 This is what makes a warning testable at all.
 `shaped-graphics`'s "more than 64 concurrent command lists" is asserted on in `libs/graphics/shaped-graphics/tests/barrier/slot-recording-test.cc`.
 Both that it fires and that it fires **once**, which is the whole point of the guard around it.
+
+**A passing test logs no warning or error it did not declare.**
+`nx::expect_warning` and `nx::allow_warnings` are the declarations, and the console withholds a test's warnings until the run judges them — see nexus's [log rule](../../nexus/docs/log-rule.md).
 
 A failing test's recording is written out as a `.ccrec`, so a CI failure arrives with its log inline.
 Assertion failures and failed `CHECK`s are recorded too, which is what puts them in that file next to whatever the code recorded around them.

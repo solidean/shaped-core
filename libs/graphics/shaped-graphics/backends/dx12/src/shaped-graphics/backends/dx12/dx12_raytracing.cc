@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/context/impl/device_lifecycle.hh>
 
 namespace sg::backend::dx12
 {
@@ -74,7 +75,11 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     inputs.pGeometryDescs = geometry_descs.data();
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
-    device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    {
+        // A ray-tracing driver call; see shaped-graphics/context/impl/device_lifecycle.hh.
+        sg::impl::raytracing_driver_hold const driver_guard;
+        device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    }
     CC_ASSERT(prebuild.ResultDataMaxSizeInBytes > 0, "prebuild reported a zero-size BLAS result");
 
     // Persistent result (across-epoch) + transient scratch (recycled once its epoch retires).
@@ -101,7 +106,10 @@ sg::blas_handle dx12_command_list::build_blas_common(cc::span<D3D12_RAYTRACING_G
     build_desc.DestAccelerationStructureData = result->gpu_virtual_address();
     build_desc.ScratchAccelerationStructureData = scratch->gpu_virtual_address();
     build_desc.Inputs = inputs;
-    list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+    {
+        sg::impl::raytracing_driver_hold const driver_guard;
+        list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+    }
 
     return std::make_shared<dx12_blas>(result, isize(prebuild.ResultDataMaxSizeInBytes),
                                        isize(prebuild.ScratchDataSizeInBytes),
@@ -267,7 +275,11 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     inputs.InstanceDescs = instance_buf->gpu_virtual_address();
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
-    device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    {
+        // A ray-tracing driver call; see shaped-graphics/context/impl/device_lifecycle.hh.
+        sg::impl::raytracing_driver_hold const driver_guard;
+        device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    }
     CC_ASSERT(prebuild.ResultDataMaxSizeInBytes > 0, "prebuild reported a zero-size TLAS result");
 
     auto const result_raw = _ctx.persistent.create_raw_buffer(isize(prebuild.ResultDataMaxSizeInBytes),
@@ -292,7 +304,10 @@ sg::tlas_handle dx12_command_list::raytracing_build_tlas(cc::span<sg::tlas_insta
     build_desc.DestAccelerationStructureData = result->gpu_virtual_address();
     build_desc.ScratchAccelerationStructureData = scratch->gpu_virtual_address();
     build_desc.Inputs = inputs;
-    list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+    {
+        sg::impl::raytracing_driver_hold const driver_guard;
+        list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+    }
 
     return std::make_shared<dx12_tlas>(
         result, isize(prebuild.ResultDataMaxSizeInBytes), isize(prebuild.ScratchDataSizeInBytes),

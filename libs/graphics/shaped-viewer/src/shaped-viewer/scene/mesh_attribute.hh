@@ -112,6 +112,18 @@ struct sv::attribute_format
 /// `per_corner` is 3 elements per triangle, in triangle order — what a hard edge needs, since the two triangles then carry their own normal at the shared vertex.
 /// `per_triangle` is one element per triangle, indexed by `PrimitiveIndex()`.
 ///
+/// **These are one set, shared by every geometry kind, and a geometry admits the SUBSET it can number.**
+/// That is what lets one material definition and one generated shader body serve both a mesh and a quadric batch, with only the
+/// preamble that builds the shading context differing — see `sv::serves` and libs/graphics/shaped-viewer/docs/quadrics.md.
+///
+/// A quadric batch numbers its primitives and nothing else, so it admits `per_instance` and `per_triangle` alone.
+/// `per_triangle` means "one value per element of the geometry's own primitive stream, indexed by `PrimitiveIndex()`" — a
+/// triangle for a mesh, a quadric for a batch — so the generated load is byte-identical for the two.
+/// The name is the mesh's; the meaning is the index.
+///
+/// A frequency the geometry cannot number loses to the next-coarsest rank, like any other unusable candidate — see
+/// `resolve_material`.
+///
 /// `per_edge` is RESERVED and rejected by `mesh_attribute::create` for now.
 /// The other geometric frequencies index something the geometry already numbers; an edge is not numbered at all, so per-edge data needs an edge table on triangle_geometry first —
 /// the edges themselves (each naming its two vertices) plus each triangle's three edge indices, which is also what decides whether opposite half-edges share one entry.

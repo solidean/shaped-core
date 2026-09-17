@@ -422,6 +422,60 @@ TEST("export - junit report carries what the run cost the machine, and only what
     CHECK(measured.contains("peak_resident_bytes=\"1048576\""));
 }
 
+TEST("export - serial time is what ran alone plus the largest exclusion group")
+{
+    // Hand-placed intervals rather than a real run, so the arithmetic is pinned without depending on how long anything took.
+    auto const plain = nx::test_declaration{.name = "plain"};
+    auto const alone = nx::test_declaration{.name = "alone", .test_config = {.exclusive_global = true}};
+    auto const alone_tagged = nx::test_declaration{
+        .name = "alone-tagged",
+        .test_config = {.exclusion_tags = {"gpu"}, .exclusion_tag_count = 1, .exclusive_global = true}};
+    auto const gpu = nx::test_declaration{.name = "gpu",
+                                          .test_config = {.exclusion_tags = {"gpu", "gpu"}, .exclusion_tag_count = 2}};
+    auto const disk
+        = nx::test_declaration{.name = "disk", .test_config = {.exclusion_tags = {"disk"}, .exclusion_tag_count = 1}};
+    auto const on_main = nx::test_declaration{.name = "on-main", .test_config = {.main_thread = true}};
+    auto const direct
+        = nx::test_declaration{.name = "direct", .test_config = {.scheduler = nx::config::scheduler_mode::none}};
+    auto const pool = nx::test_declaration{
+        .name = "pool",
+        .test_config = {.scheduler = nx::config::scheduler_mode::own_pool, .scheduler_threads = 4}};
+
+    auto exec = nx::test_schedule_execution();
+    auto const add = [&](nx::test_declaration const& decl, double start, double end)
+    {
+        auto& e = exec.executions.emplace_back();
+        e.instance.declaration = &decl;
+        e.started_at_steady_s = start;
+        e.finished_at_steady_s = end;
+        return &e;
+    };
+
+    add(plain, 1, 50);
+    add(alone, 1, 3);
+    add(alone_tagged, 3, 4); // alone, and so not also counted toward "gpu"
+    add(gpu, 10, 12);        // a repeated tag is one lock, counted once
+    add(gpu, 12, 15);
+    add(disk, 10, 13);
+    add(on_main, 20, 26); // main_thread is a group of its own, and the largest here
+    add(direct, 30, 31);
+    add(direct, 31, 32);
+    add(pool, 40, 44); // own_pool tests overlap each other, so the phase counts as its span
+    add(pool, 41, 45);
+    add(disk, 0, 0);                                                         // never started
+    add(plain, 60, 70)->nested.emplace_back().instance.declaration = &alone; // a child runs under its driver's interval
+
+    auto const serial = exec.serial_time();
+    CHECK(serial.alone_s == 3.0 + 2.0 + 5.0);
+    CHECK(serial.largest_group == "main_thread");
+    CHECK(serial.largest_group_s == 6.0);
+    CHECK(serial.total_s() == 16.0);
+
+    auto const xml = nx::write_junit_xml("s", exec);
+    CHECK(xml.contains("serial_time=\"16.0000\""));
+    CHECK(xml.contains("serial_group=\"main_thread\""));
+}
+
 TEST("export - junit report for an all-pass run has no failure elements", no_scheduler)
 {
     nx::test_registry reg;
@@ -438,7 +492,7 @@ TEST("export - junit report for an all-pass run has no failure elements", no_sch
     CHECK(!xml.contains("<failure"));
 }
 
-TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler)
+TEST("export - the benchmark sidecar carries the samples, not just a summary", no_scheduler, thorough_only)
 {
     nx::test_registry reg;
 
@@ -500,7 +554,7 @@ TEST("export - the benchmark sidecar carries the samples, not just a summary", n
     CHECK(samples.size() >= 8);
 }
 
-TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler)
+TEST("export - the benchmark sidecar names the baseline the console drew", no_scheduler, thorough_only)
 {
     // The RESOLVED baseline rather than the config flag.
     // With nothing marked, the first loop declared is the baseline and the report says so, so a sidecar writing
@@ -545,7 +599,7 @@ TEST("export - the benchmark sidecar names the baseline the console drew", no_sc
     CHECK(!loops[1]["no_baseline"].as_bool());
 }
 
-TEST("export - a sweep's loops carry no baseline at all", no_scheduler)
+TEST("export - a sweep's loops carry no baseline at all", no_scheduler, thorough_only)
 {
     // One loop setting `no_baseline` drops the comparison from the whole table, so no row may claim to be the
     // baseline: a consumer that divided one row by another would be reporting the input sizes rather than the code.

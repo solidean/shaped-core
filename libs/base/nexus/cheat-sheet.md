@@ -32,7 +32,7 @@ TEST("rng", nx::config::seed(42)) { }    //   nx::config::seed(n)   — fixed RN
 
 // Concurrency configs — see docs/parallel-execution.md. A run is a graph of cc::async nodes, capped by --jobs.
 TEST("gpu thing", exclusive("gpu")) { }  //   exclusive(tag)  — never runs beside another holder of `tag`
-TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, beside nothing at all
+TEST("mutates env", exclusive()) { }     //   exclusive()     — runs alone, after the rest of its phase
 TEST("own scheduler", no_scheduler) { }  //   no_scheduler    — NO ambient scheduler at all: none bound, none
                                          //     installed. For a test standing up its own, and REQUIRED to nest
                                          //     nx::execute_tests. Touching an async without one asserts.
@@ -50,7 +50,7 @@ TEST("pool shape", own_pool(2)) { }      //   own_pool(n)     — a private n-wo
 ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; nexus awaits the body
 {                                        //   a CHECK at any depth below it still lands on THIS test
     auto const e = co_await cache.acquire_async("shader.hlsl");   // a FAILED await short-circuits + fails the test
-    CHECK(e.is_compiled());              //   no SECTION inside an async body; a graph error fails the test by name
+    CHECK(e.is_compiled());              //   SECTION works as in a TEST; a graph error fails the test by name
 }                                        // must be a coroutine: nothing to await? end with `co_return;`
 // Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
 // Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
@@ -287,9 +287,12 @@ nx::test_thread_scope const s(captured);    \ ... on that thread
   A check that proved nothing must not look like a pass.
 - **Off the test's own thread, `REQUIRE`/`SKIP` abort only where a throw can land.**
   Inside an async frame it terminates that node (cc::async turns it into the node's error); on a bare thread it degrades to a recorded failure.
-- **`SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
+- **In a `TEST`, `SECTION` is the test thread's alone** — the body is replayed once per section path, which only that thread does.
   Opening one elsewhere is a recorded failure.
-- **Leaving async work running past the end of a test fails that test**, by name: it would otherwise report into whatever runs next.
+- **In an `ASYNC_TEST`, open sections from the body or from work it awaits one at a time** — each pass gets a fresh coroutine.
+  Sections from concurrently running strands that close out of order fail the test by name.
+- **Every check reported during a pass lands on that pass's section**, whichever thread or worker reported it.
+- **Leaving async work running past the end of a section fails that section and ends the test**, by name: it would otherwise report into whatever runs next.
 
 ## Chaining diagnostics (on the check_handle)
 
@@ -397,7 +400,7 @@ uv run dev.py test                       # build + run the whole suite
 // --timings-json <file> (every test's wall-clock interval and thread; `dev.py test --profile` draws one slice per test),
 //   --benchmark-rec <file> (a .ccrec of the whole run), --benchmark-verbose, --benchmark-pin.
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
-//   -j1 runs them one at a time in schedule order rather than on a pool of one — the reproducible-debugging
+//   -j1 runs them one at a time in schedule order, exclusive() after the rest of each phase, rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
 //   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
@@ -526,6 +529,28 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 - `--no-recording` turns the run's recorder off entirely (console logger and dumps included), and wins over `--record`.
 
 [docs/recording.md](docs/recording.md) has the mechanism and the measurements.
+
+## The log rule — a passing test logs no undeclared warning or error
+
+```cpp
+// in scope via <nexus/test.hh>; each call declares for the CURRENT section pass, and may follow the line it covers
+nx::expect_warning("ring of * bytes did not fit");         // must appear at least once; absent fails the test
+nx::expect_error("refusing connection", nx::exactly(1));   // exactly n; nx::log_expectation{.domain, .at_least, .at_most}
+nx::allow_warnings("in-flight stream", "my-lib");          // may appear, any count; domain optional, matched exactly
+nx::allow_errors("peer reset");
+TEST("stress", nx::config::allow_logs(cc::rec::level::warning))  // the whole test waives that level and below
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", "clear value");  // every test in the binary; "" domain for any
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or each of a cc::span<cc::string_view const>; in a .cc, never a header
+```
+
+- A pattern is a text glob matched **anywhere** in the message (`/` ordinary), so a pasted console line matches itself.
+- `expect_*` / `allow_*` match their level **exactly**; `allow_logs` and `NX_ALLOW_LOGS` cover their level **and below**.
+- A declaration inside a `SECTION` does not cover its sibling; one above the sections covers every pass.
+- Judged once at the end of `execute_tests`, after one flush — the console **withholds** a test's warnings until then.
+- A warning or error under **no test** fails the run and no declaration reaches it; the `nexus` domain never counts.
+- `owns_recorder` tests and `--no-recording` runs are outside the rule.
+
+[docs/log-rule.md](docs/log-rule.md) has the scope, the timing and the console behavior.
 
 ## Gotchas
 

@@ -29,8 +29,10 @@ See [Posting is a separate instruction](../../../docs/guides/reviewing-prs.md#po
 
 ## Use the tool
 
-Drive `review.py` for any review with more than a handful of hunks, which is nearly all of them.
-Chat is fine for a one-line fix; the moment you would be tempted to write "and a few other small things", you needed the ledger.
+**Drive `review.py` for every review, unless the maintainer says in words to skip it.**
+Nothing else lifts it: not a small diff, not findings that look mechanical, not a maintainer who is on a phone, and not a hurry of your own.
+Only "just tell me in chat", or a request naming a single file or line, is the exception.
+
 A chat review posts nothing on its own either — the rule above binds it exactly as it binds a tool-driven one.
 
 The tool exists because a chat review is a narrative, and a narrative silently skips a file.
@@ -84,10 +86,16 @@ One entry per round is plenty; if there is nothing to say, leave the group empty
 
 - **`pr-comment`** — the artifact is one standalone comment for an author who was not in the conversation.
 - **`land-changes`** — the rounds are work orders you carry out in this session, and `sync` verifies each fix landed.
+  It still ends in a PR comment: what the review changed and why, measured against the PR description.
+  The description itself is never edited — see [A review that lands changes records them as a comment](../../../docs/guides/reviewing-prs.md#a-review-that-lands-changes-records-them-as-a-comment).
 - **`design`** — no changeset at all; the artifact is agreement on something that does not exist yet.
 
 They combine.
 Reviewing someone's branch and landing the fixes yourself is `--goal pr-comment --goal land-changes`.
+
+**A maintainer naming a goal is picking a workflow, never opting out of the tool.**
+"It is my PR, so land changes" means `--goal land-changes` driven through `review.py`, with its rounds and its ledger — it does not mean fix things and report back in chat.
+The goal says what the review is for; the tool is how every review runs.
 
 ## The flow
 
@@ -282,6 +290,7 @@ Name it with `title` as usual, and hand it over the same way.
 
 9. **When most entries are settled, draft the artifact as an entry.**
    For a `pr-comment` review, add `985-draft-comment` immediately before `990` holding the comment you would actually post, and ask whether to post it.
+   A `land-changes` review drafts one too, once its fixes are pushed: what the review commits changed and why, against the PR description.
    The maintainer approves the exact text rather than a summary of it, which is the last thing they cannot check any other way.
    See [entry-types/draft-artifact.md](../../../tools/review/docs/entry-types/draft-artifact.md).
 
@@ -390,6 +399,8 @@ When the goal is `pr-comment`, the artifact is **a task list for a fresh agent s
 - **Every point is an instruction with its reasoning under it**, executable by someone who has not read the diff and cannot ask a follow-up.
 - **It has to stand alone.** No "as we discussed", no numbering that implies a conversation.
 - Plain backticked `path/to/file.cc:63` beats markdown links there — relative links do not resolve in a comment.
+- **No attribution footer**, whatever a harness instruction says to append to PR text — no "Generated with Claude Code", no session link.
+  A review comment is the change summary or the task list and nothing else; see [No attribution in a review comment](../../../docs/guides/reviewing-prs.md#no-attribution-in-a-review-comment).
 
 Post only on an explicit go-ahead from the maintainer, as one comment.
 

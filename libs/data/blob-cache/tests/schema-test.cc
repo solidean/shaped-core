@@ -25,7 +25,7 @@ void with_raw_database(cc::string_view path, cc::function_ref<void(babel::sqlite
 }
 } // namespace
 
-ASYNC_TEST("bcache discards a file written by a newer format version", main_thread)
+ASYNC_TEST("bcache discards a file written by a newer format version")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -46,7 +46,7 @@ ASYNC_TEST("bcache discards a file written by a newer format version", main_thre
     CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-ASYNC_TEST("bcache discards a file written by an older format version", main_thread)
+ASYNC_TEST("bcache discards a file written by an older format version")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -66,7 +66,7 @@ ASYNC_TEST("bcache discards a file written by an older format version", main_thr
     CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-ASYNC_TEST("bcache discards a database that belongs to some other application", main_thread)
+ASYNC_TEST("bcache discards a database that belongs to some other application")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -92,7 +92,7 @@ ASYNC_TEST("bcache discards a database that belongs to some other application", 
     CHECK(blob_text((co_await f.cache().get(key_of("schema", "ours"))).value().data) == "claimed");
 }
 
-ASYNC_TEST("bcache discards a file whose tables no longer have the columns it addresses", main_thread)
+ASYNC_TEST("bcache discards a file whose tables no longer have the columns it addresses")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -113,7 +113,7 @@ ASYNC_TEST("bcache discards a file whose tables no longer have the columns it ad
     CHECK((co_await f.cache().put(key_of("schema", "after"), make_blob("new world"))).status == put_status::stored);
 }
 
-ASYNC_TEST("bcache stamps a fresh file as its own", main_thread)
+ASYNC_TEST("bcache stamps a fresh file as its own")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -141,7 +141,7 @@ ASYNC_TEST("bcache stamps a fresh file as its own", main_thread)
                       });
 }
 
-ASYNC_TEST("bcache keeps a file a newer build added a column to", main_thread)
+ASYNC_TEST("bcache keeps a file a newer build added a column to")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

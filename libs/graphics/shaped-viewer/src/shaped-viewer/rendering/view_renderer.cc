@@ -51,6 +51,19 @@ struct resolved_view
 
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
     cc::vector<cc::hash128> permutations;
+
+    /// Whether any item here is a quadric batch at all.
+    ///
+    /// It decides whether the trace is handed the PROCEDURAL stand-in, and it has to be this broad.
+    /// Acquiring the stand-in starts its compile, and `pathtrace_routine::_variant_for` declines the WHOLE trace —
+    /// meshes included — while a quadric permutation is unready and no procedural stand-in is ready to take its place.
+    /// So deferring the acquire until some batch is actually caught uncompiled means the view blanks for exactly as
+    /// long as the stand-in then takes to build, which is the outage the stand-in exists to prevent.
+    /// Acquiring it as soon as a batch is placed gives it the whole life of the view to get ready in.
+    ///
+    /// What still holds, and is the reason this is not simply unconditional, is that a triangle-only scene never
+    /// acquires it and never compiles a hit group it could not select.
+    bool has_quadrics = false;
 };
 
 /// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
@@ -87,8 +100,44 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 {
     auto out = resolved_view{};
 
+    // Acquired once rather than per item: it is a resolve walk plus a key hash plus a lookup, and every placeholder in
+    // the layer shades through the same one.
+    auto const& fallback = resources.shaders.acquire_fallback();
+
     for (auto const& item : l.items)
     {
+        if (item.kind == scene_item_kind::quadric_set)
+        {
+            auto const* const set = resources.quadrics.get_ptr(item.quadrics);
+            CC_ASSERT(set != nullptr, "scene_item references an unknown quadric_set_id");
+            CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
+
+            // A batch still streaming keeps its place as a box, exactly as a mesh does, and one that declared no extent is
+            // skipped for the same reason: there is no honest place to draw it.
+            auto const pending = set->state != residency::complete;
+            if (pending && !set->bounds.has_value())
+                continue;
+
+            // A placeholder is a TRIANGLE cube, so it must shade through the triangle fallback rather than the batch's own
+            // quadric permutation — a procedural hit group on a triangle BLAS is exactly the mismatch that refuses to build.
+            auto const permutation = hit_group_of(out, pending ? fallback.key : item.shader_key, resources);
+
+            auto inst = sg::tlas_instance{.blas = pending ? resources.meshes.placeholder_blas() : set->blas,
+                                          .instance_id = u32(out.instances.size()),
+                                          .hit_group_offset = permutation * 2,
+                                          .opaque_override = true};
+            pack_transform(inst, pending ? placeholder_transform(set->bounds.value(), item.transform) : item.transform);
+            out.instances.push_back(cc::move(inst));
+
+            out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
+            out.parameter_blocks.push_back(item.instance);
+
+            // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
+            // the next, and the stand-in has to already be compiling by then.
+            out.has_quadrics = true;
+            continue;
+        }
+
         if (item.kind != scene_item_kind::triangle_mesh)
             continue;
 
@@ -116,8 +165,11 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // Not a shortcut: the cube's triangles have nothing to do with the mesh's, so per-vertex attributes read
         // through them would be indexed out of the data they belong to.
         // The fallback reads no attributes and no parameter block, which is exactly what makes it safe here.
-        auto const& fallback = resources.shaders.acquire_fallback();
-        auto const permutation = hit_group_of(out, is_pending ? fallback.key : item.shader_key, resources);
+        //
+        // An instance whose attributes are still streaming shades through it too, on its real geometry: binding those
+        // buffers would stall the trace until every one of them lands.
+        auto const shade_fallback = is_pending || !resources.attributes_resident(item.instance);
+        auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
         auto inst = sg::tlas_instance{.blas = is_pending ? resources.meshes.placeholder_blas() : mesh->blas,
                                       .instance_id = u32(out.instances.size()),
                                       .hit_group_offset = permutation * 2,
@@ -130,7 +182,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         out.parameter_blocks.push_back(item.instance);
     }
 
-    CC_ASSERT(!out.instances.empty(), "a view needs at least one triangle-mesh item to render");
+    CC_ASSERT(!out.instances.empty(), "a view needs at least one drawable item to render");
     return out;
 }
 
@@ -444,6 +496,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
     auto const bindless = resources.freeze();
 
+    // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
+    // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for
+    // however long the stand-in takes to compile.
+    // A triangle-only view still never asks for it.
+    auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
+
     auto const traced = pathtrace_routine::execute(
         cmd, {.frame = frame,
               .background = background,
@@ -451,9 +509,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .output = output,
               .instance_table = instance_table,
               .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to grey
+              // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.
+              // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
+              // traced by a triangle group reports no hits and disappears instead of shading flat.
+              // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
+              // compile, and a triangle-only scene must not owe a drain for a group it can never select.
               .fallback = &resources.shaders.acquire_fallback(),
+              .quadric_fallback = quadric_fallback,
               .bindless = &bindless});
 
     // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
@@ -530,6 +593,12 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const instance_table = upload_instances(cmd, resolved);
     auto const bindless = resources.freeze();
 
+    // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
+    // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for
+    // however long the stand-in takes to compile.
+    // A triangle-only view still never asks for it.
+    auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
+
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
     auto const traced = pathtrace_routine::execute(
         cmd, {.frame = frame,
@@ -538,9 +607,14 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
               .output = slot.texture,
               .instance_table = instance_table,
               .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to grey
+              // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.
+              // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
+              // traced by a triangle group reports no hits and disappears instead of shading flat.
+              // The procedural one only where the view actually has a procedural instance -- acquiring it starts a
+              // compile, and a triangle-only scene must not owe a drain for a group it can never select.
               .fallback = &resources.shaders.acquire_fallback(),
+              .quadric_fallback = quadric_fallback,
               .bindless = &bindless});
 
     // As above: a declined trace recorded nothing, so it must not count as a sample.

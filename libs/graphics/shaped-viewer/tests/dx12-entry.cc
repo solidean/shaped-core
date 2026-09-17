@@ -8,7 +8,7 @@
 
 // Entry-point drivers for sv's GPU tests.
 // Each brings up ONE dx12 context and invokes every `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against it.
-// Both carry the debug layer and a listener that fails the running test on any validation warning.
+// Both carry the debug layer, and any validation warning fails the running test through the log rule.
 //
 // Two adapters, per libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters:
 //   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
@@ -26,21 +26,11 @@ namespace dx12 = sg::backend::dx12;
 constexpr char const* warp_driver = "sv dx12 - warp";
 constexpr char const* hardware_driver = "sv dx12 - hardware";
 
-/// Fails whichever test provoked it on any debug-layer warning or worse, bar the advisories sg provokes on purpose.
-void fail_on_validation_messages(sg::context_handle const& ctx)
-{
-    static_cast<dx12::dx12_context&>(*ctx).set_message_callback(
-        [](dx12::dx12_message_severity severity, cc::string_view message)
-        {
-            if (severity > dx12::dx12_message_severity::warning)
-                return;
-            if (dx12::is_expected_validation_message(message))
-                return;
-
-            CHECK(false).context(cc::format("dx12 debug layer: {}", message));
-        });
-}
 } // namespace
+
+// The debug-layer advisories sg provokes on purpose (dx12_expected_messages.hh), allowed in every test of this binary.
+// Validation fails a test through the log rule rather than through a listener, so anything else the layer says still fails it.
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", sg::backend::dx12::k_expected_validation_messages);
 
 ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
 {
@@ -54,7 +44,6 @@ ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
         SKIP("no dx12 WARP device");
     else
     {
-        fail_on_validation_messages(ctx.value());
         co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
@@ -79,7 +68,6 @@ ASYNC_TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
         SKIP("no dx12 hardware device");
     else
     {
-        fail_on_validation_messages(ctx.value());
         co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.

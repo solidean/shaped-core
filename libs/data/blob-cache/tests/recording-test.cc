@@ -57,8 +57,7 @@ f64 accumulated(cc::rec::recording const& r, cc::string_view name)
 
 ASYNC_TEST("bcache/recording - hits and misses are recorded as they are counted",
            nx::config::exclusive(),
-           nx::config::owns_recorder,
-           nx::config::main_thread)
+           nx::config::owns_recorder)
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

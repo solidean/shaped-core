@@ -79,6 +79,9 @@ ASYNC_TEST("bcache opens degraded when its directory does not exist", main_threa
     auto reported = cc::vector<cc::string>();
     config.on_storage_error = [&](cc::string_view m) { reported.push_back(cc::string(m)); };
 
+    // "says so": degrading is a warning, logged once.
+    nx::expect_warning("cache degraded to always-miss", nx::exactly(1, "bcache"));
+
     auto cache = blob_cache::create(cc::move(config));
     co_await cc::async_settled(cache->opened());
 
@@ -96,7 +99,7 @@ ASYNC_TEST("bcache opens degraded when its directory does not exist", main_threa
     CHECK(!got->try_value()->has_value());
 }
 
-ASYNC_TEST("bcache acquire keeps a computed value a failing put could not store", main_thread)
+ASYNC_TEST("bcache acquire keeps a computed value a failing put could not store")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -124,7 +127,7 @@ ASYNC_TEST("bcache acquire keeps a computed value a failing put could not store"
     CHECK(calls == 2);
 }
 
-ASYNC_TEST("bcache reports a compute failure and nothing else through acquire", main_thread)
+ASYNC_TEST("bcache reports a compute failure and nothing else through acquire")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");
@@ -149,7 +152,7 @@ ASYNC_TEST("bcache reports a compute failure and nothing else through acquire", 
     CHECK(!(co_await f.cache().get(key)).has_value());
 }
 
-ASYNC_TEST("bcache answers after close without hanging or crashing", main_thread)
+ASYNC_TEST("bcache answers after close without hanging or crashing")
 {
     if (!blob_cache::is_storage_available())
         SKIP("no SQLite backend was compiled in");

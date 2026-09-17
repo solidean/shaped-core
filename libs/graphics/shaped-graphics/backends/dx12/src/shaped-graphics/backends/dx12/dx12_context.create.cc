@@ -7,6 +7,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 
@@ -171,6 +172,14 @@ void log_debug_layer_message(dx12_message_severity severity, char const* descrip
     }
 }
 
+// Every context whose callback is registered, oldest first.
+//
+// D3D12 hands one debug-layer message to every callback registered on the DEVICE that raised it, and hands two contexts
+// on one adapter the same device — so a message logged by each context without a listener would print once per context.
+// Only per device, though: a WARP context and a hardware context never see each other's messages.
+// So the oldest context without a listener ON THE SAME DEVICE is the one that logs, which makes it once per device.
+cc::mutex<cc::vector<dx12_context const*>> g_registered_contexts;
+
 // Validation messages, handed to the context's listener or logged at the debug layer's own severity when it has none.
 // Registered on the device's info queue when the debug layer is active, and runs on whatever thread the runtime raises the message from.
 void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
@@ -182,8 +191,26 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
     auto const level = to_sg_severity(severity);
     auto* const ctx = static_cast<dx12_context*>(context);
     if (ctx != nullptr && ctx->_message_callback.is_valid())
+    {
         ctx->_message_callback(level, description);
-    else
+        return;
+    }
+
+    if (ctx == nullptr)
+    {
+        log_debug_layer_message(level, description);
+        return;
+    }
+
+    auto const is_logger = g_registered_contexts.lock(
+        [&](cc::vector<dx12_context const*>& contexts)
+        {
+            for (auto const* const c : contexts)
+                if (c->_device.Get() == ctx->_device.Get() && !c->_message_callback.is_valid())
+                    return c == ctx;
+            return false;
+        });
+    if (is_logger)
         log_debug_layer_message(level, description);
 }
 
@@ -252,10 +279,16 @@ u32 register_debug_callback(ID3D12Device* device, dx12_context* ctx)
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&info_queue))))
         return 0;
 
+    // Listed before the registration, so no message can reach this context's callback while it is missing from the list.
+    g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.push_back(ctx); });
+
     DWORD cookie = 0;
     if (FAILED(info_queue->RegisterMessageCallback(&dx12_message_callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, ctx,
                                                    &cookie)))
+    {
+        g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.remove_first_value(ctx); });
         return 0;
+    }
     return u32(cookie);
 }
 } // namespace
@@ -269,6 +302,9 @@ void dx12_context::unregister_message_callback()
     if (SUCCEEDED(_device->QueryInterface(IID_PPV_ARGS(&info_queue))))
         info_queue->UnregisterMessageCallback(DWORD(_message_callback_cookie));
     _message_callback_cookie = 0;
+
+    // After the runtime stopped calling it, and never under the lock across the unregister, which may wait on a callback in flight.
+    g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.remove_first_value(this); });
 }
 } // namespace sg::backend::dx12
 
@@ -297,6 +333,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // Adapter selection, device creation and every resource system's setup — tens of milliseconds, and the first
     // thing anyone looks at when a program is slow to show a window.
     CC_RECORD_SCOPE("sg.context.create");
+
+    // Held across the whole creation, including a failed one destroying its half-built context; see impl/device_lifecycle.hh.
+    sg::impl::device_lifecycle_hold const lifecycle;
 
     using namespace sg::backend::dx12;
 

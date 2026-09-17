@@ -1,5 +1,6 @@
 #include "glob.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/char_predicates.hh>
 
@@ -9,7 +10,7 @@ namespace
 {
 /// Backtracking matcher over the two views.
 /// Recursion depth is bounded by the number of `*` groups in the pattern, which is a handful.
-bool match_from(cc::string_view p, cc::string_view s, bool fold_case)
+bool match_from(cc::string_view p, cc::string_view s, bool fold_case, bool is_text)
 {
     isize pi = 0;
     isize si = 0;
@@ -21,21 +22,23 @@ bool match_from(cc::string_view p, cc::string_view s, bool fold_case)
         if (c == '*')
         {
             auto const globstar = pi + 1 < p.size() && p[pi + 1] == '*';
+            auto const crosses_slash = globstar || is_text;
             auto rest = p.subview(pi + (globstar ? 2 : 1));
 
             // `**/x` must also match a bare `x`, so the separator behind a globstar is optional.
-            if (globstar && rest.starts_with('/') && match_from(rest.subview(1), s.subview(si), fold_case))
+            if (globstar && !is_text && rest.starts_with('/')
+                && match_from(rest.subview(1), s.subview(si), fold_case, is_text))
                 return true;
 
             // Try every split point, shortest first.
             // A plain `*` stops at the first `/`; a `**` does not.
             for (auto k = si;; ++k)
             {
-                if (match_from(rest, s.subview(k), fold_case))
+                if (match_from(rest, s.subview(k), fold_case, is_text))
                     return true;
                 if (k >= s.size())
                     return false;
-                if (!globstar && s[k] == '/')
+                if (!crosses_slash && s[k] == '/')
                     return false;
             }
         }
@@ -45,7 +48,7 @@ bool match_from(cc::string_view p, cc::string_view s, bool fold_case)
 
         if (c == '?')
         {
-            if (s[si] == '/')
+            if (!is_text && s[si] == '/')
                 return false;
         }
         else if (fold_case ? cc::to_lower(c) != cc::to_lower(s[si]) : c != s[si])
@@ -101,6 +104,11 @@ cc::string glob_normalize_path(cc::string_view path)
 bool glob_matches(cc::string_view pattern, cc::string_view path, cc::flags<glob_option> options)
 {
     auto const fold_case = options.has(glob_option::ignore_case);
+    auto const is_text = options.has(glob_option::text);
+    CC_ASSERT(!(is_text && options.has(glob_option::normalize)), "glob_option::text and normalize do not combine");
+
+    if (is_text)
+        return match_from(pattern, path, fold_case, true);
 
     // Read before normalizing, which is what drops the trailing slash the shorthand is spelled with.
     auto const subtree = pattern.ends_with('/');
@@ -125,6 +133,6 @@ bool glob_matches(cc::string_view pattern, cc::string_view path, cc::flags<glob_
         pattern = owned_pattern;
     }
 
-    return match_from(pattern, path, fold_case);
+    return match_from(pattern, path, fold_case, false);
 }
 } // namespace cc

@@ -27,13 +27,6 @@ using namespace sort_test;
 
 namespace
 {
-/// Drives the graph to completion on the run's ambient scheduler, which is the inline path under -DSC_THREADS=OFF.
-/// Only for the tests with a SECTION, which cannot be async; every other test awaits its sort.
-void drive(cc::shared_async<cc::unit> const& root)
-{
-    (void)cc::async_blocking_get(root);
-}
-
 /// Wide enough that the pivot is bound by reference and the block partition is off, i.e. the other partition path.
 struct wide
 {
@@ -42,7 +35,7 @@ struct wide
 };
 } // namespace
 
-TEST("sort_async - lands on exactly what cc::sort produces")
+ASYNC_TEST("sort_async - lands on exactly what cc::sort produces")
 {
     // The partition is sequential and each task owns a disjoint subrange, so the swap sequence is a function of
     // the input alone and not of the schedule.
@@ -62,7 +55,7 @@ TEST("sort_async - lands on exactly what cc::sort produces")
                 cc::sort(expected);
 
                 auto values = original;
-                drive(cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(16)));
+                co_await cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_less{}, isize(16));
 
                 CHECK(isize(values.size()) == n);
                 for (isize i = 0; i < n; ++i)
@@ -118,7 +111,7 @@ ASYNC_TEST("sort_async - a wide element type, which takes the non-blockwise part
         CHECK(values[i].key == expected[i].key);
 }
 
-TEST("sort_async - a by-value comparator survives the copy into every task")
+ASYNC_TEST("sort_async - a by-value comparator survives the copy into every task")
 {
     cc::random rng(55);
     isize const n = 8000;
@@ -128,7 +121,7 @@ TEST("sort_async - a by-value comparator survives the copy into every task")
     SECTION("cc::default_greater")
     {
         auto values = original;
-        drive(cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_greater{}, isize(32)));
+        co_await cc::sort_async_ex(0, n, cc::as_index_swap_range(values), cc::default_greater{}, isize(32));
         CHECK(cc::is_sorted(values, cc::default_greater{}));
     }
 
@@ -137,7 +130,7 @@ TEST("sort_async - a by-value comparator survives the copy into every task")
         auto values = original;
         auto const by_magnitude = [](i32 a, i32 b) { return (a < 0 ? -a : a) < (b < 0 ? -b : b); };
 
-        drive(cc::sort_async_ex(0, n, cc::as_index_swap_range(values), by_magnitude, isize(32)));
+        co_await cc::sort_async_ex(0, n, cc::as_index_swap_range(values), by_magnitude, isize(32));
         CHECK(cc::is_sorted(values, by_magnitude));
     }
 }

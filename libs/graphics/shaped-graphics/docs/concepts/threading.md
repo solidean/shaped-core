@@ -70,6 +70,23 @@ What the registry leaves as an obligation sits on the ACTORS rather than on the 
 The inline-download actor is the live example.
 It sweeps until its submission completes and only then falls through to the fence wait, because that submission can be queued behind an upload the copy actor has not run yet.
 
+## Whose work a transfer actor is doing
+
+A transfer actor runs one caller's job on a thread that caller never sees, so a validation message or a check raised there would name nobody.
+So every async transfer job carries a `cc::async_ambient_handle` captured on the enqueuing thread.
+The actor installs it only for work that is that job's alone, such as polling its source or recording its copy.
+Two rules keep that honest.
+
+- **Never across other work.**
+  A window that packs several jobs runs with no job's context, and so does any `cc::thread_pump_all()` the actor sweeps while it waits.
+  A pumped component's report would otherwise fail a test that never started it.
+- **Reset before settling.**
+  The handle is dropped immediately before pushing anything the enqueuer awaits.
+  That push resumes them, and a test ending right there would count the job's reference as async work it left running.
+
+The handle owns a reference rather than holding a bare pointer on purpose.
+A transfer whose future was dropped outlives the test that started it, and installing an unreferenced head then would walk a freed chain.
+
 ## Backends today
 
 - **dx12** — `multi_threaded`.

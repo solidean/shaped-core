@@ -37,3 +37,20 @@ upstreams:
       It is on the license allowlist as a named exception rather than by category; re-read the terms on any version bump.
       Building DXC from source instead would be an LLVM-scale build, which is why we take the binary.
       The releases name their license members per platform, so download-dxc.py maps each by name onto the files `license_files` declares.
+
+      HELD BACK DELIBERATELY: the two newer candidates are both unusable, for unrelated reasons, so this pin stays until a release fixes one of them.
+
+      v1.9.2607 is tainted by its packaging.
+      Its Linux asset ships the WINDOWS header set, member for member, so there is no WinAdapter.h in it at all — and dxcapi.h includes that header unconditionally off Windows.
+      The release therefore does not compile for any non-Windows consumer, and no amount of install-plan work here can fix it.
+      That asset also carries 515 MB of object files and static archives.
+      That is https://github.com/microsoft/DirectXShaderCompiler/issues/8770 — the same regression's other symptom, and the issue to watch.
+      Its Windows zip is installable but writes `bin\x64\...` with backslash separators and spells the MIT member LICENCE-MIT.
+      download-dxc.py absorbs both, and they are the tell that the packaging changed wholesale rather than the layout being edited.
+
+      v1.10.2605.37 (the Shader Model 6.10 preview line) packages correctly but ships DIFFERENT license terms, and they are the reason this dependency is on the allowlist at all.
+      The preview EULA drops the entire DISTRIBUTABLE CODE section: "distributable" appears seven times in the terms we hold and zero times in those.
+      Its "share, publish, distribute" prohibition therefore loses the carve-out that lets us ship dxcompiler with an application.
+      It also adds TIME-SENSITIVE SOFTWARE, terminating 30 days after a commercial release first becomes available, and PRE-RELEASE SOFTWARE.
+      A pin whose license expires and forbids redistribution is not one we can ship, whatever its binaries do.
+      Any move to the 1.10 line needs the terms re-read on the release actually taken.

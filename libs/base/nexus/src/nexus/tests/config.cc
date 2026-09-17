@@ -25,6 +25,10 @@ void nx::impl::apply_config_item(config::cfg& result, config::cfg const& rhs)
     result.thorough_only |= rhs.thorough_only;
     result.default_entry |= rhs.default_entry;
 
+    // The broader waiver wins, since two items each allowing a level mean the test may log up to the higher one.
+    if (rhs.allowed_log_level > result.allowed_log_level)
+        result.allowed_log_level = rhs.allowed_log_level;
+
     // Exclusion accumulates rather than overriding: two config items each naming a tag mean the test holds both.
     result.exclusive_global |= rhs.exclusive_global;
     for (int i = 0; i < rhs.exclusion_tag_count && i < config::max_exclusion_tags; ++i)
