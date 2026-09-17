@@ -218,12 +218,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - an installed message callback receives validat
 {
     auto& c = *handle;
 
-    // The shared context carries the fail-the-test listener, so a recording one replaces it until this test returns.
+    // The shared context logs validation messages, so a recording listener replaces that until this test returns.
     // set_message_callback is not synchronized against a message raised on another thread, so the swap happens idle.
     co_await c.idle_completion();
     CC_DEFER
     {
-        vulkan::test::fail_on_validation_messages(c);
+        c.set_message_callback({});
     };
 
     int seen = 0;
@@ -244,6 +244,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - an installed message callback receives validat
 
     // Clearing restores the log default, so a later message reaches no listener.
     c.set_message_callback({});
+    nx::expect_warning("validation: ignored", nx::exactly(1, "sg.vulkan"));
     c.dispatch_validation_message(vulkan::vulkan_message_severity::warning, "ignored");
     CHECK(seen == 1);
 }
@@ -253,11 +254,11 @@ ASYNC_INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed call
 {
     auto& c = *handle;
 
-    // The provoked message would fail the test through the shared listener, so a counting one replaces it until return.
+    // A counting listener replaces the log until return, so the provoked message is counted rather than logged.
     co_await c.idle_completion();
     CC_DEFER
     {
-        vulkan::test::fail_on_validation_messages(c);
+        c.set_message_callback({});
     };
 
     int seen = 0;

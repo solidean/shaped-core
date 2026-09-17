@@ -7,6 +7,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 
@@ -171,6 +172,13 @@ void log_debug_layer_message(dx12_message_severity severity, char const* descrip
     }
 }
 
+// Every context whose callback is registered, oldest first.
+//
+// D3D12 hands one debug-layer message to EVERY callback registered in the process, not only the device that raised it.
+// So a message logged by each context without a listener would print once per live context.
+// The oldest context without a listener is the one that logs, which makes it once per process.
+cc::mutex<cc::vector<dx12_context const*>> g_registered_contexts;
+
 // Validation messages, handed to the context's listener or logged at the debug layer's own severity when it has none.
 // Registered on the device's info queue when the debug layer is active, and runs on whatever thread the runtime raises the message from.
 void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
@@ -182,8 +190,20 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
     auto const level = to_sg_severity(severity);
     auto* const ctx = static_cast<dx12_context*>(context);
     if (ctx != nullptr && ctx->_message_callback.is_valid())
+    {
         ctx->_message_callback(level, description);
-    else
+        return;
+    }
+
+    auto const is_logger = g_registered_contexts.lock(
+        [&](cc::vector<dx12_context const*>& contexts)
+        {
+            for (auto const* const c : contexts)
+                if (!c->_message_callback.is_valid())
+                    return c == ctx;
+            return false;
+        });
+    if (ctx == nullptr || is_logger)
         log_debug_layer_message(level, description);
 }
 
@@ -252,10 +272,16 @@ u32 register_debug_callback(ID3D12Device* device, dx12_context* ctx)
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&info_queue))))
         return 0;
 
+    // Listed before the registration, so no message can reach this context's callback while it is missing from the list.
+    g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.push_back(ctx); });
+
     DWORD cookie = 0;
     if (FAILED(info_queue->RegisterMessageCallback(&dx12_message_callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, ctx,
                                                    &cookie)))
+    {
+        g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.remove_first_value(ctx); });
         return 0;
+    }
     return u32(cookie);
 }
 } // namespace
@@ -269,6 +295,9 @@ void dx12_context::unregister_message_callback()
     if (SUCCEEDED(_device->QueryInterface(IID_PPV_ARGS(&info_queue))))
         info_queue->UnregisterMessageCallback(DWORD(_message_callback_cookie));
     _message_callback_cookie = 0;
+
+    // After the runtime stopped calling it, and never under the lock across the unregister, which may wait on a callback in flight.
+    g_registered_contexts.lock([&](cc::vector<dx12_context const*>& contexts) { contexts.remove_first_value(this); });
 }
 } // namespace sg::backend::dx12
 

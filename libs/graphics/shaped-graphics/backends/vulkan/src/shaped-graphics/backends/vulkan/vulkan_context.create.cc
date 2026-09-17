@@ -22,7 +22,7 @@ char const* const k_validation_layer = "VK_LAYER_KHRONOS_validation";
 // Runs on whatever thread the loader raises the message from.
 // Always returns VK_FALSE — never aborts the offending call.
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
-                                                        VkDebugUtilsMessageTypeFlagsEXT /*types*/,
+                                                        VkDebugUtilsMessageTypeFlagsEXT types,
                                                         VkDebugUtilsMessengerCallbackDataEXT const* data,
                                                         void* user_data)
 {
@@ -32,6 +32,16 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_messenger_callback(VkDebugUtilsMessageSever
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
         mapped = vulkan_message_severity::warning;
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        mapped = vulkan_message_severity::info;
+
+    // The loader speaks for software installed on the machine — an implicit layer such as a screen recorder's hook
+    // announcing an older API version — which no code of ours can act on.
+    // Such a message is GENERAL-typed and carries no validation id, where the Khronos layer's carry VUID- or UNASSIGNED-.
+    auto const id = cc::string_view(data->pMessageIdName != nullptr ? data->pMessageIdName : "");
+    auto const is_loader_notice
+        = (types & (VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT)) == 0
+       && !id.starts_with("VUID-") && !id.starts_with("UNASSIGNED-");
+    if (is_loader_notice && mapped == vulkan_message_severity::warning)
         mapped = vulkan_message_severity::info;
 
     // The messenger created alongside the instance carries no context yet, so its create-time messages go to the log.

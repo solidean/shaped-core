@@ -79,18 +79,24 @@ Full mechanism: [nexus/docs/invocable-tests.md](../../../base/nexus/docs/invocab
 
 ### A validation message fails the test that provoked it
 
-The dx12 drivers create their context with the debug layer on and install a listener via `dx12_context::set_message_callback`, failing the running test on any message of `warning` severity or worse.
-Without it a validation error is a line on stderr nobody reads, and the run stays green — which it did, for ~680 of them.
-Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
+Every driver creates its context with validation on and installs **no listener**: the backend logs each message at the layer's own severity.
+nexus's log rule then fails the test that logged a warning or worse — [log-rule.md](../../../base/nexus/docs/log-rule.md).
+Without that a validation error is a line on stderr nobody reads, and the run stays green — which it did, for ~680 of them.
+Attribution rides the ambient context, so the failure lands on the right test wherever the runtime raised the message.
 
-A test whose subject **is** the bad input opts out with a `dx12::scoped_expected_validation_messages` guard; there is no tag for it.
-That guard is thread-scoped rather than per-context, and deliberately so: D3D12 hands one message to **every** callback registered in the process, not only the one on the device that raised it.
-With several contexts alive — the normal state of the dx12 suite at `-jN` — silencing one context's listener leaves the others to fail the test anyway.
-The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
+The advisories sg provokes on purpose are [`dx12_expected_messages.hh`](../backends/dx12/src/shaped-graphics/backends/dx12/dx12_expected_messages.hh).
+Each dx12 driver allows them for every test in its binary.
+A test whose subject **is** the bad input declares it: `nx::expect_error(...)` when the message is the point, `nx::allow_errors(...)` when whether it appears depends on something else.
 
-sg's own warnings go through `CC_LOG_WARNING`, so they are **events rather than terminal output** and a test can assert on one.
-Register a `cc::rec::recording_listener`, provoke the warning, and ask the recording whether it fired — `tests/barrier/slot-recording-test.cc` is the worked example.
-That is also how you pin a warning firing exactly ONCE, which the hand-rolled `warned` guards around them exist to guarantee.
+D3D12 hands one message to **every** callback registered in the process, not only the one on the device that raised it.
+So the backend logs a message from one context only — the oldest without a listener — and a test sees it once however many contexts are alive.
+`dx12-validation-broadcast-test.cc` pins the broadcast that makes this necessary.
+
+A loader notice about software installed on the machine, such as a screen recorder's implicit layer announcing an older API version, is logged at `info`.
+Nothing in sg can act on it, and a test must not fail on what is installed.
+
+sg's own warnings go through `CC_LOG_WARNING`, so they are **events rather than terminal output**, and a test that provokes one declares it with `nx::expect_warning`.
+That is also how you pin a warning firing exactly ONCE — `nx::exactly(1)` — which the hand-rolled `warned` guards around them exist to guarantee.
 
 **What belongs here:** every statement about the public API — allocation shapes, lifetime/epoch semantics, transfer round-trips, binding validation, the transient budget contract.
 Anything that must hold for dx12 *and* vulkan *and* a future cpu backend goes here, written once rather than duplicated per backend.

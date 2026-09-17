@@ -188,7 +188,9 @@ public:
         return false;
     }
 
-    /// Routes this device's debug-layer messages to `callback` instead of stderr.
+    /// Routes this device's debug-layer messages to `callback` instead of the log.
+    /// D3D12 delivers every message to every context's callback, so each listener sees messages other devices raised too.
+    /// Without listeners a message is logged once per process, by the oldest context that has none.
     /// Only ever called while the debug layer is active in this process, and only for messages raised after creation returned.
     /// The runtime raises a message on whatever thread provoked it, and this setter is not synchronized against that — set it before the context is driven from a second thread.
     /// Passing an empty function restores the stderr default.

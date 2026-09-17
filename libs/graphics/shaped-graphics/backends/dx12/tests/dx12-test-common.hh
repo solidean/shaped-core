@@ -15,55 +15,19 @@
 // Most tests are INVOCABLE_TESTs taking the context the entry driver (dx12-entry.cc) built — one per adapter, for the whole run.
 // The helpers here are for the few that need a context of their own: pristine epoch/pool state, a backend knob the test is about, or more than one context.
 
-namespace sg::backend::dx12
+// The debug-layer advisories sg provokes on purpose, allowed in every test of this binary.
+// Validation fails a test through the log rule, so a test provoking a message on purpose declares it with nx::expect_error.
+inline bool const dx12_advisories_allowed = []
 {
-struct scoped_expected_validation_messages;
-} // namespace sg::backend::dx12
-
-namespace sg::backend::dx12
-{
-// The allowlist itself is dx12_expected_messages.hh, shared with the tier-1 entry driver.
-
-/// Set while a test is deliberately provoking a validation message; see scoped_expected_validation_messages.
-inline thread_local bool tl_expect_validation_messages = false;
-
-} // namespace sg::backend::dx12
-
-/// Suppresses the listener below for the calling thread, for a test whose subject IS the bad input.
-///
-/// Thread-scoped rather than per-context, because D3D12 hands one debug-layer message to EVERY callback registered in the process, not only the one on the device that raised it.
-/// With several contexts alive — which is the normal state of this suite at -jN — clearing one context's listener leaves the other N-1 to fail the test.
-/// The message is raised synchronously on the thread that provoked it, so the thread is what names the right test.
-struct sg::backend::dx12::scoped_expected_validation_messages
-{
-    scoped_expected_validation_messages() { tl_expect_validation_messages = true; }
-    ~scoped_expected_validation_messages() { tl_expect_validation_messages = false; }
-
-    scoped_expected_validation_messages(scoped_expected_validation_messages const&) = delete;
-    scoped_expected_validation_messages& operator=(scoped_expected_validation_messages const&) = delete;
-};
+    for (auto const message : sg::backend::dx12::k_expected_validation_messages)
+        nx::impl::register_log_allowance(cc::rec::level::warning, "sg.dx12", message.data(),
+                                         cc::source_location::current());
+    return true;
+}();
 
 namespace sg::backend::dx12
 {
-
-/// Fails whichever test provoked it on any debug-layer message of warning severity or worse, bar the expected ones above.
-/// Without this a validation error is a line on stderr nobody reads, and the run stays green.
-/// Attribution rides the ambient context, so the check lands on the right test wherever the runtime raised the message.
-inline void fail_on_validation_messages(dx12_context_handle const& ctx)
-{
-    ctx->set_message_callback(
-        [](dx12_message_severity severity, cc::string_view message)
-        {
-            if (severity > dx12_message_severity::warning || tl_expect_validation_messages)
-                return;
-            if (is_expected_validation_message(message))
-                return;
-
-            CHECK(false).context(cc::format("dx12 debug layer: {}", message));
-        });
-}
-
-/// The backend-typed view of a freshly created context, with the validation listener installed.
+/// The backend-typed view of a freshly created context.
 /// Passes an error through untouched, so a caller can SKIP.
 inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_handle> ctx)
 {
@@ -74,12 +38,10 @@ inline cc::result<dx12_context_handle> as_test_context(cc::result<sg::context_ha
         return cc::error(cc::move(ctx).error());
     }
 
-    auto typed = std::static_pointer_cast<dx12_context>(ctx.value());
-    fail_on_validation_messages(typed);
-    return typed;
+    return std::static_pointer_cast<dx12_context>(ctx.value());
 }
 
-/// A context for a test to own: the hardware adapter or WARP where there is none, debug layer on, validation messages failing the test.
+/// A context for a test to own: the hardware adapter or WARP where there is none, debug layer on, so a validation message fails the test through the log rule.
 /// `config` supplies the backend knobs the test is about — the adapter and the debug layer are set here regardless.
 /// Only for a test whose subject is the context itself: pristine epoch/pool state, a knob, creation or teardown.
 /// Errors on the rare host with no adapter at all, so a caller can SKIP.

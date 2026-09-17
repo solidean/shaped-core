@@ -6,14 +6,9 @@
 
 // Does D3D12 hand one debug-layer message to EVERY callback in the process, or only to the device that raised it?
 //
-// The whole answer is load-bearing.
-// `scoped_expected_validation_messages` is thread-scoped rather than per-context precisely because the broadcast was
-// observed, and dx12-test-common.hh plus a paragraph of libs/graphics/shaped-graphics/docs/testing.md exist to
-// explain that choice.
-// If the message does NOT cross, all three should go: a per-context guard is simpler, it is what the vulkan backend
-// already does, and the thread-scoped one would be silencing more than it needs to.
-//
-// So this test pins the observation rather than the workaround, and says which way it went and what follows.
+// The answer is load-bearing for the backend's logging: without listeners, a message is logged once per process by the
+// oldest context that has none, rather than once per context — see dx12_context::set_message_callback.
+// If the message stops crossing, that dedupe is silencing messages other devices raised, and should go.
 
 namespace
 {
@@ -57,8 +52,9 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
     if (second == nullptr)
         SKIP("could not create a second dx12 context");
 
-    // The provocation is this test's subject, so the shared listener must not fail the test on it.
-    dx12::scoped_expected_validation_messages const expect_complaint;
+    // The provocation is this test's subject.
+    // Whether another context in the process logs it depends on what else is alive, so it is allowed rather than expected.
+    nx::allow_errors("debug layer:", "sg.dx12");
 
     cc::atomic<int> seen_by_first = {0};
     cc::atomic<int> seen_by_second = {0};
@@ -83,7 +79,7 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
         SKIP("the debug layer raised no message for the provocation, so this test learns nothing");
 
     CHECK(second_count > 0)
-        .context("D3D12 broadcasts a debug-layer message to every registered callback, which is why "
-                 "scoped_expected_validation_messages is thread-scoped rather than per-context; a failure here means "
-                 "it no longer does, and that guard, its helper and the paragraph in testing.md should go");
+        .context("D3D12 broadcasts a debug-layer message to every registered callback, which is why the backend "
+                 "logs each message from one context only; a failure here means it no longer does, and that "
+                 "dedupe in dx12_context.create.cc should go");
 }

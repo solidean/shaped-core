@@ -305,7 +305,7 @@ public:
 
     // Delivers one validation message to the installed callback, or to the log when none is installed.
     // Called from the debug messenger; body in vulkan_context.cc.
-    void dispatch_validation_message(vulkan_message_severity severity, cc::string_view message) const;
+    void dispatch_validation_message(vulkan_message_severity severity, cc::string_view message);
 
     // backend-typed API — prefer these when you already hold a vulkan_context
 
