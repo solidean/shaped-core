@@ -136,7 +136,7 @@ public:
     /// **There is one per geometry kind, and that is not symmetry**: a substitution has to keep the hit group's kind,
     /// since a procedural BLAS traced by a group with no intersection shader reports no hits at all.
     ///
-    /// What it buys: one material still compiling, or one that does not compile, degrades to grey shading on its own
+    /// What it buys: one material still compiling, or one that does not compile, degrades to gray shading on its own
     /// geometry instead of making the whole view a no-op.
     material_permutation const& acquire_fallback(geometry_kind kind = geometry_kind::triangles);
 

@@ -98,7 +98,7 @@ float4 interpolate_f4(ByteAddressBuffer b, attribute_desc d, uint3 e, float3 w)
 /// Barycentric blend of three unit quaternions, as a rotation rather than as four numbers.
 ///
 /// The alignment is what makes the sum mean anything.
-/// `q` and `-q` are the same rotation, so two corners can describe neighbouring frames and still sit nearly antipodal in 4D;
+/// `q` and `-q` are the same rotation, so two corners can describe neighboring frames and still sit nearly antipodal in 4D;
 /// summing those cancels toward zero and the normalized result is a frame belonging to neither, which reads as a swirl across
 /// the triangle.
 /// Aligning both corners into the first's hemisphere first is the fix, and it is why a rotation cannot go through

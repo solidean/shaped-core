@@ -11,6 +11,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/context.hh> // sv::background_work
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
@@ -94,7 +95,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     REQUIRE(record->state == sv::residency::complete);
     REQUIRE(record->blas != nullptr);
 
-    // The neutral quadric permutation: one hard-coded grey surface, which is all a first trace needs.
+    // The neutral quadric permutation: one hard-coded gray surface, which is all a first trace needs.
     auto const& permutation = resources.shaders.acquire_quadric_fallback();
 
     // What makes its hit group PROCEDURAL, and the one thing a triangle permutation never carries.
@@ -217,11 +218,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     auto const at = [&](i32 x, i32 y) { return pixels[y * image_size + x]; };
 
-    // Anything materially darker than the environment was hit: the surface is grey and takes two bounces, so it cannot
+    // Anything materially darker than the environment was hit: the surface is gray and takes two bounces, so it cannot
     // come back as bright as the background it replaced.
     auto const is_hit = [&](tg::vec4f const& px) { return luminance_of(px) < env_radiance * 0.9f; };
 
-    // The centre of the frame is the centre of the sphere.
+    // The center of the frame is the center of the sphere.
     CHECK(is_hit(at(image_size / 2, image_size / 2)));
 
     // The corners are well outside a sphere that covers about a sixth of the frame, so they must be background.
@@ -245,12 +246,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     CHECK(fraction > expected * 0.7);
     CHECK(fraction < expected * 1.3);
 
-    // A hit shaded through a broken normal comes back black rather than grey, which the coverage count alone would accept.
+    // A hit shaded through a broken normal comes back black rather than gray, which the coverage count alone would accept.
     for (auto const& px : pixels)
         if (is_hit(px))
             CHECK(luminance_of(px) > 0.01f);
 
-    co_return;
+    // Everything this test set going, including what the routine started on the frame path.
+    // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing
+    // here holds a handle to, so naming individual nodes cannot cover them.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute compiles",
@@ -268,14 +272,14 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
     auto signature = cc::vector<sv::material_signature_entry>();
-    signature.push_back(sv::material_signature_entry::of("colour", tg::vec3f(0.5f, 0.5f, 0.5f)));
+    signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
     auto const type
-        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "    surface.base_color = colour;");
+        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "    surface.base_color = color;");
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     // One value per primitive, which is the finest a quadric batch can serve.
-    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
-    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
+    auto const colors = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, colors);
 
     auto set = sv::resident_quadric_set{.name = "edges", .geometry = sv::quadric_set_id(0), .primitive_count = 2};
     set.attributes.push_back(sv::mesh_attribute_binding::of(attribute, sv::attribute_id(0)));
@@ -305,6 +309,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
     auto mesh = sv::resident_mesh{.name = "tri", .geometry = sv::mesh_id(0), .triangle_count = 1, .vertex_count = 3};
     auto const on_mesh = sv::resolve_material(type, material, mesh);
     CHECK(on_mesh.permutation_key != resolved.permutation_key);
+
+    // Everything this test set going, including what the routine started on the frame path.
+    // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing
+    // here holds a handle to, so naming individual nodes cannot cover them.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manager", (sg::context_handle const& ctx_h))
@@ -325,10 +334,9 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.2f));
     set.add_line(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), 0.05f);
 
-    // Two values per primitive, which is what makes this a per_triangle material rather than a flat one.
-    auto const colours
-        = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1), tg::vec3f(0, 1, 0), tg::vec3f(1, 1, 0)};
-    set.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colours));
+    // One value per primitive — the set holds two — which is what makes this a per_triangle material rather than a flat one.
+    auto const colors = cc::array<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)};
+    set.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, colors));
 
     auto const item = resources.acquire_scene_item(set);
 
@@ -376,6 +384,17 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
     CHECK(other_permutation->key != permutation->key);
     co_await cc::async_settled(other_permutation->shader);
     co_await cc::async_settled(other_permutation->intersection);
+
+    // `other` was acquired AFTER the drain above, and acquiring a batch queues two stream uploads — its primitive
+    // buffer and its box buffer.
+    // Those are the two async items this test used to leave running: with a warm cache and a thread pool they happen
+    // to land during the compiles awaited just above, and on the single-threaded preset they do not.
+    resources.wait_for_pending_uploads();
+
+    // Everything else this test set going, including what the routine started on the frame path.
+    // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing
+    // here holds a handle to, so naming individual nodes cannot cover them.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference", (sg::context_handle const& ctx_h))
@@ -384,7 +403,7 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     // This runs BOTH against the same rays and compares what they hit.
     //
     // The comparison is the silhouette rather than the shading: what the two routines share is which points are on the
-    // solid, and a colour would drag the whole BSDF into a test about geometry.
+    // solid, and a color would drag the whole BSDF into a test about geometry.
     //
     // The shapes are the ones with the least other coverage — a capped cylinder, a cone frustum and a hyperboloid — since
     // an agreement test is worth most exactly where neither side has been checked against anything else.
@@ -577,7 +596,7 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
     REQUIRE(pixels.size() == isize(agreement_size) * isize(agreement_size));
 
-    // The ray the raygen forms for a pixel's CENTRE, mirrored exactly: ndc is [-1, 1] with y down, and the direction is
+    // The ray the raygen forms for a pixel's CENTER, mirrored exactly: ndc is [-1, 1] with y down, and the direction is
     // forward + right_scaled * ndc.x - up_scaled * ndc.y.
     auto const ray_for = [&](i32 x, i32 y)
     {
@@ -655,13 +674,18 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     CC_LOG_INFO("quadric agreement: {} cpu hits over {} shapes, {} disagreements, {} outside bounds", cpu_hits,
                 set.primitive_count(), disagreements, outside_bounds);
 
-    // A pixel is one sample of an area: the GPU jitters four inside it while the CPU takes the centre, so the two can only
+    // A pixel is one sample of an area: the GPU jitters four inside it while the CPU takes the center, so the two can only
     // differ where the silhouette crosses the pixel.
     //
     // A tenth is the bound because it leaves the perimeter room while still failing on anything structural: a shader that
     // hit nothing would disagree on every hit, and losing one of the seven shapes — or a cylinder's cap, or the
     // hemisphere's floor — is hundreds.
     CHECK(disagreements < cpu_hits / 10);
+
+    // Everything this test set going, including what the routine started on the frame path.
+    // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing
+    // here holds a handle to, so naming individual nodes cannot cover them.
+    co_await cc::async_settled(sv::background_work(ctx));
 }
 
 ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation is compiling",
@@ -837,4 +861,9 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
     // Drained so nothing this test started outlives it; both settled on the error rather than on a value.
     co_await cc::async_settled(own->intersection);
+
+    // Everything this test set going, including what the routine started on the frame path.
+    // `sv::background_work` is the context-wide answer, and that is the point: a trace kicks off compiles nothing
+    // here holds a handle to, so naming individual nodes cannot cover them.
+    co_await cc::async_settled(sv::background_work(ctx));
 }

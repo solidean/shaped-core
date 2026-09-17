@@ -27,6 +27,9 @@ scene_item& quadric_ref::target() const
 
 void quadric_ref::transform(tg::affine_transform3f const& t)
 {
+    if (_item == no_item)
+        return; // an empty batch was never placed, so there is nothing to move
+
     target().transform = t;
 }
 
@@ -64,6 +67,13 @@ mesh_ref scene_ref::add_mesh(sv::resident_mesh const& mesh)
 
 quadric_ref scene_ref::add_quadrics(sv::quadric_set const& set)
 {
+    // An empty batch draws nothing, so it is filtered out here rather than asserted on: a caller building a set from a
+    // loop that happened to produce no primitives has not made a mistake, and `frame::_flush_immediate_quadrics`
+    // already skips one for the same reason.
+    // The lower-level asserts stay as contracts — see `gpu_resource_manager::create_quadric_set`.
+    if (set.is_empty())
+        return quadric_ref(_frame, _view, _layer, quadric_ref::no_item);
+
     // Content-keyed like `add_mesh`, so a caller re-adding an unchanged batch every frame pays lookups.
     auto& items = target().items;
     items.push_back(_frame->resources().acquire_scene_item(set));
@@ -72,6 +82,9 @@ quadric_ref scene_ref::add_quadrics(sv::quadric_set const& set)
 
 quadric_ref scene_ref::add_quadrics(sv::resident_quadric_set const& set)
 {
+    if (set.primitive_count == 0)
+        return quadric_ref(_frame, _view, _layer, quadric_ref::no_item);
+
     auto& items = target().items;
     items.push_back(_frame->resources().acquire_scene_item(set));
     return quadric_ref(_frame, _view, _layer, u32(items.size() - 1));

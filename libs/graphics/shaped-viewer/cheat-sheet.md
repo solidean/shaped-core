@@ -418,7 +418,7 @@ sv::quadric_primitive::flag_emit_clip_surface  // draw the CLIPPER's surface too
 sv::quadric_primitive::create_sphere(tg::sphere3f)                       // unclipped
 sv::quadric_primitive::create_cylinder(tg::segment3f, radius, capped=false)  // false is an OPEN tube; the box is the same either way
 sv::quadric_primitive::create_cone(base_to_apex, base_radius, capped=true)   // base disc at pos0, tip at pos1; `capped` draws the disc
-p.admits(world_p);  p.normal_at(world_p);  p.emits_clip_surface()
+p.admits(set_space_p);  p.normal_at(set_space_p);  p.emits_clip_surface()   // NOT world space — the set's
 sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
 sv::capsule_primitives(segment, radius)        // -> fixed_vector<quadric_primitive, 3>: the cylinder, then a sphere at each end
 sv::line_primitives(segment, style)            // -> fixed_vector<quadric_primitive, 3>: 1 for flat/open ends, 3 for round
@@ -443,7 +443,7 @@ sv::resident_quadric_set         // that batch as resources: a quadric_set_id, b
 ```
 
 ```cpp
-auto set = sv::quadric_set();                       // built once: add() folds the hash and the bounds as it goes
+auto set = sv::quadric_set();                       // built once: add() folds the bounds; the hash is one pass, on demand
 for (auto const& v : mesh.vertices()) set.add_sphere(tg::sphere3f(v, 0.02f));
 for (auto const& e : mesh.edges())    set.add_line(tg::segment3f(e.a, e.b), 0.008f);   // OPEN by default — the vertex spheres cover the joints
 set.material = steel;
@@ -460,10 +460,11 @@ s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
 s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
 ```
 
-**The factories are the only way in**, and that is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
+**`add` is the only mutator** — the named factories all funnel through it, and `add(quadric_primitive)` takes a record the factories do not cover.
+That is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
 The hash is one pass over the primitive span, taken on the first `hash()` after a mutation and cached, so a set filled once and placed every frame hashes once.
 It is order-SENSITIVE without arranging for it, because the byte range IS the primitive order, which is what `PrimitiveIndex()` reads.
-The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recolouring or re-placing a million-primitive batch re-uploads nothing.
+The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recoloring or re-placing a million-primitive batch re-uploads nothing.
 
 **The primitives live in the SET's space**, and `transform` places that space in the world.
 A non-uniform placement turns its spheres into ellipsoids at no cost, because a general quadric is closed under an affine map where a typed sphere would not be.
@@ -480,7 +481,7 @@ A batch numbers its primitives and nothing else, so it admits `per_instance` and
 The latter means "one value per element of the primitive stream, indexed by `PrimitiveIndex()`" — a triangle for a mesh, a quadric for a batch.
 The two geometries differ in the PREAMBLE that builds the shading context, and in nothing the material fragment reads.
 A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
-The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parametrization.
+The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parameterization.
 
 **A batch is one material.**
 The underlying API takes a range of quadrics sharing one; per-quadric *parameters* are had by being bucketed into several batches, which the immediate calls already do.

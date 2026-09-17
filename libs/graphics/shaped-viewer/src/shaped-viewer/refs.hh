@@ -42,12 +42,20 @@ private:
 };
 
 /// One quadric batch placed in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_quadrics`.
+///
+/// **A handle to an empty batch names no item**, since an empty set draws nothing and is not placed at all.
+/// Every method on it is then a no-op rather than an error, so a caller can place and transform in one expression
+/// without asking first whether there was anything to place.
 class sv::quadric_ref
 {
 public:
+    /// The item index an empty batch is handed back under — see the note above.
+    static constexpr u32 no_item = u32(-1);
+
     quadric_ref(frame* f, view_index view, u32 layer, u32 item) : _frame(f), _view(view), _layer(layer), _item(item) {}
 
     /// Where this placement puts the batch, overriding the transform the set itself carries.
+    /// A no-op on a handle to an empty batch.
     void transform(tg::affine_transform3f const& t);
 
 private:
@@ -107,8 +115,8 @@ public:
 
     /// Adds one sphere to this scene's implicit quadric batch, drawn with `material`.
     ///
-    /// Sugar over `add_quadrics`: the frame owns one set per material and this appends to it, which is what makes drawing
-    /// three spheres cost three lines rather than a set a caller has to hold.
+    /// Sugar over `add_quadrics`: the frame owns one set per (view, layer, material) and this appends to it, which is what
+    /// makes drawing three spheres cost three lines rather than a set a caller has to hold.
     ///
     /// **The implicit set hashes its CONTENTS**, so an unchanged frame still uploads nothing — the property the explicit
     /// form has, kept rather than traded away for the convenience.

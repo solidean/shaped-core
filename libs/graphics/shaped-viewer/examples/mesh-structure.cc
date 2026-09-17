@@ -20,7 +20,7 @@
 //   one bit on the primitive, not a second piece of geometry.
 //   Here it is off: the joints already carry vertex spheres, so a cap would draw something nothing can see.
 //
-//   The colour is per PRIMITIVE, at `per_triangle` — the same frequency a mesh reads a per-face colour at.
+//   The color is per PRIMITIVE, at `per_triangle` — the same frequency a mesh reads a per-face color at.
 //   That is not a coincidence: a quadric batch numbers its primitives and nothing else, so it admits exactly the
 //   frequencies a mesh's primitive stream does, and one material definition generates one shader body for both.
 //
@@ -103,8 +103,8 @@ cc::vector<tg::pos3f> faces_of(cc::span<tg::pos3f const> vertices)
     return out;
 }
 
-/// A vertex's own colour, from the direction it points — so the structure reads as a whole rather than as 42 unrelated bits.
-tg::vec3f colour_of(tg::pos3f const& v)
+/// A vertex's own color, from the direction it points — so the structure reads as a whole rather than as 42 unrelated bits.
+tg::vec3f color_of(tg::pos3f const& v)
 {
     auto const d = tg::normalize(v - tg::pos3f::zero);
     return tg::vec3f(0.5f + 0.5f * d[0], 0.5f + 0.5f * d[1], 0.5f + 0.5f * d[2]);
@@ -117,7 +117,7 @@ EXAMPLE("shaped-viewer/mesh-structure")
     auto const edges = edges_of(vertices);
 
     // The surface itself, deliberately dark: a default-bright one competes with the structure instead of sitting under it.
-    // `create_value` is the per_instance shorthand — one colour for the whole mesh, read out of the parameter block rather
+    // `create_value` is the per_instance shorthand — one color for the whole mesh, read out of the parameter block rather
     // than off a buffer.
     auto const surface
         = sv::mesh{.name = "icosahedron",
@@ -133,30 +133,30 @@ EXAMPLE("shaped-viewer/mesh-structure")
     structure.name = "structure";
     structure.reserve(vertices.size() + edges.size());
 
-    // One colour per primitive, in primitive order — which is what `PrimitiveIndex()` reads.
-    auto colours = cc::vector<tg::vec3f>();
-    colours.reserve(vertices.size() + edges.size());
+    // One color per primitive, in primitive order — which is what `PrimitiveIndex()` reads.
+    auto colors = cc::vector<tg::vec3f>();
+    colors.reserve(vertices.size() + edges.size());
 
     for (auto const& v : vertices)
     {
         structure.add_sphere(tg::sphere3f(v, 0.13f));
-        colours.push_back(colour_of(v));
+        colors.push_back(color_of(v));
     }
 
     for (auto const& e : edges)
     {
         // OPEN tubes, deliberately: the joints already carry vertex spheres, so drawing the caps would be geometry
         // nothing can see.
-        // `add(segment, radius, true)` closes them, at no change to the primitive's box.
+        // `add_line(s, {.radius = r, .ends = sv::line_ends::flat})` closes them, at no change to the primitive's box.
         structure.add_line(tg::segment3f(vertices[e[0]], vertices[e[1]]), 0.045f);
 
-        auto const a = colour_of(vertices[e[0]]);
-        auto const b = colour_of(vertices[e[1]]);
-        colours.push_back((a + b) * 0.5f);
+        auto const a = color_of(vertices[e[0]]);
+        auto const b = color_of(vertices[e[1]]);
+        colors.push_back((a + b) * 0.5f);
     }
 
     structure.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
     for (auto f : sv::interactive("shaped-viewer/mesh-structure"))
     {

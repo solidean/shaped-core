@@ -28,8 +28,8 @@ using namespace cc::primitive_defines;
 // One acceleration structure, one upload, two instances — and the spheres come out as ellipsoids, because a general quadric
 // is closed under an affine map where a typed sphere would not be.
 //
-// Colour is `per_triangle`: one value per primitive, indexed by PrimitiveIndex().
-// That is the same frequency a mesh reads a per-face colour at, and it generates the same line of shader code — a quadric
+// Color is `per_triangle`: one value per primitive, indexed by PrimitiveIndex().
+// That is the same frequency a mesh reads a per-face color at, and it generates the same line of shader code — a quadric
 // batch and a triangle mesh differ in the preamble that builds the shading context and in nothing else.
 //
 // The camera is the FLY one rather than the orbit default, because this is a scene laid out on a floor rather than a
@@ -48,7 +48,7 @@ namespace
 {
 constexpr float spacing = 2.4f;
 
-/// Where the i-th showcase item sits: one row, left to right, centred on the origin.
+/// Where the i-th showcase item sits: one row, left to right, centered on the origin.
 /// A row rather than a grid because a gallery is read across, and eight of these fit a 16:9 frame without crowding.
 tg::pos3f slot(int i)
 {
@@ -112,7 +112,7 @@ sv::quadric_primitive hemisphere(tg::pos3f const& at, float radius)
 {
     auto p = sv::quadric_primitive::create_sphere(tg::sphere3f(at, radius));
 
-    // A slab of half-height r/2 centred at r/2 keeps 0 <= y <= r; its lower plane is the floor and its upper one lies
+    // A slab of half-height r/2 centered at r/2 keeps 0 <= y <= r; its lower plane is the floor and its upper one lies
     // outside the sphere, so only the cut shows.
     p.clip = sv::quadric3::slab(tg::vec3f(0, 1, 0), radius * 0.5f, radius * 0.5f);
     p.flags = sv::quadric_primitive::flag_emit_clip_surface;
@@ -125,11 +125,11 @@ EXAMPLE("shaped-viewer/quadric-gallery")
     auto gallery = sv::quadric_set();
     gallery.name = "quadric gallery";
 
-    auto colours = cc::vector<tg::vec3f>();
+    auto colors = cc::vector<tg::vec3f>();
 
-    // One colour per primitive, appended in lockstep with the primitives themselves — which is what keeps a
+    // One color per primitive, appended in lockstep with the primitives themselves — which is what keeps a
     // `per_triangle` attribute lined up with `PrimitiveIndex()`.
-    auto const push = [&](tg::vec3f const& c) { colours.push_back(c); };
+    auto const push = [&](tg::vec3f const& c) { colors.push_back(c); };
 
     // 0: a plain sphere — the surface quadric with nothing clipping it.
     gallery.add_sphere(tg::sphere3f(slot(0) + tg::vec3f(0, 0.8f, 0), 0.8f));
@@ -170,7 +170,7 @@ EXAMPLE("shaped-viewer/quadric-gallery")
     push(tg::vec3f(0.45f, 0.85f, 0.85f));
 
     gallery.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
     // The floor, so the shapes sit on something and cast shadows onto it.
     auto const floor

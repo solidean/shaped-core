@@ -7,6 +7,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
+#include <shaped-viewer/material/impl/material_hash.hh> // impl::add_sampler, which skips the sampler's padding
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
@@ -238,6 +239,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
         return;
 
     meshes.begin_frame(e);
+    quadrics.begin_frame(e);
     materials.begin_frame(e);
     textures.begin_frame(e);
     attributes.begin_frame(e);
@@ -363,18 +365,25 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, quad
 
     _upload_parameters(cmd, r);
 
-    // A pending batch names the STAND-IN rather than its own primitive buffer, and that is about the transfer rather than
-    // about what the shader reads.
-    // A command list that touches a resource a stream is still filling waits for the whole transfer to land — so naming
-    // the real buffer here would stall the first frames on megabytes nothing is going to read, since a pending batch is
-    // traced as the placeholder cube through the neutral hit group anyway.
-    // The stand-in is filled by a direct upload rather than a stream, so it is never the thing being waited on.
+    // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
+    // cube's positions — exactly as the mesh overload below does, and for the same reason: `PtClosestHit` reads the hit
+    // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
+    // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
+    //
+    // Naming the real buffer while it streams would also stall: a command list that touches a resource a stream is
+    // still filling waits for the whole transfer to land, and the first frames would pay that for bytes the placeholder
+    // never reads.
+    // `placeholder_vertices` is filled by a direct upload rather than a stream, so it is never the thing being waited on.
     auto const pending = q.state != residency::complete;
+    auto const vertices
+        = pending ? meshes.placeholder_vertices().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+
+    // A quadric indexes nothing, but the field still has to name something the bound snapshot covers.
     auto const stand_in = meshes.index_stand_in().raw()->as_raw_readonly();
 
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
-            .vertices = u32(pending ? acquire_buffer(stand_in) : acquire_buffer(q.primitives.raw()->as_raw_readonly())),
+            .vertices = u32(acquire_buffer(vertices)),
             .indices = u32(acquire_buffer(stand_in)),
             .is_indexed = 0u};
 }
@@ -484,6 +493,29 @@ bool gpu_resource_manager::_is_resident(sv::resident_mesh const& m)
     return true;
 }
 
+/// The content key a GPU slot is cached under, over everything the placement COPIES out of the value.
+///
+/// A slot names ids that were minted from particular bytes, and every field those came from is public and mutable on
+/// `sv::mesh` and reachable through `add` / `clear` on `sv::quadric_set`.
+/// So the slot has to be keyed on the content rather than only checked for liveness, or a refilled or reassigned value
+/// keeps drawing what it held when it was first placed.
+///
+/// An attribute contributes its name, format and frequency as well as its hash: `mesh_attribute::hash` covers the
+/// element bytes alone, and the binding copies the other three across.
+[[nodiscard]] cc::hash128 attributes_digest(cc::span<mesh_attribute const> attributes)
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(i64(attributes.size()));
+    for (auto const& a : attributes)
+    {
+        b.add_string(a.name);
+        b.add_pod(a.format);
+        b.add_pod(a.frequency);
+        b.add_pod(a.hash);
+    }
+    return cc::hash128::create(b.written_bytes(), impl::attribute_hash_seed);
+}
+
 sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
 {
     CC_ASSERT(!data.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
@@ -499,7 +531,27 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
     // never re-upload the bytes the mesh is still holding.
     // Falling through re-acquires from those bytes, which is the "an eviction is a re-upload" property the design
     // rests on.
-    if (data.cache.manager == this && _is_live(data.cache.resources))
+    // What the placement copies out of `data`, so a value that changed since it was placed re-acquires.
+    // The geometry, the attributes and every field of a texture sample the binding carries across.
+    auto const content = [&]
+    {
+        auto& b = cc::byte_stream_builder::thread_local_scratch();
+        b.add_pod(data.geometry.hash);
+        b.add_pod(i64(data.textures.size()));
+        for (auto const& t : data.textures)
+        {
+            b.add_string(t.name);
+            b.add_pod(t.source.texture.hash);
+            b.add_string(t.source.uv_attribute);
+            impl::add_sampler(b, t.source.sampler);
+            b.add_pod(t.source.swizzle);
+            b.add_pod(t.source.transform);
+        }
+        auto const shape = cc::hash128::create(b.written_bytes(), impl::position_hash_seed);
+        return impl::combine_digests(shape, attributes_digest(data.attributes));
+    }();
+
+    if (data.cache.manager == this && data.cache.content == content && _is_live(data.cache.resources))
     {
         data.cache.resources.transform = data.transform;
         data.cache.resources.material = data.material;
@@ -557,7 +609,8 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
                                 .textures = cc::move(bound_textures),
                                 .bounds = box,
                                 .triangle_count = data.geometry.triangle_count(),
-                                .vertex_count = data.geometry.vertex_count()}};
+                                .vertex_count = data.geometry.vertex_count()},
+                  .content = content};
 
     data.cache.ready = _is_resident(data.cache.resources);
     return data.cache.resources;
@@ -620,7 +673,11 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
     // verified rather than believed.
     // The transform and the material are re-read anyway, since those are what a caller changes between frames without
     // changing a payload.
-    if (data.cache.manager == this && _is_live(data.cache.resources))
+    // What the placement copies out of `data`: the primitives, and the attributes bound alongside them.
+    // `clear()` plus a refill is the documented per-frame pattern, and it changes both without touching the slot.
+    auto const content = impl::combine_digests(data.hash(), attributes_digest(data.attributes));
+
+    if (data.cache.manager == this && data.cache.content == content && _is_live(data.cache.resources))
     {
         data.cache.resources.transform = data.transform;
         data.cache.resources.material = data.material;
@@ -645,7 +702,8 @@ sv::resident_quadric_set const& gpu_resource_manager::create_quadric_set(sv::qua
                                 .transform = data.transform,
                                 .material = data.material,
                                 .bounds = data.bounds(),
-                                .primitive_count = data.primitive_count()}};
+                                .primitive_count = data.primitive_count()},
+                  .content = content};
 
     data.cache.ready = _is_resident(data.cache.resources);
     return data.cache.resources;
@@ -818,8 +876,8 @@ sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel
               "a 1x1 placeholder is written as four 8-bit channels");
 
     // An sRGB view decodes what it reads, so the value has to be stored encoded to come back as itself.
-    // The curve covers the colour channels ONLY: alpha in an sRGB format is stored and sampled linearly, so encoding it
-    // would hand the shader a number nothing ever decodes — a base-colour map bound as `opacity` through `.a` is
+    // The curve covers the color channels ONLY: alpha in an sRGB format is stored and sampled linearly, so encoding it
+    // would hand the shader a number nothing ever decodes — a base-color map bound as `opacity` through `.a` is
     // exactly that case.
     auto const encode = [&](float v, int component)
     {

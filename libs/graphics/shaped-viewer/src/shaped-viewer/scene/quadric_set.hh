@@ -55,6 +55,15 @@ struct sv::impl::quadric_set_gpu_slot
     /// The resources minted for this set against that manager.
     sv::resident_quadric_set resources;
 
+    /// The content this slot was minted from.
+    ///
+    /// **The slot is keyed on it, not merely validated by it.**
+    /// Every field the placement reads is public and mutable, so a caller can refill, reassign or copy the value after
+    /// placing it and the ids above would keep naming the FIRST contents — which is exactly the per-frame refill the
+    /// `clear()` doc advertises.
+    /// A mismatch falls through to a normal re-acquire, so an unchanged value still costs a compare.
+    cc::hash128 content;
+
     /// Whether those resources had reached the GPU, as of that placement.
     bool ready = false;
 };
@@ -64,10 +73,10 @@ struct sv::impl::quadric_set_gpu_slot
 /// **This is the set a caller builds and holds**, and it is the quadric counterpart of `sv::mesh`.
 /// It needs no device to exist, and placing it is what turns its primitives into resources.
 ///
-/// Primitives are added rather than assigned, and `add` is the only way in, because the content hash and the bounds are folded
-/// as each one arrives.
-/// That is what makes "equal contents give equal hashes" an invariant of the type instead of something a caller has to
-/// remember, and it costs O(1) per primitive rather than a pass over the whole batch per frame.
+/// Primitives are added rather than assigned, and `add` is the only MUTATOR, which is what makes "equal contents give equal
+/// hashes" an invariant of the type instead of something a caller has to remember.
+/// The bounds are folded as each primitive arrives; the hash is one pass over the whole span, taken on the first `hash()`
+/// after a mutation and cached — see `_hash_dirty`.
 ///
 /// **The primitives live in the SET's space, and `transform` places that space in the world.**
 /// So a set built once can be placed many times, and a non-uniform scale in the placement turns its spheres into ellipsoids —
@@ -187,8 +196,7 @@ private:
     /// The fold costs two XXH3-128 calls per primitive (the record, then the running digest) against one long-input
     /// pass, and the per-call setup is what dominates at 120 and 32 bytes: about five times the work for an identical
     /// invariant.
-    /// At a million primitives, which is the scale this type is built for and re-authored every frame, it is 20.9 ms
-    /// against 4.6 ms — see `tests/quadric-set-benchmark.cc`.
+    /// `tests/quadric-set-benchmark.cc` carries the measurement, at the three scales that settled it.
     ///
     /// Mutable because taking the hash does not change the set; it only stops deferring work the set already owed.
     mutable cc::hash128 _hash;

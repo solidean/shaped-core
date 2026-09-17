@@ -1,10 +1,13 @@
 #include "viewer_test_env.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/context.hh> // sv::background_work
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 
@@ -143,4 +146,146 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch can be a single primitive", (sg::cont
     CHECK(manager.get(id).aabbs.element_count() == 1);
 
     co_return;
+}
+
+ASYNC_INVOCABLE_TEST("sv - an idle quadric batch is evicted like any other resource", (sg::context_handle const& ctx_h))
+{
+    // `gpu_resource_manager::advance_to` drives every pool's frame boundary, and the quadric pool was left out of it.
+    // Nothing about that is visible in a short-lived scene: the pool stays at epoch 0, so the idle timeout never fires
+    // and the byte budget treats every entry as this frame's working set.
+    // A configured `quadrics.budget` therefore did nothing at all.
+    auto& ctx = *ctx_h;
+
+    auto resources = sv::gpu_resource_manager::create(ctx, {.quadrics = {.budget = {.max_idle_epochs = 0}}});
+
+    auto set = sv::quadric_set();
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.5f));
+
+    auto const id = resources.quadrics.acquire(sv::quadric_data::of(set));
+    REQUIRE(resources.quadrics.get_ptr(id) != nullptr);
+
+    // Landed before the boundaries, so what is being tested is the IDLE timeout rather than a cancelled upload.
+    resources.wait_for_pending_uploads();
+
+    // Two boundaries without re-acquiring: at `max_idle_epochs = 0` the first one that does not touch it is enough.
+    resources.advance_to(sg::epoch(u64(ctx.current_epoch()) + 1));
+    resources.advance_to(sg::epoch(u64(ctx.current_epoch()) + 2));
+
+    CHECK(resources.quadrics.get_ptr(id) == nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv - a refilled quadric set re-acquires rather than keeping its first geometry",
+                     (sg::context_handle const& ctx_h))
+{
+    // The slot is a cache keyed on CONTENT, not merely validated for liveness.
+    // `clear()` plus a refill is the per-frame pattern the type documents, and it changes the primitives without
+    // touching the slot — so a slot keyed on liveness alone would keep drawing whatever the set held when it was
+    // first placed.
+    auto& ctx = *ctx_h;
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto set = sv::quadric_set();
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.5f));
+
+    auto const& first = resources.create_quadric_set(set);
+    auto const first_id = first.geometry;
+    CHECK(first.primitive_count == 1);
+
+    set.clear();
+    set.add_sphere(tg::sphere3f(tg::pos3f(1, 0, 0), 0.25f));
+    set.add_sphere(tg::sphere3f(tg::pos3f(2, 0, 0), 0.25f));
+
+    auto const& second = resources.create_quadric_set(set);
+    CHECK(second.geometry != first_id);
+    CHECK(second.primitive_count == 2);
+
+    // An UNCHANGED set still takes the fast path, which is the property the content key must not cost.
+    auto const& again = resources.create_quadric_set(set);
+    CHECK(again.geometry == second.geometry);
+
+    // A copy carries the original's slot, and its own contents decide what it resolves to.
+    auto copy = set;
+    copy.add_sphere(tg::sphere3f(tg::pos3f(3, 0, 0), 0.25f));
+    auto const& copied = resources.create_quadric_set(copy);
+    CHECK(copied.geometry != second.geometry);
+    CHECK(copied.primitive_count == 3);
+
+    resources.wait_for_pending_uploads();
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv - a reassigned mesh re-acquires rather than keeping its first geometry",
+                     (sg::context_handle const& ctx_h))
+{
+    // The same property on `sv::mesh`, whose `geometry`, `attributes` and `textures` are all public and mutable.
+    auto& ctx = *ctx_h;
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const tri = [](float x)
+    {
+        return sv::triangle_geometry::create_from_positions(
+            cc::vector<tg::pos3f>{tg::pos3f(x, 0, 0), tg::pos3f(x + 1, 0, 0), tg::pos3f(x, 1, 0)});
+    };
+
+    auto mesh = sv::mesh{.name = "m", .geometry = tri(0.0f)};
+
+    auto const& first = resources.create_mesh(mesh);
+    auto const first_id = first.geometry;
+
+    mesh.geometry = tri(5.0f);
+
+    auto const& second = resources.create_mesh(mesh);
+    CHECK(second.geometry != first_id);
+
+    // Unchanged again takes the fast path.
+    auto const& again = resources.create_mesh(mesh);
+    CHECK(again.geometry == second.geometry);
+
+    // And an attribute is part of the key, since the binding copies its name, format and frequency across.
+    mesh.attributes.push_back(sv::mesh_attribute::create_value("base_color", tg::vec3f(1, 0, 0)));
+    auto const& with_attribute = resources.create_mesh(mesh);
+    CHECK(with_attribute.attributes.size() == 1);
+
+    resources.wait_for_pending_uploads();
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv - a pending quadric batch names the placeholder's positions", (sg::context_handle const& ctx_h))
+{
+    // A pending batch is traced as the placeholder CUBE through the triangle fallback, and that hit group reads the
+    // triangle's three corner positions back out of `inst.vertices` to recompute the geometric normal.
+    // Naming the index stand-in there — a three-element u32 buffer — hands it twelve bytes to read up to 36 positions
+    // out of, which is the mesh overload's own documented reason for naming `placeholder_vertices` instead.
+    //
+    // Checked without a trace on purpose: a trace would race both the upload and the stand-in's compile.
+    auto& ctx = *ctx_h;
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto set = sv::quadric_set();
+    set.add_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), 0.5f));
+
+    // A batch stays pending until something drains it, and nothing here does.
+    auto const item = resources.acquire_scene_item(set);
+    auto const* const record = resources.quadrics.get_ptr(item.quadrics);
+    REQUIRE(record != nullptr);
+    REQUIRE(record->state != sv::residency::complete);
+
+    auto cmd = ctx.create_command_list();
+    auto const described = resources.describe_instance(*cmd, item.quadrics, item.instance);
+
+    // `acquire_buffer` hands back the same index for the same view within one epoch, so this compares indices.
+    auto const expected = u32(resources.acquire_buffer(resources.meshes.placeholder_vertices().raw()->as_raw_readonly()));
+    CHECK(described.vertices == expected);
+
+    // And it is NOT the index stand-in, which is what it used to name.
+    auto const stand_in = u32(resources.acquire_buffer(resources.meshes.index_stand_in().raw()->as_raw_readonly()));
+    CHECK(described.vertices != stand_in);
+    CHECK(described.indices == stand_in); // a quadric indexes nothing, so that field still names the stand-in
+
+    ctx.drop_command_list(cc::move(cmd));
+
+    resources.wait_for_pending_uploads();
+    co_await cc::async_settled(sv::background_work(ctx));
 }

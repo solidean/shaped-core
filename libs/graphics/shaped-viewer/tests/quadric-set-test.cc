@@ -107,7 +107,7 @@ TEST("sv::quadric_set hashes primitive ORDER")
 TEST("sv::quadric_set hash ignores what is not geometry")
 {
     // The hash keys the uploaded PAYLOAD, so two sets differing only in how they are drawn share one.
-    // That is what lets a caller recolour a million-primitive batch without re-uploading it.
+    // That is what lets a caller recolor a million-primitive batch without re-uploading it.
     auto a = structure_of(0.25f);
     auto b = structure_of(0.25f);
 

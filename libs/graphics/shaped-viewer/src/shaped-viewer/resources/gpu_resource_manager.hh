@@ -140,7 +140,7 @@ private:
 class sv::gpu_resource_manager
 {
 public:
-    /// Creates the four managers, the staging group over `cfg.bindless`'s layout, and one array per table.
+    /// Creates the five managers, the staging group over `cfg.bindless`'s layout, and one array per table.
     ///
     /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: a sampled texture is
     /// acquired into the first, and every buffer a hit reads — geometry, attributes, the parameter block — into the second.
@@ -306,6 +306,9 @@ public:
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
 
     /// `data`'s primitives and attributes named by id, as the `sv::resident_quadric_set` a scene item is placed from.
+    ///
+    /// `data` must hold at least one primitive: an empty batch has no BLAS to build, and `scene_ref::add_quadrics`
+    /// filters one out before it ever reaches here rather than letting a caller trip this.
     ///
     /// The quadric counterpart of `create_mesh`, and the same contract: the result is remembered ON `data` (see
     /// `sv::impl::quadric_set_gpu_slot`), every payload is acquired by the content hash it already carries, and a cached id

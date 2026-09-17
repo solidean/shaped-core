@@ -65,8 +65,7 @@ void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_
         return;
 
     CC_LOG_WARNING("attribute '{}' is bound at a frequency {} geometry cannot number, so the material falls back to "
-                   "its "
-                   "own constant for it — a quadric batch numbers its primitives and nothing else",
+                   "its own constant for it",
                    name, kind == geometry_kind::quadrics ? "quadric" : "triangle");
 }
 
@@ -76,7 +75,7 @@ void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_
 [[nodiscard]] mesh_attribute_binding const* find_uv_attribute(geometry_view const& geometry, cc::string_view name)
 {
     // A quadric carries no uv at all, which is what makes both texture ranks unreachable on one.
-    // It follows from the geometry rather than from a policy: a general quadric has no natural surface parametrization, so
+    // It follows from the geometry rather than from a policy: a general quadric has no natural surface parameterization, so
     // there is no frequency a uv could be interpolated at.
     if (geometry.kind != geometry_kind::triangles)
         return nullptr;

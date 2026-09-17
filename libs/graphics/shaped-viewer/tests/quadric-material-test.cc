@@ -23,12 +23,12 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A material type declaring one colour, which is what everything below resolves.
-[[nodiscard]] sv::material_type colour_type()
+/// A material type declaring one color, which is what everything below resolves.
+[[nodiscard]] sv::material_type color_type()
 {
     auto signature = cc::vector<sv::material_signature_entry>();
-    signature.push_back(sv::material_signature_entry::of("colour", tg::vec3f(0.5f, 0.5f, 0.5f)));
-    return sv::material_type::create("sv_test_colour", cc::move(signature), "    surface.base_color = colour;");
+    signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
+    return sv::material_type::create("sv_test_color", cc::move(signature), "    surface.base_color = color;");
 }
 
 [[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)
@@ -81,11 +81,11 @@ TEST("sv::serves splits the geometric frequencies by what each geometry numbers"
 
 TEST("sv::resolve_material takes a per_triangle attribute on a quadric batch")
 {
-    auto const type = colour_type();
+    auto const type = color_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
-    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
+    auto const colors = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, colors);
 
     // Held in a named local rather than passed as a temporary: a `resolved_material` BORROWS its geometry, so a set that
     // died at the end of the call expression would leave every attribute pointer dangling.
@@ -100,15 +100,15 @@ TEST("sv::resolve_material takes a per_triangle attribute on a quadric batch")
 
 TEST("sv::resolve_material falls back when the geometry cannot number the frequency")
 {
-    auto const type = colour_type();
+    auto const type = color_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     // Authored for a mesh and placed on a batch: the candidate is unusable, so it loses to the coarser rank rather than
     // failing the resolve — the same thing a format mismatch does.
     auto const per_vertex = cc::array<tg::vec3f>::create_filled(3, tg::vec3f(1, 0, 0));
-    auto const vertex_colour = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_vertex, per_vertex);
+    auto const vertex_color = sv::mesh_attribute::create("color", sv::attribute_frequency::per_vertex, per_vertex);
 
-    auto const batch = quadric_set_with(vertex_colour);
+    auto const batch = quadric_set_with(vertex_color);
     auto const on_quadrics = sv::resolve_material(type, material, batch);
     REQUIRE(on_quadrics.attributes.size() == 1);
     CHECK(on_quadrics.attributes[0].frequency == sv::material_frequency::material_type);
@@ -116,7 +116,7 @@ TEST("sv::resolve_material falls back when the geometry cannot number the freque
 
     // The same attribute on a mesh IS usable, which is what says the refusal is the geometry's rather than the attribute
     // being malformed.
-    auto const mesh = mesh_with(vertex_colour);
+    auto const mesh = mesh_with(vertex_color);
     auto const on_mesh = sv::resolve_material(type, material, mesh);
     REQUIRE(on_mesh.attributes.size() == 1);
     CHECK(on_mesh.attributes[0].frequency == sv::material_frequency::mesh_attribute);
@@ -124,17 +124,17 @@ TEST("sv::resolve_material falls back when the geometry cannot number the freque
 
 TEST("sv::resolve_material leaves the texture ranks unreachable on a quadric")
 {
-    auto const type = colour_type();
+    auto const type = color_type();
 
-    // A material naming a texture for `colour`, sampled through a uv set.
+    // A material naming a texture for `color`, sampled through a uv set.
     auto const material = sv::material::create(
         "m", sv::material_type_id::invalid,
-        {sv::material_attribute_binding::of_texture("colour", {.texture = sv::texture_id(0), .uv_attribute = "uv"})});
+        {sv::material_attribute_binding::of_texture("color", {.texture = sv::texture_id(0), .uv_attribute = "uv"})});
 
     auto const uvs = cc::array<tg::vec2f>::create_filled(2, tg::vec2f(0.5f, 0.5f));
 
     // Even carrying a uv set at a frequency it CAN number, a quadric resolves no sample: there is no surface
-    // parametrization for one, so the uv lookup refuses regardless of what the batch offers.
+    // parameterization for one, so the uv lookup refuses regardless of what the batch offers.
     auto const uv = sv::mesh_attribute::create("uv", sv::attribute_frequency::per_triangle, uvs);
     auto const batch = quadric_set_with(uv);
     auto const on_quadrics = sv::resolve_material(type, material, batch);
@@ -157,11 +157,11 @@ TEST("sv::resolve_material leaves the texture ranks unreachable on a quadric")
 
 TEST("sv::generate_material_shader emits a flat load for per_triangle")
 {
-    auto const type = colour_type();
+    auto const type = color_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
-    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
+    auto const colors = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, colors);
     auto const set = quadric_set_with(attribute);
     auto const r = sv::resolve_material(type, material, set);
 
@@ -180,11 +180,11 @@ TEST("sv::generate_material_shader emits ONE body for a mesh and a quadric alike
     // A `per_triangle` attribute resolves the same way on either geometry, so the two produce the same permutation key and
     // the same source — byte for byte.
     // Only the PREAMBLE differs, and that is the runtime include rather than anything the generator emits here.
-    auto const type = colour_type();
+    auto const type = color_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
-    auto const colours = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
-    auto const attribute = sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, colours);
+    auto const colors = cc::array<tg::vec3f>::create_filled(2, tg::vec3f(1, 0, 0));
+    auto const attribute = sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, colors);
 
     auto const set = quadric_set_with(attribute);
     auto const mesh = mesh_with(attribute);
@@ -199,16 +199,15 @@ TEST("sv::generate_material_shader emits ONE body for a mesh and a quadric alike
 TEST("sv::generate_material_shader forks a permutation on the geometric frequency")
 {
     // What DOES fork one: the same name at a different frequency, since that picks a different load.
-    auto const type = colour_type();
+    auto const type = color_type();
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     auto const one = cc::array<tg::vec3f>::create_filled(1, tg::vec3f(1, 0, 0));
     auto const three = cc::array<tg::vec3f>::create_filled(3, tg::vec3f(1, 0, 0));
 
-    auto const flat_mesh = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_triangle, three));
-    auto const blended_mesh = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_vertex, three));
-    auto const constant_mesh
-        = mesh_with(sv::mesh_attribute::create("colour", sv::attribute_frequency::per_instance, one));
+    auto const flat_mesh = mesh_with(sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, three));
+    auto const blended_mesh = mesh_with(sv::mesh_attribute::create("color", sv::attribute_frequency::per_vertex, three));
+    auto const constant_mesh = mesh_with(sv::mesh_attribute::create("color", sv::attribute_frequency::per_instance, one));
 
     auto const flat = sv::resolve_material(type, material, flat_mesh);
     auto const blended = sv::resolve_material(type, material, blended_mesh);

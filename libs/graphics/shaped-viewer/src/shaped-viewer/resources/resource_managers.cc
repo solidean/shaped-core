@@ -38,7 +38,7 @@ namespace impl
 // Attributes outrank the geometry that indexes them, and that ordering is a correctness argument rather than a
 // preference: a mesh becomes drawable the moment its BLAS is built, and if its uv set were still in flight then it
 // would draw its real triangles against zeroed attribute bytes for a frame or two.
-// Geometry outranks textures for the reason the design gives: a grey model beats a floating albedo map.
+// Geometry outranks textures for the reason the design gives: a gray model beats a floating albedo map.
 constexpr i32 attribute_stream_priority = 20;
 constexpr i32 geometry_stream_priority = 10;
 constexpr i32 texture_stream_priority = 0;
@@ -458,7 +458,7 @@ texture_id texture_manager::acquire(texture_data const& texture)
 
     // Every supplied level as its own transfer, each keeping a pin into the caller's pixels — so the payload outlives
     // this call without the manager holding a copy of it.
-    // Below the geometry priority: a grey model beats a floating albedo map.
+    // Below the geometry priority: a gray model beats a floating albedo map.
     auto transfers = cc::vector<sg::stream_upload_handle>();
     auto offset = isize(0);
     for (auto mip = i32(0); mip < texture.mip_count; ++mip)

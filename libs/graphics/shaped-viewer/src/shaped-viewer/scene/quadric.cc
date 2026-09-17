@@ -99,40 +99,71 @@ tg::vec3f sv::quadric_primitive::normal_at(tg::pos3f const& p) const
 
 namespace
 {
-/// The real roots of `q` along the ray, in ascending order.
+/// The real roots of `q` along the ray, in ascending order, plus the point they were solved about.
 ///
 /// `count` is 0, 1 or 2; a vanishing quadratic term is a ray parallel to a degenerate direction of the quadric — a slab or a
 /// plane pair — where the equation is linear and has exactly one root, and treating it as a quadratic would divide by zero.
+///
+/// `t` is along the original ray, so a caller compares and reports it directly.
+/// `shifted_origin` and `t_closest` are what the solve actually used, and a caller wanting the HIT POINT must build it from
+/// those — `shifted_origin + d * (t - t_closest)` — rather than from the ray's own origin, or it throws away the precision
+/// the shift bought.
 struct quadric_roots
 {
     int count = 0;
     float t[2] = {0.0f, 0.0f};
+    tg::vec3f shifted_origin = {};
+    float t_closest = 0.0f;
 };
 
-[[nodiscard]] quadric_roots roots_of(sv::quadric3 const& q, tg::vec3f const& o, tg::vec3f const& d)
+[[nodiscard]] quadric_roots roots_of(sv::quadric3 const& q, tg::vec3f const& o_in, tg::vec3f const& d)
 {
-    auto const a_o = tg::vec3f(q.diag[0] * o[0] + q.off_diag[0] * o[1] + q.off_diag[1] * o[2],
-                               q.off_diag[0] * o[0] + q.diag[1] * o[1] + q.off_diag[2] * o[2],
-                               q.off_diag[1] * o[0] + q.off_diag[2] * o[1] + q.diag[2] * o[2]);
-    auto const a_d = tg::vec3f(q.diag[0] * d[0] + q.off_diag[0] * d[1] + q.off_diag[1] * d[2],
-                               q.off_diag[0] * d[0] + q.diag[1] * d[1] + q.off_diag[2] * d[2],
-                               q.off_diag[1] * d[0] + q.off_diag[2] * d[1] + q.diag[2] * d[2]);
+    auto const a_of = [&](tg::vec3f const& v)
+    {
+        return tg::vec3f(q.diag[0] * v[0] + q.off_diag[0] * v[1] + q.off_diag[1] * v[2],
+                         q.off_diag[0] * v[0] + q.diag[1] * v[1] + q.off_diag[2] * v[2],
+                         q.off_diag[1] * v[0] + q.off_diag[2] * v[1] + q.diag[2] * v[2]);
+    };
 
+    auto const a_d = a_of(d);
     float const qa = tg::dot(d, a_d);
-    float const qb = 2.0f * (tg::dot(d, a_o) + tg::dot(q.linear, d));
-    float const qc = q.evaluate(o);
 
     auto out = quadric_roots{};
+    out.shifted_origin = o_in;
 
     if (qa == 0.0f)
     {
-        if (qb == 0.0f)
+        float const qb_linear = 2.0f * (tg::dot(d, a_of(o_in)) + tg::dot(q.linear, d));
+        if (qb_linear == 0.0f)
             return out;
 
         out.count = 1;
-        out.t[0] = -qc / qb;
+        out.t[0] = -q.evaluate(o_in) / qb_linear;
         return out;
     }
+
+    // Re-expressed about the ray's closest approach before the roots are formed.
+    //
+    // **This is a precision requirement rather than a simplification.**
+    // `qc` is Q at whatever origin the solve is expressed about, so for a small primitive seen from far away it is
+    // dominated by the distance rather than by the radius: a sphere of radius 0.01 seen from 100 units has a qc of
+    // 1e4 - 1e-4, and the ulp of 1e4 in float32 is about 1e-3, so the radius is gone before the discriminant is formed.
+    // What is left is a difference of two huge nearly-equal numbers whose SIGN is rounding noise, and the silhouette
+    // then reports hits and misses at random rather than degrading gracefully.
+    //
+    // The per-primitive origin fixes distance from the WORLD origin; this fixes distance from the RAY origin, and the
+    // two are independent.
+    // Exact for any quadric, because shifting the origin along the ray is a reparameterization: the roots come back by
+    // adding `t_closest` to each.
+    float const qb_in = 2.0f * (tg::dot(d, a_of(o_in)) + tg::dot(q.linear, d));
+    float const t_closest = -qb_in / (2.0f * qa);
+    auto const o = o_in + d * t_closest;
+
+    float const qb = 2.0f * (tg::dot(d, a_of(o)) + tg::dot(q.linear, d));
+    float const qc = q.evaluate(o);
+
+    out.shifted_origin = o;
+    out.t_closest = t_closest;
 
     float const disc = qb * qb - 4.0f * qa * qc;
     if (disc < 0.0f)
@@ -147,8 +178,8 @@ struct quadric_roots
     float const r1 = s == 0.0f ? r0 : qc / s;
 
     out.count = 2;
-    out.t[0] = cc::min(r0, r1);
-    out.t[1] = cc::max(r0, r1);
+    out.t[0] = cc::min(r0, r1) + t_closest;
+    out.t[1] = cc::max(r0, r1) + t_closest;
     return out;
 }
 } // namespace
@@ -162,14 +193,19 @@ cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, 
 
     // The solid is the intersection of the two interiors, so a candidate on either boundary counts only where it lies inside
     // the OTHER — which is the whole test, and the reason the caps of a cylinder need no geometry of their own.
-    auto const consider = [&](float t, quadric3 const& own, quadric3 const& other)
+    //
+    // The point is built from the SHIFTED origin the roots were solved about rather than from the ray's own: rebuilding
+    // it as `o + d * t` at a hundred times the primitive's radius throws away exactly the precision the shift bought,
+    // and the clip test and the normal would then be taken at a point that is not on the surface.
+    auto const consider = [&](quadric_roots const& roots, int i, quadric3 const& own, quadric3 const& other)
     {
+        auto const t = roots.t[i];
         if (t < t_min || t > t_max)
             return;
         if (best.has_value() && t >= best.value().t)
             return;
 
-        auto const p = o + d * t;
+        auto const p = roots.shifted_origin + d * (t - roots.t_closest);
         if (other.evaluate(p) > 0.0f)
             return;
 
@@ -178,13 +214,13 @@ cc::optional<sv::quadric_hit> sv::intersect(quadric_primitive const& primitive, 
 
     auto const surface_roots = roots_of(primitive.surface, o, d);
     for (auto i = 0; i < surface_roots.count; ++i)
-        consider(surface_roots.t[i], primitive.surface, primitive.clip);
+        consider(surface_roots, i, primitive.surface, primitive.clip);
 
     if (primitive.emits_clip_surface())
     {
         auto const clip_roots = roots_of(primitive.clip, o, d);
         for (auto i = 0; i < clip_roots.count; ++i)
-            consider(clip_roots.t[i], primitive.clip, primitive.surface);
+            consider(clip_roots, i, primitive.clip, primitive.surface);
     }
 
     return best;

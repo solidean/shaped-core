@@ -30,11 +30,11 @@ using namespace cc::primitive_defines;
 // one re-uploads nothing whatever its size.
 //
 // **The edges carry data rather than decoration.**
-// Each tube is coloured by its own length, over the range the mesh actually spans — which on a subdivided icosahedron
+// Each tube is colored by its own length, over the range the mesh actually spans — which on a subdivided icosahedron
 // draws the twelve pentagonal vertices the construction cannot avoid, as a pattern you can see rather than a number
 // you have to trust.
 // That is `per_triangle` — one value per element of the geometry's own primitive stream — which is the SAME frequency a
-// mesh reads a per-face colour at, generating the same shader body from the same material definition.
+// mesh reads a per-face color at, generating the same shader body from the same material definition.
 //
 // Controls
 //   left-drag    orbit          middle-drag    pan          wheel    zoom
@@ -200,7 +200,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
                    .geometry = sv::triangle_geometry::create_from_positions(triangle_soup(mesh)),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.10f, 0.11f, 0.13f))}};
 
-    // The range the colouring is normalized over, so the variation fills the ramp rather than sitting in a corner of it.
+    // The range the coloring is normalized over, so the variation fills the ramp rather than sitting in a corner of it.
     // On a subdivided icosahedron it is narrow — a few percent — which is exactly why it has to be measured rather than
     // assumed.
     auto shortest = 1e30f;
@@ -227,13 +227,13 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
     structure.reserve(mesh.vertices.size() + edges.size());
 
     // One value per primitive, in primitive order — what `PrimitiveIndex()` reads.
-    auto colours = cc::vector<tg::vec3f>();
-    colours.reserve(mesh.vertices.size() + edges.size());
+    auto colors = cc::vector<tg::vec3f>();
+    colors.reserve(mesh.vertices.size() + edges.size());
 
     for (auto const& v : mesh.vertices)
     {
         structure.add_sphere(tg::sphere3f(v, vertex_radius));
-        colours.push_back(tg::vec3f(0.85f, 0.85f, 0.88f)); // neutral, so the edges carry the reading
+        colors.push_back(tg::vec3f(0.85f, 0.85f, 0.88f)); // neutral, so the edges carry the reading
     }
 
     for (auto const& e : edges)
@@ -244,11 +244,11 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
         structure.add_line(tg::segment3f(mesh.vertices[e[0]], mesh.vertices[e[1]]), tube_radius);
 
         auto const len = tg::distance(mesh.vertices[e[0]], mesh.vertices[e[1]]);
-        colours.push_back(ramp((len - shortest) / cc::max(longest - shortest, 1e-6f)));
+        colors.push_back(ramp((len - shortest) / cc::max(longest - shortest, 1e-6f)));
     }
 
     structure.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
     for (auto f : sv::interactive("shaped-viewer/mesh-structure-dense"))
     {

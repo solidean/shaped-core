@@ -27,7 +27,7 @@ struct sv::geometry_view
 
     cc::span<mesh_attribute_binding const> attributes;
 
-    /// Always empty for quadrics: a general quadric has no natural surface parametrization, so there is nothing to sample by.
+    /// Always empty for quadrics: a general quadric has no natural surface parameterization, so there is nothing to sample by.
     cc::span<mesh_texture_binding const> textures;
 
     [[nodiscard]] static geometry_view of(sv::resident_mesh const& mesh);

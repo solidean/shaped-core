@@ -21,10 +21,12 @@ using namespace cc::primitive_defines;
 //     the fan            one direction at eight lengths, PROPORTIONAL — every arrow a scaled copy of the last
 //     the field          the same eight lengths at a FIXED shaft radius — the reading a vector field wants,
 //                        since there length is the only thing an arrow's size is allowed to encode
+//     the white one      one arrow drawn straight into the frame's own batch, with no set anybody holds —
+//                        the only use of the immediate API in any example
 //
 // The fan and the field are the same eight segments, and the difference between the two rows is the overload alone.
 //
-// Colour is `per_triangle`: one value per primitive, indexed by PrimitiveIndex() — so an arrow takes two entries, and
+// Color is `per_triangle`: one value per primitive, indexed by PrimitiveIndex() — so an arrow takes two entries, and
 // giving the head a lighter one is what makes the tip read at a distance.
 //
 // Controls
@@ -56,15 +58,15 @@ EXAMPLE("shaped-viewer/quadric-arrows")
     auto arrows = sv::quadric_set();
     arrows.name = "arrows";
 
-    auto colours = cc::vector<tg::vec3f>();
+    auto colors = cc::vector<tg::vec3f>();
 
-    // One colour per primitive, and an arrow is two of them — shaft then head, in the order `add_arrow` appends.
+    // One color per primitive, and an arrow is two of them — shaft then head, in the order `add_arrow` appends.
     // The head gets the lighter shade, which is what a `per_triangle` attribute is for: the two halves of one arrow are
     // one batch, one BLAS and one material, and differ only in a number indexed by PrimitiveIndex().
     auto const shade = [&](tg::vec3f const& c)
     {
-        while (colours.size() < arrows.primitive_count())
-            colours.push_back(colours.size() + 1 == arrows.primitive_count() ? c * 1.45f : c);
+        while (colors.size() < arrows.primitive_count())
+            colors.push_back(colors.size() + 1 == arrows.primitive_count() ? c * 1.45f : c);
     };
 
     // The frame: three arrows from the origin, each sized to its own length, which is what an axis gizmo wants.
@@ -78,7 +80,7 @@ EXAMPLE("shaped-viewer/quadric-arrows")
     shade(tg::vec3f(0.15f, 0.30f, 0.66f));
 
     // The fan: eight lengths, each arrow proportional to itself.
-    // Every one is a scaled copy of its neighbour, head included — which reads as one arrow at eight sizes rather than as
+    // Every one is a scaled copy of its neighbor, head included — which reads as one arrow at eight sizes rather than as
     // eight arrows, and is exactly why this is the wrong overload for a vector field.
     for (auto i = 0; i < 8; ++i)
     {
@@ -98,7 +100,7 @@ EXAMPLE("shaped-viewer/quadric-arrows")
     }
 
     arrows.attributes.push_back(
-        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colours)));
+        sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
 
     // The floor, so the arrows sit on something and cast shadows onto it.
     auto const floor

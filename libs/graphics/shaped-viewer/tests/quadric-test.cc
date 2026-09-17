@@ -45,7 +45,7 @@ TEST("sv::quadric3 evaluates and differentiates a sphere")
 {
     auto const q = sv::quadric3::sphere_about_origin(2.0f);
 
-    CHECK(near(q.evaluate(tg::vec3f(0, 0, 0)), -4.0f)); // the centre is inside
+    CHECK(near(q.evaluate(tg::vec3f(0, 0, 0)), -4.0f)); // the center is inside
     CHECK(near(q.evaluate(tg::vec3f(2, 0, 0)), 0.0f));  // and the surface is the zero set
     CHECK(near(q.evaluate(tg::vec3f(3, 0, 0)), 5.0f));  // outside is positive
 
@@ -159,20 +159,20 @@ TEST("sv::quadric_primitive survives far from the world origin")
     // The reason `origin` is in the record at all.
     // Written as a world-space quadric, this sphere's constant term is |c|^2 - r^2 = 2.5e7 - 6.4e-5, and the ulp of 2.5e7 in
     // float32 is about 2 — so the radius would be gone before anything read it, and the primitive would vanish or balloon.
-    auto const centre = tg::pos3f(5000.0f, -3000.0f, 1200.0f);
+    auto const center = tg::pos3f(5000.0f, -3000.0f, 1200.0f);
     float const radius = 0.008f;
 
-    auto const p = sv::quadric_primitive::create_sphere(tg::sphere3f(centre, radius));
+    auto const p = sv::quadric_primitive::create_sphere(tg::sphere3f(center, radius));
 
-    auto const hit = sv::intersect(p, ray_from(centre - tg::vec3f(1, 0, 0), tg::vec3f(1, 0, 0)));
+    auto const hit = sv::intersect(p, ray_from(center - tg::vec3f(1, 0, 0), tg::vec3f(1, 0, 0)));
     REQUIRE(hit.has_value());
     CHECK(near(hit.value().t, 1.0f - radius, 1e-3f));
 
     // The silhouette is what a lost radius destroys, so check a ray that must MISS by a hair as well as one that must hit.
     CHECK(
-        sv::intersect(p, ray_from(centre - tg::vec3f(1, 0, 0) + tg::vec3f(0, 0.004f, 0), tg::vec3f(1, 0, 0))).has_value());
+        sv::intersect(p, ray_from(center - tg::vec3f(1, 0, 0) + tg::vec3f(0, 0.004f, 0), tg::vec3f(1, 0, 0))).has_value());
     CHECK(
-        !sv::intersect(p, ray_from(centre - tg::vec3f(1, 0, 0) + tg::vec3f(0, 0.02f, 0), tg::vec3f(1, 0, 0))).has_value());
+        !sv::intersect(p, ray_from(center - tg::vec3f(1, 0, 0) + tg::vec3f(0, 0.02f, 0), tg::vec3f(1, 0, 0))).has_value());
 }
 
 TEST("sv::capsule_primitives returns a cylinder and two caps")
@@ -425,7 +425,7 @@ TEST("sv::quadric_primitive::create_cone is axis-agnostic")
     // rather than on a boundary float32 will not land on exactly.
     CHECK(p.admits(base + (apex - base) * 0.5f));
 
-    // The base's centre is inside the cone and admitted; a point a radius past the rim is neither.
+    // The base's center is inside the cone and admitted; a point a radius past the rim is neither.
     CHECK(p.surface.evaluate(base - p.origin) < 0.0f);
     CHECK(p.surface.evaluate(base + off * 1.0f - p.origin) > 0.0f);
 
@@ -507,4 +507,53 @@ TEST("sv::quadric_set::add_arrow appends both primitives")
     auto explicit_style = sv::quadric_set();
     explicit_style.add_arrow(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0)), sv::arrow_style::for_length(1.0f));
     CHECK(explicit_style.hash() == set.hash());
+}
+
+TEST("sv::intersect resolves a thin primitive seen from far away")
+{
+    // The per-primitive origin fixes distance from the WORLD origin; it does nothing about distance from the RAY origin,
+    // and those are independent.
+    //
+    // Without the root shift in `roots_of`, `qc` at 100 units from a radius-0.01 sphere is 1e4 - 1e-4, whose ulp in
+    // float32 is about 1e-3 — the radius is gone before the discriminant is formed, and the discriminant is then a
+    // difference of two huge nearly-equal numbers whose sign is rounding noise.
+    // The silhouette does not soften at that point, it becomes random: rays well inside it miss and rays well outside it
+    // hit, and which of the two dominates depends only on how the ray happened to round.
+    //
+    // libs/graphics/shaped-viewer/docs/quadrics.md sizes a mesh's edges at 0.008 and its vertices at 0.02, so this is
+    // the target workload rather than an extreme.
+    constexpr float radius = 0.01f;
+    constexpr float distance = 100.0f;
+    constexpr int ray_count = 256;
+
+    auto const primitive = sv::quadric_primitive::create_sphere(tg::sphere3f(tg::pos3f(0, 0, 0), radius));
+    auto const eye = tg::pos3f(0, 0, -distance);
+
+    // Aimed at a ring on the silhouette plane: inside it every ray must hit, outside it every ray must miss.
+    auto const fraction_hit = [&](float k)
+    {
+        auto hits = 0;
+        for (auto i = 0; i < ray_count; ++i)
+        {
+            auto const phi = tg::angle_f::make_from_radians(2.0f * 3.14159265f * float(i) / float(ray_count));
+            auto const target = tg::pos3f(k * radius * tg::cos(phi), k * radius * tg::sin(phi), 0.0f);
+            auto const ray = tg::ray3f(eye, tg::normalize(target - eye));
+            if (sv::intersect(primitive, ray).has_value())
+                ++hits;
+        }
+        return hits;
+    };
+
+    CHECK(fraction_hit(0.9f) == ray_count); // every ray inside the silhouette hits
+    CHECK(fraction_hit(1.1f) == 0);         // and every ray outside it misses
+
+    // And the hit it reports is on the surface, not merely somewhere along the ray: the point has to be built from the
+    // shifted origin, which is what `consider` does.
+    auto const straight = tg::ray3f(eye, tg::vec3f(0, 0, 1));
+    auto const hit = sv::intersect(primitive, straight);
+    REQUIRE(hit.has_value());
+    CHECK(near(hit.value().t, distance - radius, 1e-2f));
+
+    // The normal at a head-on hit points back at the eye.
+    CHECK(near(tg::dot(hit.value().normal, tg::vec3f(0, 0, -1)), 1.0f, 1e-3f));
 }

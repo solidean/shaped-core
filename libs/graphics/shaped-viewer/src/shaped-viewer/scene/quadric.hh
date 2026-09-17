@@ -88,7 +88,7 @@ struct sv::quadric3
             .off_diag = tg::vec3f(-k * axis[0] * axis[1], -k * axis[0] * axis[2], -k * axis[1] * axis[2])};
     }
 
-    /// The slab of half-height `half_height` centred at `offset` along unit `axis`: (p·axis - offset)² - half_height².
+    /// The slab of half-height `half_height` centered at `offset` along unit `axis`: (p·axis - offset)² - half_height².
     ///
     /// This is the clipper that turns an infinite cylinder into a finite one, and its A is axis axisᵀ.
     /// Its own zero set is the pair of planes at the slab's ends, which is what a capped cylinder's flat faces ARE — see
@@ -195,7 +195,7 @@ namespace sv
 // cache key — two identical sets could then hash differently and upload twice.
 // Every member is 4-byte aligned and the total is their exact sum, so there is no hole; this is what says so out loud.
 static_assert(sizeof(quadric_primitive) == 12 + 40 + 40 + 4 + 24,
-              "quadric_primitive must stay padding-free — see quadric_set::add");
+              "quadric_primitive must stay padding-free — see quadric_set::hash()");
 static_assert(sizeof(quadric3) == 40, "quadric3 must stay padding-free");
 } // namespace sv
 

@@ -58,11 +58,17 @@ All in the same 96 GPU bytes and the same shader.
 ### The origin is a correctness requirement, not a convenience
 
 A general quadric stored in world space breaks at mesh scale, and it breaks silently.
-A sphere of radius 0.008 centred at world x = 5000 has constant term |c|² − r², which is 2.5e7 − 6.4e-5.
+A sphere of radius 0.008 centered at world x = 5000 has constant term |c|² − r², which is 2.5e7 − 6.4e-5.
 The ulp of 2.5e7 in float32 is about 2, so the radius is gone before the shader runs.
 
 Expressing the pair about a per-primitive origin and translating the ray into it is what avoids that.
 **Pin it as a test**: a small-radius primitive far from the world origin, whose silhouette is checked rather than merely whose trace does not crash.
+
+**There are two distances, and the origin fixes only one of them.**
+The per-primitive origin fixes distance from the WORLD origin; `roots_of` shifting to the ray's closest approach before it forms the discriminant is what fixes distance from the RAY origin.
+Without the second, a sphere of radius 0.01 seen from 100 units has a `qc` of 1e4 - 1e-4, so the radius is gone in float32 before the discriminant exists.
+Its sign is then rounding noise, and the silhouette reports hits and misses at random.
+Both halves are in the CPU reference and in the shader, and both are pinned by tests.
 
 ### A capsule is three primitives
 
@@ -101,7 +107,9 @@ The key is one XXH3-128 pass over the primitive span, taken lazily on the first 
 Folding a digest per `add` was the first shape, and it is about five times the work for the same invariant.
 The cost is the call count rather than the bytes, and `tests/quadric-set-benchmark.cc` is what settled it.
 It is also what lands the streaming, residency and eviction story for free.
-A quadric batch becomes the same kind of thing `mesh_manager` already holds: a pinned hashed payload that `ctx.stream` uploads, and that `record_pending_work` builds a BLAS behind.
+A quadric batch becomes the same kind of thing `mesh_manager` already holds: a hashed payload that `ctx.stream` uploads, and that `record_pending_work` builds a BLAS behind.
+It differs in one way, and deliberately: `quadric_data` BORROWS its span rather than pinning it.
+The authored form cannot be uploaded as it stands — it splits into a primitive buffer and a box buffer — so the acquire builds new arrays anyway, and only on a miss.
 
 **One material per batch**, so a multi-material set is several batches.
 One BLAS can hold several geometries and DXR can select a hit group per geometry.
@@ -216,7 +224,7 @@ free.
 
 An earlier revision of this design gave quadrics frequencies of their own — `per_quadric` for one value per primitive, and
 `per_quadric_end` for a value at each end of a tube, blended along its length.
-The clip slab makes the second nearly free: it is offset rather than centred, so it carries the axis WITH its sign, and the
+The clip slab makes the second nearly free: it is offset rather than centered, so it carries the axis WITH its sign, and the
 blend parameter falls out of the same evaluation the intersection already does.
 
 It was dropped, and the reason is the whole point of the section above.
@@ -230,8 +238,10 @@ The cheap way back to it is a frequency that reads the clip slab's axial paramet
 
 ### No textures on quadrics, for now
 
-A general quadric has no natural surface parametrization, so there is nothing to sample by.
-The texture ranks of the frequency chain are unreachable on a quadric set, and resolution says so rather than silently falling back to a coarser rank.
+A general quadric has no natural surface parameterization, so there is nothing to sample by.
+The texture ranks of the frequency chain are simply unreachable on a quadric set.
+`find_uv_attribute` returns null for one, so a sampled candidate never enters the walk and the declaration falls to the next rank like any other.
+That one is silent, unlike an attribute bound at a frequency the geometry cannot number, which warns — see `resolve.hh`.
 
 ## What the intersection shader reports
 
@@ -319,12 +329,12 @@ Each step is meant to be landable and testable on its own.
    The open and capped tubes are the same record with one bit different, which is the clearest thing in the picture.
    `quadric-arrows.cc` is the arrow API: an axis frame, and the same eight segments drawn twice — proportional in one row,
    at a fixed shaft radius in the other — which is the difference the sizing overload makes and the reason there are two.
-   `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, coloured at `per_triangle` — one value per
-   quadric, each vertex taking its own colour and each edge the average of its two endpoints'.
+   `mesh-structure.cc` is the feature taught small: an icosahedron's 42 primitives, colored at `per_triangle` — one value per
+   quadric, each vertex taking its own color and each edge the average of its two endpoints'.
    `mesh-structure-dense.cc` is the same authoring code at the scale a real mesh has — a five-times-subdivided
    icosahedron, 10,242 vertices and 30,720 edges as **40,962 primitives in one batch**, one acceleration structure, one
    instance.
-   Its edges are coloured by their own length, again at `per_triangle`, which draws the construction's seams as a pattern
+   Its edges are colored by their own length, again at `per_triangle`, which draws the construction's seams as a pattern
    rather than a number.
 
 ## Elsewhere

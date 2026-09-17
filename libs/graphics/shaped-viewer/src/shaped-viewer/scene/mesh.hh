@@ -34,6 +34,15 @@ struct sv::impl::mesh_gpu_slot
     /// The resources minted for this mesh against that manager.
     sv::resident_mesh resources;
 
+    /// The content this slot was minted from.
+    ///
+    /// **The slot is keyed on it, not merely validated by it.**
+    /// Every field the placement reads is public and mutable, so a caller can refill, reassign or copy the value after
+    /// placing it and the ids above would keep naming the FIRST contents — which is exactly the per-frame refill the
+    /// `clear()` doc advertises.
+    /// A mismatch falls through to a normal re-acquire, so an unchanged value still costs a compare.
+    cc::hash128 content;
+
     /// Whether those resources had all reached the GPU, as of that placement.
     bool ready = false;
 };

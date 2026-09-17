@@ -52,24 +52,19 @@ struct resolved_view
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
     cc::vector<cc::hash128> permutations;
 
-    /// Whether some procedural instance here names a permutation that has not finished compiling.
+    /// Whether any item here is a quadric batch at all.
     ///
-    /// It decides whether the trace is handed the PROCEDURAL stand-in, and the answer is this narrow on purpose:
-    /// acquiring that stand-in GENERATES and compiles a permutation, so a scene whose quadrics are all shading
-    /// normally — or which has none at all — would be paying for a hit group nothing in it could ever select.
-    /// Read with `try_value`, which observes a node without starting it.
-    bool wants_quadric_fallback = false;
+    /// It decides whether the trace is handed the PROCEDURAL stand-in, and it has to be this broad.
+    /// Acquiring the stand-in starts its compile, and `pathtrace_routine::_variant_for` declines the WHOLE trace —
+    /// meshes included — while a quadric permutation is unready and no procedural stand-in is ready to take its place.
+    /// So deferring the acquire until some batch is actually caught uncompiled means the view blanks for exactly as
+    /// long as the stand-in then takes to build, which is the outage the stand-in exists to prevent.
+    /// Acquiring it as soon as a batch is placed gives it the whole life of the view to get ready in.
+    ///
+    /// What still holds, and is the reason this is not simply unconditional, is that a triangle-only scene never
+    /// acquires it and never compiles a hit group it could not select.
+    bool has_quadrics = false;
 };
-
-/// Whether `p` has every shader its hit group needs, without starting or waiting for any of them.
-[[nodiscard]] bool is_compiled(material_permutation const* p)
-{
-    if (p == nullptr || p->shader->try_value() == nullptr)
-        return false;
-    if (p->intersection.is_valid() && p->intersection->try_value() == nullptr)
-        return false;
-    return true;
-}
 
 /// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
 /// scene's own.
@@ -137,10 +132,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
             out.parameter_blocks.push_back(item.instance);
 
-            // A batch drawn as the placeholder cube is a TRIANGLE instance, so it needs no procedural stand-in; one
-            // drawn as itself needs one exactly while its own permutation is still compiling.
-            if (!pending && !is_compiled(out.hit_groups[permutation]))
-                out.wants_quadric_fallback = true;
+            // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
+            // the next, and the stand-in has to already be compiling by then.
+            out.has_quadrics = true;
             continue;
         }
 
@@ -498,10 +492,11 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
     auto const bindless = resources.freeze();
 
-    // Acquired only where a procedural instance actually has nothing to shade with yet: acquiring generates and
-    // compiles a permutation, so asking for one in the steady state would start work nothing ever selects.
-    auto const* const quadric_fallback
-        = resolved.wants_quadric_fallback ? &resources.shaders.acquire_quadric_fallback() : nullptr;
+    // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
+    // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for
+    // however long the stand-in takes to compile.
+    // A triangle-only view still never asks for it.
+    auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
     auto const traced = pathtrace_routine::execute(
         cmd, {.frame = frame,
@@ -510,7 +505,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .output = output,
               .instance_table = instance_table,
               .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to grey
+              // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.
               // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
               // traced by a triangle group reports no hits and disappears instead of shading flat.
@@ -594,10 +589,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const instance_table = upload_instances(cmd, resolved);
     auto const bindless = resources.freeze();
 
-    // Acquired only where a procedural instance actually has nothing to shade with yet: acquiring generates and
-    // compiles a permutation, so asking for one in the steady state would start work nothing ever selects.
-    auto const* const quadric_fallback
-        = resolved.wants_quadric_fallback ? &resources.shaders.acquire_quadric_fallback() : nullptr;
+    // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
+    // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for
+    // however long the stand-in takes to compile.
+    // A triangle-only view still never asks for it.
+    auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
     auto const traced = pathtrace_routine::execute(
@@ -607,7 +603,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
               .output = slot.texture,
               .instance_table = instance_table,
               .hit_groups = resolved.hit_groups,
-              // One material still compiling, or one that does not compile, degrades to grey
+              // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.
               // Two stand-ins rather than one: a substitution has to keep the hit group's kind, or a quadric batch
               // traced by a triangle group reports no hits and disappears instead of shading flat.

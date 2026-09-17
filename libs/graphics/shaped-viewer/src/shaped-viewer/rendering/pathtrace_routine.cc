@@ -160,9 +160,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
     // The procedural stand-in, started on the same terms and for the same reason.
     auto const* const quadric_fallback
-        = d.quadric_fallback != nullptr && state_of(d.quadric_fallback) == permutation_state::ready
-              ? d.quadric_fallback
-              : nullptr;
+        = d.quadric_fallback != nullptr && state_of(d.quadric_fallback) == permutation_state::ready ? d.quadric_fallback
+                                                                                                    : nullptr;
 
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
