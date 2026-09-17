@@ -55,12 +55,13 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4 removed `useResource`: a resource outside every `MTLResidencySet` the queue knows about is simply not there when the GPU runs, so a copy from it reads zeroes and a copy to it writes nowhere.
   It is not an API misuse, so the validation layer says nothing either.
   One context-wide set today; a per-list set built from the touched-resource tracking is the optimization, not a correctness gap.
-- **Queue barriers come in pairs, and one half alone synchronizes nothing.**
+- **Queue barriers come in pairs, and the pair does not survive a queue wait.**
   `barrierAfterQueueStages` at the head of an encoder waits on queue work; `barrierAfterStages` at its end publishes this encoder's work to what follows.
-  Emitting only the consumer leaves the wait with no producer to find, and a write in one command buffer stays invisible to a read in the next.
-  Both are unconditional per encoder.
-  Emitting the consumer only where an *intra-list* barrier was needed is the subtler mistake: a list whose first op has no local hazard then never waits for the list that wrote what it reads.
-  That passes in isolation, because the queue usually drains between two submits, and fails under load.
+  Both are unconditional per encoder, because emitting only the consumer leaves the wait with no producer to find.
+  **But a `wait` on the queue between two commits resets what the later encoder's consumer half can see**, and a pending async transfer puts one there on almost every submit.
+  So two command buffers are ordered by the submission timeline instead: a submit waits on the highest submission token any resource it touches was last named by.
+  Per-resource, so lists sharing nothing still run concurrently.
+  `tests/barrier/cross-list-ordering-test.cc` is the sequence that fails without it — and it passes on its own, without the transfer alongside, which is what made this invisible.
 - **A binding group is one argument buffer, and the layout is `binding.index` directly.**
   Metal has no descriptor-set layout object and no root signature, so both layout types here are schema and make no device call at all.
   A group becomes one argument buffer whose 8-byte slot `n` is what `[[id(n)]]` addresses in MSL.
@@ -335,11 +336,10 @@ The whole binary runs with API validation armed, so a violation anywhere in it e
 **The tier-1 API suite runs against metal**, 162 tests of it, through `tests/backends/metal-entry.cc` in the same shape vulkan's driver uses.
 
 It was disabled and written synchronously until the review caught it, which meant nothing ran the sweep — the suite was green only for tests named one at a time.
-Turning it on immediately found a transfer defect that predates this backend's whole transfer tier, which is the argument for enabling a sweep before it is comfortable rather than after.
+Turning it on immediately found the cross-list ordering defect above, which no single test could reach, and that is the argument for enabling a sweep before it is comfortable rather than after.
 
-Two things are pinned rather than disabling it again, both in [docs/TODO.md](../../docs/TODO.md):
-the transfer fuzz test, which skips on metal;
-and the whole sweep under `SC_THREADS=OFF`, where the driver registers disabled because metal settles completions from a queue `cc::async`'s single-threaded scheduler will not wait on.
+One thing is still pinned rather than disabling it again, in [docs/TODO.md](../../docs/TODO.md):
+the whole sweep under `SC_THREADS=OFF`, where the driver registers disabled because metal settles completions from a queue `cc::async`'s single-threaded scheduler will not wait on.
 
 One API test still runs against metal by being named exactly, which is what the per-invocable aliases are for:
 

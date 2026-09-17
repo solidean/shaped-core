@@ -96,16 +96,13 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     _encoder = _buffer->computeCommandEncoder()->retain();
 
     // Every encoder opens by waiting on everything already committed to this queue, and closes by publishing its own
-    // work — the two halves of MTL4's queue barrier pair.
+    // work — the two halves of MTL4's queue barrier pair, emitted unconditionally.
     //
-    // **Unconditional, and that is the correction rather than the conservatism.**
-    // Emitting it only where an intra-list barrier was needed is wrong: a list whose first op has no *local* hazard —
-    // a copy reading a buffer this list has not touched before — then never waits for the list that wrote it.
-    // That reads correctly in isolation, because the queue usually drains between two submits, and fails under load.
-    // The tier-1 suite running its invocables concurrently is what exposed it.
-    //
-    // Narrowing this to the resources a list actually reads is an optimization the per-buffer tracking already has the
-    // information for; it is not a correctness gap.
+    // **What orders two command buffers is the submission timeline, not this pair.**
+    // A queue wait between the two commits leaves this barrier with no earlier work to find, and a pending async
+    // transfer puts one there — see the wait in metal_context::submit_command_list, which is what the ordering
+    // actually rests on, and tests/barrier/cross-list-ordering-test.cc, which fails without it.
+    // The pair stays for the visibility half, so a write published by one encoder is readable by the next.
     _encoder->barrierAfterQueueStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
     return _encoder;
 }

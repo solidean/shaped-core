@@ -151,24 +151,15 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
     list.end_recording();
 
-    // Order this list after every off-frame transfer of a resource it touches.
-    //
-    // The two queues are otherwise independent: an async upload committed to the transfer queue has no relationship to
-    // a command list committed to the direct one, so a list reading a buffer an upload is still filling would read
-    // whatever was there.
-    // One wait covers the whole list, on the highest value any of its resources claimed.
-    if (auto const wait = highest_pending_transfer(list); wait > 0)
-        _queue->wait(_transfers.timeline(), wait);
-
-    wait_for_streams(list);
-
-    // **Finalize, claim, commit and signal are one step in a single global order.**
+    // **Wait, finalize, claim, commit and signal are one step in a single global order.**
     //
     // The queue is free-threaded, and that is the hazard: two threads may claim tokens 5 and 6 and reach the commit in
     // the other order, which either releases a waiter on 5 before list 5 has run, or drives the shared event backwards
     // from 6 to 5 and breaks is_submission_complete.
-    // Finalize is inside for a second reason — finalize order must equal execute order, which is what makes a
-    // resource's `current` mean "after everything submitted so far".
+    // The waits are inside for a sharper reason — an MTL4 queue wait applies to what is committed after it, so a wait
+    // separated from its own commit by another thread's is a wait that list never gets.
+    // Finalize is inside for a third — finalize order must equal execute order, which is what makes a resource's
+    // `current` mean "after everything submitted so far".
     // Work that neither orders against another submit nor names a token runs after the lock.
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
@@ -177,6 +168,30 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
         [&](int&)
         {
             finalize_touched_buffers(list);
+
+            // **A list waits for the submissions that last named what it touches, on the submission timeline.**
+            //
+            // The queue barrier pair an encoder opens and closes with is not what orders two command buffers, however
+            // much it reads like it: a queue wait between the two commits — which is exactly what the transfer wait
+            // below is — leaves the later encoder's `barrierAfterQueueStages` with no earlier work to find, and its
+            // read of a buffer the earlier list wrote returns the bytes from before.
+            // tests/barrier/cross-list-ordering-test.cc is that sequence, and it fails without this wait.
+            //
+            // Per-resource rather than a blanket serialization: two lists touching nothing in common still run
+            // concurrently, and the stamp is read here, before `stamp_touched_resources` raises it to this submission.
+            if (auto const wait = highest_prior_submission(list); wait > 0)
+                _queue->wait(_epochs.submission_timeline(), wait);
+
+            // Order this list after every off-frame transfer of a resource it touches.
+            //
+            // The two queues are otherwise independent: an async upload committed to the transfer queue has no
+            // relationship to a command list committed to the direct one, so a list reading a buffer an upload is
+            // still filling would read whatever was there.
+            // One wait covers the whole list, on the highest value any of its resources claimed.
+            if (auto const wait = highest_pending_transfer(list); wait > 0)
+                _queue->wait(_transfers.timeline(), wait);
+
+            wait_for_streams(list);
 
             // Claimed inside, so the stamp lands before submit returns: a caller that issues an async transfer on the
             // very next line must find this list already named.
@@ -326,6 +341,18 @@ void metal_context::wait_for_streams(metal_command_list& list)
         wait_on(_transfers.pending_stream_wait(touched.get()), touched);
     for (auto const& touched : list.touched_textures())
         wait_on(_transfers.pending_stream_wait(touched.get()), touched);
+}
+
+u64 metal_context::highest_prior_submission(metal_command_list& list) const
+{
+    u64 highest = 0;
+    for (auto const& touched : list.touched_buffers())
+        highest = cc::max(highest, static_cast<metal_buffer const&>(*touched).submission().get());
+    for (auto const& touched : list.touched_textures())
+        highest = cc::max(highest, static_cast<metal_texture const&>(*touched).submission().get());
+    for (auto const& touched : list.touched_accels())
+        highest = cc::max(highest, touched.storage->submission().get());
+    return highest;
 }
 
 void metal_context::stamp_touched_resources(metal_command_list& list, sg::submission_token token)

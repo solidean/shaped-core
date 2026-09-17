@@ -160,6 +160,10 @@ public:
     /// Move every resource `list` touched from its per-list state into the state the next list synchronizes against.
     void finalize_touched_buffers(metal_command_list& list);
 
+    /// The highest submission token any resource this list touches was last named by, or 0 for none.
+    /// Read before `stamp_touched_resources` raises them, and it is what this submit waits on.
+    [[nodiscard]] u64 highest_prior_submission(metal_command_list& list) const;
+
     /// Record `token` on every resource `list` touched, so a later off-frame transfer defers behind this list.
     /// The reverse of `highest_pending_transfer`, and the other half of the sync between the two queues.
     void stamp_touched_resources(metal_command_list& list, sg::submission_token token);

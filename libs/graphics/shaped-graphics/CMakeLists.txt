@@ -256,6 +256,7 @@ if(SC_BUILD_TESTS)
             tests/transfer/texture-async-interleave-test.cc
             tests/transfer/overlapping-readback-test.cc
             tests/barrier/concurrent-layout-test.cc
+            tests/barrier/cross-list-ordering-test.cc
             tests/transfer/stream-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc

@@ -136,22 +136,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Raster landed after that was written, so the premise no longer holds.
   The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
   `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
+  Read that with the queue barrier pair's limit in mind: it carries visibility, and a queue wait between two commits
+  leaves the consumer half with nothing to find, which is why cross-list *ordering* now rides the submission timeline
+  instead.
   What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
   clamped away, and that cannot be established without a Metal device.
   If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
   rather than leaving a deferral to a milestone that has already arrived.
-
-- **A metal async download can read stale bytes, and the tier-1 fuzz test is pinned for it.**
-  `sg - upload download fuzz test` skips on metal.
-  The sequence is several async uploads, a copy region on the direct queue, an epoch advance, then an async download
-  that reads bytes the copies should have replaced.
-  Reproduce with `uv run dev.py test "sg - upload download fuzz test" --seed 587514285228756490`, which minimises to
-  about a dozen operations.
-  **It is pre-existing rather than a regression**: it reproduces identically at `95e6a63d`, before the staging-ring
-  rewrite, the submission serialization and the completion wiring, and was invisible only because the tier-1 driver
-  never ran.
-  `wait_for_queues` reads correct on inspection — it waits on the buffer's submission stamp, its previous transfer and
-  any stream — so the fault is likelier in when that stamp is read, or what it covers, than in the wait itself.
 
 - **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
   `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
