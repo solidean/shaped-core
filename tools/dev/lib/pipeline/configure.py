@@ -48,6 +48,7 @@ def _ensure_prereqs(root: Path, preset: Preset) -> None:
     prereqs.ensure_dxc(root, preset.name)
     prereqs.ensure_zydis(root, preset.name)
     prereqs.ensure_sdl3(root, preset.name)
+    prereqs.ensure_node_webgpu(root, preset.name)
     prereqs.ensure_sqlite(root, preset.name)
 
 

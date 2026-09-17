@@ -1,0 +1,8 @@
+{
+  "name": "shaped-core-dev-js",
+  "private": true,
+  "description": "JavaScript dependencies of dev.py's wasm test runs: Dawn's node binding, which gives node a navigator.gpu.",
+  "dependencies": {
+    "webgpu": "0.6.1"
+  }
+}

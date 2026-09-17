@@ -42,7 +42,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
-| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | No CI — emdawnwebgpu; `emscripten-webgpu-*` presets, and `emscripten-threads-webgpu-*` for both |
+| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | CI on `emscripten-threads-webgpu-relwithdebinfo` — emdawnwebgpu, and sg's webgpu backend; `emscripten-webgpu-*` presets for WebGPU alone |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
 | Consoles | — | vendor toolchains | 3 | planned |
 

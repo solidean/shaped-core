@@ -35,6 +35,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert the `llvm@22` formula) |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
+| [ci-wasm-emscripten-threads-webgpu.yml](../../.github/workflows/ci-wasm-emscripten-threads-webgpu.yml) | `ubuntu-24.04` | `emscripten-threads-webgpu-relwithdebinfo`, node 22; GPU tests SKIP without an adapter, and the job prints how many did |
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
 
@@ -157,10 +158,11 @@ Everything real is in the artifact above.
 
 ## Extending
 
-Natural next steps, each its own workflow or matrix entry: the **sanitizer**
-presets (ASan/UBSan, Linux clang), the remaining WASM tiers (threads, WebGPU,
-WASI), running the iOS/Android binaries on a simulator/emulator (today they are
-build-only), and build caching (ccache/sccache).
+Natural next steps, each its own workflow or matrix entry:
+- the **sanitizer** presets (ASan/UBSan, Linux clang);
+- the remaining WASM tiers (threads without WebGPU, WebGPU without threads, WASI), and a runner with a GPU so the WebGPU leg stops skipping;
+- running the iOS/Android binaries on a simulator/emulator (today they are build-only);
+- build caching (ccache/sccache).
 
 **Prefer Linux for additional checks.**
 Linux runners spin up faster and cost less than Windows and macOS, and the `ubuntu-26.04` job installs no toolchain beyond SDL3's headers, so it has the lowest end-to-end latency.

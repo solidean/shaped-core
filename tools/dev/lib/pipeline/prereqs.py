@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -143,3 +144,26 @@ def ensure_sqlite(root: Path, preset_name: str = "") -> None:
         doing="downloading the pinned SQLite amalgamation for babel::sqlite",
         dependent="babel-serializer's SQLite format",
     )
+
+
+def ensure_node_webgpu(root: Path, preset_name: str = "") -> None:
+    """Install the pinned `webgpu` npm package into tools/dev/js when a WebGPU wasm preset needs it and it is missing.
+
+    Node has no WebGPU of its own; that package is Dawn's binding, which tools/dev/js/webgpu-preload.mjs installs as navigator.gpu.
+    A failure is not fatal: under node every GPU test then SKIPs for want of an adapter, and deno needs none of this.
+    """
+    if "webgpu" not in preset_name.lower() or os.environ.get("SC_SKIP_NODE_WEBGPU"):
+        return
+    js = root / "tools" / "dev" / "js"
+    if (js / "node_modules" / "webgpu" / "package.json").is_file():
+        return
+    npm = shutil.which("npm")
+    if npm is None:
+        ui.write_line("node-webgpu: npm not found — node runs of WebGPU tests will SKIP (install node, or use --runtime deno)")
+        return
+
+    ui.write_line("node-webgpu: installing the pinned webgpu npm package (set SC_SKIP_NODE_WEBGPU=1 to skip) ...")
+    with profile.span("node-webgpu", type="prereq"), ui.suspend():
+        result = subprocess.run([npm, "ci", "--no-audit", "--no-fund"], cwd=js)
+    if result.returncode != 0:
+        ui.write_line("node-webgpu: npm ci failed — node runs of WebGPU tests will SKIP. Run `npm ci` in tools/dev/js to see the error.")

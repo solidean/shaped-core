@@ -37,6 +37,9 @@ class NotFound(RuntimeError):
 _PATH_ENV = {"node": "SC_NODE_PATH", "deno": "SC_DENO_PATH"}
 _KIND_ENV = "SC_JS_RUNTIME"
 
+# Installs navigator.gpu under node; the `webgpu` package it loads is pinned in the package.json beside it.
+_NODE_WEBGPU_PRELOAD = Path(__file__).resolve().parents[2] / "js" / "webgpu-preload.mjs"
+
 
 @dataclass(frozen=True)
 class JsRuntime:
@@ -56,6 +59,11 @@ class JsRuntime:
             # into a `.js`, which Deno reads as ESM and rejects before the module runs at all.
             # Single-threaded output emits no require and does not need it, but the flag is harmless there.
             return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs"]
+        # Node has no navigator.gpu of its own; the preload installs one backed by Dawn, and loads Dawn only when a
+        # module first asks for it, so the many artifacts that never touch a GPU pay nothing.
+        # Deno needs none: its WebGPU is built in.
+        if _NODE_WEBGPU_PRELOAD.is_file():
+            return [str(self.exe), "--import", _NODE_WEBGPU_PRELOAD.as_uri()]
         return [str(self.exe)]
 
     def describe(self) -> str:
