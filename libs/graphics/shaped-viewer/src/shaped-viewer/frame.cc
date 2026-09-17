@@ -185,6 +185,34 @@ id_scope frame::scoped_id(int id)
     return id_scope(this);
 }
 
+sv::quadric_set& frame::_immediate_batch_for(view_index view, u32 layer, material_id material)
+{
+    for (auto& b : _immediate_quadrics)
+        if (b.view == view && b.layer == layer && b.material == material)
+            return b.set;
+
+    _immediate_quadrics.push_back({.view = view, .layer = layer, .material = material});
+    auto& added = _immediate_quadrics.back();
+    added.set.name = "immediate quadrics";
+    added.set.material = material;
+    return added.set;
+}
+
+void frame::_flush_immediate_quadrics()
+{
+    for (auto const& b : _immediate_quadrics)
+    {
+        if (b.set.is_empty())
+            continue;
+
+        // One scene item per batch, appended to the layer that built it — which is why this cannot happen as the calls
+        // come in: a batch is not placeable until it is complete.
+        _views[u32(b.view)].layers[b.layer].items.push_back(resources().acquire_scene_item(b.set));
+    }
+
+    _immediate_quadrics.clear();
+}
+
 void frame::present()
 {
     if (_viewer == nullptr || !_open || _presented)

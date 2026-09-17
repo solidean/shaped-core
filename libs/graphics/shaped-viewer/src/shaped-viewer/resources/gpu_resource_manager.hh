@@ -48,6 +48,7 @@ struct sv::texture_policy
 struct sv::gpu_resource_manager_config
 {
     manager_config meshes = {};
+    manager_config quadrics = {};
     manager_config materials = {};
     manager_config textures = {};
     manager_config attributes = {};
@@ -139,7 +140,7 @@ private:
 class sv::gpu_resource_manager
 {
 public:
-    /// Creates the four managers, the staging group over `cfg.bindless`'s layout, and one array per table.
+    /// Creates the five managers, the staging group over `cfg.bindless`'s layout, and one array per table.
     ///
     /// `cfg.bindless` must declare `textures_2d` and `buffers`, whatever else it declares or omits: a sampled texture is
     /// acquired into the first, and every buffer a hit reads — geometry, attributes, the parameter block — into the second.
@@ -219,7 +220,8 @@ public:
     /// How many payloads are still in flight, across every manager.
     [[nodiscard]] isize settling_count() const
     {
-        return meshes.settling_count() + attributes.settling_count() + textures.settling_count();
+        return meshes.settling_count() + quadrics.settling_count() + attributes.settling_count()
+             + textures.settling_count();
     }
 
     /// `r` resolved down to ids — the durable half of what a generated shader reads per instance.
@@ -265,6 +267,14 @@ public:
     /// the staging group clean and its snapshot cached.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, mesh_id mesh, instance_id instance);
 
+    /// The same for a quadric batch.
+    ///
+    /// `vertices` names the batch's PRIMITIVE buffer rather than a position buffer, which is what the intersection shader reads
+    /// by `PrimitiveIndex()`; the field means "the geometry buffer this instance reads" either way.
+    /// `indices` is the stand-in, since a quadric indexes nothing — the field still has to name something the bound snapshot
+    /// covers.
+    [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance);
+
     /// Whether every attribute `instance`'s parameter block reads has landed.
     ///
     /// Until then the instance shades through the fallback hit group, which reads no attributes and no parameter block.
@@ -301,6 +311,25 @@ public:
     /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
 
+    /// `data`'s primitives and attributes named by id, as the `sv::resident_quadric_set` a scene item is placed from.
+    ///
+    /// `data` must hold at least one primitive: an empty batch has no BLAS to build, and `scene_ref::add_quadrics`
+    /// filters one out before it ever reaches here rather than letting a caller trip this.
+    ///
+    /// The quadric counterpart of `create_mesh`, and the same contract: the result is remembered ON `data` (see
+    /// `sv::impl::quadric_set_gpu_slot`), every payload is acquired by the content hash it already carries, and a cached id
+    /// whose record was evicted is re-acquired from the bytes rather than trusted.
+    [[nodiscard]] sv::resident_quadric_set const& create_quadric_set(sv::quadric_set const& data);
+
+    /// Everything placing a quadric batch in a scene costs, as one `scene_item`.
+    ///
+    /// The counterpart of the mesh overloads, and the same one-resolution rule: the material is resolved against the BATCH, so
+    /// the permutation it yields is the quadric spelling and carries an intersection shader.
+    [[nodiscard]] scene_item acquire_scene_item(sv::resident_quadric_set const& set);
+
+    /// The same, from CPU bytes: `create_quadric_set` followed by the resolution above.
+    [[nodiscard]] scene_item acquire_scene_item(sv::quadric_set const& set);
+
     /// The layout of the staging group every bindless table is bound through.
     /// A pipeline that traces against those tables composes this as one of its groups, which is what makes the
     /// manager's contract a schema rather than a set of names a shader has to rediscover.
@@ -313,6 +342,7 @@ public:
     [[nodiscard]] u32 table_capacity(bindless_table table) const;
 
     mesh_manager meshes;
+    quadric_manager quadrics;
     material_manager materials;
     texture_manager textures;
     attribute_manager attributes;
@@ -371,6 +401,7 @@ private:
 
     gpu_resource_manager(sg::context& ctx,
                          mesh_manager meshes,
+                         quadric_manager quadrics,
                          material_manager materials,
                          texture_manager textures,
                          attribute_manager attributes,
@@ -379,6 +410,17 @@ private:
                          cc::vector<table_entry> tables,
                          texture_policy texture_policy,
                          work_budget work_budget);
+
+    /// Rebuilds `r`'s parameter block for THIS epoch and uploads it if it changed, creating its buffer on first use.
+    ///
+    /// Shared by both `describe_instance` overloads, because the block is the material's and has nothing to do with which
+    /// geometry reads it.
+    void _upload_parameters(sg::command_list& cmd, instance_record& r);
+
+    /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
+    /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.
+    [[nodiscard]] bool _is_live(sv::resident_quadric_set const& set);
+    [[nodiscard]] bool _is_resident(sv::resident_quadric_set const& set);
 
     /// The entry for `table` in a freshly built list, before `_slot_of` exists to index it.
     [[nodiscard]] static table_entry const* _find_table(cc::span<table_entry const> tables, bindless_table table);

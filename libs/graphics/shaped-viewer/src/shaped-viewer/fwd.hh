@@ -25,7 +25,10 @@ struct texture_record;
 struct attribute_record;
 struct instance_slot;
 struct instance_record;
-struct instance_gpu;       // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
+struct instance_gpu; // one scene item as a closest-hit reads it, by InstanceID() (resources/instance_data.hh)
+struct quadric_gpu;  // one quadric as the intersection shader reads it, by PrimitiveIndex() (resources/quadric_data.hh)
+struct quadric_data; // what a caller hands the quadric manager
+struct quadric_set_record; // one uploaded batch: two buffers and the procedural BLAS over them
 enum class residency : u8; // how much of a resource has reached the GPU (resource_managers.hh)
 struct work_budget;        // how much follow-up GPU work one epoch may record
 struct texture_policy;     // what happens to a texture once it has landed
@@ -58,6 +61,14 @@ struct render_settings;
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
+struct quadric3;             // a quadric surface, as the 10 entries of the symmetric 4x4 Q (scene/quadric.hh)
+struct quadric_primitive;    // one drawn quadric: a surface, a clipper, and the box both are expressed about
+struct quadric_hit;          // what a ray hit on one is: how far along, and the normal there
+struct arrow_style;          // the three lengths an arrow is drawn from (scene/quadric.hh)
+enum class line_ends : u8;   // how a drawn segment is closed at its ends (scene/quadric.hh)
+struct line_style;           // how thick a line is drawn, and how its ends are closed
+struct quadric_set;          // a batch of quadrics drawn as one thing (scene/quadric_set.hh)
+struct resident_quadric_set; // that batch as resources
 enum class scalar_type : u8;
 struct attribute_format;
 enum class attribute_frequency : u8;
@@ -76,7 +87,8 @@ struct mesh;
 
 namespace impl
 {
-struct mesh_gpu_slot; // what placing a mesh produced, remembered on it (scene/mesh.hh)
+struct mesh_gpu_slot;        // what placing a mesh produced, remembered on it (scene/mesh.hh)
+struct quadric_set_gpu_slot; // the same for a quadric set (scene/quadric_set.hh)
 } // namespace impl
 
 // asset loading (see asset/)
@@ -96,6 +108,8 @@ struct imported_asset; // an import's output, before a library has minted its ma
 } // namespace impl
 
 // the material system (see material/)
+enum class geometry_kind : u8;           // which geometry a material is resolved against (material/resolve.hh)
+struct geometry_view;                    // what resolution needs to know about that geometry
 enum class material_frequency : u8;      // where an attribute's value came from; the ORDER is the precedence
 enum class material_source_kind : u8;    // a constant, or a uv-sampled texture
 enum class attribute_interpolation : u8; // how a mesh-sourced attribute is blended across a hit triangle
@@ -139,6 +153,7 @@ struct material_data;
 struct texture_data;
 // the resource ids are defined at the bottom of this header, since they carry an `invalid` enumerator
 enum class mesh_id : u32;
+enum class quadric_set_id : u32;
 enum class material_set_id : u32;
 enum class material_type_id : u32;
 enum class material_id : u32;
@@ -148,6 +163,7 @@ enum class buffer_id : u32;
 enum class attribute_id : u32;
 enum class instance_id : u32;
 class mesh_manager;
+class quadric_manager;
 class material_manager;
 class texture_manager;
 class attribute_manager;
@@ -217,6 +233,7 @@ class capture_session;
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs
 class mesh_ref;
+class quadric_ref; // one quadric batch placed in a scene (refs.hh)
 class light_ref;
 class scene_ref;
 class leaf_ref;
@@ -272,6 +289,13 @@ CC_REC_DECLARE_DOMAIN(g_rec_domain);
 /// `invalid` (`u32(-1)`, all bits set) is the reserved null id every manager skips when handing ids out.
 /// The managers mint from 0 upward, so 0 is a usable id and only the top of the range is the sentinel.
 enum class sv::mesh_id : sv::u32
+{
+    invalid = u32(-1)
+};
+
+/// Names one uploaded quadric batch — the primitives, their AABBs, and the procedural BLAS over them.
+/// Minted by the quadric manager, keyed on the set's own content hash.
+enum class sv::quadric_set_id : sv::u32
 {
     invalid = u32(-1)
 };

@@ -18,6 +18,7 @@ inline constexpr u64 index_hash_seed = 0x623435;
 inline constexpr u64 material_hash_seed = 0x523453;
 inline constexpr u64 attribute_hash_seed = 0x7a11b2;
 inline constexpr u64 texture_hash_seed = 0x9c4d17;
+inline constexpr u64 quadric_hash_seed = 0x6b3f28;
 inline constexpr u64 material_type_hash_seed = 0x31f0a6;
 inline constexpr u64 material_definition_hash_seed = 0x8e2b53;
 

@@ -53,7 +53,8 @@ bindless tables                          [in progress]  sv hand-declares the lay
 pathtrace_routine                        [in progress]  the DXR GI trace view_renderer drives: TLAS + dispatch_rays into a UAV target
 pbr_raytrace_routine                     [in progress]  the flat single-bounce IBL DXR trace (SH environment), driven directly
 sv_shaders package                       [in progress]  raygen / miss+closest-hit, plus layout.hlsl (border / view / wipe), via slib
-camera / controls                        [in progress]  dev-friendly pinhole camera, plus sv::orbit_camera_controller (event-driven) and sv::fps_camera_controller; only the orbit one is wired in
+camera / controls                        [in progress]  dev-friendly pinhole camera, plus sv::orbit_camera_controller (event-driven) and sv::fps_camera_controller (integrated over time).
+                                                        BOTH are wired in: `view_ref::camera_style` picks one, the viewer routes that view's events to it and runs the per-frame update, and switching mid-session re-seeds the incoming controller from where the outgoing one left the camera
 persistent per-view state                [in progress]  view_id keys what a view keeps — camera, controller, zoom, display name, last rect, composite target and accumulators — all in one sv::view_store the frame owns
 id stack (push_id / scoped_id)           [done]         seeds view_id so one name under N scopes names N views; independent of layout nesting, and a duplicate within a frame asserts.
                                                         Ids are formattable and take an ImGui-style ## suffix, which separates two views without changing what a human reads
@@ -106,6 +107,10 @@ asset loading (asset_loader)             [done]         glTF 2.0, OBJ and STL lo
                                                         Textures ride on the mesh as pixels rather than on the material as ids, which is what keeps the whole importer CPU-side.
                                                         Still open: PLY, .mtl, the KHR_materials_* extensions (babel does not read them), and generated tangent frames.
                                                         The recipe and caching model in [asset-loading.md](asset-loading.md) is deliberately deferred — from_memory plus a key covers everything until assets get big enough that holding their payloads resident is the problem
+quadric primitives                       [done]         a second scene_item_kind: analytic quadrics traced by a custom intersection shader over a procedural (AABB) BLAS, for drawing a mesh's vertices and edges at scale.
+                                                        One record is a surface quadric and a clipping quadric about a per-primitive origin, batched one BLAS and one TLAS instance per sv::quadric_set.
+                                                        Materials reach it as a second SPELLING of the same generator — a quadric runtime and epilogue, which material_shader_key already distinguishes — over ONE frequency set, of which a batch admits per_instance and per_triangle.
+                                                        Still open: a per-end frequency blended along the clip slab's axis, which would give an edge a gradient for no extra bytes. See quadrics.md
 lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine

@@ -10,6 +10,7 @@
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/refs.hh>
+#include <shaped-viewer/scene/quadric_set.hh>
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -182,6 +183,7 @@ private:
     friend class leaf_ref;
     friend class scene_ref;
     friend class mesh_ref;
+    friend class quadric_ref;
     friend class light_ref;
 
     frame() = default; // a closed frame
@@ -210,7 +212,32 @@ private:
     bool _open = false;
     bool _presented = false;
 
-    cc::vector<view_data> _views;    ///< every view authored this frame; a leaf names them by index
+    cc::vector<view_data> _views; ///< every view authored this frame; a leaf names them by index
+
+    /// One batch the immediate quadric calls are accumulating into, for one (view, layer, material).
+    ///
+    /// The sugar's whole cost model lives here: the set is rebuilt every frame, so its identity changes and its CONTENTS
+    /// do not — and since a set is content-hashed, an unchanged drawing still resolves to resident resources and uploads
+    /// nothing.
+    /// What it does pay is re-hashing the primitives each frame, which is cheap against uploading them and is not free.
+    struct immediate_batch
+    {
+        view_index view = view_index(0);
+        u32 layer = 0;
+        material_id material = material_id::invalid;
+        sv::quadric_set set;
+    };
+
+    cc::vector<immediate_batch> _immediate_quadrics;
+
+    /// The batch for `(view, layer, material)`, created on first use this frame.
+    [[nodiscard]] sv::quadric_set& _immediate_batch_for(view_index view, u32 layer, material_id material);
+
+    /// Places every accumulated immediate batch into the layer that built it, and clears them.
+    ///
+    /// Must run after the last authoring call and before the frame is flattened, which is why the viewer calls it rather
+    /// than the sugar placing as it goes: a batch is one scene item, and it cannot be placed until it is complete.
+    void _flush_immediate_quadrics();
     layout_tree _nodes;              ///< the shared node pool every layout layer indexes into
     cc::vector<view_index> _windows; ///< each window's root view
     cc::vector<view_id> _window_ids;

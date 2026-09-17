@@ -677,6 +677,22 @@ Every mechanism was right and every fix was unbuildable as written.
 The same review asserted a cache key moved on an include edit, against a header saying it does not.
 Both were true — of the DXC compile key and of the slib asset key — and the finding named neither, so it read as contradicting the document it was asking to correct.
 
+**A prescribed drain, wait or guard is a mechanism claim about what is outstanding.**
+Naming the remedy without naming what leaked is a guess.
+It is one that looks like diligence, because the remedy is usually sound in general.
+
+pr-179 again, and again conceded by the reviewer.
+A GPU test was reported as leaking "2 async item(s)" on a cold cache, with the nodes unidentified, and the prescription was to settle `sv::background_work` the way the neighbouring test files do.
+The two items were the second batch's STREAM UPLOADS: `quadrics.acquire` queues one transfer per buffer, and that test acquires again after its only drain.
+So `background_work` does not cover them at all, and `wait_for_pending_uploads` does.
+The leak was real and the prescription was inert.
+
+**Look for the configuration that makes the race deterministic before writing the item.**
+Here it was the `singlethreaded-*` preset: with no worker thread, work advances only when something pumps, so an undrained transfer fails every time instead of once per cold cache.
+That is a two-minute run and it converts "I saw it once and could not reproduce it" into a named mechanism.
+Reach for it whenever a finding rests on something that happened on one run — a leak, an ordering, a timeout.
+This repo keeps presets that remove exactly the concurrency such a finding depends on.
+
 ### A doc's statement of its own limits is a claim, not a boundary
 
 The rules above say the author's prose is evidence you can trust, and that a test's comment about itself is a claim to check.
@@ -729,6 +745,31 @@ The actual test was one line — a 50 ms sleep per frame — and it passed, beca
 **The check is to ask what the measurement would look like under the other hypothesis.**
 Where the answer is "the same", it is not evidence.
 A timing taken from a system that is doing nothing almost always fails that test.
+
+### Measure the code, not a model of it
+
+**A number taken from a re-implementation is a claim about the re-implementation.**
+Modelling the code in numpy or in a scratch program is the natural way to check a numerical claim.
+It is right up to the point where the model and the code round differently, which for a precision finding is the whole subject.
+
+pr-179 is the worked case, and the reviewer caught it themselves.
+The finding was that a thin quadric loses its silhouette at distance, because `qc = |o|² − r²` swamps the radius in float32 and the discriminant's sign becomes rounding noise.
+That was right, and the fix — shifting the solve to the ray's closest approach — was right.
+The reported SYMPTOM was not.
+The table came from a numpy float32 model whose ray directions were built in float64 and cast down, and it showed a mix of missed hits and false hits, described as tubes "dissolving".
+Run against `sv::intersect` itself, with rays built the way the code builds them, every ray aimed *outside* the sphere reports a hit from 50 units out.
+Nothing dissolves; the silhouette inflates.
+
+Which side the error lands on depends on exactly how the ray is constructed, so a model that builds them differently answers a different question.
+
+**The remedy is usually cheaper than the model.**
+`sv::intersect` is a plain CPU function with no device behind it, so a test could have called it directly.
+That is what the eventual test does, and what produced the real number.
+Before modelling, ask whether the thing under test is already callable.
+Where it is, the model is strictly worse evidence than the call.
+
+**A finding can be right about the cause and wrong about the symptom**, and that is worth stating rather than smoothing over.
+The fix survives and the description does not, and an author who checks the description first will conclude the whole item is wrong.
 
 ### "The only X" is a count
 

@@ -15,6 +15,8 @@ add_library(shaped-viewer
     src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
+    src/shaped-viewer/scene/quadric.cc
+    src/shaped-viewer/scene/quadric_set.cc
     src/shaped-viewer/material/material_type.cc
     src/shaped-viewer/material/material.cc
     src/shaped-viewer/material/material_library.cc
@@ -194,6 +196,10 @@ if(SC_BUILD_TESTS)
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
         tests/keyed-cache-test.cc
+        tests/quadric-test.cc
+        tests/quadric-set-test.cc
+        tests/quadric-material-test.cc
+        tests/quadric-set-benchmark.cc
         tests/camera-controller-test.cc
         tests/layout-test.cc
         tests/render-plan-test.cc
@@ -233,6 +239,8 @@ if(SC_BUILD_TESTS)
             tests/viewer-renderer-test.cc
             tests/layout-routine-test.cc
             tests/gpu-resource-manager-test.cc
+            tests/quadric-manager-test.cc
+            tests/quadric-trace-test.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc

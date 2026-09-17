@@ -402,6 +402,103 @@ Nothing renders either form directly: the renderer consumes `sv::scene_item` (id
 `sv::resolve_material` runs against the GPU form, since that is the one whose attributes and textures are already named by id.
 The seeds behind every content key live in `impl/content_hash.hh`, so a geometry and the payload it is uploaded as agree on one key instead of caching the same bytes twice.
 
+## Quadric authoring — analytic spheres and tubes
+
+```cpp
+#include <shaped-viewer/scene/quadric_set.hh>
+
+sv::quadric3                     // a quadric surface: the 10 entries of the symmetric 4x4 Q, as {diag, off_diag, linear, constant}
+sv::quadric3::sphere_about_origin(r)           // -> |p|^2 - r^2
+sv::quadric3::cylinder_about_origin(axis, r)   // -> the infinite cylinder about the origin along unit `axis`
+sv::quadric3::cone_about_origin(axis, slope)   // -> the DOUBLE cone apexed at the origin; a slab is what keeps one nappe
+sv::quadric3::slab(axis, offset, half_height)  // -> (p.axis - offset)^2 - h^2; the clipper that makes a cylinder finite
+q.evaluate(p);  q.gradient(p);   // p is the DISPLACEMENT from the primitive's origin, not a world position
+
+sv::quadric_primitive            // { pos3f origin; quadric3 surface; quadric3 clip; u32 flags; aabb3f bounds; } — 96 bytes on the GPU
+sv::quadric_primitive::flag_emit_clip_surface  // draw the CLIPPER's surface too — a cylinder's caps, a hemisphere's floor
+sv::quadric_primitive::create_sphere(tg::sphere3f)                       // unclipped
+sv::quadric_primitive::create_cylinder(tg::segment3f, radius, capped=false)  // false is an OPEN tube; the box is the same either way
+sv::quadric_primitive::create_cone(base_to_apex, base_radius, capped=true)   // base disc at pos0, tip at pos1; `capped` draws the disc
+p.admits(set_space_p);  p.normal_at(set_space_p);  p.emits_clip_surface()   // NOT world space — the set's
+sv::intersect(prim, ray, t_min, t_max)         // -> optional<quadric_hit>; the CPU reference the shader mirrors
+sv::capsule_primitives(segment, radius)        // -> fixed_vector<quadric_primitive, 3>: the cylinder, then a sphere at each end
+sv::line_primitives(segment, style)            // -> fixed_vector<quadric_primitive, 3>: 1 for flat/open ends, 3 for round
+sv::arrow_primitives(segment[, style|shaft_radius])  // -> fixed_vector<quadric_primitive, 2>: the shaft, then the head
+
+sv::arrow_style                  // { float shaft_radius, head_radius, head_length; } — ABSOLUTE, defaults = for_length(1)
+sv::arrow_style::for_shaft_radius(r)   // head 2.5x that radius and 3x its own, so the tip angle is fixed at atan(1/3)
+sv::arrow_style::for_length(len)       // = for_shaft_radius(0.02 * len)
+
+sv::line_ends                    // round (hemisphere each end, 3 prims) | flat (the clipper's planes, 1) | open (nothing, 1)
+sv::line_style                   // { float radius = 0.01f; line_ends ends = line_ends::open; } — ABSOLUTE, like arrow_style
+
+sv::quadric_set                  // the batch a caller builds and holds — the quadric counterpart of sv::mesh
+set.add_sphere(tg::sphere3f);  set.add_line(segment, style | radius);  set.add_capsule(segment, radius);  set.add(primitive)
+set.add_cone(base_to_apex, base_radius, capped=true)
+set.add_arrow(segment);  set.add_arrow(segment, shaft_radius);  set.add_arrow(segment, style)   // 2 primitives: shaft, head
+set.clear();  set.reserve(n)
+set.primitives();  set.primitive_count();  set.hash();  set.bounds();  set.is_ready()
+set.name;  set.attributes;  set.transform;  set.material    // one material per batch; per-primitive variation is an attribute
+
+sv::resident_quadric_set         // that batch as resources: a quadric_set_id, bound attributes, transform, material, summary
+```
+
+```cpp
+auto set = sv::quadric_set();                       // built once: add() folds the bounds; the hash is one pass, on demand
+for (auto const& v : mesh.vertices()) set.add_sphere(tg::sphere3f(v, 0.02f));
+for (auto const& e : mesh.edges())    set.add_line(tg::segment3f(e.a, e.b), 0.008f);   // OPEN by default — the vertex spheres cover the joints
+set.material = steel;
+
+f.add_scene().add_quadrics(set);                    // -> sv::quadric_ref; uploads nothing when unchanged
+
+auto s = f.add_scene();                             // or, for a handful:
+s.add_sphere(tg::sphere3f(p, 0.02f), steel);        //   into a frame-owned batch per (view, layer, material),
+s.add_line(tg::segment3f(a, b), 0.008f, steel);     //   flushed once before the frame is flattened
+s.add_line(tg::segment3f(a, b),                     //   ...or with the ends named
+           {.radius = 0.008f, .ends = sv::line_ends::round}, steel);
+s.add_cone(tg::segment3f(base, tip), 0.05f, steel); //   base disc at pos0, tip at pos1
+s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
+s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
+```
+
+**`add` is the only mutator** — the named factories all funnel through it, and `add(quadric_primitive)` takes a record the factories do not cover.
+That is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
+The hash is one pass over the primitive span, taken on the first `hash()` after a mutation and cached, so a set filled once and placed every frame hashes once.
+It is order-SENSITIVE without arranging for it, because the byte range IS the primitive order, which is what `PrimitiveIndex()` reads.
+The bounds fold alongside it and stay OUT of the identity, as do the name, the material and the transform — so recoloring or re-placing a million-primitive batch re-uploads nothing.
+
+**The primitives live in the SET's space**, and `transform` places that space in the world.
+A non-uniform placement turns its spheres into ellipsoids at no cost, because a general quadric is closed under an affine map where a typed sphere would not be.
+
+**An arrow spans EXACTLY the segment it is given**, head included — the head comes out of that length rather than past its end, so an arrow between two points measures the distance between them.
+A head at least as long as the arrow is clamped to it and the shaft is dropped, which is what keeps a vector field's shortest arrows from turning inside out.
+The overload is the whole difference between the two readings: `add_arrow(s)` is proportional, and `add_arrow(s, r)` fixes the thickness so that length is the only thing an arrow's size encodes.
+
+**A capsule is not a quadric** — its surface is piecewise — so a round-capped edge is three primitives.
+Where the joints already carry vertex spheres, the default `open` end is exact there rather than an approximation.
+
+**There is ONE frequency set and a geometry admits the subset its own primitives number**, which is what lets one material definition generate one shader body for both.
+A batch numbers its primitives and nothing else, so it admits `per_instance` and `per_triangle`.
+The latter means "one value per element of the primitive stream, indexed by `PrimitiveIndex()`" — a triangle for a mesh, a quadric for a batch.
+The two geometries differ in the PREAMBLE that builds the shading context, and in nothing the material fragment reads.
+A frequency the geometry cannot number loses to the coarser rank like any other unusable candidate.
+The texture ranks are unreachable on a quadric, because a sample needs a uv and a general quadric has no surface parameterization.
+
+**A batch is one material.**
+The underlying API takes a range of quadrics sharing one; per-quadric *parameters* are had by being bucketed into several batches, which the immediate calls already do.
+Anything finer than one value per primitive is a question about materials rather than frequencies.
+A gradient along a tube would be a material taking two parameter sets; it is deliberately not built.
+
+**The clipper has a surface of its own.**
+The solid is {surface <= 0} AND {clip <= 0}, so a ray meets up to FOUR candidates — two roots of each quadric — and each counts only where it lies inside the other's interior.
+That is where a cylinder's end caps and a hemisphere's floor come from, and it makes an open tube and a capped one one record with one bit different.
+**The box bounds the solid and never the visible part of it**: toggling that bit must not move it, or the same geometry becomes two resources and a dropped hit a silent hole.
+
+See [docs/quadrics.md](docs/quadrics.md) for the design.
+`examples/quadric-gallery.cc` shows what the representation reaches — cones, ellipsoids and hyperboloids as well as spheres and tubes.
+`examples/quadric-arrows.cc` is the arrow API, and the difference the sizing overload makes across a row of them.
+`examples/mesh-structure.cc` is it in practice; `examples/mesh-structure-dense.cc` is the same code at 40,962 primitives in one batch.
+
 ## Asset loading — a file into `sv::mesh`
 
 babel reads the formats; sv turns a parsed document into things a view can draw.
