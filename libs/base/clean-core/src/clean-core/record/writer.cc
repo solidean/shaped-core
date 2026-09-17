@@ -281,6 +281,8 @@ cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payl
         return e;
 
     auto& w = impl::t_writer;
+    if (w.ambient_reset_pending) [[unlikely]]
+        impl::flush_ambient_reset();
     auto const header_bytes = isize(sizeof(impl::event_header));
 
     // A rotation is worth it only when the current chunk cannot hold a useful payload at all.

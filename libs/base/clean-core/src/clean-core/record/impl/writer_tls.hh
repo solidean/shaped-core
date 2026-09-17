@@ -49,6 +49,10 @@ struct cc::rec::impl::writer_tls
     /// Deduplicated together with `last_trace`, so a delta is written when either changes.
     u64 last_owner;
 
+    /// Set when the thread left every context, and the delta saying so has not been written yet.
+    /// See note_ambient_change: the next event writes it first, and re-entering the same context cancels it.
+    bool ambient_reset_pending;
+
     /// How many profiling scopes are open on this thread.
     u32 scope_depth;
 

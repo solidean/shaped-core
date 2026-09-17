@@ -521,3 +521,38 @@ REC_TEST("record/trace - a chunk preamble states the owner, so a later chunk att
     REQUIRE(loaded.has_value());
     CHECK(count_owned(loaded.value().events(), owner, "filler") == count_owned(r, owner, "filler"));
 }
+
+REC_TEST("record/trace - leaving every context is written only when something records in the gap")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const owner = cc::rec::new_trace_id();
+    auto const r = capture(
+        [&]
+        {
+            cc::rec::owner_scope const owned(owner);
+            CC_RECORD_MARK("owned");
+
+            // What a pool worker does around every queued item: leave, and come straight back.
+            {
+                cc::impl::async_ambient_root_scope const gap;
+            }
+            CC_RECORD_MARK("still-owned");
+
+            // A gap something records in is still a gap.
+            {
+                cc::impl::async_ambient_root_scope const gap;
+                CC_RECORD_MARK("in-the-gap");
+            }
+            CC_RECORD_MARK("owned-again");
+        });
+
+    CHECK(count_owned(r, owner, "owned") == 1);
+    CHECK(count_owned(r, owner, "still-owned") == 1);
+    CHECK(count_owned(r, cc::rec::trace_id::none, "in-the-gap") == 1);
+    CHECK(count_owned(r, owner, "owned-again") == 1);
+
+    // Entering the owner, one reset and one return around the gap that recorded, and leaving the owner — the empty gap
+    // wrote nothing.
+    CHECK(r.count_of_kind(cc::rec::event_kind::ambient_changed) == 4);
+}
