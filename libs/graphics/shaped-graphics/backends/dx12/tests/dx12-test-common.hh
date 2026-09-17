@@ -15,16 +15,6 @@
 // Most tests are INVOCABLE_TESTs taking the context the entry driver (dx12-entry.cc) built — one per adapter, for the whole run.
 // The helpers here are for the few that need a context of their own: pristine epoch/pool state, a backend knob the test is about, or more than one context.
 
-// The debug-layer advisories sg provokes on purpose, allowed in every test of this binary.
-// Validation fails a test through the log rule, so a test provoking a message on purpose declares it with nx::expect_error.
-inline bool const dx12_advisories_allowed = []
-{
-    for (auto const message : sg::backend::dx12::k_expected_validation_messages)
-        nx::impl::register_log_allowance(cc::rec::level::warning, "sg.dx12", message.data(),
-                                         cc::source_location::current());
-    return true;
-}();
-
 namespace sg::backend::dx12
 {
 /// The backend-typed view of a freshly created context.

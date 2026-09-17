@@ -540,6 +540,7 @@ nx::allow_warnings("in-flight stream", "my-lib");          // may appear, any co
 nx::allow_errors("peer reset");
 TEST("stress", nx::config::allow_logs(cc::rec::level::warning))  // the whole test waives that level and below
 NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", "clear value");  // every test in the binary; "" domain for any
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or each of a cc::span<cc::string_view const>; in a .cc, never a header
 ```
 
 - A pattern is a text glob matched **anywhere** in the message (`/` ordinary), so a pasted console line matches itself.

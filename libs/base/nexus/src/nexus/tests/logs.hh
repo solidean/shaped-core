@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/record/fwd.hh>
 #include <clean-core/string/string_view.hh>
@@ -73,11 +74,22 @@ namespace nx::impl
 /// Registers a binary-wide allowance; NX_ALLOW_LOGS is the spelling.
 /// Allows records at or below `level` whose domain matches (empty for any) and whose text matches `pattern`.
 /// Must be called before the run starts, which static initialization guarantees.
-void register_log_allowance(cc::rec::level level, char const* domain, char const* pattern, cc::source_location location);
+void register_log_allowance(cc::rec::level level,
+                            cc::string_view domain,
+                            cc::string_view pattern,
+                            cc::source_location location);
+
+/// One allowance per pattern, for a list several binaries share.
+void register_log_allowance(cc::rec::level level,
+                            cc::string_view domain,
+                            cc::span<cc::string_view const> patterns,
+                            cc::source_location location);
 } // namespace nx::impl
 
 /// Allows matching records in every test of this binary: at or below `level`, from `domain` (empty for any), matching the glob `pattern` anywhere in the message.
+/// `pattern_` may also be a list of patterns, which allows each of them.
 /// The broadest waiver there is, so it belongs beside the driver of the tests that need it, with the reason above it.
+/// Expands to a `static`, so it belongs in a .cc: in a header it registers once per including translation unit.
 #define NX_ALLOW_LOGS(level_, domain_, pattern_)                  \
     static bool const CC_MACRO_JOIN(_nx_allow_logs_, __COUNTER__) \
         = (::nx::impl::register_log_allowance((level_), (domain_), (pattern_), ::cc::source_location::current()), true)

@@ -26,6 +26,8 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", "clear value");              /
 `nx::allow_*` is for a record that may or may not happen, such as one that depends on timing.
 `nx::config::allow_logs` sits on the declaration so a reader of the test list sees it, and is meant for a stress or environment test whose warnings are incidental and unpredictable.
 `NX_ALLOW_LOGS` is the broadest waiver there is, so it belongs beside the driver of the tests that need it, with the reason above it.
+It also takes a list of patterns, which is how several binaries share one — sg's dx12 drivers all pass `k_expected_validation_messages`.
+It expands to a `static`, so it goes in a `.cc`: from a header it would register once per including translation unit.
 
 The `expect_*` and `allow_*` calls match their own level exactly, so an error never meets an expected warning.
 `allow_logs` and `NX_ALLOW_LOGS` cover everything at or below their level, so waiving errors waives warnings too.

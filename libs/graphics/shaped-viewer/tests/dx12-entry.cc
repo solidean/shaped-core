@@ -30,13 +30,7 @@ constexpr char const* hardware_driver = "sv dx12 - hardware";
 
 // The debug-layer advisories sg provokes on purpose (dx12_expected_messages.hh), allowed in every test of this binary.
 // Validation fails a test through the log rule rather than through a listener, so anything else the layer says still fails it.
-static bool const dx12_advisories_allowed = []
-{
-    for (auto const message : sg::backend::dx12::k_expected_validation_messages)
-        nx::impl::register_log_allowance(cc::rec::level::warning, "sg.dx12", message.data(),
-                                         cc::source_location::current());
-    return true;
-}();
+NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", sg::backend::dx12::k_expected_validation_messages);
 
 ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
 {

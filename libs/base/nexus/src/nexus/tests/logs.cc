@@ -19,8 +19,8 @@ namespace
 struct log_allowance
 {
     cc::rec::level level = {};
-    char const* domain = nullptr;
-    char const* pattern = nullptr;
+    cc::string domain;
+    cc::string pattern;
     cc::source_location location;
 };
 
@@ -194,16 +194,25 @@ void nx::allow_errors(cc::string_view pattern, cc::string_view domain, cc::sourc
 }
 
 void nx::impl::register_log_allowance(cc::rec::level level,
-                                      char const* domain,
-                                      char const* pattern,
+                                      cc::string_view domain,
+                                      cc::string_view pattern,
                                       cc::source_location location)
 {
     log_allowances().push_back({
         .level = level,
-        .domain = domain != nullptr ? domain : "",
-        .pattern = pattern != nullptr ? pattern : "",
+        .domain = cc::string(domain),
+        .pattern = cc::string(pattern),
         .location = location,
     });
+}
+
+void nx::impl::register_log_allowance(cc::rec::level level,
+                                      cc::string_view domain,
+                                      cc::span<cc::string_view const> patterns,
+                                      cc::source_location location)
+{
+    for (auto const pattern : patterns)
+        register_log_allowance(level, domain, pattern, location);
 }
 
 void nx::impl::judge_logs(nx::test_schedule_execution& result, bool outermost)
