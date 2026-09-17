@@ -11,13 +11,9 @@
 // cannot create a context and the driver then SKIPs.
 // Compiled only where the metal backend builds, so on Apple platforms.
 //
-// The driver runs `nx::config::disabled` while the backend is built out: every resource and recording seam still
-// aborts, and a full sweep across them is a crash that takes the suite with it rather than a set of failures.
-// Registering is what still buys something — it builds the per-invocable aliases, so any one API test runs against
-// metal by being named exactly, which is how the suite is used as an oracle while the backend grows.
+// The driver runs the whole sweep, the way vulkan's does — it was `nx::config::disabled` while the backend was built
+// out, and turning it on is what found the cross-list ordering defect no single test could reach.
 // See libs/graphics/shaped-graphics/docs/writing-a-backend.md and libs/base/nexus/docs/invocable-tests.md.
-//
-// Take the disabled off once no seam aborts, the way vulkan's came off.
 //
 // There is no listener installed here, and that is settled rather than pending.
 // Metal has no validation callback of the kind dx12 and vulkan install: its messages go to stderr and nowhere else.
