@@ -116,8 +116,12 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // Not a shortcut: the cube's triangles have nothing to do with the mesh's, so per-vertex attributes read
         // through them would be indexed out of the data they belong to.
         // The fallback reads no attributes and no parameter block, which is exactly what makes it safe here.
+        //
+        // An instance whose attributes are still streaming shades through it too, on its real geometry: binding those
+        // buffers would stall the trace until every one of them lands.
+        auto const shade_fallback = is_pending || !resources.attributes_resident(item.instance);
         auto const& fallback = resources.shaders.acquire_fallback();
-        auto const permutation = hit_group_of(out, is_pending ? fallback.key : item.shader_key, resources);
+        auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
         auto inst = sg::tlas_instance{.blas = is_pending ? resources.meshes.placeholder_blas() : mesh->blas,
                                       .instance_id = u32(out.instances.size()),
                                       .hit_group_offset = permutation * 2,
