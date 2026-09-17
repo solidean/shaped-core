@@ -228,7 +228,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **The WGSL twins of sg's tier-1 shader tests.**
     The shader package and the routine tests need DXC, so on wasm no tier-1 test dispatches or draws.
     `shaped-graphics-webgpu-test` covers compute, raster, group 3 and presentation by hand until a WGSL package runs the same tests.
-  - **The rotating-cube example on webgpu**, with `SC_EXAMPLE_BACKEND=webgpu`, and the shaped-rendering blit and imgui shaders in WGSL.
+  - **The shaped-rendering blit and imgui shaders in WGSL**, which is what a routine on the web needs; the rotating-cube example already runs on webgpu.
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.

@@ -132,10 +132,10 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
-`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12` or `vulkan`.
+`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan` or `webgpu`.
 
-`auto` takes dx12 wherever one exists, which on Windows means the vulkan arm is never reached by default.
-So the setting exists to reach it: building `rotating-cube` both ways is how one HLSL source is shown to really serve both backends.
+`auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
+So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
 
 **Every graphical example reads it**, not only the one that supports both backends — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:
