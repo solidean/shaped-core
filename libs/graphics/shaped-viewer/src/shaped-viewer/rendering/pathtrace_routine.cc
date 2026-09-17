@@ -69,6 +69,17 @@ enum class permutation_state
     if (primary != permutation_state::ready)
         return primary;
 
+    // A procedural permutation is not ready until its intersection shader is, and that is not symmetry with the any-hit:
+    // a group built without one is a TRIANGLE group, and a procedural BLAS traced by one reports no hits at all.
+    // So the batch would silently draw nothing rather than shade flat, which is also why the substitution below has to
+    // pick the stand-in of the matching kind.
+    if (p->intersection.is_valid())
+    {
+        auto const isect = state_of_node(p->intersection);
+        if (isect != permutation_state::ready)
+            return isect;
+    }
+
     if (!p->can_cut_out)
         return permutation_state::ready;
 
@@ -147,6 +158,11 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto const* const fallback
         = d.fallback != nullptr && state_of(d.fallback) == permutation_state::ready ? d.fallback : nullptr;
 
+    // The procedural stand-in, started on the same terms and for the same reason.
+    auto const* const quadric_fallback
+        = d.quadric_fallback != nullptr && state_of(d.quadric_fallback) == permutation_state::ready ? d.quadric_fallback
+                                                                                                    : nullptr;
+
     auto const* const compiled_rg = _raygen_shader->try_value();
     auto const* const compiled_ms = _miss_shader->try_value();
     auto const* const compiled_sms = _shadow_miss_shader->try_value();
@@ -164,7 +180,11 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
         if (state_of(p) != permutation_state::ready)
-            p = fallback; // still compiling, or a material that does not build
+            // Still compiling, or a material that does not build — and the stand-in must keep the hit group's KIND:
+            // a procedural BLAS traced by a group with no intersection shader reports nothing, so a quadric
+            // substituted by the triangle fallback would vanish rather than shade flat.
+            // `intersection` is what says which kind this permutation is.
+            p = p->intersection.is_valid() ? quadric_fallback : fallback;
 
         if (p == nullptr)
             return nullptr; // nothing compiled and nothing to stand in for it — trace no-ops, as it always did
@@ -211,9 +231,11 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto hits = cc::vector<sg::compiled_shader const*>();
     auto any_hits = cc::vector<sg::compiled_shader const*>();
     auto shadow_any_hits = cc::vector<sg::compiled_shader const*>();
+    auto intersections = cc::vector<sg::compiled_shader const*>();
     hits.reserve(groups.size());
     any_hits.reserve(groups.size());
     shadow_any_hits.reserve(groups.size());
+    intersections.reserve(groups.size());
     for (auto const* const p : groups)
     {
         hits.push_back(p->shader->try_value());
@@ -221,6 +243,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         // The cutout test, where the material has one — twice, because the two rays that reach it carry different payloads.
         any_hits.push_back(p->can_cut_out ? p->any_hit->try_value() : nullptr);
         shadow_any_hits.push_back(p->can_cut_out ? p->shadow_any_hit->try_value() : nullptr);
+
+        // Null for a triangle permutation; present makes the group PROCEDURAL, which a quadric batch's BLAS requires.
+        intersections.push_back(p->intersection.is_valid() ? p->intersection->try_value() : nullptr);
     }
 
     // The global root signature must cover every binding *any* stage uses, minus the manager's tables — those are the
@@ -235,6 +260,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         if (h != nullptr)
             stages.push_back(h->bindings);
     for (auto const* const h : shadow_any_hits)
+        if (h != nullptr)
+            stages.push_back(h->bindings);
+    for (auto const* const h : intersections)
         if (h != nullptr)
             stages.push_back(h->bindings);
 
@@ -289,9 +317,25 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
-    auto rpd = sg::raytracing_pipeline_description{.layout = pipeline_layout,
-                                                   .max_recursion_depth = 2,
-                                                   .max_payload_size = isize(sizeof(u32) * 26)};
+    // 12 attribute bytes where this pipeline has a procedural group: a quadric's intersection reports the surface normal
+    // it already computed, and recomputing that in the closest-hit is the one piece of work the analytic form exists to
+    // avoid.
+    // Declared per pipeline rather than once for every trace, because the maximum is what an implementation sizes its
+    // attribute storage from — a scene with no quadrics in it keeps the 8 a triangle's barycentrics need.
+    // The variant key already covers the group set, so the two cannot collide.
+    auto const has_intersection = [&]
+    {
+        for (auto const* const h : intersections)
+            if (h != nullptr)
+                return true;
+        return false;
+    }();
+
+    auto rpd = sg::raytracing_pipeline_description{
+        .layout = pipeline_layout,
+        .max_recursion_depth = 2,
+        .max_payload_size = isize(sizeof(u32) * 26),
+        .max_attribute_size = has_intersection ? isize(sizeof(float) * 3) : isize(sizeof(float) * 2)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
     auto const shadow_miss_h = rpd.add_miss_shader(*compiled_sms);
@@ -311,11 +355,18 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
         auto group = sg::hit_shader{.closest_hit = *hits[i]};
         if (any_hits[i] != nullptr)
             group.any_hit = *any_hits[i];
+        if (intersections[i] != nullptr)
+            group.intersection = *intersections[i];
         hit_handles.push_back(rpd.add_hit_shader(group));
 
+        // The shadow record needs the intersection shader too, and that is not symmetry for its own sake: a shadow ray
+        // traverses the SAME procedural BLAS, and a procedural BLAS traversed by a group without one hits nothing.
+        // Without this a quadric would cast no shadow and occlude nothing.
         auto shadow = sg::hit_shader{};
         if (shadow_any_hits[i] != nullptr)
             shadow.any_hit = *shadow_any_hits[i];
+        if (intersections[i] != nullptr)
+            shadow.intersection = *intersections[i];
         hit_handles.push_back(rpd.add_hit_shader(shadow));
     }
 
