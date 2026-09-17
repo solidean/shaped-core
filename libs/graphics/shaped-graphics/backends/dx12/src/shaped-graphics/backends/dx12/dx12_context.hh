@@ -101,7 +101,7 @@ struct sg::backend::dx12::dx12_config
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
-    isize upload_ring_bytes = isize(16) * 1024 * 1024;
+    isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
 
     /// Capacity of the inline READBACK ring buffer, in bytes.
     /// Bounds the in-flight inline download volume.

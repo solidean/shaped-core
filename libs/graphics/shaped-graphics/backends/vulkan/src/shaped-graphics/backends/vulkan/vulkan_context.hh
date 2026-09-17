@@ -64,7 +64,7 @@ struct sg::backend::vulkan::vulkan_config
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
     /// Matches the dx12 backend's default.
-    isize upload_ring_bytes = 16 * 1024 * 1024;
+    isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
 
     /// Capacity of the readback ring behind cmd.download, in bytes.
     isize download_ring_bytes = 16 * 1024 * 1024;
