@@ -73,12 +73,19 @@ void cc::rec::impl::note_ambient_change(void* head)
     auto payload = ambient_payload{};
     auto const* const trace_t = rec::impl::trace_tag();
     auto const* const owner_t = rec::impl::owner_tag();
+    auto const trace_bit = cc::impl::async_ambient_tag_bit(trace_t);
+    auto const owner_bit = cc::impl::async_ambient_tag_bit(owner_t);
     auto found_trace = false;
     auto found_owner = !rec::impl::g_owner_ever_installed.load(cc::memory_order_relaxed);
 
-    // The innermost link of each tag wins, and the walk ends once both are known.
+    // The innermost link of each tag wins, and the walk ends once both are known — or once the mask says neither of
+    // the ones still missing is anywhere further down.
     for (auto const* l = static_cast<cc::async_ambient_link const*>(head); l != nullptr; l = l->parent)
     {
+        auto const wanted = (found_trace ? 0 : trace_bit) | (found_owner ? 0 : owner_bit);
+        if ((l->present_mask & wanted) == 0)
+            break;
+
         if (!found_trace && l->tag == trace_t)
         {
             payload.trace = l->value;
