@@ -47,7 +47,8 @@ TEST("sg slot - overflow past 64 concurrent slots")
         slots.push_back(alloc.acquire());
     CHECK(alloc.live_count() == 64);
 
-    // The 65th allocation overflows to index 64 (emits a one-time warning to stderr).
+    // The 65th allocation overflows to index 64, and the allocator warns once.
+    nx::expect_warning("more than 64 concurrent command lists", nx::exactly(1));
     auto const overflow = alloc.acquire();
     CHECK(int(overflow) == 64);
     CHECK(alloc.live_count() == 65);
