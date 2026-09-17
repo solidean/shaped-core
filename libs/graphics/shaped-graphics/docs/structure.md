@@ -135,7 +135,7 @@ backends/                                       # each subclasses the abstract s
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real across the surface
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents headless; GPU timestamps are the gap
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents windowed and headless; GPU timestamps are the gap
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -146,7 +146,7 @@ backends/                                       # each subclasses the abstract s
 - **Tier 1 (now):** dx12, vulkan.
   Both are real across the surface, including ray tracing.
 - **Tier 2 (soon):** metal, webgpu.
-  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting headless until shaped-rendering's window gains a cocoa arm; GPU timestamps are the remaining gap.
+  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless; GPU timestamps are the remaining gap.
   It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep in a threaded build.
   With SC_THREADS=OFF its driver registers disabled — see TODO.md.
 - **Legacy compat (planned):** opengl, webgl.

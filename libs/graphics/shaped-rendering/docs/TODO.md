@@ -38,12 +38,6 @@ Bigger design intent lives in [structure.md](structure.md).
 
 Windowing:
 
-- **macOS has no `native_window()` mapping.**
-  `sg::window_platform` gained its cocoa arm with the metal backend, and `sg::native_window::from_cocoa` takes the `CAMetalLayer*` that backend presents to.
-  What is missing is this side: `window_sdl.cc` has no cocoa case, so a macOS window still returns an invalid handle and nothing there can present.
-  The layer comes from `SDL_PROP_WINDOW_COCOA_WINDOW_POINTER`'s view rather than from the window directly, which is the one piece of Objective-C this needs.
-  Until it lands, metal's windowed swapchain is written and unreached — see shaped-graphics' [TODO](../../shaped-graphics/docs/TODO.md).
-
 - **wayland is currently off in practice.**
   [extern/sdl3](../../../../extern/sdl3/CMakeLists.txt) forces `SDL_WAYLAND ON`, but SDL's wayland backend pkg-checks for `wayland-client`, `wayland-egl`, `wayland-cursor`, `egl` and `xkbcommon` —
   and degrades to X11-only, without an error, if any is missing.

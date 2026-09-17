@@ -183,6 +183,13 @@ if(SC_BUILD_TESTS)
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
     endif()
 
+    # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
+    # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.
+    if(APPLE AND SC_HAS_SDL3 AND TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/metal-window-manual-test.cc)
+        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-metal)
+    endif()
+
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-rendering-test)
 endif()

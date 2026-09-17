@@ -1,6 +1,7 @@
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/string/print.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/present/native_window.hh>
 #include <shaped-rendering/window.hh>
 
 // The counterpart to window-test.cc: what a dummy video driver cannot reach.
@@ -26,8 +27,15 @@ TEST("sr - window native handle (manual)", nx::config::manual, exclusive("sr-win
     CHECK(win->width() == 320);
     CHECK(win->height() == 240);
 
+    // win32 and cocoa both name their window in a single pointer that always exists.
+    // X11 and wayland are left out because which of the two a session runs is a runtime fact, not a compile-time one.
 #ifdef CC_OS_WINDOWS
     CHECK(win->native_window().is_valid());
+    CHECK(win->native_window().platform == sg::window_platform::win32);
+#endif
+#ifdef CC_OS_MACOS
+    CHECK(win->native_window().is_valid());
+    CHECK(win->native_window().platform == sg::window_platform::cocoa);
 #endif
 }
 

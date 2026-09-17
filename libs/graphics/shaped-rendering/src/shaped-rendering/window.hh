@@ -197,6 +197,13 @@ private:
     /// The backend's window object, opaque here because its type is not part of this API.
     void* _native_window = nullptr;
 
+    /// The CAMetalLayer-backed view on cocoa, and null on every other platform.
+    ///
+    /// Created with the window rather than on demand, because `native_window()` is const and a layer has to outlive
+    /// every swapchain built on it.
+    /// Opaque for `_native_window`'s reason.
+    void* _metal_view = nullptr;
+
     cc::string _title;
     int _width = 0;
     int _height = 0;
