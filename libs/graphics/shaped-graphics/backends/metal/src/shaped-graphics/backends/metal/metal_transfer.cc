@@ -119,6 +119,10 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
       command_buffer->release();
       self->forget_value(resource, value);
 
+      // This handler is the only thing that knows this commit finished; the epoch cannot say so, because it tracks
+      // the direct queue.
+      ctx->epochs().return_allocator_from_callback(allocator);
+
       // Last, and after `on_complete` has dropped the resource handle it held: a waiter released by this counter must
       // find every lifetime this transfer extended already given back.
       //
@@ -138,7 +142,6 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
     options->release();
 
     _queue->signalEvent(_timeline, value);
-    _ctx->epochs().retire_allocator_with_epoch(allocator);
 }
 
 u64 metal_transfer_system::pending_value_for(sg::raw_buffer const& buffer) const
@@ -390,12 +393,17 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const pending = &_pending;
+    auto* const ctx = _ctx;
     auto sink = _ctx->feedback_sink();
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
     auto* const options = MTL4::CommitOptions::alloc()->init();
     options->addFeedbackHandler(^void(MTL4::CommitFeedback*) {
       (*finish)();
+
+      // The stream queue's own progress, which the epoch cannot report: it tracks the direct queue.
+      ctx->epochs().return_allocator_from_callback(allocator);
+
       if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
       {
 #if CC_HAS_THREADS
@@ -410,7 +418,6 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
 
     // No value signalled here: a streaming batch is one slice of a transfer, and what a waiter waits for is the
     // transfer ending — which is the per-resource stream timeline rather than this one.
-    _ctx->epochs().retire_allocator_with_epoch(allocator);
 }
 
 void metal_transfer_system::order_stream_copy(metal_stream_job const& job)

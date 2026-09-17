@@ -108,6 +108,18 @@ public:
     /// Hands `allocator` to the open epoch, which resets it and returns it to the pool once the GPU is done with it.
     void retire_allocator_with_epoch(MTL4::CommandAllocator* allocator);
 
+    /// Hands an allocator back from the commit's own feedback handler, which is the only thing that knows that
+    /// commit has finished.
+    ///
+    /// **A transfer or stream allocator must not ride the epoch.**
+    /// `retire_allocator_with_epoch` resets when the *direct* queue's epoch fence is reached, and nothing ties that to
+    /// the transfer or stream queue — so an upload ordered behind a stream, or behind a busy submission, still has a
+    /// command buffer pending when the frame advances, and its allocator is reset and leased to the next list.
+    /// That is what `_free_allocators`' contract forbids, and it corrupts whatever the next list records.
+    ///
+    /// Called on a queue Apple owns, hence the callback mutex rather than `_mutex`.
+    void return_allocator_from_callback(MTL4::CommandAllocator* allocator);
+
     /// Runs `finalizer` once the open epoch's GPU work has finished.
     void defer(cc::unique_function<void()> finalizer);
 
@@ -130,6 +142,11 @@ private:
     cc::ringbuffer<metal_epoch_payload> _in_flight;
     metal_epoch_payload _open;
     cc::vector<MTL4::CommandAllocator*> _free_allocators;
+
+    /// Allocators handed back from a commit feedback handler, drained by `lease_allocator`.
+    /// Separate from `_free_allocators` because it is written from Apple's threads, which `_mutex` does not cover with
+    /// SC_THREADS off.
+    callback_mutex<cc::vector<MTL4::CommandAllocator*>> _callback_free_allocators;
 
     bool _is_shut_down = false;
 };

@@ -175,8 +175,32 @@ bool metal_epoch_system::is_submission_complete(sg::submission_token token) cons
     return _submission_event->signaledValue() >= u64(token);
 }
 
+void metal_epoch_system::return_allocator_from_callback(MTL4::CommandAllocator* allocator)
+{
+    if (allocator == nullptr)
+        return;
+
+    // Reset here rather than at lease: the commit that used it has completed, which is exactly what this callback
+    // means, and doing it now keeps the lease path free of work that can fail.
+    allocator->reset();
+    _callback_free_allocators.lock([&](cc::vector<MTL4::CommandAllocator*>& free) { free.push_back(allocator); });
+}
+
 MTL4::CommandAllocator* metal_epoch_system::lease_allocator()
 {
+    // Drained first, so an allocator a finished transfer handed back is reused before a new one is made.
+    auto* const from_callback = _callback_free_allocators.lock(
+        [&](cc::vector<MTL4::CommandAllocator*>& free) -> MTL4::CommandAllocator*
+        {
+            if (free.empty())
+                return nullptr;
+            auto* const a = free.back();
+            free.remove_back();
+            return a;
+        });
+    if (from_callback != nullptr)
+        return from_callback;
+
     auto* const recycled = _mutex.lock(
         [&](int&) -> MTL4::CommandAllocator*
         {
@@ -237,6 +261,10 @@ void metal_epoch_system::shutdown()
                 take(payload);
             }
             take(_open);
+
+            for (auto* a : _callback_free_allocators.lock([](cc::vector<MTL4::CommandAllocator*>& free)
+                                                          { return cc::move(free); }))
+                a->release();
 
             for (auto* a : _free_allocators)
                 allocators.push_back(a);
