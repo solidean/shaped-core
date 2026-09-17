@@ -813,6 +813,7 @@ protected:
 };
 auto a = cc::make_and_start_threaded_actor<uploader>(args...); // -> cc::unique_ptr<threaded_actor<...>>
 a->enqueue_message(upload_job{...});      // -> bool (false if shutting down); a->shutdown() drains + joins
+                                          // the sender's cc::rec owner id rides the message: what on_message records is attributed to it
 auto impl = a->take_impl<uploader>();     // std::unique_ptr — only after shutdown; ~handle joins too
 
 // Unthreaded mode: no background thread (the only option on single-threaded wasm).

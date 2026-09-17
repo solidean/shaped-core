@@ -50,6 +50,7 @@ Records from the `nexus` domain never count, since a failed check already fails.
 Every pass runs under its own owner id ([`cc::rec::owner_scope`](../../clean-core/docs/systems/recording.md#an-owner-beside-the-trace)).
 A record carries that id to the test from any thread the test's work reaches.
 That includes a `co_await` in an `ASYNC_TEST`, a thread wrapped in `nx::attributed_to_current_test`, and a library's own `CC_RECORD_ASYNC_SCOPE`.
+A message to a `cc::threaded_actor` carries its sender's owner too, so what the actor logs while handling it lands on the sending test.
 The trace would not do, because every async scope mints a fresh one.
 
 **A warning or error recorded under no test fails the run**, beside checks that ran outside any test.
