@@ -905,9 +905,11 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // exactly how a renamed callback would go on producing a plausible, wrong reference image.
     if (!session.request().name.empty() && session.is_first_application())
     {
-        CC_LOG_ERROR("capture: nothing registered the capture {}", session.request().name);
+        auto registered = cc::string();
         for (auto const& name : session.registered_names())
-            CC_LOG_ERROR("capture: this frame registered {}", name);
+            registered += cc::format("{}{}", registered.empty() ? "" : ", ", name);
+        CC_LOG_ERROR("capture: nothing registered the capture {}; this frame registered: {}", session.request().name,
+                     registered.empty() ? cc::string("nothing") : registered);
 
         session.mark_done();
         request_close();

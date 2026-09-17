@@ -225,6 +225,9 @@ INVOCABLE_TEST("sv - a capture nothing registered fails without writing", (sg::c
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "no-such-capture");
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
+    // The error is the outcome under test, and it names what the frame did register.
+    nx::expect_error("nothing registered the capture no-such-capture; this frame registered: front", nx::exactly(1));
+
     auto frames = 0;
     for (auto f : sv::interactive(ctx, "sv-test/capture-missing"))
     {
@@ -280,6 +283,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
 
     g_timeout_test_now = 0.0;
     auto const timeout_seconds = 60.0;
+    nx::expect_warning("capture: giving up after", nx::exactly(1));
 
     // Above the accumulation cap, so no number of frames settles it; only the clock can end this run.
     auto const request = sr::capture_request{.active = true,
