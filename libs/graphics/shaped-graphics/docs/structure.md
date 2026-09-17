@@ -134,8 +134,8 @@ src/shaped-graphics/
 backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
-  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): device + resource creation; recording is stubbed
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real through presentation, transfer, streaming and ray tracing — the whole tier-1 suite passes; GPU timestamps are the gap
+  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real across the surface
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents headless; GPU timestamps are the gap
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -144,13 +144,11 @@ backends/                                       # each subclasses the abstract s
 ## Backend tiers
 
 - **Tier 1 (now):** dx12, vulkan.
-  dx12 is real across the surface.
-  vulkan brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
-  Every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
+  Both are real across the surface, including ray tracing.
 - **Tier 2 (soon):** metal, webgpu.
-  metal is under construction.
-  It creates a Metal 4 device and refuses below its floor (macOS / iOS 26, Apple silicon), realizes the epochs on a pair of MTLSharedEvents, and opens, submits and drops command lists.
-  Its tier-1 driver runs the whole sweep in a threaded build; with SC_THREADS=OFF it registers disabled, and one transfer test is pinned — both in TODO.md.
+  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting headless until shaped-rendering's window gains a cocoa arm; GPU timestamps are the remaining gap.
+  It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep in a threaded build.
+  With SC_THREADS=OFF its driver registers disabled — see TODO.md.
 - **Legacy compat (planned):** opengl, webgl.
 
 A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).

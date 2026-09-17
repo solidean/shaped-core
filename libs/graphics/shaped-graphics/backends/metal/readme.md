@@ -2,7 +2,7 @@
 
 `sg::backend::metal` — shaped-graphics on Metal 4, for macOS and iOS.
 
-Early stage.
+Real across the surface, presenting headless until shaped-rendering's window gains a cocoa arm; GPU timestamps are the remaining gap.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
 Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, raster draws, and a swapchain presents.
@@ -75,7 +75,10 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
-  They cannot collide, because sg already requires that index to be unique within its group.
+  **An array binding consumes `count` indices, and nothing checks that.**
+  Unique indices are not enough on their own: an array at index 0 with count 4 occupies slots 0 to 3, so a scalar binding at index 1 overwrites one of them and no error says so.
+  **A layout with array bindings must space its indices by their counts**, which is a rule rather than a check.
+  A layout is built often enough that a pairwise range test there costs every correct layout — see [docs/concepts/bindings.md](../../docs/concepts/bindings.md).
 - **There is no per-pipeline cached blob.**
   `cached_pipeline_data()` returns empty and `used_cached_pipeline()` is always false, so every pipeline build is cold.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping

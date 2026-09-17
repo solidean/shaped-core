@@ -16,8 +16,13 @@
 /// **One descriptor array, not two.**
 /// dx12 keeps views and samplers in separate heaps, so the base's `descriptor_offsets` speaks of "the view heap, or the
 /// sampler heap for a sampler binding". An argument buffer has no such split: every binding kind is one 8-byte slot in
-/// the same buffer, so both offsets are simply `binding.index`, and they cannot collide because sg already requires an
-/// index to be unique within its group.
+/// the same buffer, so both offsets are simply `binding.index`.
+///
+/// **A caller must space array bindings by their counts**, and nothing here checks it.
+/// An array binding takes `count` consecutive slots, so unique indices alone do not keep two bindings apart: an array
+/// at index 0 with count 4 occupies slots 0 to 3, and a binding at index 1 overwrites one of them silently.
+/// The check belongs in layout creation, which happens often enough that a pairwise range test is not worth its cost —
+/// see libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 ///
 /// A static sampler has no slot here at all — it is written straight into the minted group from the layout — which is
 /// what the base's `-1` offset means.

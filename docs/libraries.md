@@ -201,7 +201,9 @@ The graphics stack, layered on top of `base`.
 The graphics-API wrapper: a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types — over concrete graphics backends.
 It also owns the **render-routine framework** (`sg::render_routine` plus the per-context `ctx.routines` registry), whose concrete routines live in shaped-rendering.
 Backends are **separate static libraries**, smurf-named and namespaced (`sg::backend::dx12::dx12_context`), one per API.
-dx12 and vulkan are real across the surface, and metal is being built out on Metal 4; webgpu, opengl and webgl are intended but unwritten.
+dx12 and vulkan are real across the surface, and so is metal on Metal 4 (macOS / iOS 26, Apple silicon).
+Metal presents headless until shaped-rendering's window gains a cocoa arm, and GPU timestamps are its remaining gap.
+webgpu, opengl and webgl are intended but unwritten.
 Resources are shared-immutable, handed out as `xyz_handle` — a `std::shared_ptr<sg::xyz const>` for a resource, without the `const` for the mutable `context` and `swapchain`.
 There are no host-visible resources: PCIe transfer is a globally shared resource sg manages.
 How a backend derives from those interfaces is [backends.md](../libs/graphics/shaped-graphics/docs/concepts/backends.md)'s.

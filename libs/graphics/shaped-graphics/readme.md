@@ -6,11 +6,12 @@ Part of the [graphics family](../../../docs/graphics.md) — `sv → sr → sg �
 
 sg exposes a small, backend-agnostic surface — `context`, `command_list`, and the GPU resource types — over concrete graphics backends.
 dx12 and vulkan are tier 1; metal and webgpu tier 2; opengl and webgl legacy.
-Three exist: the two tier-1 backends, and **metal**, which is being built out.
+Three exist: the two tier-1 backends, and **metal**.
 
 The library is at an **early stage**, though not a stub: the sg core and the **dx12** backend are real across transfer, barriers, bindings, pipelines, raytracing, queries and presentation.
 **vulkan** is real across the same surface and runs the same tier-1 API suite.
-**metal** is real across presentation, transfer, streaming and ray tracing, with GPU timestamps the remaining gap — see its [readme](backends/metal/readme.md).
+**metal** is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon) — see its [readme](backends/metal/readme.md).
+It presents headless until shaped-rendering's window gains a cocoa arm, and GPU timestamps are its remaining gap.
 Which windowing systems it can present to is decided at build time, by which of their development headers were installed.
 [docs/structure.md](docs/structure.md) is the per-module `[done]` / `[in progress]` / `[planned]` roadmap.
 

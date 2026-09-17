@@ -736,7 +736,7 @@ cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> t
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```
 
-## raytracing pipeline + shader table + dispatch_rays  (dx12 + metal real, vulkan stubs; see docs/concepts/raytracing-pipeline.md)
+## raytracing pipeline + shader table + dispatch_rays  (real on all three backends; see docs/concepts/raytracing-pipeline.md)
 
 ```cpp
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
