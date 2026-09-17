@@ -15,7 +15,14 @@
 /// verbatim, with no base to add and nothing for a kernel to compute wrongly.
 ///
 /// The intersection table is the other kind: it holds what runs *during* traversal, and Metal indexes it by the
-/// instance's `intersectionFunctionTableOffset` — which is exactly sg's `hit_group_offset`.
+/// instance's `intersectionFunctionTableOffset` plus the geometry descriptor's own — sg's `hit_group_offset` plus the
+/// geometry index, which is where DXR's first two hit-index contributions land.
+/// DXR's third, the per-`TraceRay` ray contribution, has no counterpart at all — see
+/// libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
+///
+/// **A kernel whose intersection table holds any triangle group must declare it
+/// `intersection_function_table<instancing, triangle_data>`**, because the opaque triangle default is installed with
+/// exactly that signature and Metal requires the two to agree.
 ///
 /// **They reach a kernel through `sg::reserved_binding_group`**, as four members of that group's argument buffer:
 /// `[[id(0)]]` intersection, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable.

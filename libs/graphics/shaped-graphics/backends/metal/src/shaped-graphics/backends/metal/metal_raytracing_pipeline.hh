@@ -61,10 +61,14 @@ public:
 
     void release_backend_objects() override;
 
-    /// The compute pipeline state a raygen shader registered at `handle` became.
+    /// The compute pipeline state a raygen shader registered at `handle` became, or null for a handle this pipeline
+    /// never issued.
+    /// Null rather than an assert, because the other three handle kinds reach the same caller as a `cc::error` and a
+    /// handle from the wrong pipeline is a caller mistake in all four.
     [[nodiscard]] MTL::ComputePipelineState* raygen_state(sg::raygen_shader_handle handle) const
     {
-        CC_ASSERT(u32(handle) < u32(_raygen_states.size()), "raygen shader handle is out of this pipeline's range");
+        if (u32(handle) >= u32(_raygen_states.size()))
+            return nullptr;
         return _raygen_states[isize(u32(handle))];
     }
 

@@ -210,20 +210,26 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
     linking->setMaxCallStackDepth(NS::UInteger(desc.max_recursion_depth));
 
     auto raygen_states = cc::vector<MTL::ComputePipelineState*>();
+
+    // One exit for every failure past this point, because there are now three kinds of object in flight: the linked
+    // functions, the linking descriptor, and the raygen states already built.
+    // Three of the four returns below used to leave the last of those behind.
+    auto const fail = [&](auto e)
+    {
+        for (auto* const state : raygen_states)
+            state->release();
+        unwind(linked);
+        linking->release();
+        return cc::result<sg::raytracing_pipeline_handle>(cc::move(e));
+    };
+
     for (auto const& shader : desc.raygen_shaders)
     {
         if (shader.stage != sg::shader_stage::raygen)
-        {
-            unwind(linked);
-            linking->release();
-            return cc::error("raytracing_pipeline: a registered raygen shader has the wrong stage");
-        }
+            return fail(cc::error("raytracing_pipeline: a registered raygen shader has the wrong stage"));
         if (shader.format != sg::shader_format::metal_lib || shader.bytecode.empty())
-        {
-            unwind(linked);
-            linking->release();
-            return cc::error("raytracing_pipeline: the metal backend needs a non-empty metal_lib raygen shader");
-        }
+            return fail(cc::error("raytracing_pipeline: the metal backend needs a non-empty metal_lib raygen "
+                                  "shader"));
 
         auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
                                                 DISPATCH_DATA_DESTRUCTOR_DEFAULT);
@@ -232,11 +238,8 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
         dispatch_release(blob);
 
         if (library == nullptr)
-        {
-            unwind(linked);
-            linking->release();
-            return metal_error(library_error, "raytracing_pipeline: the raygen metal library could not be loaded");
-        }
+            return fail(metal_error(library_error, "raytracing_pipeline: the raygen metal library could not be "
+                                                   "loaded"));
         libraries.push_back(library);
 
         auto* const function_descriptor = MTL4::LibraryFunctionDescriptor::alloc()->init();
@@ -254,15 +257,9 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
         function_descriptor->release();
 
         if (state == nullptr)
-        {
-            for (auto* const s : raygen_states)
-                s->release();
-            unwind(linked);
-            linking->release();
-            return metal_error(pipeline_error, cc::format("raytracing_pipeline: the raygen shader '{}' could not be "
-                                                          "built",
-                                                          shader.entry_point));
-        }
+            return fail(metal_error(pipeline_error, cc::format("raytracing_pipeline: the raygen shader '{}' could "
+                                                               "not be built",
+                                                               shader.entry_point)));
         raygen_states.push_back(state);
     }
 

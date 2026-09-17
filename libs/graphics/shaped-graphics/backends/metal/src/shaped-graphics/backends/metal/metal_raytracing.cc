@@ -146,6 +146,14 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
         d->setTriangleCount(NS::UInteger(triangle_count));
         d->setOpaque(g.is_opaque);
 
+        // **DXR's geometry contribution to the hit index, which Metal spells per geometry descriptor.**
+        // The instance's own offset alone makes every geometry of a BLAS select one hit group, so a BLAS whose second
+        // geometry needs a different any-hit would run the first's.
+        // The multiplier is 1 here, which is what sg's surface implies — see
+        // libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md for the contribution metal has no
+        // counterpart for.
+        d->setIntersectionFunctionTableOffset(NS::UInteger(geometry_descs.size()));
+
         if (g.indices != nullptr)
         {
             auto const& indices = require_build_input(g.indices, "indices");
@@ -204,6 +212,7 @@ sg::blas_handle metal_command_list::raytracing_build_blas_aabbs(cc::span<blas_aa
         d->setBoundingBoxStride(NS::UInteger(g.aabb_stride_in_bytes));
         d->setBoundingBoxCount(NS::UInteger(g.aabb_count));
         d->setOpaque(g.is_opaque);
+        d->setIntersectionFunctionTableOffset(NS::UInteger(geometry_descs.size())); // see the triangle path
 
         inputs.push_back(g.aabbs);
         geometry_descs.push_back(d);

@@ -74,6 +74,15 @@ So a raygen shader is not something a pipeline dispatches there — it **is** th
   MSL's `visible_function_table<T>` is typed by the function signature, so miss, closest-hit and callable functions cannot share a table.
   Each of sg's index spaces therefore gets one, and the indices are used verbatim.
 - One sg hit group splits across both kinds: `intersection` and `any_hit` run during traversal and go in the intersection function table, while `closest_hit` is a visible function the kernel calls.
+  **Metal runs exactly one function during traversal**, so a *procedural* group may carry an intersection function or an any-hit but not both, and metal refuses the pair rather than dropping one.
+  Fold the any-hit's decision into the intersection function, which is where it already decides what the ray hit.
+- **Two of DXR's three hit-index contributions map, and the ray contribution does not.**
+  The instance's `InstanceContributionToHitGroupIndex` is the instance descriptor's `intersectionFunctionTableOffset`.
+  The geometry contribution is each geometry descriptor's own offset, which metal sets to its geometry index.
+  `RayContributionToHitGroupIndex` has no counterpart.
+  That is DXR's per-`TraceRay` term, which lets one scene serve a primary ray and a shadow ray from different records.
+  An MSL kernel names the table it calls, so the equivalent here is a second table or a second raygen.
+  A shader ported from HLSL that varies the ray contribution selects a different function on metal than on dx12.
 - `dispatch_rays` selects that raygen's pipeline state, binds the tables through `sg::reserved_binding_group`, and calls `dispatchThreads`.
 - `max_recursion_depth` becomes Metal's `maxCallStackDepth`, which sizes the stack for indirect calls and defaults to 1.
   Recursion itself is supported — a visible function may trace and may call back through a table — so the field is honoured rather than capped.

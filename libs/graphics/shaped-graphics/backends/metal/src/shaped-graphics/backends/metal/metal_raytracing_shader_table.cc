@@ -19,20 +19,24 @@ constexpr isize k_table_slot_count = 4;
 
 void release_raygen_binding(metal_residency_set& residency, metal_raytracing_shader_table::raygen_binding const& r)
 {
+    // **All five residency entries, because all five were added.**
+    // A resource left in the set is one the queue keeps resident for the context's whole life, and nothing reports it
+    // — the same silence that makes a missing entry read zeroes rather than fail.
+    //
     // The pipeline state is borrowed from the pipeline, which outlives this table, so it is not released here.
-    if (r.intersection != nullptr)
-        r.intersection->release();
-    if (r.miss != nullptr)
-        r.miss->release();
-    if (r.closest_hit != nullptr)
-        r.closest_hit->release();
-    if (r.callable != nullptr)
-        r.callable->release();
-    if (r.arguments != nullptr)
+    auto const give_back = [&](auto* object)
     {
-        residency.remove(r.arguments);
-        r.arguments->release();
-    }
+        if (object == nullptr)
+            return;
+        residency.remove(object);
+        object->release();
+    };
+
+    give_back(r.intersection);
+    give_back(r.miss);
+    give_back(r.closest_hit);
+    give_back(r.callable);
+    give_back(r.arguments);
 }
 
 metal_raytracing_shader_table::~metal_raytracing_shader_table()
@@ -80,6 +84,11 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
     {
         auto binding = metal_raytracing_shader_table::raygen_binding{};
         binding.state = pipeline.raygen_state(raygen_handle);
+        if (binding.state == nullptr)
+        {
+            unwind(binding);
+            return cc::error("raytracing_shader_table: a raygen handle is out of the pipeline's range");
+        }
 
         // Every table is minted from THIS raygen's pipeline state: a function handle is per state, so a table built
         // from one raygen's state cannot be bound to another's.
@@ -174,6 +183,18 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
                                             i));
             }
 
+            // **Metal runs ONE function during traversal, and a procedural group's is its intersection shader.**
+            // DXR runs an any-hit after it; MSL has nowhere to put that, so a procedural group carrying one is
+            // refused rather than silently losing it — the intersection function does that work here.
+            if (group.is_procedural && group.any_hit != nullptr)
+            {
+                unwind(binding);
+                return cc::error(cc::format("raytracing_shader_table: hit group {} is procedural and carries an "
+                                            "any-hit shader, which metal has no traversal slot for — fold the "
+                                            "any-hit's work into the intersection function",
+                                            i));
+            }
+
             // What runs during traversal: an intersection shader for a procedural group, otherwise the any-hit if
             // there is one, and otherwise Metal's own triangle intersection.
             auto* const traversal = group.is_procedural ? group.intersection : group.any_hit;
@@ -191,8 +212,13 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
             }
             else
             {
-                binding.intersection->setOpaqueTriangleIntersectionFunction(MTL::IntersectionFunctionSignatureNone,
-                                                                            NS::UInteger(i));
+                // **The signature must match the table's own MSL declaration**, which `None` does not.
+                // A table that holds any triangle group is declared `intersection_function_table<instancing,
+                // triangle_data>` — see the readme, which states that as the requirement on a kernel — so the opaque
+                // default is asked for with exactly those two.
+                binding.intersection->setOpaqueTriangleIntersectionFunction(
+                    MTL::IntersectionFunctionSignatureInstancing | MTL::IntersectionFunctionSignatureTriangleData,
+                    NS::UInteger(i));
             }
         }
 

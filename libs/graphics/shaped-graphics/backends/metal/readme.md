@@ -235,7 +235,16 @@ The pipeline path maps as follows.
 - **An sg hit group splits across both kinds of table** at the same index.
   `intersection` and `any_hit` run *during* traversal and belong in the intersection function table.
   `closest_hit` runs after it and is called by the kernel, so it is a visible function like a miss shader.
-  A triangle group with neither gets `setOpaqueTriangleIntersectionFunction`.
+  A triangle group with neither gets `setOpaqueTriangleIntersectionFunction`, asked for with `Instancing | TriangleData`.
+  The signature must match the table's own MSL declaration, so **a kernel whose intersection table holds any triangle group declares it `intersection_function_table<instancing, triangle_data>`**.
+- **A procedural hit group may not carry an any-hit, and metal refuses the pair.**
+  Traversal runs exactly one function per group here, and for a procedural group that is its intersection function — there is nowhere to put an any-hit beside it.
+  DXR runs both, so this is a real gap rather than a spelling: fold the any-hit's decision into the intersection function, which is already deciding what the ray hit.
+  Accepting the group and dropping the any-hit is what this replaces, and it reports hits DXR would have rejected without saying anything.
+- **Two of DXR's three hit-index contributions map.**
+  The instance contribution is the instance descriptor's `intersectionFunctionTableOffset`, and the geometry contribution is each geometry descriptor's own offset, set to its geometry index.
+  The ray contribution — DXR's per-`TraceRay` term — has no counterpart, because an MSL kernel names the table it calls.
+  [docs/concepts/raytracing-pipeline.md](../../docs/concepts/raytracing-pipeline.md) carries what that costs a ported shader.
 - **Dynamic linking rather than static.**
   `raytracing_pipeline_description` already owns every shader, so static would fit.
   It would also drop the property the handle-to-index split exists for: one pipeline backing several tables with different function sets.
@@ -263,6 +272,8 @@ A hit reports its distance, a miss reports −1, and a payload nothing wrote sta
 | an intersection function describes a procedural primitive | the intersection function produced the distance, which is not the AABB's own entry distance |
 | a hit function recurses through its own table to the declared depth | indirect recursion works, four levels deep |
 | a shader table is built from two separate libraries | table entries may come from different shader files |
+| each geometry of a BLAS selects its own hit group | the geometry contribution reaches the intersection table |
+| a procedural hit group with an any-hit is refused | the pair metal has no traversal slot for is an error, not a dropped shader |
 
 The any-hit test is the pair of the one above it rather than a standalone assertion.
 Opaque geometry reports a hit and the identical non-opaque geometry with a rejecting any-hit reports a miss, so nothing but the function could have changed the answer.

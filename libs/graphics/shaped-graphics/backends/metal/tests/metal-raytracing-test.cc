@@ -276,17 +276,20 @@ struct traceable_scene
 
 /// Run one raygen entry point through the pipeline path and hand back what each thread wrote.
 /// `hit` is the group under test, which is what makes each caller below differ by one shader.
-[[nodiscard]] cc::vector<float> trace_with_pipeline(mtl::metal_context_handle const& ctx,
-                                                    traceable_scene const& scene,
-                                                    cc::string raygen_entry,
-                                                    sg::hit_shader hit)
+[[nodiscard]] cc::vector<float> trace_with_hit_groups(mtl::metal_context_handle const& ctx,
+                                                      traceable_scene const& scene,
+                                                      cc::string raygen_entry,
+                                                      cc::span<sg::hit_shader const> hits)
 {
     auto const group = bind_scene(ctx, scene);
 
     auto desc = sg::raytracing_pipeline_description{.layout = scene.pipeline_layout};
     auto const raygen = desc.add_raygen_shader(fixture_shader(sg::shader_stage::raygen, cc::move(raygen_entry)));
     auto const miss = desc.add_miss_shader(fixture_shader(sg::shader_stage::miss, "miss_marker"));
-    auto const hit_handle = desc.add_hit_shader(cc::move(hit));
+
+    auto hit_handles = cc::vector<sg::hit_shader_handle>();
+    for (auto const& hit : hits)
+        hit_handles.push_back(desc.add_hit_shader(hit));
 
     auto pipeline = ctx->create_metal_raytracing_pipeline(desc, sg::lifetime_scope::persistent);
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
@@ -294,7 +297,8 @@ struct traceable_scene
     auto table_desc = sg::raytracing_shader_table_description{.pipeline = pipeline.value()};
     auto const raygen_slot = table_desc.add_raygen_shader(raygen);
     (void)table_desc.add_miss_shader(miss);
-    (void)table_desc.add_hit_shader(hit_handle);
+    for (auto const handle : hit_handles)
+        (void)table_desc.add_hit_shader(handle);
 
     auto table = ctx->create_metal_raytracing_shader_table(table_desc, sg::lifetime_scope::persistent);
     REQUIRE(table.has_value()).context(table.has_error() ? table.error().to_string() : cc::string());
@@ -311,6 +315,15 @@ struct traceable_scene
     REQUIRE(bytes.has_value());
     auto const* const values = reinterpret_cast<float const*>(bytes.value().data());
     return cc::vector<float>::create_copy_of(cc::span<float const>(values, k_thread_count));
+}
+
+/// The one-group form, which is what most of these need.
+[[nodiscard]] cc::vector<float> trace_with_pipeline(mtl::metal_context_handle const& ctx,
+                                                    traceable_scene const& scene,
+                                                    cc::string raygen_entry,
+                                                    sg::hit_shader const& hit)
+{
+    return trace_with_hit_groups(ctx, scene, cc::move(raygen_entry), cc::span<sg::hit_shader const>(&hit, 1));
 }
 } // namespace
 
@@ -504,4 +517,87 @@ TEST("sg metal - a shader table is built from two separate libraries")
         .context(cc::format("miss thread read {}, expected -2 from the second library (-1 would mean the first "
                             "library's miss ran)",
                             values[1]));
+}
+
+TEST("sg metal - a procedural hit group with an any-hit is refused")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // Metal runs ONE function during traversal, and a procedural group's is its intersection shader — there is
+    // nowhere to put an any-hit beside it.
+    // Dropping it silently is what this replaces: the trace then reports hits DXR would have rejected, and nothing
+    // says why.
+    auto const scene = make_procedural_scene(ctx);
+
+    auto desc = sg::raytracing_pipeline_description{.layout = scene.pipeline_layout};
+    auto const raygen = desc.add_raygen_shader(fixture_shader(sg::shader_stage::raygen, "raygen_procedural"));
+    auto const miss = desc.add_miss_shader(fixture_shader(sg::shader_stage::miss, "miss_marker"));
+    auto const hit
+        = desc.add_hit_shader({.closest_hit = fixture_shader(sg::shader_stage::closest_hit, "closest_hit_marker"),
+                               .any_hit = fixture_shader(sg::shader_stage::any_hit, "any_hit_reject"),
+                               .intersection = fixture_shader(sg::shader_stage::intersection, "procedural_hit")});
+
+    auto pipeline = ctx->create_metal_raytracing_pipeline(desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    auto table_desc = sg::raytracing_shader_table_description{.pipeline = pipeline.value()};
+    (void)table_desc.add_raygen_shader(raygen);
+    (void)table_desc.add_miss_shader(miss);
+    (void)table_desc.add_hit_shader(hit);
+
+    auto table = ctx->create_metal_raytracing_shader_table(table_desc, sg::lifetime_scope::persistent);
+    CHECK(table.has_error()).context("a procedural group carrying an any-hit was accepted");
+}
+
+TEST("sg metal - each geometry of a BLAS selects its own hit group")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // DXR's GeometryContributionToHitGroupIndex, which Metal spells as the geometry descriptor's own
+    // `intersectionFunctionTableOffset`.
+    // Without it every geometry of a BLAS selects the instance's one entry, so the second geometry below runs the
+    // first's any-hit — which rejects, and turns a hit into a miss.
+    //
+    // Geometry 0 is a triangle the probe ray misses entirely; geometry 1 is the fixture triangle it hits.
+    constexpr float k_two_triangles[18] = {
+        10, 10, 0, 11, 10, 0, 10, 11, 0, // geometry 0, out of the ray's path
+        0,  0,  0, 1,  0,  0, 0,  1,  0, // geometry 1, the fixture triangle at distance 1
+    };
+
+    auto const vertices = ctx->persistent.create_raw_buffer(
+        isize(sizeof(k_two_triangles)), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto upload = ctx->create_command_list();
+    upload->upload.bytes_to_buffer(vertices, cc::as_bytes(cc::span<float const>(k_two_triangles)));
+    ctx->submit_command_list(cc::move(upload));
+
+    // Non-opaque, because traversal consults an any-hit only on non-opaque geometry.
+    sg::blas_triangles const geometries[2] = {
+        {.vertices = vertices, .vertex_count = 3, .is_opaque = false},
+        {.vertices = vertices, .vertex_offset_in_bytes = 9 * isize(sizeof(float)), .vertex_count = 3, .is_opaque = false},
+    };
+
+    auto cmd = ctx->create_command_list();
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(geometries));
+    auto const instance = sg::tlas_instance{.blas = blas};
+    auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&instance, 1));
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const scene = finish_scene(ctx, tlas);
+
+    // Group 0 rejects every hit; group 1 has no any-hit at all, so traversal accepts.
+    sg::hit_shader const hits[2] = {
+        {.closest_hit = fixture_shader(sg::shader_stage::closest_hit, "closest_hit_marker"),
+         .any_hit = fixture_shader(sg::shader_stage::any_hit, "any_hit_reject")},
+        {.closest_hit = fixture_shader(sg::shader_stage::closest_hit, "closest_hit_marker")},
+    };
+
+    auto const values = trace_with_hit_groups(ctx, scene, "raygen", cc::span<sg::hit_shader const>(hits));
+
+    CHECK(values[0] == k_triangle_distance)
+        .context(cc::format("thread 0 read {}; geometry 1 ran geometry 0's rejecting any-hit", values[0]));
+    CHECK(values[1] == k_miss).context(cc::format("miss thread read {}", values[1]));
 }
