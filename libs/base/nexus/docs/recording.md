@@ -4,7 +4,7 @@ Every `nx::run` stands a [`cc::rec`](../../clean-core/docs/systems/recording.md)
 
 That gives three things at once, for zero source changes in a test binary:
 
-* a **console logger**, so `CC_LOG_*` from any test or example prints;
+* a **console logger**, so `CC_LOG_*` from any test or example prints — a test's warnings and errors only once the [log rule](log-rule.md) has judged them;
 * **`nx::test_recording()`**, so a test can assert on what it recorded rather than on a debug getter that exists only to be asserted on;
 * **a recording per failing test**, written beside the run's other artifacts.
 
@@ -52,6 +52,9 @@ Tests run asynchronously and in parallel, so a thread does not identify a test: 
 So nexus mints a **trace id per test** and installs it on `cc::async`'s ambient chain beside the context that already names the test.
 Every event recorded under that test — on any worker, across any `co_await` — is then attributed by the `ambient_changed` delta that names the id.
 [systems/recording](../../clean-core/docs/systems/recording.md#async-scopes) is that mechanism; nexus is just its first heavy user.
+
+Each section pass also runs under an **owner id** (`cc::rec::owner_scope`), which async scopes leave alone.
+The [log rule](log-rule.md) attributes by it, since a library's own async scope replaces the trace for whatever it records.
 
 A nested test (one run through `nx::test_registry` from inside another) mints its own id **if it opted in**, and its events then belong to it rather than to its parent.
 One that did not mints nothing and stays under whatever context was already in effect, so its events land in the parent's bucket.

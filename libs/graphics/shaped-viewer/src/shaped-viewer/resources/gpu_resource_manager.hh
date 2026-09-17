@@ -275,6 +275,12 @@ public:
     /// covers.
     [[nodiscard]] instance_gpu describe_instance(sg::command_list& cmd, quadric_set_id set, instance_id instance);
 
+    /// Whether every attribute `instance`'s parameter block reads has landed.
+    ///
+    /// Until then the instance shades through the fallback hit group, which reads no attributes and no parameter block.
+    /// Binding an attribute buffer a stream is still filling would make the trace's list wait for the whole transfer.
+    [[nodiscard]] bool attributes_resident(instance_id instance);
+
     /// `data`'s payloads named by id, as the `sv::resident_mesh` a scene item is placed from.
     ///
     /// The result is remembered ON `data` — see `sv::impl::mesh_gpu_slot` — so the reference is into the mesh's own

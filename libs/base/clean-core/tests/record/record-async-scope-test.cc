@@ -200,15 +200,27 @@ REC_TEST("record/async-scope - attribution outlives the links it came from")
     CHECK(ambient_changes(captured) >= 400);
 }
 
-REC_TEST("record/async-scope - ambient deltas gate on the profiling category")
+REC_TEST("record/async-scope - ambient deltas gate on the attribution category, not on profiling")
 {
     rec_fixture const fixture(deterministic_config());
+
+    auto const profiling_off = capture(
+        []
+        {
+            scoped_domain_mask const restore(cc::rec::g_system_domain);
+            cc::rec::g_system_domain.set_enabled(cc::rec::category::profiling, false);
+
+            CC_RECORD_ASYNC_SCOPE("still-attributed");
+        });
+
+    // A harness judges events by owner, so silencing profiling must not silently drop the attribution.
+    CHECK(ambient_changes(profiling_off) == 2);
 
     auto const r = capture(
         []
         {
             scoped_domain_mask const restore(cc::rec::g_system_domain);
-            cc::rec::g_system_domain.set_enabled(cc::rec::category::profiling, false);
+            cc::rec::g_system_domain.set_enabled(cc::rec::category::attribution, false);
 
             CC_RECORD_ASYNC_SCOPE("silenced");
             CC_RECORD_MARK("still-recorded"); // a different category and domain, so it still lands

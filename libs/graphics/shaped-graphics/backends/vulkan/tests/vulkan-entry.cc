@@ -8,12 +8,12 @@
 
 // Entry-point driver for the vulkan backend suite (shaped-graphics-vulkan-test).
 // It brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite pays for one device rather than one per test.
-// The context carries validation, sync validation and the fail-on-validation listener; see vulkan-test-common.hh.
+// The context carries validation and sync validation, and a validation message fails the test that provoked it through the log rule.
 //
 // One device, not one per adapter: vulkan has no software adapter to guarantee, and the first hardware device is what the default run needs.
 // A test that needs a context of its own — the context is its subject, or a vulkan_config knob is — stays an ordinary TEST and takes one from make_context.
 //
-// The invocables run serially on this context, so each leaves it clean: every list submitted or dropped, and any callback it swapped reinstalled.
+// The invocables run serially on this context, so each leaves it clean: every list submitted or dropped, and any message callback it installed cleared again.
 
 namespace
 {

@@ -1,3 +1,4 @@
+#include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
@@ -283,9 +284,18 @@ ASYNC_INVOCABLE_TEST("sg - an inline upload larger than the ring is staged anywa
     // A small ring, applied at the next advance.
     // vulkan implements this too now; it used to be a no-op there while its own ring-full assert told the caller to
     // call it.
+    // Every invocable after this one runs on the same context, so the default ring comes back whatever happens here.
     ctx->upload.set_inline_budget(64 * 1024);
+    CC_DEFER
+    {
+        ctx->upload.set_inline_budget(sg::context_upload_scope::default_inline_budget_bytes);
+        ctx->advance_epoch();
+    };
     ctx->advance_epoch();
     co_await ctx->idle_completion();
+
+    // The fallback is the subject, so the warning it logs is the expected outcome.
+    nx::expect_warning("did not fit the 65536-byte upload ring");
 
     // Comfortably past the ring, so no wait could ever produce the space.
     auto const count = isize(64 * 1024);
@@ -319,9 +329,17 @@ ASYNC_INVOCABLE_TEST("sg - one epoch's inline transfers may exceed the ring", (s
 {
     REQUIRE(ctx != nullptr);
 
+    // Every invocable after this one runs on the same context, so the default ring comes back whatever happens here.
     ctx->upload.set_inline_budget(64 * 1024);
+    CC_DEFER
+    {
+        ctx->upload.set_inline_budget(sg::context_upload_scope::default_inline_budget_bytes);
+        ctx->advance_epoch();
+    };
     ctx->advance_epoch();
     co_await ctx->idle_completion();
+
+    nx::expect_warning("did not fit the 65536-byte upload ring");
 
     auto const chunk = isize(8 * 1024); // u32s: 32 KiB each, so three overrun a 64 KiB ring
     auto values = cc::vector<u32>();

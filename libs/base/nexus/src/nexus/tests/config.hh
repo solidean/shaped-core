@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/record/fwd.hh>
 #include <nexus/fwd.hh>
 
 namespace nx::config
@@ -90,6 +91,10 @@ struct nx::config::cfg
     // Requires an untagged `exclusive()` and forbids `recorded`; the schedule asserts on both rather than trusting the
     // order the config objects were spelled in.
     bool owns_recorder = false;
+
+    // The highest cc::rec::level this whole test may log without declaring it, or -1 for none.
+    // An int rather than the enum so config.hh names no recorder type; see allow_logs.
+    int allowed_log_level = -1;
 };
 
 namespace nx::config
@@ -132,6 +137,21 @@ constexpr struct
 {
     void apply(cfg& result) const { result.recorded = true; }
 } recorded;
+
+// This whole test may log records at or below `level` without declaring them — see nexus/tests/logs.hh.
+//
+// The broad waiver, for a stress or environment test whose warnings are incidental and unpredictable.
+// It sits on the declaration so a reader of the test list sees it; a known record wants nx::expect_* or nx::allow_*.
+constexpr auto allow_logs(cc::rec::level level)
+{
+    struct item
+    {
+        int value;
+        void apply(cfg& c) const { c.allowed_log_level = value > c.allowed_log_level ? value : c.allowed_log_level; }
+    };
+
+    return item{int(level)};
+}
 
 // This test owns the cc::rec singleton: the run shuts its recorder down before the body and re-initializes after.
 //

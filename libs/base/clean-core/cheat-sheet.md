@@ -344,6 +344,7 @@ cc::glob_matches(pat, path, cc::glob_option::normalize | cc::glob_option::ignore
 // '?' one char, '*' a run — neither crosses '/'; '**' does, and the '/' after it is optional ("src/**/x" matches "src/x").
 // A pattern ending in '/' means the subtree. Nothing is anchored for you: match a suffix with a leading "**/".
 // Normalize once yourself when one side is reused across many comparisons; the option redoes both sides per call.
+cc::glob_matches("*did not fit*", text, cc::glob_option::text);   // free text: '/' is ordinary, no subtree shorthand; never with normalize
 
 #include <clean-core/string/to_string.hh>        // cc::to_string(v) -> cc::string for bool/char/ints/floats/ptr/...
 cc::to_chars(buf, v)                             // -> isize written; the same rendering into a char buffer, no allocation
@@ -812,6 +813,7 @@ protected:
 };
 auto a = cc::make_and_start_threaded_actor<uploader>(args...); // -> cc::unique_ptr<threaded_actor<...>>
 a->enqueue_message(upload_job{...});      // -> bool (false if shutting down); a->shutdown() drains + joins
+                                          // the sender's cc::rec owner id rides the message: what on_message records is attributed to it
 auto impl = a->take_impl<uploader>();     // std::unique_ptr — only after shutdown; ~handle joins too
 
 // Unthreaded mode: no background thread (the only option on single-threaded wasm).
@@ -1074,8 +1076,13 @@ cc::rec::current_async_scope();              // -> desc const*, the innermost on
 cc::rec::current_trace_id();                 // -> trace_id; an async scope ALWAYS has one (see Tracing below)
 // Pick by unit of work: async scope per logical operation, CC_RECORD_SCOPE per span of one thread's time.
 // It allocates two links and takes their refcounts, so it is the heavier of the two — wrong tool for an inner loop.
-// Deltas are eager (an ambient_changed event at each cc::async restore whose TRACE differs), because a chain of
+// Deltas are eager (an ambient_changed event at each cc::async restore whose TRACE or OWNER differs), because a chain of
 // co_awaits recording NOTHING still has to be attributed — the scope is about where time goes.
+// The delta gates on category::attribution, NOT profiling: silencing profiling keeps attribution intact.
+cc::rec::owner_scope const owner(id);        // an owner id on the ambient chain; async scopes leave it alone
+cc::rec::current_owner_id();                 // -> trace_id; the owner in effect, or none
+// Attribute by OWNER, not trace, when a harness judges what it runs: every async scope mints a fresh trace.
+// A `none` id installs nothing; the delta and every chunk preamble carry it as an `owner` field beside `trace`.
 #include <clean-core/record/sampling.hh>      // what the threads were ACTUALLY doing, beside what they were told to say
 cc::rec::sampling_scope const s({.rate_hz = 1000.0});    // or start_sampling / stop_sampling / is_sampling
 // rate_hz is PER THREAD (a tick covers all of them). Capped ~1.9 kHz by the OS timer — measured, not guessed.
@@ -1176,6 +1183,9 @@ Getting events out:
 #include <clean-core/record/recording.hh>
 struct my_listener : cc::rec::listener { void on_chunk(cc::rec::chunk_view const& v) override { ... } };
 struct per_event : cc::rec::event_listener<per_event> { void on_event(auto const& chunk, auto const& e) { ... } };
+cc::rec::attribution_cursor cursor;          // a listener's per-thread (trace, owner), carried across blocks
+auto& running = cursor.for_block(view);      // reset when view starts a chunk this cursor has not seen
+cc::rec::attribution_cursor::observe(running, e); // -> attribution{trace, owner}; EVERY event, in order, or it goes stale
 
 #include <clean-core/record/console_listener.hh>
 cc::rec::install_default_console_listener();  // an application's one line: initializes if needed, then registers
@@ -1187,6 +1197,8 @@ auto console = cc::rec::console_listener({.min_level = cc::rec::level::info,   /
 // Options given EXPLICITLY are taken verbatim; only a DEFAULT-constructed listener reads the environment:
 //   CC_LOG_LEVEL  CC_LOG_TIME  CC_LOG_COLOR  CC_LOG_THREAD  CC_LOG_DOMAIN  CC_LOG_SITE   (plus NO_COLOR / FORCE_COLOR)
 cc::rec::console_options::from_environment(base);  // ... the same overrides over defaults of YOUR choosing
+.filter = [](cc::rec::event_view const& e, cc::rec::trace_id owner, void* user) { ... }, // false holds an event back
+// The filter runs last and under the processing mutex: it must not flush or register listeners. .filter_user is `user`.
 cc::rec::enable_environment_log_levels();    // opens every DOMAIN down to CC_LOG_LEVEL — a listener's min_level only
                                              //    filters what was recorded, and trace/debug are gated off before that
 // Neither reads well during static init: the environment and "is stdout a terminal" have no answer that early.

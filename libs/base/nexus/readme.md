@@ -41,6 +41,7 @@ Several capabilities are easy to miss from the macros alone:
 | a command line, with help, validation and completion | `nx::args` | [docs/args.md](docs/args.md) |
 | hardware performance counters around a workload | `nx::bench::measure_hw_counters` | [docs/guides/profiling.md](../../../docs/guides/profiling.md) |
 | asserting on what a test logged, recorded or measured | `nx::test_recording()` | [docs/recording.md](docs/recording.md) |
+| declaring the warnings and errors a passing test may log | `nx::expect_warning`, `nx::allow_warnings` | [docs/log-rule.md](docs/log-rule.md) |
 
 ## File organization
 

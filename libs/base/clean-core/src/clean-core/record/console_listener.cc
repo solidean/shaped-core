@@ -173,15 +173,20 @@ cc::rec::console_options cc::rec::console_options::from_environment(rec::console
 
 void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
 {
+    auto* const running = _options.filter != nullptr ? &_attribution.for_block(view) : nullptr;
+
     for (auto it = view.begin(); it != view.end(); ++it)
     {
         auto const e = *it;
+        auto const owner = running != nullptr ? rec::attribution_cursor::observe(*running, e).owner : rec::trace_id::none;
 
         auto const is_stat = e.kind() == rec::event_kind::stat_snapshot || e.kind() == rec::event_kind::stat_accumulate;
         auto const is_log = e.kind() == rec::event_kind::log;
         if (!is_log && !(is_stat && _options.show_stats))
             continue;
         if (e.level() < _options.min_level)
+            continue;
+        if (_options.filter != nullptr && !_options.filter(e, owner, _options.filter_user))
             continue;
 
         auto const wall_secs = view.wall_secs_of(e.cycles);

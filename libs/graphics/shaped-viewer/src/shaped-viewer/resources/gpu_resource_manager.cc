@@ -395,13 +395,23 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
     CC_ASSERT(contains_instance(instance), "no such instance_id");
     auto& r = _instances[isize(u32(instance))];
 
-    _upload_parameters(cmd, r);
-
     // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
     // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
     auto const pending = m.state != residency::complete;
     auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
     auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+
+    // Shaded through the fallback, which reads no parameter block, so the block is neither built nor bound — building it
+    // is what would bind a still-streaming attribute buffer.
+    // The index stand-in fills the slot, since a record has to name some buffer there.
+    if (pending || !attributes_resident(instance))
+        return {.param_buffer = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+                .param_offset = 0,
+                .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
+                .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
+                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
+
+    _upload_parameters(cmd, r);
 
     // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
     // declaration `freeze()` hands the trace.
@@ -409,7 +419,17 @@ instance_gpu gpu_resource_manager::describe_instance(sg::command_list& cmd, mesh
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
             .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
             .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = (!pending && m.is_indexed) ? 1u : 0u};
+            .is_indexed = m.is_indexed ? 1u : 0u};
+}
+
+bool gpu_resource_manager::attributes_resident(instance_id instance)
+{
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    for (auto const& slot : _instances[isize(u32(instance))].slots)
+        if (slot.kind == material_slot_kind::attribute_descriptor
+            && attributes.get(slot.attribute).state != residency::complete)
+            return false;
+    return true;
 }
 
 bool gpu_resource_manager::_is_live(sv::resident_mesh const& m)

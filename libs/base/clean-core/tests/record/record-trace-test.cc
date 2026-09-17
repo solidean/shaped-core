@@ -395,3 +395,164 @@ REC_TEST("record/trace - a trace follows the work across a co_await")
     CHECK(of_trace.count("before-suspend") == 1);
     CHECK(of_trace.count("after-suspend") == 1);
 }
+
+//
+// Owners
+//
+
+namespace
+{
+/// How many events named `name` a recording attributes to `owner`, carrying attribution forward per thread.
+isize count_owned(cc::rec::recording const& r, cc::rec::trace_id owner, cc::string_view name)
+{
+    cc::map<cc::thread_id, cc::rec::attribution> running;
+    auto n = isize(0);
+    r.for_each_event(
+        [&](cc::rec::chunk_view const& v, cc::rec::event_view const& e)
+        {
+            if (cc::rec::attribution_cursor::observe(running[v.thread.id], e).owner == owner && e.name() == name)
+                ++n;
+        });
+    return n;
+}
+} // namespace
+
+REC_TEST("record/trace - an owner survives an async scope, which replaces the trace")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const owner = cc::rec::new_trace_id();
+    auto inner_trace = cc::rec::trace_id::none;
+
+    auto const r = capture(
+        [&]
+        {
+            cc::rec::owner_scope const owned(owner);
+            CHECK(cc::rec::current_owner_id() == owner);
+            CC_RECORD_MARK("before-scope");
+            {
+                CC_RECORD_ASYNC_SCOPE("library-work");
+                inner_trace = cc::rec::current_trace_id();
+
+                // The scope minted a fresh trace with no parent link, and the owner is still the one installed above.
+                CHECK(cc::rec::current_owner_id() == owner);
+                CC_RECORD_MARK("inside-scope");
+            }
+        });
+
+    CHECK(cc::rec::current_owner_id() == cc::rec::trace_id::none);
+    CHECK(inner_trace != cc::rec::trace_id::none);
+    CHECK(count_owned(r, owner, "before-scope") == 1);
+    CHECK(count_owned(r, owner, "inside-scope") == 1);
+    CHECK(r.from_trace(inner_trace).count("inside-scope") == 1);
+}
+
+REC_TEST("record/trace - an owner follows the work across a co_await")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const owner = cc::rec::new_trace_id();
+    auto after = cc::rec::trace_id::none;
+
+    auto const r = capture(
+        [&]
+        {
+            cc::rec::owner_scope const owned(owner);
+            auto const co = [](cc::rec::trace_id* a) -> cc::shared_async<int>
+            {
+                co_await cc::async_yield();
+                *a = cc::rec::current_owner_id();
+                CC_RECORD_MARK("after-suspend");
+                co_return 1;
+            }(&after);
+
+            CHECK(cc::async_blocking_get(co) == 1);
+        });
+
+    CHECK(after == owner);
+    CHECK(count_owned(r, owner, "after-suspend") == 1);
+}
+
+REC_TEST("record/trace - attribution does not depend on profiling being on")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const owner = cc::rec::new_trace_id();
+    auto const r = capture(
+        [&]
+        {
+            scoped_domain_mask const restore(cc::rec::g_system_domain);
+            cc::rec::g_system_domain.set_enabled(cc::rec::category::profiling, false);
+
+            cc::rec::owner_scope const owned(owner);
+            CC_RECORD_MARK("attributed");
+        });
+
+    CHECK(count_owned(r, owner, "attributed") == 1);
+}
+
+REC_TEST("record/trace - a chunk preamble states the owner, so a later chunk attributes on its own")
+{
+    auto cfg = deterministic_config();
+    rec_fixture const fixture(cfg);
+
+    auto const owner = cc::rec::new_trace_id();
+    auto const r = capture(
+        [&]
+        {
+            cc::rec::owner_scope const owned(owner);
+
+            // Enough to rotate: every chunk after the first opens with a preamble, and no delta repeats the owner there.
+            for (auto i = 0; i < 20000; ++i)
+                CC_RECORD_MARK("filler");
+        });
+
+    auto preambles_with_owner = isize(0);
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::stream_state && e.field_as_u64("owner").value_or(0) == u64(owner))
+                ++preambles_with_owner;
+        });
+    CHECK(preambles_with_owner >= 1);
+
+    // And the owner survives a round trip, since a field is described by its descriptor rather than by a version.
+    auto loaded = cc::rec::deserialize(cc::rec::serialize(r));
+    REQUIRE(loaded.has_value());
+    CHECK(count_owned(loaded.value().events(), owner, "filler") == count_owned(r, owner, "filler"));
+}
+
+REC_TEST("record/trace - leaving every context is written only when something records in the gap")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const owner = cc::rec::new_trace_id();
+    auto const r = capture(
+        [&]
+        {
+            cc::rec::owner_scope const owned(owner);
+            CC_RECORD_MARK("owned");
+
+            // What a pool worker does around every queued item: leave, and come straight back.
+            {
+                cc::impl::async_ambient_root_scope const gap;
+            }
+            CC_RECORD_MARK("still-owned");
+
+            // A gap something records in is still a gap.
+            {
+                cc::impl::async_ambient_root_scope const gap;
+                CC_RECORD_MARK("in-the-gap");
+            }
+            CC_RECORD_MARK("owned-again");
+        });
+
+    CHECK(count_owned(r, owner, "owned") == 1);
+    CHECK(count_owned(r, owner, "still-owned") == 1);
+    CHECK(count_owned(r, cc::rec::trace_id::none, "in-the-gap") == 1);
+    CHECK(count_owned(r, owner, "owned-again") == 1);
+
+    // Entering the owner, one reset and one return around the gap that recorded, and leaving the owner — the empty gap
+    // wrote nothing.
+    CHECK(r.count_of_kind(cc::rec::event_kind::ambient_changed) == 4);
+}

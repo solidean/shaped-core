@@ -26,6 +26,33 @@ cc::rec::impl::trace_link_scope::~trace_link_scope()
         reinterpret_cast<cc::async_ambient_scope*>(_storage)->~async_ambient_scope();
 }
 
+cc::atomic<bool> cc::rec::impl::g_owner_ever_installed = {false};
+
+cc::rec::owner_scope::owner_scope(cc::rec::trace_id id)
+{
+    if (id == rec::trace_id::none)
+        return;
+
+    // Before the link goes on: installing it publishes a delta, and that delta must already look for the owner.
+    rec::impl::g_owner_ever_installed.store(true, cc::memory_order_relaxed);
+    new (cc::placement_new, _storage) cc::async_ambient_scope(rec::impl::owner_tag(), u64(id));
+    _installed = true;
+}
+
+cc::rec::owner_scope::~owner_scope()
+{
+    if (_installed)
+        reinterpret_cast<cc::async_ambient_scope*>(_storage)->~async_ambient_scope();
+}
+
+cc::rec::trace_id cc::rec::current_owner_id()
+{
+    // No harness ever installed one, so there is nothing to walk the chain for.
+    if (!rec::impl::g_owner_ever_installed.load(cc::memory_order_relaxed))
+        return rec::trace_id::none;
+    return rec::trace_id(cc::async_ambient_lookup(rec::impl::owner_tag()));
+}
+
 cc::rec::impl::async_scope_guard::async_scope_guard(cc::rec::desc const& begin_desc,
                                                     cc::rec::desc const& end_desc,
                                                     cc::rec::trace_id id)

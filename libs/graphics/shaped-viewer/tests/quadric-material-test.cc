@@ -109,6 +109,7 @@ TEST("sv::resolve_material falls back when the geometry cannot number the freque
     auto const vertex_color = sv::mesh_attribute::create("color", sv::attribute_frequency::per_vertex, per_vertex);
 
     auto const batch = quadric_set_with(vertex_color);
+    nx::expect_warning("bound at a frequency quadric geometry cannot number", nx::exactly(1, "sv"));
     auto const on_quadrics = sv::resolve_material(type, material, batch);
     REQUIRE(on_quadrics.attributes.size() == 1);
     CHECK(on_quadrics.attributes[0].frequency == sv::material_frequency::material_type);

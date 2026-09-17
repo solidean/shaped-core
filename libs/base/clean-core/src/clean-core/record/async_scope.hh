@@ -39,6 +39,13 @@ CC_ASYNC_AMBIENT_TAG(async_scope_tag)
 /// link routinely outlives the scope object that pushed it.
 CC_ASYNC_AMBIENT_TAG(trace_tag)
 
+/// The ambient tag an owner id installs under; the value is the id's bit pattern, as for `trace_tag`.
+CC_ASYNC_AMBIENT_TAG(owner_tag)
+
+/// Set by the first owner_scope ever constructed, and never cleared.
+/// Until then an ambient delta does not look for an owner, so a process without a harness pays one load for it.
+extern cc::atomic<bool> g_owner_ever_installed;
+
 /// The layout of an async scope's begin/end payload: the trace id in effect, or 0.
 inline constexpr rec::field async_scope_fields[] = {
     {.name = "trace", .type = rec::type_code::u64_, .offset = 0, .size = 8},
@@ -81,8 +88,33 @@ private:
 };
 } // namespace cc::rec::impl
 
+/// Installs an owner id on the ambient chain: the context that answers for everything recorded under it.
+///
+/// **Distinct from a trace, and never replaced by one.**
+/// Every CC_RECORD_ASYNC_SCOPE mints a trace with no link to the enclosing one.
+/// So attributing by trace loses whatever a library records inside its own async scope.
+/// An owner is set by whoever accounts for the events — a test harness, once per pass — and async scopes leave it alone.
+///
+/// Carried as the `owner` field of the ambient delta and of every chunk preamble.
+/// A `none` id installs nothing, and the link it pushes may outlive the scope, exactly as an async scope's may.
+struct cc::rec::owner_scope
+{
+    explicit owner_scope(rec::trace_id id);
+    ~owner_scope();
+
+    owner_scope(owner_scope const&) = delete;
+    owner_scope& operator=(owner_scope const&) = delete;
+
+private:
+    bool _installed = false;
+    alignas(cc::async_ambient_scope) byte _storage[sizeof(cc::async_ambient_scope)] = {};
+};
+
 namespace cc::rec
 {
+/// The owner the calling thread is currently under, or `none`; a chain walk, like current_trace_id.
+[[nodiscard]] rec::trace_id current_owner_id();
+
 /// The descriptor of the innermost async scope in effect on the calling thread, or null.
 [[nodiscard]] inline rec::desc const* current_async_scope()
 {

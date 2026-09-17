@@ -104,6 +104,9 @@ CC_COLD_FUNC bool writer_rotate(isize needed);
 /// Accounts one event this thread could not write, for the next gap event to report.
 CC_COLD_FUNC void writer_account_drop(isize bytes, u64 cycles);
 
+/// Writes the ambient delta a thread deferred when it left every context; see note_ambient_change.
+CC_COLD_FUNC void flush_ambient_reset();
+
 /// Writes header and payload at the cursor and publishes them; the space must already be reserved.
 CC_FORCE_INLINE void write_event_at(rec::desc const& d, u64 cycles, u16 core, u16 flags, void const* payload, isize payload_size)
 {
@@ -136,6 +139,8 @@ CC_FORCE_INLINE void record_bytes(rec::desc const& d, void const* payload, isize
     // (writer_tls) and forming `nullptr + needed` is undefined even though every target computes what we want.
     // `end - cur` is well defined for the null pair, yielding 0, so the first record still fails and takes the cold path.
     auto& w = t_writer;
+    if (w.ambient_reset_pending) [[unlikely]]
+        flush_ambient_reset();
     if (needed > w.end - w.cur) [[unlikely]]
     {
         if (!writer_rotate(needed))

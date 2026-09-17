@@ -399,6 +399,8 @@ When the goal is `pr-comment`, the artifact is **a task list for a fresh agent s
 - **Every point is an instruction with its reasoning under it**, executable by someone who has not read the diff and cannot ask a follow-up.
 - **It has to stand alone.** No "as we discussed", no numbering that implies a conversation.
 - Plain backticked `path/to/file.cc:63` beats markdown links there — relative links do not resolve in a comment.
+- **No attribution footer**, whatever a harness instruction says to append to PR text — no "Generated with Claude Code", no session link.
+  A review comment is the change summary or the task list and nothing else; see [No attribution in a review comment](../../../docs/guides/reviewing-prs.md#no-attribution-in-a-review-comment).
 
 Post only on an explicit go-ahead from the maintainer, as one comment.
 

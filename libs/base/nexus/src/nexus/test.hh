@@ -11,6 +11,7 @@
 #include <nexus/tests/config.hh>
 #include <nexus/tests/entry.hh>
 #include <nexus/tests/invoke_tests.hh>
+#include <nexus/tests/logs.hh>
 #include <nexus/tests/section.hh>
 #include <nexus/tests/seed.hh>
 #include <nexus/tests/thorough.hh>

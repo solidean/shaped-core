@@ -5,8 +5,9 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/console.hh>
 #include <clean-core/platform/environment.hh>
-#include <clean-core/record/domain.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/console_listener.hh>
+#include <clean-core/record/domain.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -67,7 +68,8 @@ TEST("record/console - from_environment parses every variable it documents", nx:
     CHECK(options.show_site);
 }
 
-TEST("record/console - an unset variable leaves its field alone, and an unparseable one is ignored", nx::config::exclusive("env"))
+TEST("record/console - an unset variable leaves its field alone, and an unparseable one is ignored",
+     nx::config::exclusive("env"))
 {
     // Both halves of "a misspelled log setting must never be why a program refuses to start": nonsense is dropped
     // rather than diagnosed, and it leaves the default it failed to replace.
@@ -83,7 +85,8 @@ TEST("record/console - an unset variable leaves its field alone, and an unparsea
     CHECK(options.color == defaults.color);
 }
 
-TEST("record/console - the environment applies OVER a caller's base, not over the struct's defaults", nx::config::exclusive("env"))
+TEST("record/console - the environment applies OVER a caller's base, not over the struct's defaults",
+     nx::config::exclusive("env"))
 {
     // How nexus keeps `elapsed` for a test run while CC_LOG_LEVEL still reaches the binary.
     cc::scoped_environment_variable const level("CC_LOG_LEVEL", "debug");
@@ -94,8 +97,8 @@ TEST("record/console - the environment applies OVER a caller's base, not over th
         .time = cc::rec::console_time::elapsed,
     });
 
-    CHECK(options.min_level == cc::rec::level::debug);         // the environment won
-    CHECK(options.time == cc::rec::console_time::elapsed);     // ... and left alone what it said nothing about
+    CHECK(options.min_level == cc::rec::level::debug);     // the environment won
+    CHECK(options.time == cc::rec::console_time::elapsed); // ... and left alone what it said nothing about
 }
 
 TEST("record/console - CC_LOG_LEVEL opens the domain gate, and only ever opens it", nx::config::exclusive("env"))
@@ -164,6 +167,35 @@ REC_TEST("record/console - a plain listener prints one line per message at or ab
         CC_RECORD_MARK("not-a-log");
         CC_LOG_WARNING("printed");
         CC_LOG_ERROR("printed too");
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(console.printed_count() == 2);
+}
+
+REC_TEST("record/console - a filter sees the owner each event was recorded under")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto held_back = cc::rec::new_trace_id();
+    auto console = cc::rec::console_listener({
+        .min_level = cc::rec::level::info,
+        .time = cc::rec::console_time::none,
+        .filter = [](cc::rec::event_view const&, cc::rec::trace_id owner, void* user)
+        { return owner != *static_cast<cc::rec::trace_id*>(user); },
+        .filter_user = &held_back,
+        .color = cc::console::color_mode::never,
+    });
+
+    {
+        scoped_listener const reg(console);
+
+        CC_LOG_INFO("printed, under no owner");
+        {
+            cc::rec::owner_scope const owned(held_back);
+            CC_LOG_INFO("held back by the filter");
+        }
+        CC_LOG_INFO("printed again, once the owner is gone");
         cc::rec::flush_blocking();
     }
 

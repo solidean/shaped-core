@@ -26,7 +26,33 @@ namespace nx::impl
 {
 enum class check_kind;
 enum class cmp_op;
+struct log_declaration;
+struct log_pass;
 } // namespace nx::impl
+
+/// One nx::expect_* or nx::allow_* call, made inside a pass.
+struct nx::impl::log_declaration
+{
+    cc::rec::level level = {};
+    cc::string pattern;
+    cc::string domain; ///< empty for any
+    bool is_expectation = false;
+    int at_least = 0;
+    int at_most = -1; ///< negative for no upper bound
+    cc::source_location location;
+};
+
+/// What the log rule needs of one section pass, kept on the execution until the run judges it.
+struct nx::impl::log_pass
+{
+    /// The owner id the pass ran under, or 0 when the run was not recording.
+    u64 owner = 0;
+
+    /// Indices from the root into `section::subsections`, naming the leaf the pass is filed under.
+    cc::vector<int> section_path;
+
+    cc::vector<log_declaration> declarations;
+};
 
 struct nx::test_error
 {
@@ -110,9 +136,26 @@ struct nx::test_execution
     // What a COMMAND's body returned; empty for anything that is not a command, or a command that never returned.
     cc::optional<int> exit_code;
 
+    // One entry per section pass, for the log rule to judge once the run's records are all delivered — see tests/logs.hh.
+    cc::vector<impl::log_pass> log_passes;
+
+    // The trace this test's recording was bucketed under, or 0; the log verdict settles a bucket left undecided.
+    u64 record_trace = 0;
+
     // Failing if this test's own tree fails or any dispatched child fails.
     [[nodiscard]] bool is_considered_failing() const;
 };
+
+namespace nx::impl
+{
+/// Records one nx::expect_* / nx::allow_* on the running test's current pass.
+void add_log_declaration(log_declaration declaration);
+
+/// Judges every pass of `result` against the warnings and errors kept for it, filing a failure per violation.
+/// Flushes the recorder once first.
+/// The outermost run also claims the unattributed records, and drops whatever no pass claimed.
+void judge_logs(nx::test_schedule_execution& result, bool outermost);
+} // namespace nx::impl
 
 struct nx::test_schedule_execution
 {
@@ -123,6 +166,10 @@ struct nx::test_schedule_execution
     // Drained from a process-global sink at the end of this run, so a nested execute_tests takes what it produced and the outer one sees only its own.
     int orphan_checks = 0;
     cc::vector<test_error> orphan_errors;
+
+    // Warnings and errors logged under no test at all, which fail the run the way an orphan check does.
+    // Only the outermost execute_tests claims them; a nested run's are its enclosing test's business.
+    cc::vector<test_error> unattributed_logs;
 
     // All counts recurse into dispatched (nested) executions: a dispatched instance counts as its own test.
     [[nodiscard]] int count_total_tests() const;
