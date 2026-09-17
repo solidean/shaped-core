@@ -224,7 +224,8 @@ req.accumulate_frames              // -> u32, default 60
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
 
-sr::write_capture_image(ctx, tex, path)  // -> cc::result<cc::unit>; blocking readback, bgra8 -> RGB, format from the extension
+sr::write_capture_image(ctx, tex, path)        // -> cc::result<cc::unit>; blocking readback, bgra8 -> RGB, format from the extension
+sr::write_capture_image_async(ctx, tex, path)  // -> cc::shared_async<cc::result<cc::unit>>; the same, awaited — what a never_block context needs
 ```
 
 - **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.

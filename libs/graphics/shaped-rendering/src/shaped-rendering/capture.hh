@@ -4,6 +4,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/resource/texture.hh> // sg::texture_2d, which sg's fwd.hh does not name
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -98,4 +99,10 @@ namespace sr
 [[nodiscard]] cc::result<cc::unit> write_capture_image(sg::context& ctx,
                                                        sg::texture_2d const& texture,
                                                        cc::string_view path);
+
+/// The same, awaiting the download instead of blocking for it — what a context that never blocks must use.
+/// `texture` must outlive the returned async, which reads it before its first suspension and never again.
+[[nodiscard]] cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ctx,
+                                                                               sg::texture_2d const& texture,
+                                                                               cc::string path);
 } // namespace sr

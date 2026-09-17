@@ -85,19 +85,11 @@ capture_request capture_request::from_environment()
     return req;
 }
 
-cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const& texture, cc::string_view path)
+namespace
 {
-    CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
-
-    auto const size = tg::vec2i(texture.width(), texture.height());
-
-    auto future = ctx.download.bytes_from_texture(texture.raw());
-    ctx.block_until_idle();
-    auto const bytes = future.try_get_bytes();
-    if (!bytes.has_value())
-        return cc::error("capture: reading the image back from the GPU failed");
-
-    auto const src = bytes.value().span();
+/// The readback, converted and written — everything the two entry points share once the bytes have landed.
+[[nodiscard]] cc::result<cc::unit> encode_capture_image(cc::span<byte const> src, tg::vec2i size, cc::string_view path)
+{
     auto const pixels = isize(size[0]) * isize(size[1]);
     if (src.size() < pixels * 4)
         return cc::error("capture: the readback is smaller than the image it should hold");
@@ -126,5 +118,34 @@ cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const&
     // like a rendering artifact rather than a broken file.
     CC_RETURN_IF_ERROR(out.flush());
     return cc::unit{};
+}
+} // namespace
+
+cc::result<cc::unit> write_capture_image(sg::context& ctx, sg::texture_2d const& texture, cc::string_view path)
+{
+    CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
+
+    auto future = ctx.download.bytes_from_texture(texture.raw());
+    ctx.block_until_idle();
+    auto const bytes = future.try_get_bytes();
+    if (!bytes.has_value())
+        return cc::error("capture: reading the image back from the GPU failed");
+
+    return encode_capture_image(bytes.value().span(), tg::vec2i(texture.width(), texture.height()), path);
+}
+
+cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ctx,
+                                                                 sg::texture_2d const& texture,
+                                                                 cc::string path)
+{
+    CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
+
+    auto const size = tg::vec2i(texture.width(), texture.height());
+    auto const future = ctx.download.bytes_from_texture(texture.raw());
+
+    // The download settles wherever the backend delivers it, and the encode below touches only the bytes and the file,
+    // so this needs no home of its own.
+    auto const bytes = co_await future.bytes();
+    co_return encode_capture_image(bytes.span(), size, path);
 }
 } // namespace sr
