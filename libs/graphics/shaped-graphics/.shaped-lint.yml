@@ -76,8 +76,8 @@ rules:
     reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: "on metal a download's copy-out is delivered by the MTL4CommitFeedback handler, on a dispatch queue sg does not own — so idle_completion() can settle before the bytes land, where block_until_idle also drains the transfer actors. Awaiting instead reads zeroes, intermittently with threads and reliably without them. Revisit once the copy-out settles its own completion rather than being drained for"
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle, block_until_epochs_in_flight]
+    reason: "metal settles a download's completion from the MTL4CommitFeedback handler, on a queue Apple owns — and cc::async's single-threaded scheduler refuses to wait on a node pushed from a thread it does not drive, aborting with 'parked on an external push'. Awaiting works in a threaded build and kills the SC_THREADS=OFF one, so these block instead. Revisit with the same work that unpins the tier-1 sweep there, which is the same defect: see docs/TODO.md"
     files:
       - backends/metal/tests/*.cc
 

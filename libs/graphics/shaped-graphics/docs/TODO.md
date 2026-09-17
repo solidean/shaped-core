@@ -157,6 +157,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   thread.
   It is a property of the backend's completion routing rather than of any one test, which is why the pin is at the
   preset.
+  **The tier-2 suite pays the same toll in a smaller way**: its tests block on `block_until_idle` rather than awaiting
+  `idle_completion()`, and `.shaped-lint.yml` allows that by name.
+  Converting them to await was tried and reverted — it works in a threaded build and aborts the `SC_THREADS=OFF` one
+  at the first download, on the same push.
+  So one piece of work closes both.
 
 - **No metal shader toolchain exists.**
   `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
