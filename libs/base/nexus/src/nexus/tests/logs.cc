@@ -64,7 +64,7 @@ void declare(cc::rec::level level,
 }
 
 /// Files `error` under the leaf `path` names and every section above it, the way finalize aggregates a pass's own.
-void file_error(nx::test_execution& exec, cc::span<int const> path, nx::test_error error)
+void file_error(nx::test_execution& exec, cc::span<int const> path, nx::test_error const& error)
 {
     auto* sec = &exec.root;
     auto chain = cc::vector<nx::test_execution::section*>{sec};
