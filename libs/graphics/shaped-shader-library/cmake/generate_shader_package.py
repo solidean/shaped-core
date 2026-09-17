@@ -70,7 +70,7 @@ VALID_STAGES = (
     "raygen", "closest_hit", "any_hit", "miss", "intersection", "callable",
 )
 
-VALID_LANGUAGES = ("hlsl",)
+VALID_LANGUAGES = ("hlsl", "wgsl")
 
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
@@ -236,6 +236,11 @@ def parse_entries(manifest: Manifest) -> Entries:
         if entry in seen:
             raise GeneratorError(f"shader package '{name}': entry '{entry}' is declared twice")
         seen.add(entry)
+
+        # These read HLSL's binding attributes; a WGSL module states its own addresses and is reflected at runtime.
+        if stage in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE) and manifest.language != "hlsl":
+            raise GeneratorError(
+                f"shader package '{name}': entry '{entry}' is a '{stage}' entry, which only an HLSL package has")
 
         if stage == BINDING_STAGE:
             bindings.append(read_binding_entry(manifest, path, tail))
