@@ -1,6 +1,9 @@
 #include "dx12-test-common.hh"
 
+#include <clean-core/common/utility.hh> // CC_DEFER
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
@@ -84,6 +87,50 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
                  "dedupe in dx12_context.create.cc should go");
 }
 
+/// What a listener on a third context saw of the provocation, which reaches it without changing who logs it.
+///
+/// The two tests below count LOG records, so they rest on two things the listener test above does not check: the message
+/// is an error, and it is raised on the provoking thread, which is what attributes the record to the test.
+/// A runtime delivering it otherwise is a runtime these tests learn nothing on, so they skip and say which half failed.
+struct provocation_probe
+{
+    cc::atomic<int> errors = {0};
+    cc::atomic<int> off_thread = {0};
+    cc::atomic<int> other = {0};
+    cc::thread_id provoking_thread = cc::current_thread_id();
+
+    void listen(dx12::dx12_context& ctx)
+    {
+        ctx.set_message_callback(
+            [this](dx12::dx12_message_severity severity, cc::string_view message)
+            {
+                if (!message.contains("CreateCommittedResource"))
+                    other.fetch_add(1, cc::memory_order_relaxed);
+                else if (cc::current_thread_id() != provoking_thread)
+                    off_thread.fetch_add(1, cc::memory_order_relaxed);
+                else if (severity >= dx12::dx12_message_severity::error)
+                    errors.fetch_add(1, cc::memory_order_relaxed);
+                else
+                    other.fetch_add(1, cc::memory_order_relaxed);
+            });
+    }
+
+    /// Why the counting tests cannot run here, or empty when they can.
+    [[nodiscard]] cc::string unusable_because() const
+    {
+        auto const e = errors.load(cc::memory_order_relaxed);
+        auto const t = off_thread.load(cc::memory_order_relaxed);
+        auto const o = other.load(cc::memory_order_relaxed);
+        CC_LOG_INFO("provocation probe: {} error(s) on the provoking thread, {} off it, {} other message(s)", e, t, o);
+        if (e > 0)
+            return {};
+        return cc::format("the debug layer delivered the provocation as {} off-thread and {} other message(s), not as "
+                          "an "
+                          "error on the provoking thread",
+                          t, o);
+    }
+};
+
 TEST("sg dx12 - a debug-layer message is logged once however many contexts are alive")
 {
     // Two contexts, neither with a listener: both callbacks receive the message, and only one of them may log it.
@@ -93,11 +140,29 @@ TEST("sg dx12 - a debug-layer message is logged once however many contexts are a
     auto second = dx12::make_fresh_context();
     if (second == nullptr)
         SKIP("could not create a second dx12 context");
+    auto probe_ctx = dx12::make_fresh_context();
+    if (probe_ctx == nullptr)
+        SKIP("could not create a probe dx12 context");
+
+    auto probe = provocation_probe();
+    probe.listen(*probe_ctx);
+    CC_DEFER
+    {
+        probe_ctx->set_message_callback({});
+    };
+
+    provoke_validation_message(*first);
+
+    // Declared after the probe: a skip must not leave an expectation behind to fail it.
+    if (auto const why = probe.unusable_because(); !why.empty())
+    {
+        nx::allow_errors("CreateCommittedResource", "sg.dx12");
+        nx::allow_warnings("CreateCommittedResource", "sg.dx12");
+        SKIP(why);
+    }
 
     // Exactly once whichever context is oldest, since the provoking thread is what attributes the record to this test.
     nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
-
-    provoke_validation_message(*first);
     CHECK(true);
 }
 
@@ -112,9 +177,27 @@ TEST("sg dx12 - a debug-layer message is logged by its own device when another a
         sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware}));
     if (hardware.has_error())
         SKIP("no dx12 hardware device");
+    auto const probe_ctx = dx12::as_test_context(
+        sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware}));
+    if (probe_ctx.has_error())
+        SKIP("could not create a probe dx12 context");
 
-    nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
+    auto probe = provocation_probe();
+    probe.listen(*probe_ctx.value());
+    CC_DEFER
+    {
+        probe_ctx.value()->set_message_callback({});
+    };
 
     provoke_validation_message(*hardware.value());
+
+    if (auto const why = probe.unusable_because(); !why.empty())
+    {
+        nx::allow_errors("CreateCommittedResource", "sg.dx12");
+        nx::allow_warnings("CreateCommittedResource", "sg.dx12");
+        SKIP(why);
+    }
+
+    nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
     CHECK(true);
 }
