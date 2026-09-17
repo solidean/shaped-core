@@ -533,6 +533,8 @@ void metal_stream_system::admit(metal_stream_job job)
     job.drain = _drain.start();
     job.direct_wait = job.is_texture ? static_cast<metal_texture const&>(*job.texture).submission().get()
                                      : static_cast<metal_buffer const&>(*job.buffer).submission().get();
+    job.transfer_wait = job.is_texture ? _ctx->transfers().pending_value_for(*job.texture)
+                                       : _ctx->transfers().pending_value_for(*job.buffer);
     if (job.control != nullptr)
         job.control->total_hint.store(job.source != nullptr ? job.source->total_size_hint() : i64(job.size_in_bytes),
                                       std::memory_order_relaxed);

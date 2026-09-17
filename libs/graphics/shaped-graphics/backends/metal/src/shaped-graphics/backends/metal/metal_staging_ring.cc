@@ -37,7 +37,12 @@ void metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc
 
     _buffer->setLabel(ns_string(label));
     _capacity = capacity_in_bytes;
-    _state.lock([](ring_state& s) { s = {}; });
+    _state.lock(
+        [](ring_state& s)
+        {
+            s = {};
+            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+        });
 }
 
 metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
@@ -51,6 +56,10 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
         {
             if (u64(size) > capacity)
                 return {}; // larger than the whole ring: no reclaim makes this fit
+
+            // A checkpoint held back by a copy that has since drained is freed here rather than at the next retire,
+            // which may never come — an epoch is told about its completion once.
+            reclaim(s);
 
             auto start = align_up(s.next_pos, u64(k_reservation_alignment));
 
@@ -79,9 +88,24 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     return {.buffer = dedicated, .offset = 0, .size = size, .owned = dedicated};
 }
 
+cc::shared_ptr<std::atomic<int>> metal_staging_ring::account_pending_copy()
+{
+    return _state.lock(
+        [](ring_state& s)
+        {
+            s.open_copies->fetch_add(1, std::memory_order_acq_rel);
+            return s.open_copies;
+        });
+}
+
 void metal_staging_ring::on_epoch_advance(sg::epoch closed)
 {
-    _state.lock([&](ring_state& s) { s.checkpoints.push_back({closed, s.next_pos}); });
+    _state.lock(
+        [&](ring_state& s)
+        {
+            s.checkpoints.push_back({closed, s.next_pos, cc::move(s.open_copies)});
+            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+        });
 }
 
 void metal_staging_ring::on_epochs_completed(sg::epoch completed)
@@ -89,16 +113,25 @@ void metal_staging_ring::on_epochs_completed(sg::epoch completed)
     _state.lock(
         [&](ring_state& s)
         {
-            auto retired = isize(0);
-            for (auto const& cp : s.checkpoints)
-            {
-                if (u64(cp.epoch_id) > u64(completed))
-                    break;
-                s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and in end_pos
-                ++retired;
-            }
-            s.checkpoints.remove_from_to(0, retired);
+            s.completed_epoch = cc::max(s.completed_epoch, u64(completed));
+            reclaim(s);
         });
+}
+
+void metal_staging_ring::reclaim(ring_state& s)
+{
+    auto retired = isize(0);
+    for (auto const& cp : s.checkpoints)
+    {
+        if (u64(cp.epoch_id) > s.completed_epoch)
+            break;
+        if (cp.outstanding != nullptr && cp.outstanding->load(std::memory_order_acquire) != 0)
+            break; // a download still owes a copy out of these bytes, whatever the fence says
+
+        s.freed_pos = cp.end_pos; // checkpoints are monotonic in epoch and in end_pos
+        ++retired;
+    }
+    s.checkpoints.remove_from_to(0, retired);
 }
 
 metal_staging_ring::debug_cursors metal_staging_ring::debug_cursor_state()
@@ -119,6 +152,11 @@ void metal_staging_ring::shutdown()
     _buffer = nullptr;
     _device = nullptr;
     _capacity = 0;
-    _state.lock([](ring_state& s) { s = {}; });
+    _state.lock(
+        [](ring_state& s)
+        {
+            s = {};
+            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+        });
 }
 } // namespace sg::backend::metal

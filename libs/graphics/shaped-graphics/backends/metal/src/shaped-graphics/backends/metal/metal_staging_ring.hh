@@ -3,10 +3,13 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
+
+#include <atomic>
 
 /// A shared-storage MTLBuffer that inline transfers stage through, reclaimed an epoch at a time.
 ///
@@ -27,6 +30,13 @@
 ///
 /// **The ring owns the invariant**, rather than trusting a caller to hand back a boundary that is still meaningful.
 /// Epoch boundaries are checkpoints in its own state, retired by walking them against the completed epoch.
+///
+/// **A download's bytes are still needed after its epoch retires**, which is the one thing the epoch fence cannot say.
+/// The GPU write into the ring is what the fence tracks; the copy *out* of it runs from the commit's feedback handler,
+/// on a queue Apple schedules, and nothing orders that against the host seeing the fence.
+/// So a checkpoint also counts the copies still owing against it, and reclaim stops at the first that has any — the
+/// shape dx12's download ring already uses.
+/// Without it a later epoch reuses those bytes and the download reads whatever was written over them.
 ///
 /// A reservation the ring cannot fit gets a dedicated buffer of its own instead of failing.
 /// A transfer larger than the whole ring is legitimate, and so is a frame that stages more than the budget.
@@ -72,11 +82,16 @@ public:
     /// what every call site expects.
     [[nodiscard]] reservation reserve(isize size);
 
+    /// Counts one copy still owing against the open epoch, and hands back the counter to release it with.
+    /// The caller's copy-out decrements it, whether it runs or is cancelled — until then the epoch's bytes stay held.
+    [[nodiscard]] cc::shared_ptr<std::atomic<int>> account_pending_copy();
+
     /// Records where the closing epoch's staging ends, so its bytes are reclaimed when it retires.
     void on_epoch_advance(sg::epoch closed);
 
-    /// Frees every checkpoint up to and including `completed`.
-    /// Walking rather than assigning is what makes a repeated or out-of-order retire harmless.
+    /// Frees every checkpoint up to and including `completed` whose copies have all drained.
+    /// Walking rather than assigning is what makes a repeated or out-of-order retire harmless, and the highest
+    /// completed epoch is remembered so a checkpoint held back by a copy is reclaimed by the next reservation.
     void on_epochs_completed(sg::epoch completed);
 
     [[nodiscard]] isize capacity() const { return _capacity; }
@@ -104,19 +119,28 @@ private:
     MTL::Buffer* _buffer = nullptr;
     isize _capacity = 0;
 
-    /// A closed epoch and where its staging ended; its bytes free once that epoch retires.
+    /// A closed epoch and where its staging ended; its bytes free once that epoch retires and its copies have run.
     struct epoch_checkpoint
     {
         sg::epoch epoch_id = sg::epoch::invalid;
         u64 end_pos = 0;
+        cc::shared_ptr<std::atomic<int>> outstanding; ///< copy-outs still owing against this epoch's bytes
     };
 
     struct ring_state
     {
         u64 next_pos = 0;                         ///< logical bump cursor over the u64 space, never rewound
         u64 freed_pos = 0;                        ///< everything logically below this is reclaimable
+        u64 completed_epoch = 0;                  ///< the highest epoch retire this ring has been told about
         cc::vector<epoch_checkpoint> checkpoints; ///< FIFO, oldest epoch at the front
+
+        /// The counter reservations made right now are charged to; moved onto a checkpoint at the next advance.
+        cc::shared_ptr<std::atomic<int>> open_copies;
     };
+
+    /// Walks the checkpoint FIFO, freeing every leading one that has retired and owes no copy.
+    /// Called under the lock.
+    static void reclaim(ring_state& s);
 
     /// The lock lives here rather than around the whole ring, because the cursors and the checkpoint FIFO have to move
     /// together for the invariant to hold.

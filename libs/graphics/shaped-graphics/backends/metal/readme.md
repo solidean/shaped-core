@@ -62,6 +62,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   So two command buffers are ordered by the submission timeline instead: a submit waits on the highest submission token any resource it touches was last named by.
   Per-resource, so lists sharing nothing still run concurrently.
   `tests/barrier/cross-list-ordering-test.cc` is the sequence that fails without it — and it passes on its own, without the transfer alongside, which is what made this invisible.
+- **The epoch fence says the GPU is done, not that the host has read the bytes back.**
+  An inline download's copy out of the staging ring runs from the commit's feedback handler, on a queue Apple schedules, so the fence can pass first.
+  Reclaiming the span on the fence alone then hands those bytes to the next epoch while a download still owes them.
+  Each of the download ring's epoch checkpoints therefore counts the copies outstanding against it, and reclaim stops at the first that has any.
+  Same shape as dx12's download ring; the overflow buffer a large download gets instead is held by a retain of its own, released by the copy out rather than by the epoch.
 - **A binding group is one argument buffer, and the layout is `binding.index` directly.**
   Metal has no descriptor-set layout object and no root signature, so both layout types here are schema and make no device call at all.
   A group becomes one argument buffer whose 8-byte slot `n` is what `[[id(n)]]` addresses in MSL.

@@ -163,6 +163,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     // Work that neither orders against another submit nor names a token runs after the lock.
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
+    auto* const argument_table = list.take_argument_table();
 
     auto const token = _submission.lock(
         [&](int&)
@@ -208,7 +209,8 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
             // The list's downloads: their bytes are in the staging ring and become readable when this commit
             // completes, which is precisely when the feedback handler runs.
-            auto downloads = std::make_shared<cc::vector<cc::unique_function<void()>>>(list.take_pending_downloads());
+            auto downloads
+                = std::make_shared<cc::vector<metal_command_list::pending_download>>(list.take_pending_downloads());
             auto const has_downloads = !downloads->empty();
             auto* const pending_counter = &_pending_downloads;
             if (has_downloads)
@@ -221,8 +223,11 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
                   sink->report(device_error_kind_of(NS::UInteger(error->code())),
                                describe_error(error, "a metal command buffer failed"));
 
-              for (auto& copy_out : *downloads)
-                  copy_out();
+              for (auto& download : *downloads)
+              {
+                  download.copy_out();
+                  download.settle_staging(); // the ring's span and any overflow buffer go back here, not on the epoch
+              }
               downloads->clear();
 
               // Reaching zero is what `are_transfers_drained` reports, so the completion machinery has to be told.
@@ -249,6 +254,11 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
     _epochs.retire_allocator_with_epoch(allocator);
     _epochs.defer([buffer] { buffer->release(); });
 
+    // The table holds the addresses the encoded commands read as they run, so it outlives the recording by exactly as
+    // long as the buffer does.
+    if (argument_table != nullptr)
+        _epochs.defer([argument_table] { argument_table->release(); });
+
     _slots.release(list.slot());
 
     return token;
@@ -267,21 +277,11 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
     auto* const allocator = list.allocator();
     list.release_ownership();
 
-    // The list's work never runs, so every resource it declared against is left exactly as it was.
-    for (auto const& touched : list.touched_buffers())
-    {
-        auto const& mtl_buffer = static_cast<metal_buffer const&>(*touched);
-        mtl_buffer.access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
-    }
-    for (auto const& touched : list.touched_textures())
-    {
-        auto const& mtl_texture = static_cast<metal_texture const&>(*touched);
-        mtl_texture.access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
-    }
-    for (auto const& touched : list.touched_accels())
-        touched.storage->access().lock([&](metal_resource_access& a) { a.discard(list.slot()); });
+    list.abandon_recording();
 
-    // Nothing was committed, so the GPU never saw either object and both go back immediately.
+    // Nothing was committed, so the GPU never saw any of these and they all go back immediately.
+    if (auto* const table = list.take_argument_table(); table != nullptr)
+        table->release();
     buffer->release();
     allocator->reset();
     _epochs.retire_allocator_with_epoch(allocator);

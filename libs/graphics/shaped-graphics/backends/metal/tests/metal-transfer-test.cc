@@ -2,6 +2,10 @@
 
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/backends/metal/metal_buffer.hh>
+#include <shaped-graphics/backends/metal/metal_command_list.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 
 // Inline transfer, smallest case first.
 // Split one-list from two-list deliberately: the second needs the cross-list queue barrier pair and the first does not.
@@ -236,6 +240,73 @@ TEST("sg metal - an epoch that stages nothing does not free a later epoch's byte
     auto const after = ring.reserve(1024);
     REQUIRE(after.is_valid());
     CHECK(after.offset != between.offset).context("the ring handed the same bytes out twice");
+}
+
+TEST("sg metal - an outstanding copy out holds its epoch's staging past the retire")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // The epoch fence says the GPU finished writing the staging bytes; it says nothing about the host having read
+    // them back out.
+    // That copy runs from the commit's feedback handler, on a queue Apple schedules, so the fence can pass first — and
+    // if the ring frees the span on the fence alone, the next epoch stages over bytes a download still owes.
+    auto& ring = ctx->download_ring();
+
+    auto const staged = ring.reserve(1024);
+    REQUIRE(staged.is_valid());
+    REQUIRE(staged.owned == nullptr).context("the fixture must fit the ring, or it proves nothing about it");
+
+    auto const copy = ring.account_pending_copy();
+
+    auto const epoch = ctx->current_epoch();
+    ring.on_epoch_advance(epoch);
+    auto const staged_end = ring.debug_cursor_state().next_pos;
+
+    ring.on_epochs_completed(epoch);
+    CHECK(ring.debug_cursor_state().freed_pos < staged_end).context("the fence freed bytes a copy out still owes");
+    CHECK(ring.debug_cursor_state().checkpoints == 1);
+
+    // The copy runs, and the bytes come back without another retire — an epoch is told about its completion once, so
+    // a checkpoint held back here would otherwise never be revisited.
+    copy->fetch_sub(1, std::memory_order_acq_rel);
+    auto const next = ring.reserve(1024);
+    REQUIRE(next.is_valid());
+    CHECK(ring.debug_cursor_state().freed_pos == staged_end);
+    CHECK(ring.debug_cursor_state().checkpoints == 0);
+}
+
+TEST("sg metal - a list destroyed without submit or drop hands its slot back clean")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // The per-resource access state is keyed on the command-list slot, and a slot handed back still marked as having
+    // recorded this buffer makes the next list on it skip the buffer entirely — never finalized, never stamped, and so
+    // never ordered against the list that wrote it.
+    auto buffer = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buffer != nullptr);
+
+    {
+        auto abandoned = ctx->create_command_list();
+        abandoned->copy.buffer_data_region<u32>(
+            {.src = buffer, .dst = buffer, .count = 8, .src_offset = 0, .dst_offset = 16});
+        // abandoned leaves scope here, neither submitted nor dropped — one warning on stderr is expected
+    }
+
+    auto next = ctx->create_command_list();
+    next->copy.buffer_data_region<u32>({.src = buffer, .dst = buffer, .count = 8, .src_offset = 0, .dst_offset = 32});
+
+    auto const& mtl_buffer = static_cast<mtl::metal_buffer const&>(*buffer);
+    CHECK(static_cast<mtl::metal_command_list&>(*next).touched_buffers().size() == 1);
+
+    auto const before = mtl_buffer.submission().get();
+    ctx->submit_command_list(cc::move(next));
+    CHECK(mtl_buffer.submission().get() > before).context("the next list never stamped the buffer it touched");
+
+    ctx->block_until_idle();
 }
 
 TEST("sg metal - concurrent submits on one buffer see each other's writes")

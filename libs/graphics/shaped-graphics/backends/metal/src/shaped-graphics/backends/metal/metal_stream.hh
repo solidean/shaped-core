@@ -68,6 +68,13 @@ struct sg::backend::metal::metal_stream_job
     /// onward, so a list submitted later has no claim to order ahead of the stream.
     u64 direct_wait = 0;
 
+    /// The off-frame transfer this one orders behind, on the transfer system's own timeline, read at admission too.
+    ///
+    /// The direct queue is not the only writer: `ctx.upload` commits to the transfer queue, and a stream reading a
+    /// resource an async upload is still filling would otherwise read whatever was there — zeroes, where the texture
+    /// was never written at all.
+    u64 transfer_wait = 0;
+
     /// This transfer's value on its resource's streaming timeline, reserved at admission.
     /// Signalled when the job ends, whichever way it ends — a list waiting on it must never be left waiting.
     u64 stream_value = 0;

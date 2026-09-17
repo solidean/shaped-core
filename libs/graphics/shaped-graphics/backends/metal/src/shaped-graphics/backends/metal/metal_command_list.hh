@@ -5,6 +5,8 @@
 #include <Metal/MTL4AccelerationStructure.hpp>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/memory/shared_ptr.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_barrier.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
@@ -37,6 +39,27 @@ public:
     /// Idempotent.
     void end_recording();
 
+    /// One download this list recorded: the copy out of staging, plus what settles when it runs — or when it never
+    /// does.
+    ///
+    /// **The staging bookkeeping is here rather than inside the closure** because it has to happen on both paths.
+    /// A dropped list cancels the future and still owes the ring its count and the overflow buffer its release.
+    struct pending_download
+    {
+        cc::unique_function<void()> copy_out; ///< memcpy out of staging and settle `completion`
+        cc::shared_async<cc::unit> completion;
+
+        /// Non-null when this download overflowed the ring: a retain of its own, so the epoch's release cannot free
+        /// the bytes before the copy out reads them.
+        MTL::Buffer* staging_retained = nullptr;
+
+        /// Non-null when the bytes came from the ring: the epoch's copy count, which holds its span until this runs.
+        cc::shared_ptr<std::atomic<int>> ring_copy;
+
+        /// Releases what the copy out borrowed, whether it ran or was cancelled.
+        void settle_staging();
+    };
+
     /// One acceleration structure a declare named, kept alive for as long as the recording that names it.
     /// Type-erased owner because sg::blas and sg::tlas share no base, while the tracking lives on the storage both hold.
     struct accel_declare
@@ -60,14 +83,26 @@ public:
 
     /// The copy-outs this list's downloads are waiting on, handed to the submit that will run them.
     /// Moved out, so the list keeps none afterwards.
-    [[nodiscard]] cc::vector<cc::unique_function<void()>> take_pending_downloads()
-    {
-        return cc::move(_pending_downloads);
-    }
+    [[nodiscard]] cc::vector<pending_download> take_pending_downloads() { return cc::move(_pending_downloads); }
+
+    /// Undoes everything a list that will never run left behind: the per-slot access state on every resource it
+    /// declared against, and its downloads, cancelled rather than left unsettled.
+    /// Shared by `drop_command_list` and the destructor's rescue path, which is what keeps the two from drifting.
+    void abandon_recording();
 
     /// Hands the allocator and the buffer over; the list owns neither afterwards.
     /// Called by the context once it has taken responsibility for them, whether the list is submitted or dropped.
     void release_ownership();
+
+    /// Hands the argument table over, or null if this list never bound anything.
+    /// The GPU reads it while the command buffer runs, so a submitted list's table goes back with the epoch and a
+    /// dropped one's goes back at once.
+    [[nodiscard]] MTL4::ArgumentTable* take_argument_table()
+    {
+        auto* const table = _argument_table;
+        _argument_table = nullptr;
+        return table;
+    }
 
 private:
     void transition_texture_layout(raw_texture_handle texture,
@@ -186,6 +221,12 @@ private:
                                                 accel_build_flags flags,
                                                 int geometry_count);
 
+    /// A retain on an overflow download's staging buffer, or null for a reservation inside the ring.
+    [[nodiscard]] static MTL::Buffer* retain_download_staging(metal_staging_ring::reservation const& staging);
+
+    /// The open epoch's copy count for a download staged inside the ring, or null for an overflow reservation.
+    [[nodiscard]] cc::shared_ptr<std::atomic<int>> account_download_staging(metal_staging_ring::reservation const& staging);
+
     /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
     /// Called immediately before the op those declares were for.
     void flush_barriers();
@@ -247,5 +288,5 @@ private:
     /// **Run when the commit completes, not when the epoch retires.**
     /// `ctx.block_until_idle()` drains the GPU without advancing, and an open epoch's payload never runs — so a
     /// deferral onto the epoch would leave every download in an unadvanced frame unsettled forever.
-    cc::vector<cc::unique_function<void()>> _pending_downloads;
+    cc::vector<pending_download> _pending_downloads;
 };

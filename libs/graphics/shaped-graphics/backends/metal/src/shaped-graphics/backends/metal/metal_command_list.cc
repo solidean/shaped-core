@@ -70,11 +70,19 @@ metal_command_list::~metal_command_list()
     // A list destroyed still holding it was never handed to the context, so nothing else will free these — release them
     // here rather than leak, and say so, the way the vulkan backend does.
     if (_buffer == nullptr && _allocator == nullptr)
-        return;
+        return; // submitted or dropped: the context took the buffer, the allocator and the argument table
 
     CC_LOG_WARNING("command list destroyed without submit or drop — releasing it. Submit or drop every list you open.");
 
     end_recording();
+
+    // The same unwind drop does, and for the same reason: a slot handed back still carrying this list's state makes
+    // the next list on it skip every finalize, and a download nothing will ever run has to be cancelled rather than
+    // left waiting.
+    abandon_recording();
+
+    if (_argument_table != nullptr)
+        _argument_table->release();
     if (_buffer != nullptr)
         _buffer->release();
     if (_allocator != nullptr)
@@ -135,6 +143,60 @@ void metal_command_list::end_encoder()
     _encoder->endEncoding();
     _encoder->release();
     _encoder = nullptr;
+}
+
+MTL::Buffer* metal_command_list::retain_download_staging(metal_staging_ring::reservation const& staging)
+{
+    // An overflow buffer goes back with the epoch, which the copy out does not wait for: it runs from the commit's
+    // feedback handler, and the host may have seen the fence long before.
+    // One retain of its own is what keeps the bytes there until the copy has read them.
+    if (staging.owned == nullptr)
+        return nullptr;
+    return staging.owned->retain();
+}
+
+cc::shared_ptr<std::atomic<int>> metal_command_list::account_download_staging(metal_staging_ring::reservation const& staging)
+{
+    // The same problem for a reservation inside the ring, where a retain has nothing to hold: the span is charged to
+    // the open epoch's copy count instead, and the ring will not hand those bytes out again until it drops to zero.
+    if (staging.owned != nullptr)
+        return nullptr;
+    return _metal_context.download_ring().account_pending_copy();
+}
+
+void metal_command_list::pending_download::settle_staging()
+{
+    if (staging_retained != nullptr)
+    {
+        staging_retained->release();
+        staging_retained = nullptr;
+    }
+
+    if (ring_copy != nullptr)
+    {
+        ring_copy->fetch_sub(1, std::memory_order_acq_rel);
+        ring_copy = nullptr;
+    }
+}
+
+void metal_command_list::abandon_recording()
+{
+    // The list's work never runs, so every resource it declared against is left exactly as it was.
+    for (auto const& touched : _touched_buffers)
+        static_cast<metal_buffer const&>(*touched).access().lock([&](metal_resource_access& a) { a.discard(_slot); });
+    for (auto const& touched : _touched_textures)
+        static_cast<metal_texture const&>(*touched).access().lock([&](metal_resource_access& a) { a.discard(_slot); });
+    for (auto const& declared : _touched_accels)
+        declared.storage->access().lock([&](metal_resource_access& a) { a.discard(_slot); });
+
+    // And nothing will ever run the copy outs, so every future they would have settled is cancelled instead —
+    // sg::bytes_future documents that as what a dropped recording list means.
+    for (auto& download : _pending_downloads)
+    {
+        download.completion->push_error(cc::async_error::make_cancelled());
+        download.settle_staging();
+    }
+    _pending_downloads.clear();
 }
 
 void metal_command_list::declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access)
@@ -436,12 +498,15 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     // **The copy-out holds the destination**, sharing its owner rather than borrowing a span into it.
     // A caller is free to drop the future before its epoch retires — nothing in sg says otherwise — and a bare span
     // would then be written into freed memory, which shows up as heap corruption somewhere else entirely.
-    _pending_downloads.push_back(
-        [staging, destination, size_in_bytes, completion]() mutable
-        {
-            cc::memcpy(destination.data(), staging.bytes().data(), size_t(size_in_bytes));
-            completion->push_value(cc::unit{});
-        });
+    _pending_downloads.push_back({.copy_out =
+                                      [staging, destination, size_in_bytes, completion]() mutable
+                                  {
+                                      cc::memcpy(destination.data(), staging.bytes().data(), size_t(size_in_bytes));
+                                      completion->push_value(cc::unit{});
+                                  },
+                                  .completion = completion,
+                                  .staging_retained = retain_download_staging(staging),
+                                  .ring_copy = account_download_staging(staging)});
 
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
 }
@@ -476,12 +541,15 @@ sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_han
     auto completion = cc::make_async_manual<cc::unit>();
     auto const size = layout.size_in_bytes;
 
-    _pending_downloads.push_back(
-        [staging, destination, size, completion]() mutable
-        {
-            cc::memcpy(destination.data(), staging.bytes().data(), size_t(size));
-            completion->push_value(cc::unit{});
-        });
+    _pending_downloads.push_back({.copy_out =
+                                      [staging, destination, size, completion]() mutable
+                                  {
+                                      cc::memcpy(destination.data(), staging.bytes().data(), size_t(size));
+                                      completion->push_value(cc::unit{});
+                                  },
+                                  .completion = completion,
+                                  .staging_retained = retain_download_staging(staging),
+                                  .ring_copy = account_download_staging(staging)});
 
     return sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
 }

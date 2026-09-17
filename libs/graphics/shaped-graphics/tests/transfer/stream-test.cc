@@ -527,6 +527,52 @@ ASYNC_INVOCABLE_TEST("sg stream - a sink that refuses fails the transfer", (sg::
     CHECK(calls == 1);
 }
 
+// A streamed read observes an async upload that is still in flight.
+//
+// The two are different queues on some backends, with no relationship of their own, so the read has to be told —
+// otherwise it copies out bytes the upload has not written yet, which reads as zeroes rather than as an error.
+//
+// **This states the contract rather than forcing the race.** A quiet machine lands the upload first whatever the
+// backend does; what actually caught the missing wait was the concurrent tier-1 sweep, and no amount of flooding from
+// inside one test reproduces it on demand.
+ASYNC_INVOCABLE_TEST("sg stream - a read waits on a pending async upload", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    constexpr isize size = 64 * 1024;
+    auto buf = c.persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto mismatches = 0;
+    for (auto iteration = 0; iteration < 16; ++iteration)
+    {
+        auto const src = pattern(size, 31 + iteration);
+        c.upload.bytes_to_buffer(buf, cc::make_pinned_data(src));
+
+        auto got = cc::vector<byte>();
+        for (isize i = 0; i < size; ++i)
+            got.push_back(byte(0));
+
+        auto stream = c.stream.to_sink_from_buffer(
+            buf,
+            [&](cc::span<byte const> bytes, isize offset)
+            {
+                for (isize i = 0; i < isize(bytes.size()); ++i)
+                    got[offset + i] = bytes[i];
+                return true;
+            },
+            0, size);
+
+        REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+        for (isize i = 0; i < size; ++i)
+            if (got[i] != src[i])
+                ++mismatches;
+    }
+
+    CHECK(mismatches == 0);
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed rows", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

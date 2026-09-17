@@ -42,6 +42,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The fix mirrors what the command lists already do, in dx12's async enqueue paths.
     Metal already does it: its streaming timeline is per resource, so an async transfer waits on the same value a
     command list would — which is also what makes `promote_to_async` a pure statement of intent there.
+    The reverse edge there — a *stream* ordering behind an in-flight async transfer — was missing until the tier-1
+    sweep read zeroes out of a texture an async upload was still filling, and `order_stream_copy` now waits on the
+    transfer timeline as well.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.
