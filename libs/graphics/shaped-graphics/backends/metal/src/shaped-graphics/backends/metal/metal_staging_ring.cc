@@ -1,5 +1,6 @@
 #include "metal_staging_ring.hh"
 
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 
 namespace sg::backend::metal
@@ -28,7 +29,10 @@ metal_staging_ring::~metal_staging_ring()
     shutdown();
 }
 
-cc::result<cc::unit> metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label)
+cc::result<cc::unit> metal_staging_ring::create(MTL::Device* device,
+                                                isize capacity_in_bytes,
+                                                cc::string_view label,
+                                                cc::string_view kind)
 {
     CC_ASSERT(_buffer == nullptr, "a staging ring is created once");
     CC_ASSERT(capacity_in_bytes > 0, "a staging ring needs a positive capacity");
@@ -40,6 +44,7 @@ cc::result<cc::unit> metal_staging_ring::create(MTL::Device* device, isize capac
 
     _buffer->setLabel(ns_string(label));
     _capacity = capacity_in_bytes;
+    _kind = kind;
     _state.lock(
         [](ring_state& s)
         {
@@ -83,6 +88,22 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     if (from_ring.has_value())
         return {.buffer = _buffer, .offset = from_ring.value(), .size = size};
 
+    // **Correct but slow, and the caller is told so** — the same thing dx12's rings warn about, at the same rate.
+    // Once per epoch rather than once per reservation: a frame that overflows once usually overflows many times, and
+    // the useful signal is that it happened at all.
+    auto const warn = _state.lock(
+        [](ring_state& s)
+        {
+            if (s.warned_this_epoch)
+                return false;
+            s.warned_this_epoch = true;
+            return true;
+        });
+    if (warn)
+        CC_LOG_WARNING("an inline transfer of {} bytes did not fit the {}-byte {} ring, so it was staged in a one-off "
+                       "allocation — correct but slow. Raise the matching inline budget past the peak an epoch needs",
+                       size, _capacity, _kind);
+
     // No room, so this transfer gets storage of its own rather than an error.
     // A single transfer larger than the whole ring lands here too, and is perfectly legitimate.
     auto* const dedicated = _device->newBuffer(NS::UInteger(size > 0 ? size : 1), k_staging_options);
@@ -110,6 +131,7 @@ void metal_staging_ring::on_epoch_advance(sg::epoch closed)
         {
             s.checkpoints.push_back({closed, s.next_pos, cc::move(s.open_copies)});
             s.open_copies = cc::make_shared<std::atomic<int>>(0);
+            s.warned_this_epoch = false;
         });
 }
 

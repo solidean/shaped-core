@@ -117,11 +117,13 @@ INVOCABLE_TEST("sg - a list destroyed without submit or drop cancels its downloa
     auto buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buffer != nullptr);
 
+    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
+
     auto download = sg::bytes_future();
     {
         auto cmd = ctx->create_command_list();
         download = cmd->download.bytes_from_buffer(buffer, 0, 256);
-        // cmd leaves scope neither submitted nor dropped, and prints one warning — expected here
+        // cmd leaves scope neither submitted nor dropped
     }
 
     CHECK(download.is_ready());

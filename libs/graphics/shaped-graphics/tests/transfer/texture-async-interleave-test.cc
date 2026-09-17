@@ -81,6 +81,17 @@ cc::shared_async<cc::pinned_data<byte const>> read_back(sg::context_handle const
     ctx->submit_command_list(cc::move(cmd));
     co_return co_await future.bytes();
 }
+/// Declares the layout fix-up's warning, on the backends that have texture layouts at all.
+///
+/// A metal texture has no layout, so its transfer queue can use any of them and the fix-up has nothing to say.
+/// `expect_warning` fails when a record stops appearing, which is what makes this a predicate rather than an
+/// `allow_warnings` that would stop guarding dx12 and vulkan.
+void expect_layout_fixup_warning(sg::context_handle const& ctx)
+{
+    if (ctx->backend() == sg::backend_kind::metal)
+        return;
+    nx::expect_warning("in a layout its transfer queue cannot use");
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - async texture upload composes after a list that wrote the texture",
@@ -88,7 +99,7 @@ ASYNC_INVOCABLE_TEST("sg - async texture upload composes after a list that wrote
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
-    nx::expect_warning("in a layout its transfer queue cannot use"); // make_texture starts it where the fix-up has work
+    expect_layout_fixup_warning(ctx); // make_texture starts it where the fix-up has work
 
     // The reverse edge: the list submits first, and the async upload must land after it rather than under it.
     // Nothing here waits, so the ordering is entirely the reverse stamp's.
@@ -115,7 +126,7 @@ ASYNC_INVOCABLE_TEST("sg - an async texture transfer leaves the texture async-re
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
-    nx::expect_warning("in a layout its transfer queue cannot use"); // make_texture starts it where the fix-up has work
+    expect_layout_fixup_warning(ctx); // make_texture starts it where the fix-up has work
 
     // Nothing restores a layout any more: the transfer leaves the texture where it needed it, and the next list's
     // entry barrier repairs that like it would after any other predecessor.
@@ -198,7 +209,7 @@ ASYNC_INVOCABLE_TEST("sg - two concurrent lists, a submit, an async download, an
 {
     REQUIRE(ctx != nullptr);
     auto const tex = make_texture(ctx);
-    nx::expect_warning("in a layout its transfer queue cannot use"); // make_texture starts it where the fix-up has work
+    expect_layout_fixup_warning(ctx); // make_texture starts it where the fix-up has work
 
     // The scenario the entry-barrier model exists for, end to end.
     //

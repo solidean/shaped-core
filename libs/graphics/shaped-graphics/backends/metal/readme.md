@@ -136,8 +136,9 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `staging_layout_of` counts rows in blocks, so a BC1 row covers four texel rows — treating the two as one fills the top quarter of a compressed texture and overruns a 3D one.
   And a chunk that crosses `bytes_per_image` continues on the next z, which one copy of depth 1 cannot express.
   So a chunk is encoded as one copy per slice, with the last block row of each clamped to the region's height.
-- **A queue wait is queue-wide, so a stream waits for a command list on the CPU instead.**
-  `MTL4CommandQueue::wait` parks everything on that queue, including work already committed to it — so ordering a stream behind a command list by parking the streaming queue closes a cycle.
+- **A queue wait is FIFO, and that is what makes a stream waiting for a command list a cycle.**
+  `MTL4CommandQueue::wait` is an ordinary queue item: work committed before it is unaffected — measured, not assumed.
+  What it does gate is everything committed *after*, which is the problem: a stream spans several batches, so its later batches are committed behind another stream's wait.
   A list waiting on stream J and also touching stream K's resource has K's wait park the queue on it, and J's remaining chunks then queue behind that park.
   Metal breaks the tie after about four seconds and runs the two in the wrong order, which is a hundredfold stall and stale bytes rather than a clean stop.
   So the stream actor holds a job back until the host sees its `direct_wait` submission, and arms a `notifyListener` on the submission timeline to wake itself.

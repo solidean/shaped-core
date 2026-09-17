@@ -1,5 +1,6 @@
 #include "metal-test-common.hh"
 
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
@@ -289,11 +290,13 @@ TEST("sg metal - a list destroyed without submit or drop hands its slot back cle
     auto buffer = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buffer != nullptr);
 
+    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
+
     {
         auto abandoned = ctx->create_command_list();
         abandoned->copy.buffer_data_region<u32>(
             {.src = buffer, .dst = buffer, .count = 8, .src_offset = 0, .dst_offset = 16});
-        // abandoned leaves scope here, neither submitted nor dropped — one warning on stderr is expected
+        // abandoned leaves scope here, neither submitted nor dropped
     }
 
     auto next = ctx->create_command_list();

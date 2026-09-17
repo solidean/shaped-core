@@ -306,9 +306,10 @@ bool metal_stream_system::actor_impl::run_cycle()
 
     // **A job whose direct-queue dependency has not completed is held back HERE, not on the queue.**
     //
-    // A queue wait would park the whole streaming queue on that submission, and that closes a cycle: a command list
-    // that waits for stream J and also touches the resource of stream K has K's wait park the queue on it, so J's
-    // remaining chunks queue behind that park and the list never runs.
+    // A queue wait is FIFO: work committed before it is unaffected, and everything committed after is gated on it.
+    // That second half is the cycle, because a stream spans several batches.
+    // A command list waiting for stream J and also touching stream K's resource has K's wait committed ahead of J's
+    // remaining batches, so those batches wait for a list that is waiting for J.
     // Holding K back costs K a cycle and costs J nothing.
     //
     // The lowest value still held back is remembered so `on_process` can tell a fence that moved since this read from

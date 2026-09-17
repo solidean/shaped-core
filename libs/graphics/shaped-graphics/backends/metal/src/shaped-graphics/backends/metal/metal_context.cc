@@ -44,12 +44,48 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
     CC_RETURN_IF_ERROR(_transfers.create(*this));
     _streams.create(*this);
 
-    CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring"));
-    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring"));
+    CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
+    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
     return cc::unit{};
+}
+
+void metal_context::resize_ring(metal_staging_ring& ring, isize bytes, cc::string_view label, cc::string_view kind)
+{
+    if (bytes <= 0 || ring.capacity() == bytes || is_device_lost())
+        return;
+
+    // Everything that holds a reservation has to have run before the storage behind it goes.
+    block_until_idle();
+
+    auto const previous = ring.capacity();
+    _residency.remove(ring.buffer());
+    ring.shutdown();
+
+    if (auto made = ring.create(_device, bytes, label, kind); made.has_error())
+    {
+        // Fall back to what it was, so a refused resize leaves a usable ring rather than none.
+        report_feedback_error(sg::device_error_kind::creation_failed, made.error().to_string());
+        if (auto restored = ring.create(_device, previous, label, kind); restored.has_error())
+        {
+            report_feedback_error(sg::device_error_kind::creation_failed, restored.error().to_string());
+            return;
+        }
+    }
+
+    _residency.add(ring.buffer());
+}
+
+void metal_context::set_inline_upload_budget(isize bytes)
+{
+    resize_ring(_upload_ring, bytes, "sg inline upload ring", "upload");
+}
+
+void metal_context::set_inline_download_budget(isize bytes)
+{
+    resize_ring(_download_ring, bytes, "sg inline download ring", "download");
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)

@@ -153,6 +153,16 @@ public:
     /// Called once by create_metal_context, before the context is handed out.
     [[nodiscard]] cc::result<cc::unit> create_systems(isize upload_bytes, isize download_bytes);
 
+    /// Resize an inline staging ring, which metal does by replacing it.
+    /// The drain is what makes that safe: a ring's bytes are named by copies recorded into command buffers, so the old
+    /// storage cannot go until everything holding a reservation has run.
+    void set_inline_upload_budget(isize bytes) override;
+    void set_inline_download_budget(isize bytes) override;
+
+    /// The half both budget setters share.
+    void resize_ring(metal_staging_ring& ring, isize bytes, cc::string_view label, cc::string_view kind);
+
+
     /// The transfer-timeline value `list` must wait for before it may run, or 0 when none of its resources has a
     /// transfer in flight.
     [[nodiscard]] u64 highest_pending_transfer(metal_command_list& list) const;

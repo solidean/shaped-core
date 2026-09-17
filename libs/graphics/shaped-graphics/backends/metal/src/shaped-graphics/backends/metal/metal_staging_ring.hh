@@ -4,6 +4,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/shared_ptr.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
@@ -72,7 +73,11 @@ public:
 
     /// Allocate the backing buffer.
     /// Must be called once, before any reservation.
-    [[nodiscard]] cc::result<cc::unit> create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label);
+    /// `kind` is the word the overflow warning names this ring by — "upload" or "download".
+    [[nodiscard]] cc::result<cc::unit> create(MTL::Device* device,
+                                              isize capacity_in_bytes,
+                                              cc::string_view label,
+                                              cc::string_view kind);
 
     /// Reserve `size` bytes, from the ring where it fits and from a dedicated buffer where it does not.
     /// An invalid reservation means the device refused the dedicated allocation, which is the caller's transfer to
@@ -119,6 +124,7 @@ private:
     MTL::Device* _device = nullptr;
     MTL::Buffer* _buffer = nullptr;
     isize _capacity = 0;
+    cc::string _kind;
 
     /// A closed epoch and where its staging ended; its bytes free once that epoch retires and its copies have run.
     struct epoch_checkpoint
@@ -134,6 +140,10 @@ private:
         u64 freed_pos = 0;                        ///< everything logically below this is reclaimable
         u64 completed_epoch = 0;                  ///< the highest epoch retire this ring has been told about
         cc::vector<epoch_checkpoint> checkpoints; ///< FIFO, oldest epoch at the front
+
+        /// Whether the overflow warning has already been logged since the last epoch advance.
+        /// Once per epoch rather than once per reservation, which is the rate dx12's rings warn at.
+        bool warned_this_epoch = false;
 
         /// The counter reservations made right now are charged to; moved onto a checkpoint at the next advance.
         cc::shared_ptr<std::atomic<int>> open_copies;

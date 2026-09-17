@@ -138,7 +138,7 @@ private:
     /// Orders the transfer queue behind everything already claiming this resource: the last direct-queue submission
     /// that named it, its own previous transfer, and any streaming transfer still filling it.
     /// Called with the command buffer open, since an MTL4 queue wait is queue-sequential like the commit it precedes.
-    void wait_for_queues(void const* resource, submission_stamp const& stamp, u64 previous_transfer);
+    void wait_for_queues(void const* resource, submission_stamp const& stamp, claimed const& claim);
 
     /// Commits `command_buffer`, signals `value`, and releases everything the transfer owns once it has run.
     /// `on_complete` runs first, inside the same handler, and is where a download copies its bytes out.

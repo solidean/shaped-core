@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/log.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
@@ -127,7 +128,7 @@ void metal_transfer_system::forget_value(void const* resource, u64 value)
         });
 }
 
-void metal_transfer_system::wait_for_queues(void const* resource, submission_stamp const& stamp, u64 previous_transfer)
+void metal_transfer_system::wait_for_queues(void const* resource, submission_stamp const& stamp, claimed const& claim)
 {
     // A transfer reads or writes bytes the direct queue may still be producing, and the two queues share no timeline of
     // their own — so the copy defers behind the last command list that named this resource.
@@ -138,8 +139,8 @@ void metal_transfer_system::wait_for_queues(void const* resource, submission_sta
     // And behind this resource's own previous transfer.
     // Two commits on one queue are ordered, but the copies inside them are not — an upload and the download that reads
     // it back have to be told, or the download's copy overlaps the upload's.
-    if (previous_transfer > 0)
-        _queue->wait(_timeline, previous_transfer);
+    if (claim.previous > 0)
+        _queue->wait(_timeline, claim.previous);
 
     // And behind any streaming transfer still filling this resource.
     //
@@ -165,13 +166,28 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
     auto* const options = MTL4::CommitOptions::alloc()->init();
-    options->addFeedbackHandler(^void(MTL4::CommitFeedback*) {
+    options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
+      // A transfer command buffer can fail the same way a frame's can, and this handler is the only channel that
+      // says so — the validation layer speaks only to stderr, and the direct queue's handler never sees this queue.
+      if (auto* const error = feedback->error(); error != nullptr)
+          sink->report(device_error_kind_of(NS::UInteger(error->code())),
+                       describe_error(error, "a metal transfer command buffer failed"));
+
+      // **Before `finish`, because `finish` drops the last handle this transfer held to `resource`.**
+      //
+      // The map is keyed on the resource's address, and what makes that safe is an entry existing only while the
+      // resource does.
+      // Erasing after the handle is gone breaks exactly that: the allocator can hand the address to a new resource
+      // first, and this erase then drops ITS pending entry — so the next transfer on the new resource sees no previous
+      // value, waits for nothing, and races the one still in flight.
+      // It needs an address to be reused, so it surfaces as a stale or zeroed readback long afterwards.
+      self->forget_value(resource, value);
+
       (*finish)();
 
       ctx->residency().remove(staging);
       staging->release();
       command_buffer->release();
-      self->forget_value(resource, value);
 
       // This handler is the only thing that knows this commit finished; the epoch cannot say so, because it tracks
       // the direct queue.
@@ -255,7 +271,7 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim.previous);
+    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim);
     encoder->copyFromBuffer(staging, 0, mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), NS::UInteger(data.size()));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -304,7 +320,7 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim.previous);
+    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim);
     encoder->copyFromBuffer(mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), staging, 0, NS::UInteger(size_in_bytes));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -369,7 +385,7 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(texture.get(), mtl_texture.submission(), claim.previous);
+    wait_for_queues(texture.get(), mtl_texture.submission(), claim);
     encoder->copyFromBuffer(
         staging, 0, NS::UInteger(layout.bytes_per_row), NS::UInteger(layout.bytes_per_image),
         MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
@@ -413,7 +429,7 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(texture.get(), mtl_texture.submission(), claim.previous);
+    wait_for_queues(texture.get(), mtl_texture.submission(), claim);
     encoder->copyFromTexture(
         mtl_texture.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
         MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
