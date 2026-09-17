@@ -68,7 +68,8 @@ void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 {
     if (wait.group == nullptr || wait.value == 0)
         return;
-    if (resource->claim_stream_wait_warning(wait.value))
+    // Only a stream still in flight stalls this list, so only that is worth saying; a settled one is still waited on.
+    if (!wait.group->has_reached(wait.value) && resource->claim_stream_wait_warning(wait.value))
         CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the whole "
                        "transfer lands. Wait on the stream handle yourself before using the resource, or call "
                        "promote_to_async on it if the wait is what you want");
