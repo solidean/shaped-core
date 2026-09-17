@@ -79,6 +79,9 @@ ASYNC_TEST("bcache opens degraded when its directory does not exist", main_threa
     auto reported = cc::vector<cc::string>();
     config.on_storage_error = [&](cc::string_view m) { reported.push_back(cc::string(m)); };
 
+    // "says so": degrading is a warning, logged once.
+    nx::expect_warning("cache degraded to always-miss", nx::exactly(1, "bcache"));
+
     auto cache = blob_cache::create(cc::move(config));
     co_await cc::async_settled(cache->opened());
 

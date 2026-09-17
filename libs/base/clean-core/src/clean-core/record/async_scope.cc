@@ -47,6 +47,9 @@ cc::rec::owner_scope::~owner_scope()
 
 cc::rec::trace_id cc::rec::current_owner_id()
 {
+    // No harness ever installed one, so there is nothing to walk the chain for.
+    if (!rec::impl::g_owner_ever_installed.load(cc::memory_order_relaxed))
+        return rec::trace_id::none;
     return rec::trace_id(cc::async_ambient_lookup(rec::impl::owner_tag()));
 }
 
