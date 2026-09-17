@@ -147,23 +147,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
   rather than leaving a deferral to a milestone that has already arrived.
 
-- **Two metal streams can deadlock through the stream queue's own wait, and the fix needs a wake it does not have.**
-  `order_stream_copy` emits `_stream_queue->wait(submission_timeline, job.direct_wait)`, which parks the *whole*
-  streaming queue rather than the job that needs it.
-  The cycle: stream J2 into Y spans several batches; command list L touches X and Y and therefore waits on J2; stream
-  J1 into X is admitted with `direct_wait` = L, and its batch parks the stream queue on L.
-  J2's remaining chunks then queue behind that park, so J2 never finishes and L never runs.
-  It needs three resources and a multi-batch stream, which is why nothing in the suite reaches it.
-  **Holding a job back on the CPU instead is the fix, and it is not enough on its own.**
-  The obvious shape — mark a job ineligible for a cycle while `direct_wait > submission_timeline->signaledValue()` —
-  was written and reverted: the stream actor sleeps whenever a cycle stages nothing, and a job gated only on that
-  fence has no source waker, no new job and no batch completion to bring the actor back, so it stalls forever.
-  Closing it means giving the actor a wake when a direct-queue submission completes.
-  The cheapest route is the commit feedback handler `submit_command_list` already installs, routed through the
-  detachable `metal_feedback` sink the way `notify_drained` is.
-  A second `MTL::SharedEventListener` would also do, but the completion waiter's armed values live without a lock
-  precisely because it is that listener's only caller.
-
 - **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
   `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
   tier-1 invocables stay alias-reachable and un-orphaned.

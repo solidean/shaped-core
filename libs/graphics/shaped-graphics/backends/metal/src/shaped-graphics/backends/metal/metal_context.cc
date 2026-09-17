@@ -426,6 +426,7 @@ void metal_context::shutdown()
     _epochs.shutdown();
 
     // After the epoch shutdown drained the queue, so no notification handler is still due to run.
+    _streams.release_listener();
     if (_completion.listener != nullptr)
     {
         _completion.listener->release();

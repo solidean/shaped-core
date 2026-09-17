@@ -24,6 +24,16 @@ void metal_feedback_sink::notify_drained()
         });
 }
 
+void metal_feedback_sink::notify_stream_progress()
+{
+    _context.lock(
+        [&](metal_context*& ctx)
+        {
+            if (ctx != nullptr)
+                ctx->streams().wake_if_pending();
+        });
+}
+
 void metal_feedback_sink::notify_completion_signal()
 {
     _context.lock(

@@ -32,6 +32,13 @@ public:
     /// So the notify takes the same detachable route the error report does, for the same reason.
     void notify_drained();
 
+    /// Wake the streaming actor because a direct-queue submission completed, if the context is still there.
+    ///
+    /// A stream held back on that submission has nothing else to wake it: the actor sleeps whenever a cycle stages
+    /// nothing, and a fence carries no notification of its own.
+    /// A no-op while no stream is in flight, which is what keeps this off the cost of an ordinary submit.
+    void notify_stream_progress();
+
     /// Tell the context a timeline it armed has been signalled, if it is still there.
     void notify_completion_signal();
 

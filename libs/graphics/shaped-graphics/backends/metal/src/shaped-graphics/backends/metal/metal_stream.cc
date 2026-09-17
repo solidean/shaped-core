@@ -122,6 +122,9 @@ private:
     [[nodiscard]] metal_stream_job* find_job(u64 sequence);
     void reap_finished();
     [[nodiscard]] bool run_cycle();
+
+    /// Arms a shared-event notification that wakes this actor when the submission timeline reaches `value`.
+    void arm_direct_wait_wake(u64 value);
     void deliver_completed_batches();
     void install_waker(metal_stream_job& job);
 
@@ -136,6 +139,13 @@ private:
     cc::vector<u64> _completed;                ///< batch ids the handler reported, to deliver next cycle
     callback_mutex<cc::vector<u64>> _reported; ///< what the commit handler hands over, from its own thread
     u64 _next_batch = 1;
+
+    /// The lowest direct-queue submission any job was held back on in the last cycle, or 0 for none.
+    /// Actor-local, and only ever read on the actor.
+    u64 _gated_direct_wait = 0;
+
+    /// The value a wake is currently armed for, so one gated job does not pile up a notification per cycle.
+    u64 _armed_direct_wait = 0;
 };
 
 void metal_stream_system::actor_impl::on_message(metal_stream_job job)
@@ -185,7 +195,42 @@ bool metal_stream_system::actor_impl::on_process()
 
     // Another cycle only if this one moved something: a cycle that staged nothing has nothing new to find, and the
     // next wake is what a stalled source or an in-flight commit owes us.
-    return staged;
+    if (staged)
+        return true;
+
+    // **Except for a job held back on a direct-queue submission, which has to arm its own wake.**
+    //
+    // A fence carries no notification of its own, and nothing else here is going to run: the actor sleeps whenever a
+    // cycle stages nothing, and a gated job has no source waker and no batch in flight.
+    // Re-reading first also closes the window where the fence moved while this cycle was running.
+    if (_gated_direct_wait == 0)
+        return false;
+
+    auto* const timeline = _ctx->epochs().submission_timeline();
+    if (timeline->signaledValue() >= _gated_direct_wait)
+        return true; // already there; go round again rather than arming for something in the past
+
+    arm_direct_wait_wake(_gated_direct_wait);
+    return false;
+}
+
+void metal_stream_system::actor_impl::arm_direct_wait_wake(u64 value)
+{
+    // Armed whenever the target differs from what is armed, rather than only when it grows: the lowest value still
+    // held back is what matters, and a duplicate notification costs one spurious cycle.
+    if (_armed_direct_wait == value)
+        return;
+    _armed_direct_wait = value;
+
+    auto* const listener = _ctx->streams().listener();
+    if (listener == nullptr)
+        return;
+
+    // The block captures the detachable sink rather than the actor, for the reason every commit handler does: it runs
+    // on a queue Apple owns, at a time that can be after shutdown.
+    auto sink = _ctx->feedback_sink();
+    _ctx->epochs().submission_timeline()->notifyListener(
+        listener, value, [sink](MTL::SharedEvent*, u64) { sink->notify_stream_progress(); });
 }
 
 void metal_stream_system::actor_impl::deliver_completed_batches()
@@ -258,9 +303,26 @@ bool metal_stream_system::actor_impl::run_cycle()
 
     // Eligibility is recomputed every cycle: a cancelled job stops being picked, and a finished one has nothing left.
     auto candidates = cc::vector<sg::impl::transfer_candidate>::create_with_capacity(_jobs.size());
+
+    // **A job whose direct-queue dependency has not completed is held back HERE, not on the queue.**
+    //
+    // A queue wait would park the whole streaming queue on that submission, and that closes a cycle: a command list
+    // that waits for stream J and also touches the resource of stream K has K's wait park the queue on it, so J's
+    // remaining chunks queue behind that park and the list never runs.
+    // Holding K back costs K a cycle and costs J nothing.
+    //
+    // The lowest value still held back is remembered so `on_process` can tell a fence that moved since this read from
+    // one that did not — see the sleep decision there.
+    auto const reached = _ctx->epochs().submission_timeline()->signaledValue();
+    _gated_direct_wait = 0;
+
     for (auto& job : _jobs)
     {
         auto const cancelled = job.control != nullptr && job.control->cancelled.load(std::memory_order_relaxed);
+        auto const waiting_on_direct = job.direct_wait > reached;
+        if (waiting_on_direct && (_gated_direct_wait == 0 || job.direct_wait < _gated_direct_wait))
+            _gated_direct_wait = job.direct_wait;
+
         candidates.push_back({
             .flavor = sg::impl::transfer_flavor::streaming,
             .priority = job.control != nullptr ? job.control->priority.load(std::memory_order_relaxed) : 0,
@@ -269,7 +331,7 @@ bool metal_stream_system::actor_impl::run_cycle()
             // Eligibility is per cycle and never sticky: a source that said `not_yet` last time is asked again, which
             // is what makes its waker mean something.
             // Re-polling costs nothing, because a cycle that stages nothing sleeps until the next wake.
-            .eligible = !job.failed && !job.source_exhausted && !cancelled,
+            .eligible = !job.failed && !job.source_exhausted && !cancelled && !waiting_on_direct,
         });
     }
 
@@ -552,6 +614,11 @@ void metal_stream_system::create(metal_context& ctx)
     // Without this the waiter is never told, which the busy-spin used to hide.
     _drain.notify_on_drained(&ctx);
 
+    // What a job held back on a direct-queue submission is woken by.
+    // Its default queue is Apple's, which is the point: the wake must arrive whether or not anything of ours is
+    // running.
+    _listener = MTL::SharedEventListener::alloc()->init();
+
     // The impl is built here rather than through make_threaded_actor, because the handle exposes it only after
     // shutdown and the ratio knobs need it while it runs.
     auto impl = std::make_unique<actor_impl>(ctx);
@@ -572,6 +639,14 @@ void metal_stream_system::shutdown()
     _actor = nullptr;
     _impl = nullptr;
     _ctx = nullptr;
+}
+
+void metal_stream_system::release_listener()
+{
+    if (_listener == nullptr)
+        return;
+    _listener->release();
+    _listener = nullptr;
 }
 
 void metal_stream_system::admit(metal_stream_job job)
@@ -769,6 +844,12 @@ sg::stream_download_handle metal_stream_system::finish_download(metal_stream_job
     auto future = sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
     admit(cc::move(job));
     return sg::stream_download_handle(cc::move(control), cc::move(future));
+}
+
+void metal_stream_system::wake_if_pending()
+{
+    if (_impl != nullptr && has_pending())
+        _impl->wake();
 }
 
 void metal_stream_system::set_upload_ratio(float ratio)

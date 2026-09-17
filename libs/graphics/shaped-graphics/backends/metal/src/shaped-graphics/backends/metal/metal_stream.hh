@@ -138,6 +138,23 @@ public:
     /// Whether any transfer is still in flight — what `block_until_transfers_drained` waits on.
     [[nodiscard]] bool has_pending() const { return !_drain.is_idle(); }
 
+    /// Wakes the actor if any stream is in flight, so a job held back on a direct-queue submission is re-examined.
+    ///
+    /// Called from a shared-event notification, on Apple's thread, through the detachable sink — which is why it is
+    /// gated on `has_pending()` rather than on a flag the actor keeps: the drain token exists from before a job is
+    /// admitted until after it settles, so there is no window where a notification finds nothing to wake.
+    void wake_if_pending();
+
+    /// The listener a gated job's wake is armed on.
+    /// Its own, rather than the completion waiter's: that one's armed values live without a lock precisely because it
+    /// is the only caller of its listener.
+    [[nodiscard]] MTL::SharedEventListener* listener() const { return _listener; }
+
+    /// Releases that listener.
+    /// Separate from `shutdown` because it must happen after the epoch system has drained the queue, at which point
+    /// every armed value has been reached and no notification is still due.
+    void release_listener();
+
 private:
     class actor_impl;
 
@@ -152,4 +169,5 @@ private:
     actor_impl* _impl = nullptr; // owned by _actor; reachable for the ratio knobs
     sg::impl::transfer_drain _drain;
     cc::atomic<u64> _next_sequence = {1};
+    MTL::SharedEventListener* _listener = nullptr;
 };
