@@ -165,7 +165,7 @@ public:
 
     /// The transfer-timeline value `list` must wait for before it may run, or 0 when none of its resources has a
     /// transfer in flight.
-    [[nodiscard]] u64 highest_pending_transfer(metal_command_list& list) const;
+    [[nodiscard]] pending_transfers highest_pending_transfer(metal_command_list& list) const;
 
     /// Move every resource `list` touched from its per-list state into the state the next list synchronizes against.
     void finalize_touched_buffers(metal_command_list& list);

@@ -86,6 +86,13 @@ cc::result<cc::unit> metal_transfer_system::create(metal_context& ctx)
     if (_queue == nullptr)
         return metal_error(error, "the metal device refused a transfer queue");
 
+    auto* const download_descriptor = MTL4::CommandQueueDescriptor::alloc()->init();
+    download_descriptor->setLabel(ns_string("sg download queue"));
+    _download_queue = ctx.device()->newMTL4CommandQueue(download_descriptor, &error);
+    download_descriptor->release();
+    if (_download_queue == nullptr)
+        return metal_error(error, "the metal device refused a download queue");
+
     auto* const stream_descriptor = MTL4::CommandQueueDescriptor::alloc()->init();
     stream_descriptor->setLabel(ns_string("sg stream queue"));
     _stream_queue = ctx.device()->newMTL4CommandQueue(stream_descriptor, &error);
@@ -93,54 +100,75 @@ cc::result<cc::unit> metal_transfer_system::create(metal_context& ctx)
     if (_stream_queue == nullptr)
         return metal_error(error, "the metal device refused a streaming queue");
 
-    _timeline = ctx.device()->newSharedEvent();
-    if (_timeline == nullptr)
+    _upload_timeline = ctx.device()->newSharedEvent();
+    _download_timeline = ctx.device()->newSharedEvent();
+    if (_upload_timeline == nullptr || _download_timeline == nullptr)
         return cc::error("the metal device refused a transfer timeline");
 
     // The transfer queue's work touches the same resources the frame's does, so it needs the same residency set.
     ctx.residency().attach_to(_queue);
+    ctx.residency().attach_to(_download_queue);
     ctx.residency().attach_to(_stream_queue);
     return cc::unit{};
 }
 
-metal_transfer_system::claimed metal_transfer_system::claim_value(void const* resource)
+metal_transfer_system::claimed metal_transfer_system::claim_value(void const* resource, bool is_download)
 {
     return _state.lock(
         [&](state& s)
         {
             auto& slot = s.pending_by_resource[resource];
             auto const previous = slot;
-            slot = s.next_value++;
-            return claimed{.value = slot, .previous = previous};
+
+            auto& mine = is_download ? slot.download : slot.upload;
+            mine = is_download ? s.next_download_value++ : s.next_upload_value++;
+
+            return claimed{.value = mine, .is_download = is_download, .previous = previous};
         });
 }
 
-void metal_transfer_system::forget_value(void const* resource, u64 value)
+void metal_transfer_system::forget_value(void const* resource, u64 value, bool is_download)
 {
     // Only the newest transfer clears the entry, so a resource with two in flight keeps the higher value until both are
     // done — and the map stays empty of resources that have none, which is what makes keying it on an address safe.
     _state.lock(
         [&](state& s)
         {
-            auto const* const found = s.pending_by_resource.get_ptr(resource);
-            if (found != nullptr && *found == value)
+            auto* const found = s.pending_by_resource.get_ptr(resource);
+            if (found == nullptr)
+                return;
+
+            auto& mine = is_download ? found->download : found->upload;
+            if (mine == value)
+                mine = 0;
+            if (!found->any())
                 (void)s.pending_by_resource.erase(resource);
         });
 }
 
-void metal_transfer_system::wait_for_queues(void const* resource, submission_stamp const& stamp, claimed const& claim)
+void metal_transfer_system::wait_for_pending(MTL4::CommandQueue* queue, pending_transfers const& pending) const
+{
+    if (pending.upload > 0)
+        queue->wait(_upload_timeline, pending.upload);
+    if (pending.download > 0)
+        queue->wait(_download_timeline, pending.download);
+}
+
+void metal_transfer_system::wait_for_queues(MTL4::CommandQueue* queue,
+                                            void const* resource,
+                                            submission_stamp const& stamp,
+                                            claimed const& claim)
 {
     // A transfer reads or writes bytes the direct queue may still be producing, and the two queues share no timeline of
     // their own — so the copy defers behind the last command list that named this resource.
     // Zero means no list ever did, and the submission event would never reach it.
     if (auto const wait = stamp.get(); wait > 0)
-        _queue->wait(_ctx->epochs().submission_timeline(), wait);
+        queue->wait(_ctx->epochs().submission_timeline(), wait);
 
     // And behind this resource's own previous transfer.
     // Two commits on one queue are ordered, but the copies inside them are not — an upload and the download that reads
     // it back have to be told, or the download's copy overlaps the upload's.
-    if (claim.previous > 0)
-        _queue->wait(_timeline, claim.previous);
+    wait_for_pending(queue, claim.previous);
 
     // And behind any streaming transfer still filling this resource.
     //
@@ -149,19 +177,22 @@ void metal_transfer_system::wait_for_queues(void const* resource, submission_sta
     // The per-resource streaming timeline is what makes it cheap here: an async transfer waits on the same value a
     // command list would, and `promote_to_async` is then purely the statement of intent it is documented to be.
     if (auto const wait = pending_stream_wait(resource); wait.event != nullptr)
-        _queue->wait(wait.event, wait.value);
+        queue->wait(wait.event, wait.value);
 }
 
-void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
+void metal_transfer_system::commit(MTL4::CommandQueue* queue,
+                                   MTL4::CommandBuffer* command_buffer,
                                    MTL4::CommandAllocator* allocator,
                                    MTL::Buffer* staging,
                                    void const* resource,
-                                   u64 value,
+                                   claimed const& claim,
                                    cc::unique_function<void()> on_complete)
 {
     auto* const pending = &_pending;
     auto* const ctx = _ctx;
     auto* const self = this;
+    auto const value = claim.value;
+    auto const is_download = claim.is_download;
     auto sink = _ctx->feedback_sink();
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
@@ -181,7 +212,7 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
       // first, and this erase then drops ITS pending entry — so the next transfer on the new resource sees no previous
       // value, waits for nothing, and races the one still in flight.
       // It needs an address to be reused, so it surfaces as a stale or zeroed readback long afterwards.
-      self->forget_value(resource, value);
+      self->forget_value(resource, value, is_download);
 
       (*finish)();
 
@@ -208,29 +239,29 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
     });
 
     MTL4::CommandBuffer const* const buffers[] = {command_buffer};
-    _queue->commit(buffers, 1, options);
+    queue->commit(buffers, 1, options);
     options->release();
 
-    _queue->signalEvent(_timeline, value);
+    queue->signalEvent(claim.is_download ? _download_timeline : _upload_timeline, claim.value);
 }
 
-u64 metal_transfer_system::pending_value_for(sg::raw_buffer const& buffer) const
+pending_transfers metal_transfer_system::pending_value_for(sg::raw_buffer const& buffer) const
 {
     return _state.lock(
-        [&](state& s) -> u64
+        [&](state& s) -> pending_transfers
         {
             auto const* const found = s.pending_by_resource.get_ptr(static_cast<void const*>(&buffer));
-            return found != nullptr ? *found : u64(0);
+            return found != nullptr ? *found : pending_transfers{};
         });
 }
 
-u64 metal_transfer_system::pending_value_for(sg::raw_texture const& texture) const
+pending_transfers metal_transfer_system::pending_value_for(sg::raw_texture const& texture) const
 {
     return _state.lock(
-        [&](state& s) -> u64
+        [&](state& s) -> pending_transfers
         {
             auto const* const found = s.pending_by_resource.get_ptr(static_cast<void const*>(&texture));
-            return found != nullptr ? *found : u64(0);
+            return found != nullptr ? *found : pending_transfers{};
         });
 }
 
@@ -238,6 +269,7 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
                                              cc::pinned_data<byte const> const& data,
                                              isize offset_in_bytes)
 {
+    auto* const transfer_queue = _queue;
     CC_ASSERT(buffer != nullptr, "async upload target buffer is null");
     CC_ASSERT(!buffer->is_expired(), "async upload target is a transient resource used past its epoch");
     CC_ASSERT(buffer->usage().has(sg::buffer_usage::copy_dst), "async upload target lacks copy_dst usage");
@@ -262,7 +294,7 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
-    auto const claim = claim_value(buffer.get());
+    auto const claim = claim_value(buffer.get(), transfer_queue == _download_queue);
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const allocator = resources.allocator;
@@ -271,7 +303,7 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim);
+    wait_for_queues(transfer_queue, buffer.get(), mtl_buffer.submission(), claim);
     encoder->copyFromBuffer(staging, 0, mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), NS::UInteger(data.size()));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -285,13 +317,14 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
     //
     // The pin is NOT held: the bytes were copied into staging above, on this thread.
     auto held = std::make_shared<sg::raw_buffer_handle>(cc::move(buffer));
-    commit(command_buffer, allocator, staging, held->get(), claim.value, [held] { held->reset(); });
+    commit(transfer_queue, command_buffer, allocator, staging, held->get(), claim, [held] { held->reset(); });
 }
 
 sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_handle buffer,
                                                              isize offset_in_bytes,
                                                              isize size_in_bytes)
 {
+    auto* const transfer_queue = _download_queue;
     CC_ASSERT(buffer != nullptr, "async download source buffer is null");
     CC_ASSERT(!buffer->is_expired(), "async download source is a transient resource used past its epoch");
     CC_ASSERT(buffer->usage().has(sg::buffer_usage::copy_src), "async download source lacks copy_src usage");
@@ -311,7 +344,7 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
-    auto const claim = claim_value(buffer.get());
+    auto const claim = claim_value(buffer.get(), transfer_queue == _download_queue);
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const allocator = resources.allocator;
@@ -320,7 +353,7 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_buffer = static_cast<metal_buffer const&>(*buffer);
-    wait_for_queues(buffer.get(), mtl_buffer.submission(), claim);
+    wait_for_queues(transfer_queue, buffer.get(), mtl_buffer.submission(), claim);
     encoder->copyFromBuffer(mtl_buffer.buffer(), NS::UInteger(offset_in_bytes), staging, 0, NS::UInteger(size_in_bytes));
     encoder->endEncoding();
     command_buffer->endCommandBuffer();
@@ -334,7 +367,7 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
     auto weak_destination = std::weak_ptr<void const>(destination.pin());
     auto destination_span = destination.span();
     auto held_buffer = std::make_shared<sg::raw_buffer_handle>(cc::move(buffer));
-    commit(command_buffer, allocator, staging, held_buffer->get(), claim.value,
+    commit(transfer_queue, command_buffer, allocator, staging, held_buffer->get(), claim,
            [held_buffer, weak_destination, destination_span, staging, size_in_bytes, completion]
            {
                if (auto const alive = weak_destination.lock(); alive != nullptr)
@@ -353,6 +386,7 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
                                               sg::subresource_index const& subresource,
                                               sg::texture_region const& region)
 {
+    auto* const transfer_queue = _queue;
     CC_ASSERT(texture != nullptr, "async upload target texture is null");
     CC_ASSERT(!texture->is_expired(), "async upload target is a transient texture used past its epoch");
     CC_ASSERT(texture->usage().has(sg::texture_usage::copy_dst), "async upload target texture lacks copy_dst usage");
@@ -376,7 +410,7 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
-    auto const claim = claim_value(texture.get());
+    auto const claim = claim_value(texture.get(), transfer_queue == _download_queue);
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const allocator = resources.allocator;
@@ -385,7 +419,7 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(texture.get(), mtl_texture.submission(), claim);
+    wait_for_queues(transfer_queue, texture.get(), mtl_texture.submission(), claim);
     encoder->copyFromBuffer(
         staging, 0, NS::UInteger(layout.bytes_per_row), NS::UInteger(layout.bytes_per_image),
         MTL::Size(NS::UInteger(region.size[0]), NS::UInteger(region.size[1]), NS::UInteger(region.size[2])),
@@ -395,13 +429,14 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
     command_buffer->endCommandBuffer();
 
     auto held = std::make_shared<sg::raw_texture_handle>(cc::move(texture));
-    commit(command_buffer, allocator, staging, held->get(), claim.value, [held] { held->reset(); });
+    commit(transfer_queue, command_buffer, allocator, staging, held->get(), claim, [held] { held->reset(); });
 }
 
 sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_handle texture,
                                                               sg::subresource_index const& subresource,
                                                               sg::texture_region const& region)
 {
+    auto* const transfer_queue = _download_queue;
     CC_ASSERT(texture != nullptr, "async download source texture is null");
     CC_ASSERT(!texture->is_expired(), "async download source is a transient texture used past its epoch");
     CC_ASSERT(texture->usage().has(sg::texture_usage::copy_src), "async download source texture lacks copy_src usage");
@@ -420,7 +455,7 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
-    auto const claim = claim_value(texture.get());
+    auto const claim = claim_value(texture.get(), transfer_queue == _download_queue);
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const allocator = resources.allocator;
@@ -429,7 +464,7 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
 
     auto* const encoder = command_buffer->computeCommandEncoder();
     auto const& mtl_texture = static_cast<metal_texture const&>(*texture);
-    wait_for_queues(texture.get(), mtl_texture.submission(), claim);
+    wait_for_queues(transfer_queue, texture.get(), mtl_texture.submission(), claim);
     encoder->copyFromTexture(
         mtl_texture.texture(), NS::UInteger(subresource.array_layer), NS::UInteger(subresource.mip_level),
         MTL::Origin(NS::UInteger(region.offset[0]), NS::UInteger(region.offset[1]), NS::UInteger(region.offset[2])),
@@ -445,7 +480,7 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
     auto const size_in_bytes = layout.size_in_bytes;
 
     auto held = std::make_shared<sg::raw_texture_handle>(cc::move(texture));
-    commit(command_buffer, allocator, staging, held->get(), claim.value,
+    commit(transfer_queue, command_buffer, allocator, staging, held->get(), claim,
            [held, weak_destination, destination_span, staging, size_in_bytes, completion]
            {
                if (auto const alive = weak_destination.lock(); alive != nullptr)
@@ -503,8 +538,7 @@ void metal_transfer_system::order_stream_copy(metal_stream_job const& job)
     // transfer queue has no relationship to a stream committed to the streaming one.
     // A queue wait is safe for this one: an async transfer never queues behind a stream, so there is no cycle.
     // Read at admission, so a transfer issued after this stream was admitted has no claim to order ahead of it.
-    if (job.transfer_wait > 0)
-        _stream_queue->wait(_timeline, job.transfer_wait);
+    wait_for_pending(_stream_queue, job.transfer_wait);
 }
 
 u64 metal_transfer_system::reserve_stream_value(void const* resource)
@@ -574,10 +608,14 @@ void metal_transfer_system::shutdown()
             s.stream_timelines.clear();
         });
 
-    _timeline->release();
-    _timeline = nullptr;
+    _upload_timeline->release();
+    _upload_timeline = nullptr;
+    _download_timeline->release();
+    _download_timeline = nullptr;
     _stream_queue->release();
     _stream_queue = nullptr;
+    _download_queue->release();
+    _download_queue = nullptr;
     _queue->release();
     _queue = nullptr;
     _ctx = nullptr;

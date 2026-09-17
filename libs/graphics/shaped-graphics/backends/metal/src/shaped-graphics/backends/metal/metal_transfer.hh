@@ -64,8 +64,8 @@ public:
 
     /// The timeline value a command list must wait for before it may touch this resource, or 0 for none.
     /// One overload per kind, because a list tracks its buffers and its textures separately.
-    [[nodiscard]] u64 pending_value_for(sg::raw_buffer const& buffer) const;
-    [[nodiscard]] u64 pending_value_for(sg::raw_texture const& texture) const;
+    [[nodiscard]] pending_transfers pending_value_for(sg::raw_buffer const& buffer) const;
+    [[nodiscard]] pending_transfers pending_value_for(sg::raw_texture const& texture) const;
 
     /// Commits one streaming batch on the transfer queue, running `on_complete` when the GPU has finished it.
     /// The streaming actor records the copies; this owns the queue, so it owns the commit.
@@ -105,7 +105,8 @@ public:
     [[nodiscard]] stream_wait pending_stream_wait(void const* resource) const;
 
     /// The event a wait is expressed on; the direct queue waits on it at submit.
-    [[nodiscard]] MTL::SharedEvent* timeline() const { return _timeline; }
+    /// Orders `queue` behind everything `pending` names, on whichever timelines carry it.
+    void wait_for_pending(MTL4::CommandQueue* queue, pending_transfers const& pending) const;
 
     /// Whether any transfer is still outstanding — what `block_until_transfers_drained` waits on.
     [[nodiscard]] bool has_pending() const { return _pending.load(std::memory_order_acquire) > 0; }
@@ -125,41 +126,49 @@ private:
     struct claimed
     {
         u64 value = 0;
-        u64 previous = 0;
+        bool is_download = false;
+        pending_transfers previous;
     };
 
     /// Claims the next value for `resource` and hands back the one it replaces.
     /// Both under one lock, because the previous value is exactly what the new transfer has to wait for.
-    [[nodiscard]] claimed claim_value(void const* resource);
+    [[nodiscard]] claimed claim_value(void const* resource, bool is_download);
 
     /// Drops `resource`'s entry once `value` has completed, unless a newer transfer has since claimed it.
-    void forget_value(void const* resource, u64 value);
+    void forget_value(void const* resource, u64 value, bool is_download);
 
     /// Orders the transfer queue behind everything already claiming this resource: the last direct-queue submission
     /// that named it, its own previous transfer, and any streaming transfer still filling it.
     /// Called with the command buffer open, since an MTL4 queue wait is queue-sequential like the commit it precedes.
-    void wait_for_queues(void const* resource, submission_stamp const& stamp, claimed const& claim);
+    void wait_for_queues(MTL4::CommandQueue* queue,
+                         void const* resource,
+                         submission_stamp const& stamp,
+                         claimed const& claim);
 
     /// Commits `command_buffer`, signals `value`, and releases everything the transfer owns once it has run.
     /// `on_complete` runs first, inside the same handler, and is where a download copies its bytes out.
-    void commit(MTL4::CommandBuffer* command_buffer,
+    void commit(MTL4::CommandQueue* queue,
+                MTL4::CommandBuffer* command_buffer,
                 MTL4::CommandAllocator* allocator,
                 MTL::Buffer* staging,
                 void const* resource,
-                u64 value,
+                claimed const& claim,
                 cc::unique_function<void()> on_complete);
 
     /// The next timeline value, claimed under `_state` so a value and its record are published together.
     struct state
     {
-        u64 next_value = 1;
+        /// One counter per queue, because one shared event cannot take signals from two queues: they complete
+        /// independently, so a later value can land first and drive the event backwards.
+        u64 next_upload_value = 1;
+        u64 next_download_value = 1;
 
         /// Per resource, the highest transfer value claimed against it.
         /// Keyed on the resource's address, which is safe because an entry is erased when its resource's transfers
         /// have all completed — the recycled-address hazard needs a *cache* that outlives the resource, and this does
         /// not.
         /// One map for buffers and textures alike: the addresses cannot collide, and the question is the same one.
-        cc::map<void const*, u64> pending_by_resource;
+        cc::map<void const*, pending_transfers> pending_by_resource;
 
         /// The streaming timeline of every resource that has ever been streamed, and its next value.
         ///
@@ -179,8 +188,10 @@ private:
     /// An async transfer ordering behind an in-flight stream therefore blocks the stream's own copies too, if they
     /// share a queue — the stream can never finish, so the wait never clears.
     /// A second queue costs one object and removes the cycle entirely.
+    MTL4::CommandQueue* _download_queue = nullptr; // DIAG
     MTL4::CommandQueue* _stream_queue = nullptr;
-    MTL::SharedEvent* _timeline = nullptr;
+    MTL::SharedEvent* _upload_timeline = nullptr;
+    MTL::SharedEvent* _download_timeline = nullptr;
 
     // A callback mutex, because `forget_value` runs inside a commit handler — see metal_common.hh.
     mutable callback_mutex<state> _state;

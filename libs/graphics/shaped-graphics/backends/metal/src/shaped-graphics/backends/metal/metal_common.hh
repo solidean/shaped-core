@@ -51,6 +51,19 @@ private:
 /// Without it an async download of a buffer a list has just filled reads whatever was there before.
 ///
 /// Held by `metal_buffer` and `metal_texture` alike, since the hazard is the resource's, not the kind's.
+/// What one resource still owes on each off-frame transfer queue, as the values a waiter must reach.
+/// Zero on a side means nothing of that direction is outstanding.
+///
+/// Two, because uploads and downloads run on queues of their own and one shared event cannot take signals from both:
+/// they complete independently, so a later value can land first and drive the event backwards.
+struct sg::backend::metal::pending_transfers
+{
+    u64 upload = 0;
+    u64 download = 0;
+
+    [[nodiscard]] bool any() const { return upload > 0 || download > 0; }
+};
+
 struct sg::backend::metal::submission_stamp
 {
     [[nodiscard]] u64 get() const { return _value.load(cc::memory_order_acquire); }

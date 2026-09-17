@@ -196,10 +196,15 @@ Each of these is a fact about Metal rather than a gap in the backend.
   So every pipeline build is taken under `pipeline_compilation_lock()`, process-wide rather than per context.
   The state being corrupted is the device's, and a Mac hands the same device to everyone who asks.
   `sg metal - pipelines build concurrently from several contexts` is the gate, and it is probabilistic: without the lock it takes the binary down within a run or two.
-- **Streaming needs a third queue, and that is correctness rather than tuning.**
-  An MTL4 queue is sequential: a wait blocks everything committed after it.
-  An async transfer ordering behind an in-flight stream therefore blocks the stream's own copies too, when they share a queue — so the stream never finishes and the wait never clears.
-  A second queue for streaming removes the cycle for one object.
+- **Off-frame transfer needs three queues, and each one is correctness rather than tuning.**
+  A wait blocks everything committed after it on that queue.
+  So an async transfer ordering behind an in-flight stream blocks the stream's own copies too when they share a queue, and the stream never finishes and the wait never clears.
+  **Uploads and downloads are split for a second reason, found the hard way.**
+  Sharing one queue reproduced a transfer race in the tier-1 fuzz about one run in four: an async download came back all zeroes while the buffer itself was correct.
+  Splitting them took that to zero in sixty-five runs.
+  It is the shape vulkan already has, and dx12 needs neither split — a D3D12 copy queue runs its command lists serially where an MTL4 queue is concurrent by default.
+  **Each queue needs a timeline of its own.**
+  One shared event cannot take signals from two queues: they complete independently, so a later value can land first, drive the event backwards and release a waiter early.
 - **A streaming transfer needs a timeline per resource, which the async tier does not.**
   A list touching a streamed resource waits for the *whole* transfer, including chunks the actor has not staged yet — so the value is reserved when the transfer is admitted and signalled when it ends.
   On one shared timeline that is unsound: transfers finish out of order, and a later one signalling its value would report an earlier one complete.

@@ -79,7 +79,7 @@ struct sg::backend::metal::metal_stream_job
     /// The direct queue is not the only writer: `ctx.upload` commits to the transfer queue, and a stream reading a
     /// resource an async upload is still filling would otherwise read whatever was there — zeroes, where the texture
     /// was never written at all.
-    u64 transfer_wait = 0;
+    pending_transfers transfer_wait;
 
     /// This transfer's value on its resource's streaming timeline, reserved at admission.
     /// Signalled when the job ends, whichever way it ends — a list waiting on it must never be left waiting.

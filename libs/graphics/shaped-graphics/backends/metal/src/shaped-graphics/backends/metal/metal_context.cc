@@ -226,8 +226,8 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             // relationship to a command list committed to the direct one, so a list reading a buffer an upload is
             // still filling would read whatever was there.
             // One wait covers the whole list, on the highest value any of its resources claimed.
-            if (auto const wait = highest_pending_transfer(list); wait > 0)
-                _queue->wait(_transfers.timeline(), wait);
+            if (auto const pending = highest_pending_transfer(list); pending.any())
+                _transfers.wait_for_pending(_queue, pending);
 
             wait_for_streams(list);
 
@@ -326,13 +326,19 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
     _slots.release(list.slot());
 }
 
-u64 metal_context::highest_pending_transfer(metal_command_list& list) const
+pending_transfers metal_context::highest_pending_transfer(metal_command_list& list) const
 {
-    u64 highest = 0;
+    auto highest = pending_transfers{};
+    auto const fold = [&](pending_transfers const& one)
+    {
+        highest.upload = cc::max(highest.upload, one.upload);
+        highest.download = cc::max(highest.download, one.download);
+    };
+
     for (auto const& touched : list.touched_buffers())
-        highest = cc::max(highest, _transfers.pending_value_for(*touched));
+        fold(_transfers.pending_value_for(*touched));
     for (auto const& touched : list.touched_textures())
-        highest = cc::max(highest, _transfers.pending_value_for(*touched));
+        fold(_transfers.pending_value_for(*touched));
     return highest;
 }
 

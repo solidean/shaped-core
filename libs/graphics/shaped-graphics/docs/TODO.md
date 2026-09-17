@@ -147,27 +147,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
   rather than leaving a deferral to a milestone that has already arrived.
 
-- **A metal async transfer races something, and the tier-1 transfer fuzz is pinned for it.**
-  `sg - upload download fuzz test` skips on metal.
-  It fails about one run in four — measured 4 of 15 at seed 937133793560700859 — with one of two symptoms: an async
-  download whose whole region comes back zero while the buffer itself is correct afterwards, or an inline download
-  that reads stale bytes.
-  **What is established:**
-  it needs both an async upload and an async download op present, and it needs a run's accumulated context state — the
-  minimal reproducers the fuzz prints do not reproduce standalone.
-  The commit feedback handler genuinely fires at completion (`GPUEndTime` set, the transfer timeline already signalled),
-  and the per-resource ordering chain is never observed broken.
-  **What is ruled out:**
-  residency removal (9 of 15 with `remove` disabled, no better than baseline), `requestResidency` after every add, and
-  the resource-lifetime hazard below, which is real and fixed and changed nothing here (4 of 15 either way).
-  **What is suggestive:**
-  ordering every transfer behind every earlier one — rather than behind its own resource's previous — takes the failure
-  rate from about 27% to about 12%, but does not remove it.
-  It was not landed: it costs the transfer queue its concurrency for a partial, unexplained improvement.
-  **Every probe added so far hides it**, including per-op logging and one extra mutex acquisition on the issue path,
-  which is the signature of a memory-visibility race rather than a missing fence.
-  That is the next thing to chase: what the two concurrent transfer command buffers actually share.
-
 - **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
   `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
   tier-1 invocables stay alias-reachable and un-orphaned.
