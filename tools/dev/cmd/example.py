@@ -120,9 +120,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, args.emsdk_path)
-    examples = collect_examples(preset, targets, root=ctx.root, binary_names=wanted,
-                                launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
-                                                          dev.emsdk_env(args.emsdk_path)))
+    js_launcher = jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args), dev.emsdk_env(args.emsdk_path))
+    examples = collect_examples(preset, targets, root=ctx.root, binary_names=wanted, launcher=js_launcher)
 
     if args.update_captures is not None:
         _sweep(ctx, preset, targets, examples, args)
@@ -154,10 +153,18 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         capture_path = _capture_output(preset, capture, args)
         env = {**(env or os.environ), **_capture_environment(capture, capture_path, args)}
 
+    # A wasm artifact is a .js loader plus a .wasm and cannot be executed directly.
+    launcher: list[str] = []
+    if jsr.needs_launcher(preset.is_emscripten, artifact):
+        try:
+            launcher = js_launcher.prefix()
+        except jsr.NotFound as e:
+            ctx.die(str(e))
+
     # The exact name plus the bucket flag: an example is never swept, so it must be named to run.
     # Mirrored, because watching the example run is the entire point of the command.
     result = dev.run_step(
-        [str(artifact), example.name, "--examples", *program_args],
+        [*launcher, str(artifact), example.name, "--examples", *program_args],
         step_type="example", name=example.target,
         build_dir=preset.build_dir, cwd=_working_directory(ctx, example), env=env,
         timeout=args.timeout if args.timeout else None,
