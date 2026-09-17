@@ -150,7 +150,7 @@ backends/                                       # each subclasses the abstract s
 - **Tier 2 (soon):** metal, webgpu.
   metal is under construction.
   It creates a Metal 4 device and refuses below its floor (macOS / iOS 26, Apple silicon), realizes the epochs on a pair of MTLSharedEvents, and opens, submits and drops command lists.
-  Its tier-1 driver registers but stays disabled — the seams no longer assert, it simply has not been re-enabled.
+  Its tier-1 driver runs the whole sweep in a threaded build; with SC_THREADS=OFF it registers disabled, and one transfer test is pinned — both in TODO.md.
 - **Legacy compat (planned):** opengl, webgl.
 
 A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).

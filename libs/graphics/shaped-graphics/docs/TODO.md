@@ -141,6 +141,29 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
   rather than leaving a deferral to a milestone that has already arrived.
 
+- **A metal async download can read stale bytes, and the tier-1 fuzz test is pinned for it.**
+  `sg - upload download fuzz test` skips on metal.
+  The sequence is several async uploads, a copy region on the direct queue, an epoch advance, then an async download
+  that reads bytes the copies should have replaced.
+  Reproduce with `uv run dev.py test "sg - upload download fuzz test" --seed 587514285228756490`, which minimises to
+  about a dozen operations.
+  **It is pre-existing rather than a regression**: it reproduces identically at `95e6a63d`, before the staging-ring
+  rewrite, the submission serialization and the completion wiring, and was invisible only because the tier-1 driver
+  never ran.
+  `wait_for_queues` reads correct on inspection — it waits on the buffer's submission stamp, its previous transfer and
+  any stream — so the fault is likelier in when that stamp is read, or what it covers, than in the wait itself.
+
+- **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
+  `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
+  tier-1 invocables stay alias-reachable and un-orphaned.
+  Without it the binary aborts before any test reports: metal settles its transfer completions from the
+  `MTL4CommitFeedback` handler, on a queue Apple owns, and `cc::async`'s single-threaded scheduler refuses to wait on a
+  node pushed from a thread it does not drive — "parked on an external push".
+  Closing it means routing that settle through something the pump drives, rather than pushing the node from Apple's
+  thread.
+  It is a property of the backend's completion routing rather than of any one test, which is why the pin is at the
+  preset.
+
 - **No metal shader toolchain exists.**
   `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
   `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.

@@ -332,11 +332,17 @@ Its reflection is written out by hand next to it, so the test states the binding
 Every test builds its own context, because the context is its subject.
 The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 
-The tier-1 API suite (`shaped-graphics-test`) now compiles on macOS for the first time, since `_sg_test_drivers` is non-empty there.
-Its driver is `nx::config::disabled` while the backend is built out — registering builds the per-invocable aliases, so one API test runs against metal by being named exactly:
+**The tier-1 API suite runs against metal**, 162 tests of it, through `tests/backends/metal-entry.cc` in the same shape vulkan's driver uses.
+
+It was disabled and written synchronously until the review caught it, which meant nothing ran the sweep — the suite was green only for tests named one at a time.
+Turning it on immediately found a transfer defect that predates this backend's whole transfer tier, which is the argument for enabling a sweep before it is comfortable rather than after.
+
+Two things are pinned rather than disabling it again, both in [docs/TODO.md](../../docs/TODO.md):
+the transfer fuzz test, which skips on metal;
+and the whole sweep under `SC_THREADS=OFF`, where the driver registers disabled because metal settles completions from a queue `cc::async`'s single-threaded scheduler will not wait on.
+
+One API test still runs against metal by being named exactly, which is what the per-invocable aliases are for:
 
 ```bash
 uv run dev.py test "sg - advances an epoch"
 ```
-
-Take the `disabled` off once no seam aborts, the way vulkan's came off.
