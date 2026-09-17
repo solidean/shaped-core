@@ -107,6 +107,7 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
     auto* const pending = &_pending;
     auto* const ctx = _ctx;
     auto* const self = this;
+    auto sink = _ctx->feedback_sink();
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
     auto* const options = MTL4::CommitOptions::alloc()->init();
@@ -120,7 +121,16 @@ void metal_transfer_system::commit(MTL4::CommandBuffer* command_buffer,
 
       // Last, and after `on_complete` has dropped the resource handle it held: a waiter released by this counter must
       // find every lifetime this transfer extended already given back.
-      pending->fetch_sub(1, std::memory_order_acq_rel);
+      //
+      // Reaching zero is what `are_transfers_drained` reports, so the completion machinery has to be told.
+      // Routed through the sink because this runs on Apple's queue, possibly after shutdown — and only with threads,
+      // since the singlethreaded pump polls `settle_due_completions` itself.
+      if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
+      {
+#if CC_HAS_THREADS
+          sink->notify_drained();
+#endif
+      }
     });
 
     MTL4::CommandBuffer const* const buffers[] = {command_buffer};
@@ -380,12 +390,18 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
     auto* const pending = &_pending;
+    auto sink = _ctx->feedback_sink();
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
     auto* const options = MTL4::CommitOptions::alloc()->init();
     options->addFeedbackHandler(^void(MTL4::CommitFeedback*) {
       (*finish)();
-      pending->fetch_sub(1, std::memory_order_acq_rel);
+      if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
+      {
+#if CC_HAS_THREADS
+          sink->notify_drained();
+#endif
+      }
     });
 
     MTL4::CommandBuffer const* const buffers[] = {command_buffer};

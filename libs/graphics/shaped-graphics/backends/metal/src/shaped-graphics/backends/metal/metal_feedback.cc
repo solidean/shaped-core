@@ -14,6 +14,26 @@ void metal_feedback_sink::report(sg::device_error_kind kind, cc::string_view mes
         });
 }
 
+void metal_feedback_sink::notify_drained()
+{
+    _context.lock(
+        [&](metal_context*& ctx)
+        {
+            if (ctx != nullptr)
+                sg::impl::notify_transfer_drained(*ctx);
+        });
+}
+
+void metal_feedback_sink::notify_completion_signal()
+{
+    _context.lock(
+        [&](metal_context*& ctx)
+        {
+            if (ctx != nullptr)
+                ctx->notify_completion_signal();
+        });
+}
+
 void metal_feedback_sink::detach()
 {
     _context.lock([](metal_context*& ctx) { ctx = nullptr; });

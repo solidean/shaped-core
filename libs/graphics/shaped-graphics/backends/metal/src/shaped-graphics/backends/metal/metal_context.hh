@@ -170,6 +170,14 @@ public:
     /// also a stall — so the first list it costs is told, unless `promote_to_async` already declared it intended.
     void wait_for_streams(metal_command_list& list);
 
+    /// The detachable end every commit feedback handler routes through.
+    /// The transfer and stream handlers capture it to report a drain reaching zero, the same way the submit handler
+    /// already captures it to report an error.
+    [[nodiscard]] std::shared_ptr<metal_feedback_sink> const& feedback_sink() const { return _feedback; }
+
+    /// Raise the GPU side of the completion generation; `metal_feedback_sink` is the only caller.
+    void notify_completion_signal();
+
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
     /// Public because the sink is a separate object by necessity — it has to outlive this context — and a friend
@@ -349,13 +357,23 @@ private:
         std::condition_variable condition;
         MTL::SharedEventListener* listener = nullptr;
 
-        /// The values each timeline is already armed at, so re-entering the wait re-arms nothing.
+        /// The value each timeline is currently armed at.
+        /// Re-armed whenever the target *differs*, not only when it grows: the portable layer wakes this waiter
+        /// precisely when a new target is lower than the armed one, so `>=` would leave that target unarmed and wait
+        /// for the higher one instead.
         /// The waiter is the single caller, which is what lets these live outside the mutex.
         u64 armed_submission = 0;
         u64 armed_epoch = 0;
 
-        /// Raised by every wake source; the waiter parks until it moves.
-        u64 generation = 0;
+        /// Raised once per GPU notification, and the value the last wait returned at.
+        /// The pair is what makes each notification release exactly one wait: comparing against the host's counter
+        /// instead leaves the predicate true forever after the first GPU signal, which is a spin rather than a wait.
+        u64 gpu_generation = 0;
+        u64 consumed_gpu_generation = 0;
+
+        /// The highest generation `wake_completion_signal` has been given.
+        /// Compared against the caller's own `wake_generation`, which is the counter it read before parking.
+        u64 host_generation = 0;
     };
 
     mutable completion_signal _completion;

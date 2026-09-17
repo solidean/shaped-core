@@ -210,8 +210,15 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
                   copy_out();
               downloads->clear();
 
-              if (has_downloads)
-                  pending_counter->fetch_sub(1, std::memory_order_acq_rel);
+              // Reaching zero is what `are_transfers_drained` reports, so the completion machinery has to be told.
+              // Routed through the sink because this runs on Apple's queue, possibly after shutdown — and only with
+              // threads, since the singlethreaded pump polls `settle_due_completions` itself.
+              if (has_downloads && pending_counter->fetch_sub(1, std::memory_order_acq_rel) == 1)
+              {
+#if CC_HAS_THREADS
+                  sink->notify_drained();
+#endif
+              }
             });
 
             MTL4::CommandBuffer const* const buffers[] = {buffer};
@@ -495,39 +502,62 @@ void metal_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wa
     // Arm each timeline at most once per target: a notification already pending for this value fires either way, and
     // re-arming would pile up handlers that outlive the wait.
     // The completion waiter is this seam's only caller, which is what lets the armed values live without a lock.
-    auto const arm = [this](MTL::SharedEvent* event, u64 value, u64& armed)
+    // Armed whenever the target *differs* from what is armed, not only when it grows.
+    // The portable layer wakes this waiter precisely when a new target is below the armed one, so a `>=` test would
+    // leave that lower target unarmed and park on the higher one — `epoch_completion(4)` after `epoch_completion(5)`
+    // would wait for 5.
+    // A duplicate notification is harmless: it raises the generation, and one spurious wake costs one re-check.
+    //
+    // The block captures the detachable sink rather than `this`, for the reason every commit handler does: it runs on
+    // a queue Apple owns, at a time that can be after shutdown released the listener.
+    auto sink = _feedback;
+    auto const arm = [this, &sink](MTL::SharedEvent* event, u64 value, u64& armed)
     {
-        if (value == 0 || armed >= value)
+        if (value == 0 || armed == value)
             return;
         armed = value;
         event->notifyListener(_completion.listener, value,
-                              [this](MTL::SharedEvent*, u64)
-                              {
-                                  // On a dispatch queue Apple owns, which SC_THREADS=OFF does not reach — so this
-                                  // mutex and condition are the real ones rather than cc::mutex's compiled-away lock.
-                                  auto const guard = std::lock_guard(_completion.mutex);
-                                  ++_completion.generation;
-                                  _completion.condition.notify_all();
-                              });
+                              [sink](MTL::SharedEvent*, u64) { sink->notify_completion_signal(); });
     };
 
     arm(submission_event, submission, _completion.armed_submission);
     arm(epoch_event, epoch, _completion.armed_epoch);
 
     // A GPU signal or a host wake, never a timeout.
-    // A spurious return is harmless by contract, so re-checking the timelines beside the generation costs nothing and
+    //
+    // **Each source releases exactly one wait.**
+    // A GPU notification raises `gpu_generation` past what the last wait consumed; a host wake raises
+    // `host_generation` past the counter the caller read before parking.
+    // Comparing a single counter against the caller's instead is what made this spin: after one GPU notification the
+    // predicate stayed true forever, and `run_completion_signal_waiter` loops whether or not anything is pending.
+    // A spurious return is harmless by contract, so re-checking the timelines beside the generations costs nothing and
     // closes the window between the check above and the park.
     auto guard = std::unique_lock(_completion.mutex);
-    _completion.condition.wait(guard, [&] { return _completion.generation > wake_generation || reached(); });
+    _completion.condition.wait(guard,
+                               [&]
+                               {
+                                   return _completion.gpu_generation != _completion.consumed_gpu_generation
+                                       || _completion.host_generation > wake_generation || reached();
+                               });
+    _completion.consumed_gpu_generation = _completion.gpu_generation;
+}
+
+void metal_context::notify_completion_signal()
+{
+    // On a dispatch queue Apple owns, which SC_THREADS=OFF does not reach — so this mutex and condition are the real
+    // ones rather than cc::mutex's compiled-away lock.
+    auto const guard = std::lock_guard(_completion.mutex);
+    ++_completion.gpu_generation;
+    _completion.condition.notify_all();
 }
 
 void metal_context::wake_completion_signal(u64 generation)
 {
-    // The host source.
-    // Raised rather than assigned: generations are handed out strictly increasing, and a GPU handler may have raised
-    // it further already.
+    // The host source, kept apart from the GPU one so neither masks the other.
+    // Raised rather than assigned: generations are handed out strictly increasing, and a later wake may already have
+    // raised it further.
     auto const guard = std::lock_guard(_completion.mutex);
-    _completion.generation = cc::max(_completion.generation, generation + 1);
+    _completion.host_generation = cc::max(_completion.host_generation, generation + 1);
     _completion.condition.notify_all();
 }
 

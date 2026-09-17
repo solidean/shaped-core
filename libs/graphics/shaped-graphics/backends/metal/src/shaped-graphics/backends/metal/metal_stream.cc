@@ -495,6 +495,10 @@ void metal_stream_system::create(metal_context& ctx)
     CC_ASSERT(_actor == nullptr, "the stream system is created once");
     _ctx = &ctx;
 
+    // The completion machinery requires every drain `are_transfers_drained` reads to report reaching zero.
+    // Without this the waiter is never told, which the busy-spin used to hide.
+    _drain.notify_on_drained(&ctx);
+
     // The impl is built here rather than through make_threaded_actor, because the handle exposes it only after
     // shutdown and the ratio knobs need it while it runs.
     auto impl = std::make_unique<actor_impl>(ctx);

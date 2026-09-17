@@ -24,6 +24,17 @@ public:
     /// Route one commit's error to the context, if it is still there.
     void report(sg::device_error_kind kind, cc::string_view message);
 
+    /// Tell the context a transfer drain reached zero, if it is still there.
+    ///
+    /// The completion machinery requires every drain `are_transfers_drained` reads to report through
+    /// `impl::notify_transfer_drained`, and on metal those counters are decremented inside commit feedback handlers —
+    /// on Apple's queue, at a time that can be after shutdown.
+    /// So the notify takes the same detachable route the error report does, for the same reason.
+    void notify_drained();
+
+    /// Tell the context a timeline it armed has been signalled, if it is still there.
+    void notify_completion_signal();
+
     /// Stop routing.
     /// Called from shutdown, before the context goes.
     /// A handler that runs afterwards finds nothing and does nothing.
