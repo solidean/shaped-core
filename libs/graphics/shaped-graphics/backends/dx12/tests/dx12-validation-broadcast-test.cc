@@ -4,11 +4,11 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
-// Does D3D12 hand one debug-layer message to EVERY callback in the process, or only to the device that raised it?
+// Does D3D12 hand one debug-layer message to every callback on the device that raised it, and to no other device's?
 //
-// The answer is load-bearing for the backend's logging: without listeners, a message is logged once per process by the
-// oldest context that has none, rather than once per context — see dx12_context::set_message_callback.
-// If the message stops crossing, that dedupe is silencing messages other devices raised, and should go.
+// Both halves are load-bearing for the backend's logging: without listeners, a message is logged once per device by the
+// oldest context on it that has none — see dx12_context::set_message_callback.
+// Two contexts on one adapter share a device, which is why the message crosses between them; WARP and hardware do not.
 
 namespace
 {
@@ -79,8 +79,8 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
         SKIP("the debug layer raised no message for the provocation, so this test learns nothing");
 
     CHECK(second_count > 0)
-        .context("D3D12 broadcasts a debug-layer message to every registered callback, which is why the backend "
-                 "logs each message from one context only; a failure here means it no longer does, and that "
+        .context("D3D12 broadcasts a debug-layer message to every callback on its device, which is why the backend "
+                 "logs each message from one context per device; a failure here means it no longer does, and that "
                  "dedupe in dx12_context.create.cc should go");
 }
 
@@ -98,5 +98,23 @@ TEST("sg dx12 - a debug-layer message is logged once however many contexts are a
     nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
 
     provoke_validation_message(*first);
+    CHECK(true);
+}
+
+TEST("sg dx12 - a debug-layer message is logged by its own device when another adapter's context is older")
+{
+    // The broadcast stops at the device, so an older context on a different adapter must not be the one that logs.
+    auto const warp = dx12::as_test_context(
+        sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp}));
+    if (warp.has_error())
+        SKIP("no dx12 WARP device");
+    auto const hardware = dx12::as_test_context(
+        sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware}));
+    if (hardware.has_error())
+        SKIP("no dx12 hardware device");
+
+    nx::expect_error("CreateCommittedResource", nx::exactly(1, "sg.dx12"));
+
+    provoke_validation_message(*hardware.value());
     CHECK(true);
 }

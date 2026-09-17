@@ -88,9 +88,10 @@ The advisories sg provokes on purpose are [`dx12_expected_messages.hh`](../backe
 Each dx12 driver allows them for every test in its binary.
 A test whose subject **is** the bad input declares it: `nx::expect_error(...)` when the message is the point, `nx::allow_errors(...)` when whether it appears depends on something else.
 
-D3D12 hands one message to **every** callback registered in the process, not only the one on the device that raised it.
-So the backend logs a message from one context only — the oldest without a listener — and a test sees it once however many contexts are alive.
-`dx12-validation-broadcast-test.cc` pins the broadcast that makes this necessary.
+D3D12 hands one message to **every** callback registered on the device that raised it, and two contexts on one adapter share a device.
+So the backend logs a message from one context per device only — the oldest there without a listener — and a test sees it once however many contexts are alive.
+The broadcast stops at the device: a WARP context never sees a hardware context's messages, so deduplicating across the process would silently drop one adapter's.
+`dx12-validation-broadcast-test.cc` pins both halves.
 
 A loader notice about software installed on the machine, such as a screen recorder's implicit layer announcing an older API version, is logged at `info`.
 Nothing in sg can act on it, and a test must not fail on what is installed.

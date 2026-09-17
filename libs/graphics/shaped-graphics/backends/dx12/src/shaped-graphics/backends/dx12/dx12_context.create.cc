@@ -174,9 +174,10 @@ void log_debug_layer_message(dx12_message_severity severity, char const* descrip
 
 // Every context whose callback is registered, oldest first.
 //
-// D3D12 hands one debug-layer message to EVERY callback registered in the process, not only the device that raised it.
-// So a message logged by each context without a listener would print once per live context.
-// The oldest context without a listener is the one that logs, which makes it once per process.
+// D3D12 hands one debug-layer message to every callback registered on the DEVICE that raised it, and hands two contexts
+// on one adapter the same device — so a message logged by each context without a listener would print once per context.
+// Only per device, though: a WARP context and a hardware context never see each other's messages.
+// So the oldest context without a listener ON THE SAME DEVICE is the one that logs, which makes it once per device.
 cc::mutex<cc::vector<dx12_context const*>> g_registered_contexts;
 
 // Validation messages, handed to the context's listener or logged at the debug layer's own severity when it has none.
@@ -195,15 +196,21 @@ void CALLBACK dx12_message_callback(D3D12_MESSAGE_CATEGORY /*category*/,
         return;
     }
 
+    if (ctx == nullptr)
+    {
+        log_debug_layer_message(level, description);
+        return;
+    }
+
     auto const is_logger = g_registered_contexts.lock(
         [&](cc::vector<dx12_context const*>& contexts)
         {
             for (auto const* const c : contexts)
-                if (!c->_message_callback.is_valid())
+                if (c->_device.Get() == ctx->_device.Get() && !c->_message_callback.is_valid())
                     return c == ctx;
             return false;
         });
-    if (ctx == nullptr || is_logger)
+    if (is_logger)
         log_debug_layer_message(level, description);
 }
 
