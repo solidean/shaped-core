@@ -1,5 +1,5 @@
 // Browser test-runner ABI: each Emscripten `*-test-web` module exports this tiny C interface.
-// The page in web/nexus-web-driver.js enumerates the module's tests and runs them one per animation frame, rendering a live results table.
+// The page in web/nexus-web-driver.js enumerates the module's tests and runs them one after another, rendering a live results table.
 // Running a single instance per call mirrors the CLI runner, but hands pacing and rendering to JavaScript.
 //
 // The whole file is Emscripten-only, and empty elsewhere.
@@ -8,6 +8,7 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <emscripten/emscripten.h>
 #include <nexus/tests/execute.hh>
@@ -32,7 +33,22 @@ nx::test_schedule& web_schedule()
 std::string g_name_buffer;
 std::string g_report_buffer;
 
-// Stats from the most recent nx_web_run_test, read back through the getters below.
+// The test the page started last, until nx_web_poll_test sees it finish.
+// The run references its schedule and config, so all three live together.
+struct web_test
+{
+    nx::test_schedule schedule;
+    nx::test_schedule_config config;
+    cc::unique_ptr<nx::impl::test_run> run;
+};
+
+cc::unique_ptr<web_test>& active_test()
+{
+    static cc::unique_ptr<web_test> active;
+    return active;
+}
+
+// Stats from the most recently finished test, read back through the getters below.
 int g_last_checks = 0;
 int g_last_failed_checks = 0;
 double g_last_duration_ms = 0.0;
@@ -81,18 +97,33 @@ extern "C"
         return g_name_buffer.c_str();
     }
 
-    // Runs test i and records its stats.
-    // Returns 1 if the test passed, 0 otherwise.
-    EMSCRIPTEN_KEEPALIVE int nx_web_run_test(int i)
+    // Starts test i; nx_web_poll_test carries it on.
+    // A test may wait on something only the page's event loop delivers, so it runs across calls rather than inside one.
+    EMSCRIPTEN_KEEPALIVE void nx_web_start_test(int i)
     {
+        auto& active = active_test();
+        active = nullptr;
+
         auto const& instances = web_schedule().instances;
         if (i < 0 || i >= int(instances.size()))
+            return;
+
+        active = cc::make_unique<web_test>();
+        active->schedule.instances.push_back(instances[size_t(i)]);
+        active->run = cc::make_unique<nx::impl::test_run>(active->schedule, active->config);
+    }
+
+    // -1 while the started test is still running, then 1 if it passed and 0 otherwise, with its stats recorded.
+    EMSCRIPTEN_KEEPALIVE int nx_web_poll_test()
+    {
+        auto& active = active_test();
+        if (active == nullptr)
             return 0;
+        if (!active->run->step())
+            return -1;
 
-        nx::test_schedule one;
-        one.instances.push_back(instances[size_t(i)]);
-
-        auto const execution = nx::execute_tests(one, nx::test_schedule_config{});
+        auto const execution = active->run->take_result();
+        active = nullptr;
 
         g_last_checks = execution.count_total_checks();
         g_last_failed_checks = execution.count_failed_checks();

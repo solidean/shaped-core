@@ -4,6 +4,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
@@ -15,6 +16,7 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
+#include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/entry.hh>
@@ -135,7 +137,248 @@ cc::string_view directory_of(cc::string_view path)
     }
     return {};
 }
+/// Everything the report after a run needs from before it.
+struct run_reporting
+{
+    nx::test_registry const* registry = nullptr;
+    bool is_entry_run = false;
+    bool has_benchmarks = false;
+    nx::bench::load_sample benchmark_load_before;
+    bool benchmark_pinned = false;
+    cc::unique_ptr<cc::process_cpu_sampler> cpu_sampler;
+};
+
+/// Writes every report a run asked for and returns the process's exit code.
+int report_run(nx::test_schedule_config const& config,
+               run_reporting& reporting,
+               nx::test_schedule_execution const& execution)
+{
+    auto const& registry = *reporting.registry;
+    auto const is_entry_run = reporting.is_entry_run;
+    auto const has_benchmarks = reporting.has_benchmarks;
+    auto const& benchmark_load_before = reporting.benchmark_load_before;
+    auto const benchmark_pinned = reporting.benchmark_pinned;
+    auto& cpu_sampler = *reporting.cpu_sampler;
+
+    auto resources = nx::test_run_resources{};
+    if (auto const load = cpu_sampler.sample(); load.has_value())
+    {
+        resources.cpu_machine_fraction = load.value().machine_fraction;
+        resources.cpu_cores_used = load.value().cores_used;
+    }
+    if (auto const usage = cc::query_process_usage(); usage.has_value())
+        resources.peak_resident_bytes = usage.value().peak_resident_bytes;
+
+    // An example is a program someone is watching rather than a suite being measured, so only tests say what they cost.
+    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example && !is_entry_run;
+
+    // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
+    // file's directory rather than inventing a location of its own.
+    nx::impl::end_run_recording(directory_of(config.junit_xml_file));
+
+    // Write a JUnit XML report if requested.
+    // This is additive: the console output below still runs, whatever the reporting mode.
+    if (!config.junit_xml_file.empty())
+    {
+        auto const written = write_report_file(
+            config.junit_xml_file,
+            write_junit_xml(suite_name(), execution, resources,
+                            config.shuffle ? cc::optional<decltype(config.seed)>(config.seed) : cc::nullopt));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
+                         written.error().to_string());
+    }
+
+    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::pgo). Also additive.
+    if (!config.pgo_json_file.empty())
+    {
+        auto const written = write_report_file(config.pgo_json_file, write_pgo_json(suite_name(), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.pgo_json_file,
+                         written.error().to_string());
+    }
+
+    // Additive as well: where each test sat on the timeline, for a trace of the run.
+    if (!config.timings_json_file.empty())
+    {
+        auto const written = write_report_file(config.timings_json_file, write_timings_json(suite_name(), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write timings JSON file: {}: {}", config.timings_json_file,
+                         written.error().to_string());
+    }
+
+    // Handle Catch2 XML results reporting for TestMate integration
+    if (config.report_catch2_xml_results)
+    {
+        cc::print(write_catch2_results_xml(execution));
+        return execution.count_failed_tests() > 0 ? 1 : 0;
+    }
+
+    if (has_benchmarks)
+    {
+        auto const after = nx::bench::sample_load();
+
+        // A clock ratio that moved means the frequency changed or contention appeared, which is exactly the condition
+        // worth warning about — and it measures the core the benchmark ran on rather than the machine as a whole.
+        auto const drift
+            = benchmark_load_before.ticks_per_ns > 0
+                ? (after.ticks_per_ns - benchmark_load_before.ticks_per_ns) / benchmark_load_before.ticks_per_ns
+                : 0.0;
+
+        cc::println();
+        cc::print(cc::format("load  clock {:.3f} -> {:.3f} ticks/ns ({:+.1f}%)", benchmark_load_before.ticks_per_ns,
+                             after.ticks_per_ns, drift * 100));
+        if (after.cpu_busy_fraction >= 0)
+            cc::print(cc::format("  |  machine {:.0f}% busy", after.cpu_busy_fraction * 100));
+        cc::println();
+
+        if (benchmark_pinned)
+            nx::bench::unpin();
+    }
+
+    // Write the benchmark sidecar if requested.
+    // Additive, like the reports above it.
+    if (!config.benchmark_json_file.empty())
+    {
+        auto const written = write_report_file(config.benchmark_json_file, write_bench_json(suite_name(), execution));
+        if (!written.has_value())
+            cc::eprintln("Error: could not write benchmark JSON file: {}: {}", config.benchmark_json_file,
+                         written.error().to_string());
+    }
+
+    // Print what the benchmarks measured.
+    //
+    // One report per BENCHMARK rather than one for the whole run: the loops inside one body are what get compared, and
+    // a table spanning two benchmarks would invite a comparison between numbers measured minutes apart.
+    {
+        auto style = nx::bench::report_style::for_console();
+        style.verbose = config.benchmark_verbose;
+        for (auto const& exec : execution.executions)
+        {
+            if (exec.benchmarks.empty())
+                continue;
+
+            cc::println();
+            cc::print(nx::bench::format_report(exec.instance.declaration->name, exec.benchmarks, style));
+        }
+    }
+
+    // Print any metrics recorded via nx::pgo (PGO benchmarks). Console-only mirror of the perf JSON sidecar.
+    {
+        bool has_metrics = false;
+        for (auto const& exec : execution.executions)
+            if (!exec.metrics.empty())
+            {
+                has_metrics = true;
+                break;
+            }
+
+        if (has_metrics)
+        {
+            cc::println("\nRecorded metrics:");
+            for (auto const& exec : execution.executions)
+                for (auto const& metric : exec.metrics)
+                {
+                    // Formatted through the unit, so a byte rate reads as 27.1 GiB/s rather than as eleven digits.
+                    // That is the payoff of a metric carrying a cc::rec::unit rather than a label.
+                    char const* const dir = metric.higher_is_better() ? "(higher is better)" : "(lower is better)";
+                    cc::println("  {} | {} = {} {}", exec.instance.declaration->name, metric.name,
+                                nx::bench::format_quantity(metric.value, metric.unit), dir);
+                }
+        }
+    }
+
+    // Orphan invocable tests: in a full, unfiltered normal sweep every enabled INVOCABLE_TEST must be
+    // invoked by some driver (see nx::invoke_tests). Anything left over is almost always a wiring mistake.
+    //
+    // An invocable an alias can reach is exempt, because the mistake this catches is "nothing can run this" rather than
+    // "nothing ran this". A driver may be deliberately disabled — a backend still being built out registers so its
+    // aliases exist, and disables so a sweep stays out of the parts it has not reached — and its invocables are then
+    // parked rather than unwired, runnable by name whenever someone asks for one.
+    int orphan_count = 0;
+    bool const full_normal_sweep = config.filters.empty() && config.section_filters.empty()
+                                && config.selected_bucket == nx::config::test_bucket::normal;
+    if (full_normal_sweep)
+    {
+        std::unordered_set<void const*> invoked;
+        for (auto const& exec : execution.executions)
+            collect_invoked(exec, invoked);
+
+        // Every invocable name some alias expands onto, which is the set an alias can drive by name.
+        cc::set<cc::string_view> alias_reachable;
+        for (auto const& alias : registry.aliases)
+        {
+            alias_reachable.insert(cc::string_view(alias.name));
+            for (auto const& fragment : alias.fragments)
+                for (auto const& section : fragment.section_path)
+                    alias_reachable.insert(cc::string_view(section));
+        }
+
+        for (auto const& decl : registry.declarations)
+            if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl)
+                && !alias_reachable.contains(cc::string_view(decl.name)))
+            {
+                if (orphan_count == 0)
+                    cc::eprintln("\nOrphan invocable tests (declared but never invoked):");
+                cc::eprintln("  {} at {}:{}", decl.name, decl.location.file_name(), decl.location.line());
+                ++orphan_count;
+            }
+    }
+
+    // Check for failures
+    int const failed_tests = execution.count_failed_tests();
+    int const total_tests = execution.count_total_tests();
+    int const failed_checks = execution.count_failed_checks();
+    int const total_checks = execution.count_total_checks();
+
+    // A check that could not be attributed to any test proved nothing, so it fails the run — however green every test is.
+    // Each one was already printed where it happened; this is the summary that makes the run's exit code say so.
+    int const orphan_checks = execution.orphan_checks;
+
+    if (failed_tests > 0 || orphan_count > 0 || orphan_checks > 0)
+    {
+        if (failed_tests > 0)
+        {
+            if (config.shuffle)
+                cc::eprintln("\nrun seed {} — reproduce the order with --seed {}", config.seed, config.seed);
+            cc::eprintln("\nFailed tests:");
+            for (auto const& exec : execution.executions)
+                print_failing(exec, cc::string());
+
+            cc::eprintln("\n{} of {} tests failed", failed_tests, total_tests);
+            cc::eprintln("Failed {} of {} checks", failed_checks, total_checks);
+        }
+        if (orphan_count > 0)
+            cc::eprintln("\n{} invocable test(s) were never invoked", orphan_count);
+        if (orphan_checks > 0)
+        {
+            cc::eprintln("\nChecks outside any test:");
+            for (auto const& e : execution.orphan_errors)
+                cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
+            cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
+        }
+        if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
+            cc::eprintln("{}", described);
+
+        // A failed command keeps the status it chose, unless that status was success.
+        if (is_entry_run && !execution.executions.empty())
+            if (auto const code = execution.executions[0].exit_code.value_or(0); code != 0)
+                return code;
+        return 1;
+    }
+
+    // An app or a command is a program, not a suite: its status is its own, and it prints no test summary.
+    if (is_entry_run)
+        return execution.executions.empty() ? 0 : execution.executions[0].exit_code.value_or(0);
+
+    // All tests passed
+    cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
+    if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
+        cc::println("{}", described);
+    return 0;
+}
 } // namespace
+
 
 int nx::run(int argc, char** argv)
 {
@@ -338,224 +581,37 @@ int nx::run(int argc, char** argv)
     }
 
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
-    auto cpu_sampler = cc::process_cpu_sampler();
+    auto reporting = run_reporting{.registry = &registry,
+                                   .is_entry_run = is_entry_run,
+                                   .has_benchmarks = has_benchmarks,
+                                   .benchmark_load_before = benchmark_load_before,
+                                   .benchmark_pinned = benchmark_pinned,
+                                   .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
 
-    // Execute the scheduled tests
-    auto execution = execute_tests(schedule, config);
-
-    auto resources = nx::test_run_resources{};
-    if (auto const load = cpu_sampler.sample(); load.has_value())
+    // A host that owns the thread gets the run in steps, and the report once the last one finishes.
+    // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.
+    if (impl::has_host_event_loop())
     {
-        resources.cpu_machine_fraction = load.value().machine_fraction;
-        resources.cpu_cores_used = load.value().cores_used;
-    }
-    if (auto const usage = cc::query_process_usage(); usage.has_value())
-        resources.peak_resident_bytes = usage.value().peak_resident_bytes;
-
-    // An example is a program someone is watching rather than a suite being measured, so only tests say what they cost.
-    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example && !is_entry_run;
-
-    // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
-    // file's directory rather than inventing a location of its own.
-    nx::impl::end_run_recording(directory_of(config.junit_xml_file));
-
-    // Write a JUnit XML report if requested.
-    // This is additive: the console output below still runs, whatever the reporting mode.
-    if (!config.junit_xml_file.empty())
-    {
-        auto const written = write_report_file(
-            config.junit_xml_file, write_junit_xml(suite_name(), execution, resources,
-                                                   config.shuffle ? cc::optional<u64>(config.seed) : cc::nullopt));
-        if (!written.has_value())
-            cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
-                         written.error().to_string());
-    }
-
-    // Write a perf-metrics JSON sidecar if requested (the metrics recorded via nx::pgo). Also additive.
-    if (!config.pgo_json_file.empty())
-    {
-        auto const written = write_report_file(config.pgo_json_file, write_pgo_json(suite_name(), execution));
-        if (!written.has_value())
-            cc::eprintln("Error: could not write perf JSON file: {}: {}", config.pgo_json_file,
-                         written.error().to_string());
-    }
-
-    // Additive as well: where each test sat on the timeline, for a trace of the run.
-    if (!config.timings_json_file.empty())
-    {
-        auto const written = write_report_file(config.timings_json_file, write_timings_json(suite_name(), execution));
-        if (!written.has_value())
-            cc::eprintln("Error: could not write timings JSON file: {}: {}", config.timings_json_file,
-                         written.error().to_string());
-    }
-
-    // Handle Catch2 XML results reporting for TestMate integration
-    if (config.report_catch2_xml_results)
-    {
-        cc::print(write_catch2_results_xml(execution));
-        return execution.count_failed_tests() > 0 ? 1 : 0;
-    }
-
-    if (has_benchmarks)
-    {
-        auto const after = nx::bench::sample_load();
-
-        // A clock ratio that moved means the frequency changed or contention appeared, which is exactly the condition
-        // worth warning about — and it measures the core the benchmark ran on rather than the machine as a whole.
-        auto const drift
-            = benchmark_load_before.ticks_per_ns > 0
-                ? (after.ticks_per_ns - benchmark_load_before.ticks_per_ns) / benchmark_load_before.ticks_per_ns
-                : 0.0;
-
-        cc::println();
-        cc::print(cc::format("load  clock {:.3f} -> {:.3f} ticks/ns ({:+.1f}%)", benchmark_load_before.ticks_per_ns,
-                             after.ticks_per_ns, drift * 100));
-        if (after.cpu_busy_fraction >= 0)
-            cc::print(cc::format("  |  machine {:.0f}% busy", after.cpu_busy_fraction * 100));
-        cc::println();
-
-        if (benchmark_pinned)
-            nx::bench::unpin();
-    }
-
-    // Write the benchmark sidecar if requested.
-    // Additive, like the reports above it.
-    if (!config.benchmark_json_file.empty())
-    {
-        auto const written = write_report_file(config.benchmark_json_file, write_bench_json(suite_name(), execution));
-        if (!written.has_value())
-            cc::eprintln("Error: could not write benchmark JSON file: {}: {}", config.benchmark_json_file,
-                         written.error().to_string());
-    }
-
-    // Print what the benchmarks measured.
-    //
-    // One report per BENCHMARK rather than one for the whole run: the loops inside one body are what get compared, and
-    // a table spanning two benchmarks would invite a comparison between numbers measured minutes apart.
-    {
-        auto style = nx::bench::report_style::for_console();
-        style.verbose = config.benchmark_verbose;
-        for (auto const& exec : execution.executions)
+        struct hosted_run
         {
-            if (exec.benchmarks.empty())
-                continue;
-
-            cc::println();
-            cc::print(nx::bench::format_report(exec.instance.declaration->name, exec.benchmarks, style));
-        }
+            test_schedule schedule;
+            test_schedule_config config;
+            run_reporting reporting;
+            cc::unique_ptr<impl::test_run> run;
+        };
+        auto* const hosted
+            = new hosted_run{.schedule = cc::move(schedule), .config = config, .reporting = cc::move(reporting)};
+        hosted->run = cc::make_unique<impl::test_run>(hosted->schedule, hosted->config);
+        impl::run_in_host_loop([hosted] { return hosted->run->step(); },
+                               [hosted]
+                               {
+                                   auto const code
+                                       = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
+                                   delete hosted;
+                                   return code;
+                               });
+        return 0; // not reached: the host loop ends the process
     }
 
-    // Print any metrics recorded via nx::pgo (PGO benchmarks). Console-only mirror of the perf JSON sidecar.
-    {
-        bool has_metrics = false;
-        for (auto const& exec : execution.executions)
-            if (!exec.metrics.empty())
-            {
-                has_metrics = true;
-                break;
-            }
-
-        if (has_metrics)
-        {
-            cc::println("\nRecorded metrics:");
-            for (auto const& exec : execution.executions)
-                for (auto const& metric : exec.metrics)
-                {
-                    // Formatted through the unit, so a byte rate reads as 27.1 GiB/s rather than as eleven digits.
-                    // That is the payoff of a metric carrying a cc::rec::unit rather than a label.
-                    char const* const dir = metric.higher_is_better() ? "(higher is better)" : "(lower is better)";
-                    cc::println("  {} | {} = {} {}", exec.instance.declaration->name, metric.name,
-                                nx::bench::format_quantity(metric.value, metric.unit), dir);
-                }
-        }
-    }
-
-    // Orphan invocable tests: in a full, unfiltered normal sweep every enabled INVOCABLE_TEST must be
-    // invoked by some driver (see nx::invoke_tests). Anything left over is almost always a wiring mistake.
-    //
-    // An invocable an alias can reach is exempt, because the mistake this catches is "nothing can run this" rather than
-    // "nothing ran this". A driver may be deliberately disabled — a backend still being built out registers so its
-    // aliases exist, and disables so a sweep stays out of the parts it has not reached — and its invocables are then
-    // parked rather than unwired, runnable by name whenever someone asks for one.
-    int orphan_count = 0;
-    bool const full_normal_sweep = config.filters.empty() && config.section_filters.empty()
-                                && config.selected_bucket == nx::config::test_bucket::normal;
-    if (full_normal_sweep)
-    {
-        std::unordered_set<void const*> invoked;
-        for (auto const& exec : execution.executions)
-            collect_invoked(exec, invoked);
-
-        // Every invocable name some alias expands onto, which is the set an alias can drive by name.
-        cc::set<cc::string_view> alias_reachable;
-        for (auto const& alias : registry.aliases)
-        {
-            alias_reachable.insert(cc::string_view(alias.name));
-            for (auto const& fragment : alias.fragments)
-                for (auto const& section : fragment.section_path)
-                    alias_reachable.insert(cc::string_view(section));
-        }
-
-        for (auto const& decl : registry.declarations)
-            if (decl.is_invocable() && decl.test_config.enabled && !invoked.contains(&decl)
-                && !alias_reachable.contains(cc::string_view(decl.name)))
-            {
-                if (orphan_count == 0)
-                    cc::eprintln("\nOrphan invocable tests (declared but never invoked):");
-                cc::eprintln("  {} at {}:{}", decl.name, decl.location.file_name(), decl.location.line());
-                ++orphan_count;
-            }
-    }
-
-    // Check for failures
-    int const failed_tests = execution.count_failed_tests();
-    int const total_tests = execution.count_total_tests();
-    int const failed_checks = execution.count_failed_checks();
-    int const total_checks = execution.count_total_checks();
-
-    // A check that could not be attributed to any test proved nothing, so it fails the run — however green every test is.
-    // Each one was already printed where it happened; this is the summary that makes the run's exit code say so.
-    int const orphan_checks = execution.orphan_checks;
-
-    if (failed_tests > 0 || orphan_count > 0 || orphan_checks > 0)
-    {
-        if (failed_tests > 0)
-        {
-            if (config.shuffle)
-                cc::eprintln("\nrun seed {} — reproduce the order with --seed {}", config.seed, config.seed);
-            cc::eprintln("\nFailed tests:");
-            for (auto const& exec : execution.executions)
-                print_failing(exec, cc::string());
-
-            cc::eprintln("\n{} of {} tests failed", failed_tests, total_tests);
-            cc::eprintln("Failed {} of {} checks", failed_checks, total_checks);
-        }
-        if (orphan_count > 0)
-            cc::eprintln("\n{} invocable test(s) were never invoked", orphan_count);
-        if (orphan_checks > 0)
-        {
-            cc::eprintln("\nChecks outside any test:");
-            for (auto const& e : execution.orphan_errors)
-                cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
-            cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
-        }
-        if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
-            cc::eprintln("{}", described);
-
-        // A failed command keeps the status it chose, unless that status was success.
-        if (is_entry_run && !execution.executions.empty())
-            if (auto const code = execution.executions[0].exit_code.value_or(0); code != 0)
-                return code;
-        return 1;
-    }
-
-    // An app or a command is a program, not a suite: its status is its own, and it prints no test summary.
-    if (is_entry_run)
-        return execution.executions.empty() ? 0 : execution.executions[0].exit_code.value_or(0);
-
-    // All tests passed
-    cc::println("All {} tests passed ({} checks)", total_tests, total_checks);
-    if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
-        cc::println("{}", described);
-    return 0;
+    return report_run(config, reporting, execute_tests(schedule, config));
 }

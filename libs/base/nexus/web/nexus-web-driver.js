@@ -94,7 +94,8 @@
   function runModule(M, label, sub) {
     return new Promise(function (resolve) {
       var name = M.cwrap('nx_web_test_name', 'string', ['number']);
-      var run = M.cwrap('nx_web_run_test', 'number', ['number']);
+      var start = M.cwrap('nx_web_start_test', null, ['number']);
+      var poll = M.cwrap('nx_web_poll_test', 'number', []);
       var lastChecks = M.cwrap('nx_web_last_checks', 'number', []);
       var lastMs = M.cwrap('nx_web_last_duration_ms', 'number', []);
       var lastReport = M.cwrap('nx_web_last_report', 'string', []);
@@ -108,7 +109,15 @@
           return;
         }
         var tname = name(i);
-        var ok = run(i) === 1;
+        start(i);
+        finish(tname);
+      }
+
+      // A test that waits on the page's event loop comes back unfinished; it is polled again once the loop has run.
+      function finish(tname) {
+        var result = poll();
+        if (result < 0) { setTimeout(function () { finish(tname); }, 1); return; }
+        var ok = result === 1;
         var c = lastChecks();
         var d = lastMs();
         var report = ok ? '' : lastReport();
@@ -150,7 +159,7 @@
 
     // Phase 2: run each loaded module's tests, grouped under a header. Phase 3: final summary.
     chain.then(function () {
-      el('subtitle').textContent = total + ' tests across ' + loaded.length + ' module(s) — one per animation frame';
+      el('subtitle').textContent = total + ' tests across ' + loaded.length + ' module(s)';
       var seq = Promise.resolve();
       loaded.forEach(function (L) {
         seq = seq.then(function () {

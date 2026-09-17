@@ -4,6 +4,7 @@ project(nexus LANGUAGES CXX)
 # Define the library and its sources
 add_library(nexus
     src/nexus/run.cc
+    src/nexus/impl/host_loop.cc
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
@@ -206,6 +207,7 @@ if(SC_BUILD_TESTS)
         tests/test-threaded-check-test.cc
         tests/test-parallel-test.cc
         tests/test-async-test.cc
+        tests/test-run-step-test.cc
         tests/test-async-section-test.cc
         tests/test-async-invocable-test.cc
         tests/test-seed-test.cc
