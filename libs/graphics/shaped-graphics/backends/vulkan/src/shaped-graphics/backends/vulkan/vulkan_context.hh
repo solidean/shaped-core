@@ -32,6 +32,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
 #include <shaped-graphics/present/native_window.hh>
@@ -60,6 +61,13 @@ struct sg::backend::vulkan::vulkan_config
     /// Prefer a software (CPU) physical device, e.g. lavapipe.
     /// Only a preference: Vulkan has no guaranteed software device, so this still falls back to hardware when none is present.
     bool prefer_software_device = false;
+
+    /// What `execution()` reports: `may_block` for a real renderer, `never_block` to run this context under a browser's rules on the dev box.
+    ///
+    /// Test-only in intent.
+    /// It changes nothing about how the backend waits internally.
+    /// It makes every sg call that would wait on the caller's thread assert, which is how the suite proves sg and its callers get by without blocking.
+    sg::execution_model execution = sg::execution_model::may_block;
 
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// One epoch's inline uploads must fit, since the ring is only reclaimed when an epoch retires.
@@ -197,6 +205,8 @@ public:
         return _headless_surface_supported && _swapchain_supported;
     }
 
+    [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+
     /// Vulkan has every stage sg models, so the graphics-stage features are a flat yes; the other three are device facts.
     [[nodiscard]] bool supports(sg::feature f) const override
     {
@@ -209,6 +219,7 @@ public:
         case sg::feature::headless_present:
             return is_headless_present_supported();
         case sg::feature::geometry_shader:
+        case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
             return true;
         }
@@ -611,8 +622,11 @@ public:
     void wait_for_next_inflight_epoch() override;
     [[nodiscard]] bool are_transfers_drained() const override;
     [[nodiscard]] sg::submission_token last_issued_submission() override;
-    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
-    void wake_completion_signal(u64 generation) override;
+    void arm_completion_signal(u64 submission, u64 epoch) override;
+
+    // The completion_waiter's hooks: park on the GPU timelines or a host wake, and raise that wake.
+    void park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation);
+    void wake_completion_signal(u64 generation);
 
     // The inline ring budgets.
     // Recorded here and applied at the next advance_epoch, never synchronously.
@@ -750,6 +764,11 @@ public:
     // Raised from the host to wake the completion signal waiter, which parks on it beside the two above.
     // Vulkan has no host event for a timeline, so a third timeline is how a wait on one gets interrupted.
     VkSemaphore _completion_wake_timeline = VK_NULL_HANDLE;
+    // Parks a thread (or a pump) on the timelines above for the completion asyncs.
+    // Created on the first arm, stopped in shutdown.
+    std::unique_ptr<sg::impl::completion_waiter> _completion_waiter;
+
+    sg::execution_model _execution = sg::execution_model::may_block;
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

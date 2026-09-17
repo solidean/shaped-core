@@ -319,7 +319,20 @@ sg::submission_token vulkan_context::last_issued_submission()
                                                       : sg::submission_token(issued - 1);
 }
 
-void vulkan_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
+void vulkan_context::arm_completion_signal(u64 submission, u64 epoch)
+{
+    if (_completion_waiter == nullptr)
+        _completion_waiter = std::make_unique<sg::impl::completion_waiter>(sg::impl::completion_waiter::hooks{
+            .park = [this](u64 s, u64 e, u64 generation) { park_for_completion_signal(s, e, generation); },
+            .wake = [this](u64 generation) { wake_completion_signal(generation); },
+            .settle = [this] { settle_due_completions(); },
+            .open_epoch = [this] { return u64(current_epoch()); },
+            .is_device_lost = [this] { return is_device_lost(); },
+        });
+    _completion_waiter->arm(submission, epoch);
+}
+
+void vulkan_context::park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
 {
     if (_completion_wake_timeline == VK_NULL_HANDLE)
         return;

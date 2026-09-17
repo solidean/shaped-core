@@ -48,6 +48,11 @@ struct sg::backend::vulkan::vulkan_expiring_resource
     VkDeviceMemory memory = VK_NULL_HANDLE;
     cc::vector<cc::unique_function<void()>> finalizers;
 
+    /// The heap a placed resource lives in, released only after `buffer` is destroyed.
+    /// A `VkBuffer` holds no reference on its `VkDeviceMemory`.
+    /// Without this, a heap whose last handle went with the buffer object would free the memory while the buffer bound into it still awaits deletion.
+    sg::memory_heap_handle heap;
+
     /// A transfer-queue copy that must finish before this may be released.
     ///
     /// The epoch alone is not enough: async transfer runs on its own queue and is deliberately decoupled from the
@@ -104,6 +109,7 @@ inline void release_expiring(VkDevice device,
     r.buffer = VK_NULL_HANDLE;
     r.image = VK_NULL_HANDLE;
     r.memory = VK_NULL_HANDLE;
+    r.heap = nullptr;
     for (auto& f : r.finalizers)
         out_finalizers.push_back(cc::move(f));
     r.finalizers.clear();

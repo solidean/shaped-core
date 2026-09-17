@@ -110,6 +110,9 @@ public:
     /// One list is shared by every routine initialized in the same tick, so their GPU init work batches.
     ///
     /// Routines register themselves on first acquire or prewarm; this is what actually brings them up.
+    ///
+    /// **On a context that cannot block, a tick also leaves as soon as nothing progresses within it**, budget or not.
+    /// What a phase waits on there — a pipeline, a readback — can only arrive once the tick has returned, so staying would spin until the budget ran out, or forever without one.
     routine_tick_result tick(routine_tick_options const& options = {});
 
     /// tick() until nothing is pending — the spelling a test, a tool or a loading screen wants.
@@ -260,6 +263,9 @@ private:
     // An application that never ticks gets a renderer where nothing is ever ready, and nothing else would say so:
     // every acquire reads pending, every draw is skipped, and the screen is empty with no error anywhere.
     cc::atomic<u64> _ticks = 0;
+
+    // Where a single-threaded context's init phases start, so they resume on the ticking thread; null otherwise.
+    std::unique_ptr<cc::singlethreaded_scheduler> _phase_scheduler;
     cc::atomic<u64> _pending_acquires = 0;
     cc::atomic<bool> _warned_never_ticked = false;
 };

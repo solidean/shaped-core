@@ -71,4 +71,29 @@ ASYNC_TEST("sg vulkan backend")
     }
 }
 
+// The whole sweep again under a browser's rules; see the dx12 never-block driver.
+// Under --thorough only: the dx12 one already proves the property by default on a software adapter, and a vulkan device here is a hardware one.
+ASYNC_TEST("sg vulkan never-block backend")
+{
+    if (!nx::is_thorough())
+        SKIP("the dx12 never-block driver covers the default run on WARP; this one runs under --thorough");
+
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .enable_sync_validation = true, .execution = sg::execution_model::never_block});
+    if (ctx.has_error())
+        SKIP("no vulkan device");
+    else
+    {
+        fail_on_validation_messages(ctx.value());
+        co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 static bool const sg_vulkan_registered = sg_test::register_backend("sg vulkan backend", "vulkan");
+static bool const sg_vulkan_never_block_registered
+    = sg_test::register_backend("sg vulkan never-block backend", "vulkan-never-block");
+static bool const sg_vulkan_factory_registered
+    = sg_test::register_context_factory("vulkan", [] { return sg::create_vulkan_context({}); });

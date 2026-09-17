@@ -36,6 +36,7 @@ void vulkan_buffer::release_storage() const
     vulkan_expiring_resource expiring;
     expiring.buffer = _buffer;
     expiring.memory = _memory;
+    expiring.heap = _heap;
     expiring.finalizers = cc::move(_finalizers);
 
     // The transfer queue may still be copying into or out of this buffer, which the epoch says nothing about.

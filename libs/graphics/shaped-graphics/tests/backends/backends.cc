@@ -13,6 +13,12 @@ cc::vector<sg_test::backend_entry>& sg_test::backends()
     return entries;
 }
 
+cc::vector<sg_test::context_factory>& sg_test::context_factories()
+{
+    static cc::vector<context_factory> entries;
+    return entries;
+}
+
 NX_TEST_SETUP(nx::setup& s)
 {
     for (auto const* t : s.invocables_with<sg::context_handle>())

@@ -140,7 +140,11 @@ public:
 
     /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
     /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
-    /// The change takes effect at the next advance_epoch, which drains in-flight work and resizes the transient heap; until then the current budget stays in force.
+    /// The change takes effect at the next advance_epoch, which drops the current heap and allocates the next one lazily at the new size; nothing waits.
+    ///
+    /// **Both heaps can be alive at once.**
+    /// The old one lives until the last transient resource placed in it retires, so for one or two epochs the budget is paid twice.
+    /// A caller for whom that overlap matters lets the in-flight epochs retire first — `epochs_in_flight_completion(0)` — and sets the budget after.
     /// Starts at default_budget_bytes.
     void set_budget(isize size_in_bytes);
 
@@ -174,8 +178,8 @@ private:
     friend class context;
     explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
 
-    // Applies a pending set_budget() at an epoch boundary, draining all in-flight epochs first so nothing still references the current transient heap.
-    // It then drops the heap and adopts the new budget; the heap is lazily recreated at the new size on the next transient allocation.
+    // Applies a pending set_budget() at an epoch boundary: drops the heap and adopts the new budget, without waiting.
+    // The heap is lazily recreated at the new size on the next transient allocation.
     // No-op if nothing is pending; reached via context::apply_pending_transient_budget from a backend's advance_epoch.
     void apply_pending_budget_at_epoch_boundary();
 

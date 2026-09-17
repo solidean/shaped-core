@@ -65,30 +65,28 @@ cc::shared_async<compute_pipeline_handle> build_compute_pipeline(context* ctx,
     };
 
     if (store == nullptr)
-    {
-        auto plain = create({});
-        if (plain.has_error())
-            co_await cc::async_fail(cc::move(plain.error()));
-        co_return cc::move(plain.value());
-    }
+        co_return co_await ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = layout});
 
     // Filled only by the singleflight winner, so "is it filled" IS "this was a miss".
     auto const produced = std::make_shared<cc::optional<compute_pipeline_handle>>();
 
     auto compute = [ctx, shader, layout, produced]() -> cc::shared_async<bcache::blob>
     {
-        return cc::make_async_lazy<bcache::blob>(
-            [ctx, shader, layout, produced](cc::async_context<bcache::blob>& actx) -> cc::async_step_status
-            {
-                auto built = ctx->uncached.try_create_compute_pipeline({.shader = shader, .layout = layout});
-                if (built.has_error())
-                    return actx.error(cc::move(built.error()));
+        auto build = [ctx, shader, layout, produced](cc::async_context<bcache::blob>& actx) -> cc::async_step_status
+        {
+            auto built = ctx->uncached.try_create_compute_pipeline({.shader = shader, .layout = layout});
+            if (built.has_error())
+                return actx.error(cc::move(built.error()));
 
-                *produced = built.value();
-                // Empty where the backend serializes nothing (dx12 state objects); the entry is then a tiny placeholder
-                // and every later run takes the plain build path, which is the same work it would have done anyway.
-                return actx.success(built.value()->cached_pipeline_data());
-            });
+            *produced = built.value();
+            // Empty where the backend serializes nothing (dx12 state objects); the entry is then a tiny placeholder
+            // and every later run takes the plain build path, which is the same work it would have done anyway.
+            return actx.success(built.value()->cached_pipeline_data());
+        };
+        // The store runs the compute wherever its own work runs, so a device bound to one thread needs it placed.
+        if (auto* const home = ctx->device_home())
+            return cc::make_async_lazy_on<bcache::blob>(*home, cc::move(build));
+        return cc::make_async_lazy<bcache::blob>(cc::move(build));
     };
 
     // A plain await: the only failure acquire surfaces is the compute's own, and that one must reach the caller.
@@ -434,6 +432,10 @@ async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, co
                                                                          desc.layout, this->resolve_blob_cache(),
                                                                          this->persistent_key(ctx, key, "pso"));
 
+                                      // Every segment on the device's home where it has one: the build and the seeded create both touch it.
+                                      if (auto* const home = ctx.device_home())
+                                          (void)node->try_home_cold(*home);
+
                                       // A coroutine is cold; this tier has always handed back a scheduled node.
                                       // Tracked on the context because nobody has to await it: the build references `ctx`.
                                       return ctx.backlog.start(cc::move(node));
@@ -446,17 +448,7 @@ async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, rast
     return _raster_cache.acquire(key,
                                  [&]() -> async_raster_pipeline
                                  {
-                                     // The build frame runs later, possibly on a worker.
-                                     // So deep-copy the whole description, which owns its shaders + layout handle, rather than referencing the caller's.
-                                     auto node = cc::make_async_scheduled<raster_pipeline_handle>(
-                                         [ctx_ptr = &ctx, d = raster_pipeline_description(desc)](
-                                             cc::async_context<raster_pipeline_handle>& actx) -> cc::async_step_status
-                                         {
-                                             auto res = ctx_ptr->uncached.try_create_raster_pipeline(d);
-                                             if (res.has_error())
-                                                 return actx.error(cc::move(res.error()));
-                                             return actx.success(cc::move(res.value()));
-                                         });
+                                     auto node = ctx.uncached.create_raster_pipeline_async(desc);
                                      ctx.backlog.track(node);
                                      return node;
                                  });

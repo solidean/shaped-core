@@ -32,6 +32,10 @@ enum class sg::feature
     /// The tessellation control + evaluation stages exist.
     /// Both or neither, which is why they are one feature rather than two.
     tessellation_shader,
+
+    /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.
+    /// WebGPU core has no binding arrays at all, so a bindless renderer asks once rather than finding out at layout creation.
+    binding_arrays,
 };
 
 /// Whether a caller may block on this context at all.

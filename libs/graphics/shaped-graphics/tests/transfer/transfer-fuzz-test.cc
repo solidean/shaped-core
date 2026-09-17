@@ -23,6 +23,11 @@ using namespace cc::primitive_defines;
 
 INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
+    // The fuzz ops are synchronous and read their downloads after a blocking drain, which a context that cannot block refuses.
+    // An async op sequence would need nexus to await an op.
+    if (ctx->execution() != sg::execution_model::may_block)
+        SKIP("the transfer fuzz ops block to read their downloads, and this context cannot block");
+
     REQUIRE(ctx != nullptr);
 
     auto test = nx::fuzz::test::create();

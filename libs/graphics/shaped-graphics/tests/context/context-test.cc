@@ -84,9 +84,18 @@ INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_han
     REQUIRE(ctx != nullptr);
 
     // With nothing in flight these are no-ops, but must not fault or move the epoch backwards.
+    // A context that cannot block refuses both blocking spellings instead, before touching any state.
     ctx->process_completed_epochs();
-    ctx->block_until_epochs_in_flight(0);
-    ctx->block_until_idle();
+    if (ctx->execution() == sg::execution_model::may_block)
+    {
+        ctx->block_until_epochs_in_flight(0);
+        ctx->block_until_idle();
+    }
+    else
+    {
+        CHECK_ASSERTS(ctx->block_until_epochs_in_flight(0));
+        CHECK_ASSERTS(ctx->block_until_idle());
+    }
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }
 
@@ -195,7 +204,8 @@ ASYNC_INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::
 INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    REQUIRE(ctx->execution() == sg::execution_model::may_block);
+    if (ctx->execution() != sg::execution_model::may_block)
+        SKIP("this context cannot block; the idle_completion twin below covers the same guarantee");
 
     auto const src = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
 

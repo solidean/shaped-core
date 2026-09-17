@@ -189,12 +189,14 @@ ASYNC_INVOCABLE_TEST("sg - transient buffer storage is reused across epochs", (s
     {
         CHECK(co_await transient_round_trip(ctx, e * 7 + 1));
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2); // keep at most 2 epochs in flight
+        co_await ctx->epochs_in_flight_completion(2); // keep at most 2 epochs in flight
     }
 }
 
-// set_budget is deferred: it records a pending budget the next advance_epoch applies (draining in-flight
-// work, resizing the heap). Data must keep round-tripping across a shrink and a grow.
+// set_budget is deferred: it records a pending budget the next advance_epoch applies by dropping the heap, without waiting for anything.
+// Data must keep round-tripping across a shrink and a grow.
+// The old heap's buffers are still in flight when it is dropped, so this also pins that a heap outlives the deferred deletion of every buffer placed in it.
+// The vulkan driver's validation layer is what would report the reverse.
 ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -203,7 +205,7 @@ ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (
 
     ctx->transient.set_budget(isize(512) * 1024);
     // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
-    // set_budget is deferred, hence the advance that applies it; the advance drains what it has to, so nothing here waits.
+    // set_budget is deferred, hence the advance that applies it; applying it waits for nothing.
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
@@ -212,7 +214,7 @@ ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (
     for (int e = 1; e <= 4; ++e)
     {
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2); // first advance drains + resizes to the pending 512 KiB
+        co_await ctx->epochs_in_flight_completion(2); // the first advance adopts the pending 512 KiB
         CHECK(co_await transient_round_trip(ctx, e));
     }
 
@@ -220,7 +222,7 @@ ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (
     for (int e = 5; e <= 8; ++e)
     {
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2);
+        co_await ctx->epochs_in_flight_completion(2);
         CHECK(co_await transient_round_trip(ctx, e));
     }
 }
@@ -233,7 +235,7 @@ ASYNC_INVOCABLE_TEST("sg - transient budget setter is repeatable before an advan
 
     ctx->transient.set_budget(isize(1) * 1024 * 1024);
     // The context is shared with every later test under this driver, so the default goes back even past a failed REQUIRE.
-    // set_budget is deferred, hence the advance that applies it; the advance drains what it has to, so nothing here waits.
+    // set_budget is deferred, hence the advance that applies it; applying it waits for nothing.
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);

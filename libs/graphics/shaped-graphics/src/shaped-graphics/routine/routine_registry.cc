@@ -34,7 +34,14 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     // Initialization runs on the ambient async scheduler, and installing one is the application's job.
     // Asserts where there is none rather than standing up a private one: a phase nothing can drive would leave every
     // routine pending forever, which is a configuration error and not a state to report.
-    auto& scheduler = cc::ambient_async_scheduler();
+    //
+    // The exception is a single-threaded context, whose calls must all come from one thread: a phase resuming on a pool worker would call it from another.
+    // Its phases start on a scheduler of the registry's own, bound to whichever thread ticks and driven only here.
+    auto const pins_phases = _ctx.threading() == thread_model::single_threaded;
+    if (pins_phases && _phase_scheduler == nullptr)
+        _phase_scheduler = std::make_unique<cc::singlethreaded_scheduler>();
+    auto& scheduler = pins_phases ? *_phase_scheduler : cc::ambient_async_scheduler();
+    auto const pinned = pins_phases ? std::make_unique<cc::async_worker_scope>(*_phase_scheduler) : nullptr;
 
     auto const tick_index = ++_ticks;
 
@@ -90,8 +97,13 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
 
         // Driven here, not merely waited for: under a single-threaded scheduler this thread is the only one that can
         // run a phase at all, and a tick that only pumped would spin against a queue nobody empties.
+        // A context that cannot block leaves instead of yielding: what a phase waits on arrives only after this returns.
         if (!progressed && !scheduler.try_run_one() && !cc::thread_pump_all())
+        {
+            if (_ctx.execution() == execution_model::never_block)
+                break;
             cc::this_thread_yield();
+        }
     }
 
     close_window();
@@ -152,7 +164,9 @@ routine_tick_result routine_registry::tick_until_idle()
         auto const pass = tick();
         total.initialized += pass.initialized;
         total.pending = pass.pending;
-        if (pass.initialized == 0)
+        // A tick on a context that cannot block leaves as soon as nothing progresses within it.
+        // An empty pass there says only that this tick found nothing to do yet, so the loop goes on while anything is still pending.
+        if (pass.initialized == 0 && (pass.pending == 0 || _ctx.execution() == execution_model::may_block))
             break;
     }
     return total;
@@ -330,7 +344,13 @@ void routine_registry::clear()
     // deadlock against its own initialization.
     // A context destroyed during static teardown has no ambient scheduler left; that is safe because an empty backlog
     // hands back a resolved node, and blocking on one needs none.
-    (void)cc::try_async_blocking_get(_ctx.backlog.settled());
+    auto const settled = _ctx.backlog.settled();
+    if (_ctx.execution() == execution_model::never_block)
+        CC_ASSERT(settled->is_ready(),
+                  "clearing routines would wait for background work, and this context cannot — await "
+                  "ctx.backlog.settled() before shutting it down");
+    else
+        (void)cc::try_async_blocking_get(settled);
 
     // Edges next: a token holds a strong reference, so a cycle that slipped past add_dependency would otherwise keep
     // its own routines alive after the map let go of them.

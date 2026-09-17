@@ -215,10 +215,11 @@ INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not 
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_error());
     CHECK_THROWS_AS(ctx->uncached.create_binding_group_layout(bindings), sg::pipeline_creation_exception);
 
-    // A bounded count of the same binding is what a bindless table declares, and builds.
+    // A bounded count of the same binding is what a bindless table declares, and builds where arrays exist.
     auto bounded = unbounded;
     bounded.count = 4;
-    CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&bounded, 1)).has_value());
+    CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&bounded, 1)).has_value()
+          == ctx->supports(sg::feature::binding_arrays));
 }
 
 INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::context_handle const& ctx))

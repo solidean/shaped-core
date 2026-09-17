@@ -17,30 +17,15 @@ void context_transient_scope::set_budget(isize size_in_bytes)
 
 void context_transient_scope::apply_pending_budget_at_epoch_boundary()
 {
-    isize pending = 0;
-    bool live = false;
+    // Never waits: the heap is only dropped here, and the next allocation creates one at the new budget.
+    // Every transient resource placed in the old heap holds a handle to it, and its release is epoch-deferred.
+    // So the old heap lives exactly as long as the GPU work that still reads it.
     _bump.lock(
         [&](bump_state& s)
         {
-            pending = s.pending_budget;
-            live = s.heap != nullptr;
-        });
-    if (pending == 0)
-        return;
-
-    // Drain every in-flight epoch so no GPU work still references the current transient heap before we drop it.
-    // Only needed if a heap actually exists, and it uses base-context virtuals only, so it stays backend-agnostic.
-    if (live)
-    {
-        while (u64(_ctx.completed_epoch()) + 1 < u64(_ctx.current_epoch()))
-            _ctx.wait_for_next_inflight_epoch();
-        _ctx.process_completed_epochs(); // retire any already-finished epochs so their heap references drop
-    }
-
-    _bump.lock(
-        [&](bump_state& s)
-        {
-            s.heap = nullptr; // released here (fully drained above); recreated lazily at the new budget
+            if (s.pending_budget == 0)
+                return;
+            s.heap = nullptr;
             s.budget = s.pending_budget;
             s.head = 0;
             s.pending_budget = 0;

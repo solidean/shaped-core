@@ -84,6 +84,13 @@ public:
     /// The two `block_until_` spellings are what ask, and both assert where the answer is `never_block`.
     [[nodiscard]] virtual execution_model execution() const { return execution_model::may_block; }
 
+    /// The home every call touching the device must run in, or null when any thread may make them.
+    ///
+    /// A backend whose device lives in one thread's realm reports that thread's home — WebGPU in a threaded wasm build, whose objects exist only on the thread that requested the device.
+    /// sg homes its own device work there, the pipeline cache's builds among it, so the pool never touches such a device.
+    /// A caller's own device calls are the caller's to place: a coroutine awaiting sg work hops there with `cc::async_resume_on(*home)`.
+    [[nodiscard]] cc::async_scheduler* device_home() const { return _device_home; }
+
     /// Which GPU this context is running on, fixed at creation.
     /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
     [[nodiscard]] adapter_info const& adapter() const { return _adapter; }
@@ -273,6 +280,12 @@ public:
     /// Cold, like every coroutine; settles as an error once the device is lost, or when the context shuts down first.
     [[nodiscard]] cc::shared_async<cc::unit> idle_completion();
 
+    /// Settles once at most `allowed_in_flight` epochs are still in flight, retiring as it goes.
+    ///
+    /// `block_until_epochs_in_flight` as an async, for a caller that wants the depth back inside its bound without declining the advance as `try_advance_epoch` does.
+    /// Awaited under `process_completed_epochs`' rule: never while another thread advances the epoch.
+    [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_completion(int allowed_in_flight);
+
     /// Blocks until the GPU is idle AND every sg actor has drained.
     ///
     /// **One of the two blocking spellings in sg**, which is why it says so in its name: `block_until_` greps as the
@@ -342,34 +355,24 @@ private:
         cc::shared_async<cc::unit> node;
     };
 
-    /// Everything that makes the completion asyncs settle on their own: the signal waiter, or the pump without threads.
-    /// Defined in context.cc, so this header pulls in no thread type.
+    /// The bookkeeping shared by the pending list: what was last armed, and whether the signals stopped.
+    /// Defined in context.cc.
     struct completion_signals;
 
     /// Hand back the node for `target`, minting one on a miss and making sure something will signal it.
     /// Already-settled targets never reach here — the public entry points answer those with a ready node.
     [[nodiscard]] cc::shared_async<cc::unit const> completion_for(u64 target, completion_kind kind);
 
+    /// The coroutines behind idle_completion and epochs_in_flight_completion, which place them on the device's home.
+    [[nodiscard]] cc::shared_async<cc::unit> idle_completion_steps();
+    [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_steps(int allowed_in_flight);
+
     /// Settles when no transfer actor holds outstanding work; one of `idle_completion`'s three steps.
     [[nodiscard]] cc::shared_async<cc::unit const> transfers_drained_completion();
 
-    /// Push every node whose condition now holds, or fail every node once the device is lost.
-    /// Safe from any thread, a transfer actor's included.
-    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
-    void settle_due_completions();
-
-    /// Start the waiter thread, or register the pump without threads, the first time a completion needs signalling.
-    /// Called under the pending lock.
-    void ensure_completion_signals(cc::vector<pending_completion> const& pending);
-
-    /// Nudge a waiter already parked on older targets, so it re-arms for the one just added.
-    void wake_completion_signals();
-
-    /// The waiter thread's body: arm the lowest outstanding targets, park on them, settle, repeat.
-    void run_completion_signal_waiter();
-
-    /// The pump's body without threads: settle what is due, let siblings run, and park on the GPU only when nothing else can.
-    bool pump_completion_signals();
+    /// Hand the lowest outstanding targets to the backend when they changed since the last call.
+    /// Called under the pending lock, which is what keeps successive arms in order.
+    void rearm_completion_signal(cc::vector<pending_completion> const& pending);
 
     friend void impl::notify_transfer_drained(context& ctx);
 
@@ -424,20 +427,27 @@ protected:
     /// The newest submission token handed out, or `not_submitted` when nothing has been submitted yet.
     [[nodiscard]] virtual submission_token last_issued_submission() = 0;
 
-    /// Parks until the submission timeline reaches `submission`, the epoch timeline reaches `epoch`, or
-    /// `wake_completion_signal` is given a generation past `wake_generation` — whichever comes first.
+    /// Announces the lowest outstanding submission and epoch targets, zero where none waits.
     ///
-    /// **A GPU signal or a host wake, never a timeout.**
-    /// A zero target is not waited on, and a spurious return is harmless: the caller re-checks everything.
-    /// The completion signal waiter is its only caller, so it may keep per-waiter arming state without a lock.
-    virtual void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) = 0;
+    /// The backend arranges for `settle_due_completions()` to run once either is reached.
+    /// It learns that from a thread it parks on its GPU signals (`sg::impl::completion_waiter`), or from its API's own completion callback.
+    /// Called under a context lock whenever the targets change, lower or higher, so it must not block and must not call back into the context.
+    /// Settling later, from anywhere, is fine.
+    virtual void arm_completion_signal(u64 submission, u64 epoch) = 0;
 
-    /// Wakes a waiter parked in `wait_for_completion_signal`; generations are handed out strictly increasing.
-    /// Called only when a new target is lower than what the waiter is armed for, so at most once per such target.
-    virtual void wake_completion_signal(u64 generation) = 0;
+    /// Push every node whose condition now holds, or fail every node once the device is lost.
+    /// Safe from any thread, a transfer actor's and a GPU callback's included.
+    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
+    void settle_due_completions();
 
-    /// Stops the signal waiter and fails every completion still outstanding, so no dependent parks forever.
-    /// A backend calls it in shutdown after its final drain, while its fences still exist; idempotent.
+    /// `block_until_idle`'s three steps without its `execution()` check, for a backend's own shutdown.
+    ///
+    /// `never_block` is a promise about the caller's thread, and a backend that can park a thread still has to drain before its device goes.
+    /// A backend that cannot wait never calls this.
+    void drain_at_shutdown();
+
+    /// Fails every completion still outstanding, so no dependent parks forever; idempotent.
+    /// A backend calls it in shutdown after its final drain, once whatever observes its GPU signals has stopped.
     void stop_completion_signals();
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
@@ -636,6 +646,18 @@ protected:
         raster_pipeline_description const& desc,
         lifetime_scope scope) = 0;
 
+    /// The async twins of the two creates above, which the cached tier awaits.
+    ///
+    /// The default schedules the synchronous create as a node, so it runs wherever the node is picked up, which is what every backend with a blocking pipeline build wants.
+    /// A backend whose API compiles pipelines asynchronously overrides these and settles the node from its callback.
+    /// The description is copied, so everything it references — the compiled shaders above all — must outlive the returned async.
+    [[nodiscard]] virtual cc::shared_async<compute_pipeline_handle> create_compute_pipeline_async(
+        compute_pipeline_description const& desc,
+        lifetime_scope scope);
+    [[nodiscard]] virtual cc::shared_async<raster_pipeline_handle> create_raster_pipeline_async(
+        raster_pipeline_description const& desc,
+        lifetime_scope scope);
+
     /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
     [[nodiscard]] virtual cc::result<raytracing_pipeline_handle> try_create_raytracing_pipeline(
         raytracing_pipeline_description const& desc,
@@ -676,6 +698,9 @@ protected:
 
     // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
     adapter_info _adapter;
+
+    // See device_home; set by a backend during creation, never changed afterwards.
+    cc::async_scheduler* _device_home = nullptr;
 
     // The portable floors a caller sizes against, raised by a backend that has actually measured them.
     device_limits _limits;

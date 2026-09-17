@@ -25,7 +25,7 @@ void dx12_context::shutdown()
     if (_queue && _epoch_fence)
     {
         advance_epoch();
-        block_until_idle();
+        drain_at_shutdown();
     }
 
     // Drain + join the download actor and release the ring buffers while the submission fence is still
@@ -67,6 +67,8 @@ void dx12_context::shutdown()
     _group_pool.shutdown();
 
     // The waiter may be parked on both fences, so it is joined before they go.
+    if (_completion_waiter != nullptr)
+        _completion_waiter->stop();
     stop_completion_signals();
     _submission_fence.Reset();
     _epoch_fence.Reset();
