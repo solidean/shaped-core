@@ -155,8 +155,8 @@ m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
 m.describe_instance(cmd, mesh_id, instance_id)  // -> instance_gpu, the per-item record a closest-hit reads by InstanceID()
-m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
+m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
 sv::instance_gpu                       // { u32 param_buffer, param_offset, vertices, indices, is_indexed; } — 32 bytes, mirrors sv::instance
 ```
 
