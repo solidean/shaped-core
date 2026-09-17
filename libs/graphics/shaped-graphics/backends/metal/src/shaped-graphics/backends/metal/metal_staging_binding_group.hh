@@ -42,6 +42,9 @@ private:
     /// vacant element does.
     cc::vector<u64> _slots;
 
+    /// Set when the device refused a sampler state, which `mint` turns into an error.
+    bool _sampler_refused = false;
+
     /// The resource each slot names, parallel to `_slots`, so a minted group can keep them alive.
     /// An argument buffer holds raw addresses and keeps nothing alive by itself.
     cc::vector<sg::raw_buffer_handle> _resources;

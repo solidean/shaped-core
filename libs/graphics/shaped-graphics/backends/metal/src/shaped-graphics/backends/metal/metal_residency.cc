@@ -4,7 +4,7 @@
 
 namespace sg::backend::metal
 {
-void metal_residency_set::create(MTL::Device* device, MTL4::CommandQueue* queue)
+cc::result<cc::unit> metal_residency_set::create(MTL::Device* device, MTL4::CommandQueue* queue)
 {
     CC_ASSERT(device != nullptr && queue != nullptr, "a residency set needs a device and a queue");
 
@@ -14,13 +14,15 @@ void metal_residency_set::create(MTL::Device* device, MTL4::CommandQueue* queue)
     NS::Error* error = nullptr;
     auto* const set = device->newResidencySet(descriptor, &error);
     descriptor->release();
-    CC_ASSERT(set != nullptr, "the metal device refused a residency set");
+    if (set == nullptr)
+        return metal_error(error, "the metal device refused a residency set");
 
     // Attached once.
     // Everything added to the set from here on is resident for work committed to this queue.
     queue->addResidencySet(set);
 
     _set.lock([&](MTL::ResidencySet*& s) { s = set; });
+    return cc::unit{};
 }
 
 void metal_residency_set::attach_to(MTL4::CommandQueue* queue)

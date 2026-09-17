@@ -366,12 +366,31 @@ bool metal_stream_system::actor_impl::run_cycle()
 
     auto b = batch{.id = _next_batch++};
     b.staging = _ctx->device()->newBuffer(NS::UInteger(total), k_stream_staging_options);
-    CC_ASSERT(b.staging != nullptr, "the metal device refused a streaming staging buffer");
+
+    // **A refused allocation fails this cycle's jobs rather than the process.**
+    // Each of them settles through the same path a cancelled or errored transfer takes, so a caller waiting on the
+    // handle is told rather than left parked.
+    auto* const allocator = b.staging != nullptr ? _ctx->epochs().lease_allocator() : nullptr;
+    b.command_buffer = allocator != nullptr ? _ctx->device()->newCommandBuffer() : nullptr;
+    if (b.command_buffer == nullptr)
+    {
+        if (allocator != nullptr)
+            _ctx->epochs().retire_allocator_with_epoch(allocator);
+        if (b.staging != nullptr)
+            b.staging->release();
+
+        for (auto const& chunk : chunks)
+            if (auto* const job = find_job(chunk.job_sequence); job != nullptr)
+                job->failed = true;
+
+        _ctx->report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused a streaming "
+                                                                            "staging allocation");
+        return false;
+    }
+
     b.staging->setLabel(ns_string("sg stream staging"));
     _ctx->residency().add(b.staging);
 
-    auto* const allocator = _ctx->epochs().lease_allocator();
-    b.command_buffer = _ctx->device()->newCommandBuffer();
     b.command_buffer->beginCommandBuffer(allocator);
     auto* const encoder = b.command_buffer->computeCommandEncoder();
 

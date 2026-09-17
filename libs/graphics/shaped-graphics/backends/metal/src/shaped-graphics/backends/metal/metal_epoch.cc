@@ -214,9 +214,9 @@ MTL4::CommandAllocator* metal_epoch_system::lease_allocator()
     if (recycled != nullptr)
         return recycled;
 
-    auto* const fresh = _device->newCommandAllocator();
-    CC_ASSERT(fresh != nullptr, "the device refused a command allocator");
-    return fresh;
+    // Null rather than an assert: a refused allocator is the device declining an allocation, which every caller here
+    // can report as an error or a failed transfer.
+    return _device->newCommandAllocator();
 }
 
 void metal_epoch_system::retire_allocator_with_epoch(MTL4::CommandAllocator* allocator)

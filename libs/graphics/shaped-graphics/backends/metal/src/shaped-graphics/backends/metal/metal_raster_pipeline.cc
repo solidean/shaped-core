@@ -180,6 +180,11 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
 
     auto* const depth_stencil = _device->newDepthStencilState(ds_descriptor);
     ds_descriptor->release();
+    if (depth_stencil == nullptr)
+    {
+        state->release();
+        return cc::error("raster_pipeline: the metal device refused a depth-stencil state");
+    }
 
     return std::make_shared<metal_raster_pipeline>(*this, state, depth_stencil, desc.rasterization, desc.topology,
                                                    desc.depth_stencil_format, desc.layout);

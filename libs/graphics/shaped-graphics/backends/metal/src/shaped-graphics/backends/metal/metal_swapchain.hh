@@ -15,10 +15,14 @@
 /// So a headless chain is a ring of ordinary render-target textures with a rotating index, exactly as dx12 emulates it
 /// — which means the two paths share the acquire and diverge at present.
 ///
-/// **The present handshake needs both halves of sg's split.**
+/// **The present handshake needs both halves of sg's split, and both are emitted.**
 /// `MTL4CommandQueue::waitForDrawable` must run before the work that draws into the drawable, and `signalDrawable`
 /// after it — so the submit that carries the frame is what sits between them, which is precisely the room
 /// `record_present_transition` + `present` leaves.
+/// The wait goes in the first, where a queue wait still precedes the frame's own commit.
+///
+/// **A windowed chain takes its size from the layer**, not from `swapchain_description::window.client_size`, which is
+/// documented as needed by wayland alone and is 0 on cocoa.
 class sg::backend::metal::metal_swapchain final : public sg::swapchain
 {
 public:

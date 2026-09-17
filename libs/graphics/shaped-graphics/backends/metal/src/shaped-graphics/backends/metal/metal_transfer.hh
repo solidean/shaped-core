@@ -38,7 +38,7 @@ class sg::backend::metal::metal_transfer_system
 public:
     /// Creates the queue and the timeline.
     /// Called once, before any transfer.
-    void create(metal_context& ctx);
+    [[nodiscard]] cc::result<cc::unit> create(metal_context& ctx);
 
     /// Copy `data` into `buffer` at `offset_in_bytes`, off the frame path.
     /// The pin is consumed on the calling thread, so the caller's bytes are free the moment this returns.

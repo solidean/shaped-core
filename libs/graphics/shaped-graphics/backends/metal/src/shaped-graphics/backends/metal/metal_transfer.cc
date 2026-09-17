@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
+#include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 #include <thread>
 
@@ -18,9 +19,58 @@ namespace
 /// Shared storage, because the CPU writes or reads it; untracked, for the same reason every other resource here is.
 constexpr MTL::ResourceOptions k_transfer_staging_options
     = MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked;
+
+/// One off-frame transfer's device objects: a staging buffer, an allocator and a command buffer.
+/// Any of the three can be refused by the device, which is an allocation failure rather than a broken contract — so
+/// this reports it on the deferred error channel and hands back an empty record for the caller to bail on.
+struct transfer_resources
+{
+    MTL::Buffer* staging = nullptr;
+    MTL4::CommandAllocator* allocator = nullptr;
+    MTL4::CommandBuffer* command_buffer = nullptr;
+
+    [[nodiscard]] bool is_valid() const { return command_buffer != nullptr; }
+};
+
+[[nodiscard]] transfer_resources acquire_transfer_resources(metal_context& ctx, isize size_in_bytes, cc::string_view label)
+{
+    auto out = transfer_resources{};
+
+    out.staging = ctx.device()->newBuffer(NS::UInteger(size_in_bytes), k_transfer_staging_options);
+    if (out.staging == nullptr)
+    {
+        ctx.report_feedback_error(
+            sg::device_error_kind::creation_failed,
+            cc::format("the metal device refused a {} byte staging buffer for {}", size_in_bytes, label));
+        return {};
+    }
+    out.staging->setLabel(ns_string(label));
+
+    out.allocator = ctx.epochs().lease_allocator();
+    if (out.allocator == nullptr)
+    {
+        out.staging->release();
+        ctx.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused a command "
+                                                                          "allocator for an off-frame transfer");
+        return {};
+    }
+
+    out.command_buffer = ctx.device()->newCommandBuffer();
+    if (out.command_buffer == nullptr)
+    {
+        ctx.epochs().retire_allocator_with_epoch(out.allocator);
+        out.staging->release();
+        ctx.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused a command buffer "
+                                                                          "for an off-frame transfer");
+        return {};
+    }
+
+    ctx.residency().add(out.staging);
+    return out;
+}
 } // namespace
 
-void metal_transfer_system::create(metal_context& ctx)
+cc::result<cc::unit> metal_transfer_system::create(metal_context& ctx)
 {
     CC_ASSERT(_queue == nullptr, "the transfer system is created once");
     _ctx = &ctx;
@@ -32,20 +82,24 @@ void metal_transfer_system::create(metal_context& ctx)
     descriptor->setLabel(ns_string("sg transfer queue"));
     _queue = ctx.device()->newMTL4CommandQueue(descriptor, &error);
     descriptor->release();
-    CC_ASSERT(_queue != nullptr, "the metal device refused a transfer queue");
+    if (_queue == nullptr)
+        return metal_error(error, "the metal device refused a transfer queue");
 
     auto* const stream_descriptor = MTL4::CommandQueueDescriptor::alloc()->init();
     stream_descriptor->setLabel(ns_string("sg stream queue"));
     _stream_queue = ctx.device()->newMTL4CommandQueue(stream_descriptor, &error);
     stream_descriptor->release();
-    CC_ASSERT(_stream_queue != nullptr, "the metal device refused a streaming queue");
+    if (_stream_queue == nullptr)
+        return metal_error(error, "the metal device refused a streaming queue");
 
     _timeline = ctx.device()->newSharedEvent();
-    CC_ASSERT(_timeline != nullptr, "the metal device refused a transfer timeline");
+    if (_timeline == nullptr)
+        return cc::error("the metal device refused a transfer timeline");
 
     // The transfer queue's work touches the same resources the frame's does, so it needs the same residency set.
     ctx.residency().attach_to(_queue);
     ctx.residency().attach_to(_stream_queue);
+    return cc::unit{};
 }
 
 metal_transfer_system::claimed metal_transfer_system::claim_value(void const* resource)
@@ -180,10 +234,11 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
 
     auto const scope = autorelease_scope();
 
-    auto* const staging = _ctx->device()->newBuffer(NS::UInteger(data.size()), k_transfer_staging_options);
-    CC_ASSERT(staging != nullptr, "the metal device refused an async upload staging buffer");
-    staging->setLabel(ns_string("sg async upload"));
-    _ctx->residency().add(staging);
+    auto const resources = acquire_transfer_resources(*_ctx, data.size(), "sg async upload");
+    if (!resources.is_valid())
+        return; // reported on the deferred error channel, which is the only one an upload has
+
+    auto* const staging = resources.staging;
 
     // The CPU copy happens now, on the calling thread, which is what lets the pin be released as soon as the GPU copy
     // is recorded rather than held until it runs.
@@ -194,8 +249,8 @@ void metal_transfer_system::upload_to_buffer(sg::raw_buffer_handle buffer,
     auto const claim = claim_value(buffer.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
-    auto* const allocator = _ctx->epochs().lease_allocator();
-    auto* const command_buffer = _ctx->device()->newCommandBuffer();
+    auto* const allocator = resources.allocator;
+    auto* const command_buffer = resources.command_buffer;
     command_buffer->beginCommandBuffer(allocator);
 
     auto* const encoder = command_buffer->computeCommandEncoder();
@@ -232,18 +287,19 @@ sg::bytes_future metal_transfer_system::download_from_buffer(sg::raw_buffer_hand
 
     auto const scope = autorelease_scope();
 
-    auto* const staging = _ctx->device()->newBuffer(NS::UInteger(size_in_bytes), k_transfer_staging_options);
-    CC_ASSERT(staging != nullptr, "the metal device refused an async download staging buffer");
-    staging->setLabel(ns_string("sg async download"));
-    _ctx->residency().add(staging);
+    auto const resources = acquire_transfer_resources(*_ctx, size_in_bytes, "sg async download");
+    if (!resources.is_valid())
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_cancelled_completion());
+
+    auto* const staging = resources.staging;
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(buffer.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
-    auto* const allocator = _ctx->epochs().lease_allocator();
-    auto* const command_buffer = _ctx->device()->newCommandBuffer();
+    auto* const allocator = resources.allocator;
+    auto* const command_buffer = resources.command_buffer;
     command_buffer->beginCommandBuffer(allocator);
 
     auto* const encoder = command_buffer->computeCommandEncoder();
@@ -295,11 +351,11 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
 
     auto const scope = autorelease_scope();
 
-    auto* const staging = _ctx->device()->newBuffer(NS::UInteger(layout.size_in_bytes), k_transfer_staging_options);
-    CC_ASSERT(staging != nullptr, "the metal device refused an async texture upload staging buffer");
-    staging->setLabel(ns_string("sg async texture upload"));
-    _ctx->residency().add(staging);
+    auto const resources = acquire_transfer_resources(*_ctx, layout.size_in_bytes, "sg async texture upload");
+    if (!resources.is_valid())
+        return;
 
+    auto* const staging = resources.staging;
     cc::memcpy(staging->contents(), pixels.data(), size_t(layout.size_in_bytes));
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
@@ -307,8 +363,8 @@ void metal_transfer_system::upload_to_texture(sg::raw_texture_handle texture,
     auto const claim = claim_value(texture.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
-    auto* const allocator = _ctx->epochs().lease_allocator();
-    auto* const command_buffer = _ctx->device()->newCommandBuffer();
+    auto* const allocator = resources.allocator;
+    auto* const command_buffer = resources.command_buffer;
     command_buffer->beginCommandBuffer(allocator);
 
     auto* const encoder = command_buffer->computeCommandEncoder();
@@ -340,18 +396,19 @@ sg::bytes_future metal_transfer_system::download_from_texture(sg::raw_texture_ha
 
     auto const scope = autorelease_scope();
 
-    auto* const staging = _ctx->device()->newBuffer(NS::UInteger(layout.size_in_bytes), k_transfer_staging_options);
-    CC_ASSERT(staging != nullptr, "the metal device refused an async texture download staging buffer");
-    staging->setLabel(ns_string("sg async texture download"));
-    _ctx->residency().add(staging);
+    auto const resources = acquire_transfer_resources(*_ctx, layout.size_in_bytes, "sg async texture download");
+    if (!resources.is_valid())
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_cancelled_completion());
+
+    auto* const staging = resources.staging;
 
     // Held past the commit below: a value claimed here must be the value signalled next on this queue.
     auto const submit_guard = _submit.lock_scoped();
     auto const claim = claim_value(texture.get());
     _pending.fetch_add(1, std::memory_order_acq_rel);
 
-    auto* const allocator = _ctx->epochs().lease_allocator();
-    auto* const command_buffer = _ctx->device()->newCommandBuffer();
+    auto* const allocator = resources.allocator;
+    auto* const command_buffer = resources.command_buffer;
     command_buffer->beginCommandBuffer(allocator);
 
     auto* const encoder = command_buffer->computeCommandEncoder();
@@ -442,8 +499,11 @@ u64 metal_transfer_system::reserve_stream_value(void const* resource)
             auto& timeline = s.stream_timelines[resource];
             if (timeline.event == nullptr)
             {
+                // Thrown rather than returned: this is reached from a recording seam with no error channel of its own,
+                // and a stream whose timeline nobody signals parks every command list that ever waits on it.
                 timeline.event = _ctx->device()->newSharedEvent();
-                CC_ASSERT(timeline.event != nullptr, "the metal device refused a streaming timeline");
+                if (timeline.event == nullptr)
+                    throw sg::exception("the metal device refused a streaming timeline");
             }
             return timeline.next_value++;
         });

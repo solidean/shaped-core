@@ -103,6 +103,7 @@ public:
     [[nodiscard]] MTL::SharedEvent* submission_timeline() const { return _submission_event; }
 
     /// An allocator to record into, recycled from the pool or newly created.
+    /// Null when the device refused a fresh one, which every caller reports rather than asserts on.
     [[nodiscard]] MTL4::CommandAllocator* lease_allocator();
 
     /// Hands `allocator` to the open epoch, which resets it and returns it to the pool once the GPU is done with it.

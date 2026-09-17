@@ -218,6 +218,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             continue;
 
         auto* const state = _samplers.acquire(_device, ns.sampler);
+        if (state == nullptr)
+            return cc::error(cc::format("binding_group: the metal device refused a sampler state for '{}'", ns.name));
         slots[slot_of(bindings[index], 0)] = state->gpuResourceID()._impl;
         filled[index] = char(1);
     }
@@ -237,6 +239,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                                         b.name));
 
         auto* const state = _samplers.acquire(_device, ns.sampler);
+        if (state == nullptr)
+            return cc::error(cc::format("binding_group: the metal device refused a sampler state for '{}'", ns.name));
         slots[slot_of(b, 0)] = state->gpuResourceID()._impl;
         filled[index] = char(1);
     }

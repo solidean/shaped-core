@@ -72,10 +72,11 @@ public:
 
     /// Allocate the backing buffer.
     /// Must be called once, before any reservation.
-    void create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label);
+    [[nodiscard]] cc::result<cc::unit> create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label);
 
     /// Reserve `size` bytes, from the ring where it fits and from a dedicated buffer where it does not.
-    /// Never fails: a reservation always comes back valid.
+    /// An invalid reservation means the device refused the dedicated allocation, which is the caller's transfer to
+    /// fail rather than this ring's to assert on.
     ///
     /// The span is always contiguous, so a request that would straddle the seam skips to it and leaves the tail unused.
     /// dx12 splits at the seam instead and has its callers walk the windows; here one reservation is one span, which is

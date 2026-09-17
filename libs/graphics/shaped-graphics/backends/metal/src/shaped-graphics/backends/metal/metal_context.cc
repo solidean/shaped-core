@@ -37,18 +37,19 @@ metal_context::metal_context(MTL::Device* device,
     _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 
-void metal_context::create_staging_rings(isize upload_bytes, isize download_bytes)
+cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize download_bytes)
 {
     // Before the rings, so their own buffers can declare themselves resident as they are made.
-    _residency.create(_device, _queue);
-    _transfers.create(*this);
+    CC_RETURN_IF_ERROR(_residency.create(_device, _queue));
+    CC_RETURN_IF_ERROR(_transfers.create(*this));
     _streams.create(*this);
 
-    _upload_ring.create(_device, upload_bytes, "sg inline upload ring");
-    _download_ring.create(_device, download_bytes, "sg inline download ring");
+    CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring"));
+    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring"));
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
+    return cc::unit{};
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
@@ -373,6 +374,9 @@ cc::result<std::unique_ptr<sg::command_list>> metal_context::try_create_command_
     auto const scope = autorelease_scope();
 
     auto* const allocator = _epochs.lease_allocator();
+    if (allocator == nullptr)
+        return cc::error("the metal device refused a command allocator");
+
     auto* const buffer = _device->newCommandBuffer();
     if (buffer == nullptr)
     {
@@ -409,6 +413,16 @@ void metal_context::shutdown()
     // Before the device and the queue: a handler still in flight would otherwise report into a context being torn down.
     _feedback->detach();
 
+    // **The two transfer tiers go down before the epoch system, not after it.**
+    // Both settle their in-flight work by handing resources to `defer`, and `_epochs.shutdown()` is the only thing
+    // that ever sweeps those — a job another thread admitted during shutdown would drop its buffers into a payload
+    // nothing runs again, so they leak and their finalizers never fire.
+    //
+    // Within the pair: the stream actor commits onto the transfer system's queue, so a job still in flight would name
+    // a queue that is already gone.
+    _streams.shutdown();
+    _transfers.shutdown();
+
     _epochs.shutdown();
 
     // After the epoch shutdown drained the queue, so no notification handler is still due to run.
@@ -421,10 +435,6 @@ void metal_context::shutdown()
     // After the drain above, so nothing in flight still names these bytes.
     _upload_ring.shutdown();
     _download_ring.shutdown();
-    // Before the transfer system: the actor commits onto its queue, and a job still in flight would name a queue
-    // that is already gone.
-    _streams.shutdown();
-    _transfers.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
 

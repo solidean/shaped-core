@@ -151,7 +151,7 @@ public:
 
     /// Allocates the residency set and the two staging rings.
     /// Called once by create_metal_context, before the context is handed out.
-    void create_staging_rings(isize upload_bytes, isize download_bytes);
+    [[nodiscard]] cc::result<cc::unit> create_systems(isize upload_bytes, isize download_bytes);
 
     /// The transfer-timeline value `list` must wait for before it may run, or 0 when none of its resources has a
     /// transfer in flight.

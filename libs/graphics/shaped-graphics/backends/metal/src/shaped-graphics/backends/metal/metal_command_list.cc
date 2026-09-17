@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/metal/metal_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
+#include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 // Everything below the constructor is a seam the milestone order has not reached; see
 // libs/graphics/shaped-graphics/docs/writing-a-backend.md.
@@ -131,7 +132,12 @@ MTL4::ArgumentTable* metal_command_list::argument_table()
     NS::Error* error = nullptr;
     _argument_table = _metal_context.device()->newArgumentTable(descriptor, &error);
     descriptor->release();
-    CC_ASSERT(_argument_table != nullptr, "the metal device refused an argument table");
+
+    // Thrown, not returned: this is a recording seam — `bind_group`, `bind_pipeline` — with no error channel of its
+    // own, and a frame that cannot get an argument table has nothing useful left to record.
+    // docs/error-handling.md reserves exceptions for exactly that: a failure the immediate caller cannot help with.
+    if (_argument_table == nullptr)
+        throw sg::exception(describe_error(error, "the metal device refused an argument table"));
 
     return _argument_table;
 }
@@ -413,6 +419,15 @@ void metal_command_list::upload_bytes_to_buffer(raw_buffer_handle buffer, cc::sp
         return;
 
     auto const staging = _metal_context.upload_ring().reserve(isize(data.size()));
+    if (!staging.is_valid())
+    {
+        // The device refused the dedicated allocation this reservation needed.
+        // An inline upload has no error channel of its own, so it goes on the deferred one and the copy is not
+        // recorded — which is the only honest thing left.
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused inline "
+                                                                                     "upload staging");
+        return;
+    }
 
     adopt_overflow_staging(staging);
 
@@ -442,6 +457,12 @@ void metal_command_list::upload_bytes_to_texture(raw_texture_handle texture,
     CC_ASSERT(pixels.size() == layout.size_in_bytes, "pixel data size does not match the copy region");
 
     auto const staging = _metal_context.upload_ring().reserve(layout.size_in_bytes);
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused inline "
+                                                                                     "texture upload staging");
+        return;
+    }
     adopt_overflow_staging(staging);
 
     cc::memcpy(staging.bytes().data(), pixels.data(), size_t(layout.size_in_bytes));
@@ -472,6 +493,12 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
         return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
     auto const staging = _metal_context.download_ring().reserve(size_in_bytes);
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused inline "
+                                                                                     "download staging");
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_cancelled_completion());
+    }
 
     adopt_overflow_staging(staging);
 
@@ -524,6 +551,12 @@ sg::bytes_future metal_command_list::download_bytes_from_texture(raw_texture_han
         return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
 
     auto const staging = _metal_context.download_ring().reserve(layout.size_in_bytes);
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused inline "
+                                                                                     "texture download staging");
+        return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_cancelled_completion());
+    }
     adopt_overflow_staging(staging);
 
     declare_texture(texture, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);

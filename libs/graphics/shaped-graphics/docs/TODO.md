@@ -263,9 +263,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
   See [concepts/threading.md](concepts/threading.md).
 - **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
-  Both backends are real, windowed and headless.
+  dx12 and vulkan are real, windowed and headless.
+  Metal presents headless; its windowed path is written against a `CAMetalLayer` and nothing in the tree reaches it,
+  because shaped-rendering's SDL window has no cocoa arm — see its [TODO](../../shaped-rendering/docs/TODO.md).
   Still open:
-  - a **cocoa arm on `sg::window_platform`**, for the metal backend that would consume it — see shaped-rendering's [TODO](../../shaped-rendering/docs/TODO.md);
+  - the **sr cocoa arm** that would hand `native_window::from_cocoa` a layer, and with it the first exercise of metal's
+    windowed chain;
   - **deeper HDR** — metadata and tone-mapping beyond the colorspace set.
     Including whether the request was *granted*: `enable_hdr` is best-effort on both backends and `is_hdr_enabled()`
     reports what was asked for, so nothing tells a caller which colorspace it actually got;

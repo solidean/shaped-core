@@ -23,7 +23,7 @@ class sg::backend::metal::metal_residency_set
 public:
     /// Creates the set and attaches it to `queue`.
     /// Must be called once, before any resource is added.
-    void create(MTL::Device* device, MTL4::CommandQueue* queue);
+    [[nodiscard]] cc::result<cc::unit> create(MTL::Device* device, MTL4::CommandQueue* queue);
 
     /// Also declare this set to `queue` — the transfer queue touches the same resources the frame's does.
     void attach_to(MTL4::CommandQueue* queue);

@@ -89,12 +89,22 @@ void metal_staging_binding_group::write_sampler_descriptor(int descriptor_index,
     CC_ASSERT(descriptor_index >= 0 && descriptor_index < _slots.size(), "a staging sampler index is out of the "
                                                                          "group's range");
 
+    // A refusal is recorded rather than reported here: this setter has no error channel, and `mint` is the point at
+    // which a caller asks whether the group is usable.
     auto* const state = _ctx.samplers().acquire(_ctx.device(), smp);
+    if (state == nullptr)
+    {
+        _sampler_refused = true;
+        return;
+    }
     _slots[descriptor_index] = state->gpuResourceID()._impl;
 }
 
 cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 {
+    if (_sampler_refused)
+        return cc::error("staging_binding_group: the metal device refused a sampler state for this group");
+
     auto const scope = autorelease_scope();
 
     auto const& typed_layout = static_cast<metal_binding_group_layout const&>(*layout());
@@ -118,6 +128,10 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
             if (b.name == ns.name)
             {
                 auto* const state = _ctx.samplers().acquire(_ctx.device(), ns.sampler);
+                if (state == nullptr)
+                    return cc::error(cc::format("staging_binding_group: the metal device refused a sampler state "
+                                                "for '{}'",
+                                                ns.name));
                 slots[isize(b.index)] = state->gpuResourceID()._impl;
             }
 

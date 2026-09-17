@@ -1,5 +1,7 @@
 #include "metal_staging_ring.hh"
 
+#include <clean-core/string/format.hh>
+
 namespace sg::backend::metal
 {
 namespace
@@ -26,14 +28,15 @@ metal_staging_ring::~metal_staging_ring()
     shutdown();
 }
 
-void metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label)
+cc::result<cc::unit> metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc::string_view label)
 {
     CC_ASSERT(_buffer == nullptr, "a staging ring is created once");
     CC_ASSERT(capacity_in_bytes > 0, "a staging ring needs a positive capacity");
 
     _device = device;
     _buffer = device->newBuffer(NS::UInteger(capacity_in_bytes), k_staging_options);
-    CC_ASSERT(_buffer != nullptr, "the metal device refused a staging ring allocation");
+    if (_buffer == nullptr)
+        return cc::error(cc::format("the metal device refused a {} byte staging ring", capacity_in_bytes));
 
     _buffer->setLabel(ns_string(label));
     _capacity = capacity_in_bytes;
@@ -43,6 +46,7 @@ void metal_staging_ring::create(MTL::Device* device, isize capacity_in_bytes, cc
             s = {};
             s.open_copies = cc::make_shared<std::atomic<int>>(0);
         });
+    return cc::unit{};
 }
 
 metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
@@ -82,7 +86,8 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     // No room, so this transfer gets storage of its own rather than an error.
     // A single transfer larger than the whole ring lands here too, and is perfectly legitimate.
     auto* const dedicated = _device->newBuffer(NS::UInteger(size > 0 ? size : 1), k_staging_options);
-    CC_ASSERT(dedicated != nullptr, "the metal device refused a dedicated staging allocation");
+    if (dedicated == nullptr)
+        return {}; // an invalid reservation: the caller's transfer fails rather than the process
     dedicated->setLabel(ns_string("sg staging overflow"));
 
     return {.buffer = dedicated, .offset = 0, .size = size, .owned = dedicated};

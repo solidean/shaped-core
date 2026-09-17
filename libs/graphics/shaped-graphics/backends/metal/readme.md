@@ -133,6 +133,12 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `staging_layout_of` counts rows in blocks, so a BC1 row covers four texel rows — treating the two as one fills the top quarter of a compressed texture and overruns a 3D one.
   And a chunk that crosses `bytes_per_image` continues on the next z, which one copy of depth 1 cannot express.
   So a chunk is encoded as one copy per slice, with the last block row of each clamped to the region's height.
+- **A device refusal is an error here, never an assert.**
+  Metal answers a refused allocation with nil rather than a status, which reads like a contract violation and is not one.
+  [docs/error-handling.md](../../../../../docs/error-handling.md) routes it to a `cc::result` instead.
+  So context creation, the queues, the residency set and the staging rings are fallible, and a refused sampler or texture view comes back null for the group being built to report.
+  An off-frame transfer settles its future as cancelled, or reports on the deferred channel where it has no future — an upload has no return value to fail.
+  Two seams throw instead, which is what that doc reserves an exception for: the argument table and a streaming timeline, both reached from recording calls whose caller can do nothing with an error.
 - **Host-visible memory is free.**
   `MTLStorageModeShared` on unified memory is exactly the thing whose absence blocked every one of the vulkan backend's transfer paths.
 - **A heap reports a size that is not a multiple of its own alignment.**

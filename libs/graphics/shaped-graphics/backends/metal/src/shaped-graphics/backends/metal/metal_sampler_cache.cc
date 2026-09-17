@@ -110,7 +110,11 @@ MTL::SamplerState* metal_sampler_cache::acquire(MTL::Device* device, sg::sampler
 
             auto* const state = device->newSamplerState(descriptor);
             descriptor->release();
-            CC_ASSERT(state != nullptr, "the metal device refused a sampler state");
+
+            // Null rather than an assert, and not cached: a refusal is the device declining an allocation, and every
+            // caller here already turns null into a `cc::error` on the group being built.
+            if (state == nullptr)
+                return nullptr;
 
             states[key] = state;
             return state;
