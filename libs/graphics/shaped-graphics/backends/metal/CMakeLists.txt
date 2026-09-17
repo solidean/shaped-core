@@ -29,6 +29,7 @@ add_library(shaped-graphics-metal
     src/shaped-graphics/backends/metal/metal_memory_heap.cc
     src/shaped-graphics/backends/metal/metal_raster_pipeline.cc
     src/shaped-graphics/backends/metal/metal_raytracing.cc
+    src/shaped-graphics/backends/metal/metal_query.cc
     src/shaped-graphics/backends/metal/metal_raytracing_pipeline.cc
     src/shaped-graphics/backends/metal/metal_raytracing_shader_table.cc
     src/shaped-graphics/backends/metal/metal_raster_state.cc
@@ -96,6 +97,7 @@ if(SC_BUILD_TESTS)
         tests/metal-binding-test.cc
         tests/metal-compute-test.cc
         tests/metal-present-test.cc
+        tests/metal-query-test.cc
         tests/metal-raster-test.cc
         tests/metal-raytracing-test.cc
         tests/metal-test.cc

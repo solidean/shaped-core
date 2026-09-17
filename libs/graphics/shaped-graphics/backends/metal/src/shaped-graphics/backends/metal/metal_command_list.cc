@@ -75,7 +75,7 @@ metal_command_list::~metal_command_list()
 
     CC_LOG_WARNING("command list destroyed without submit or drop — releasing it. Submit or drop every list you open.");
 
-    end_recording();
+    end_recording(false);
 
     // The same unwind drop does, and for the same reason: a slot handed back still carrying this list's state makes
     // the next list on it skip every finalize, and a download nothing will ever run has to be cancelled rather than
@@ -203,6 +203,8 @@ void metal_command_list::abandon_recording()
         download.settle_staging();
     }
     _pending_downloads.clear();
+
+    release_queries_on_drop();
 }
 
 void metal_command_list::declare_buffer(raw_buffer_handle const& buffer, pipeline_stage_flags stages, access_flags access)
@@ -366,7 +368,7 @@ void metal_command_list::flush_barriers()
                                                  visibility);
 }
 
-void metal_command_list::end_recording()
+void metal_command_list::end_recording(bool will_submit)
 {
     if (!_is_recording)
         return;
@@ -385,6 +387,11 @@ void metal_command_list::end_recording()
                                               MTL4::VisibilityOptionDevice);
 
     end_encoder();
+
+    // After the last encoder, since a resolve has to follow everything it measures.
+    if (will_submit)
+        finalize_queries_before_close();
+
     _buffer->endCommandBuffer();
 }
 
@@ -1020,14 +1027,101 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
 
 bool metal_command_list::query_timestamps_supported() const
 {
-    return false;
+    return _metal_context.queries().supports_timestamps();
 }
 
 sg::gpu_timestamp metal_command_list::query_record_gpu_timestamp()
 {
+    auto& queries = _metal_context.queries();
+
     // Callable rather than fatal, which is the contract for an unsupported backend: the caller gets an invalid query
     // that never becomes ready, and code written against a backend that has timestamps still runs here.
     // A stub would abort instead — and in a release build, where CC_ASSERT is off, take the process with it.
-    return {};
+    if (!queries.supports_timestamps())
+        return {};
+
+    auto const needs_fresh = _active_timestamp_lease < 0
+                          || _leased_counter_heaps[_active_timestamp_lease]->next_slot
+                                 >= _leased_counter_heaps[_active_timestamp_lease]->slot_count;
+    if (needs_fresh)
+    {
+        auto lease = queries.acquire_heap();
+        if (lease == nullptr)
+            return {}; // the device refused a heap mid-recording; the caller sees an invalid query, as when unsupported
+        _active_timestamp_lease = int(_leased_counter_heaps.size());
+        _leased_counter_heaps.push_back(cc::move(lease));
+    }
+
+    auto& lease = *_leased_counter_heaps[_active_timestamp_lease];
+    auto const slot = lease.next_slot++;
+
+    // **A timestamp is written at command-buffer level, not into an encoder**, so the open one has to close first.
+    // That is also what makes the value meaningful: it is written once everything recorded before it has completed,
+    // which is what makes the difference between two of them the duration of the work between.
+    end_encoder();
+    _buffer->writeTimestampIntoHeap(lease.heap, NS::UInteger(slot));
+
+    return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(lease.shared_future), isize(slot),
+                             queries.timestamp_tick_to_seconds());
+}
+
+void metal_command_list::finalize_queries_before_close()
+{
+    // Heaps are leased on demand, so every leased heap holds at least one recorded timestamp.
+    for (auto& lease : _leased_counter_heaps)
+    {
+        CC_ASSERT(lease->next_slot > 0, "leased a counter heap and recorded nothing into it");
+        auto const size_in_bytes = isize(lease->next_slot) * isize(sizeof(u64));
+
+        auto const staging = _metal_context.download_ring().reserve(size_in_bytes);
+        if (!staging.is_valid())
+        {
+            _metal_context.report_feedback_error(sg::device_error_kind::creation_failed, "the metal device refused "
+                                                                                         "timestamp readback staging");
+            continue; // the handles keep their invalid future, which reads as never ready
+        }
+        adopt_overflow_staging(staging);
+
+        // Straight into the staging ring, where vulkan needs a transient buffer in between: a resolve names a GPU
+        // address rather than a bound resource, so the ring's own buffer is as good a destination as any.
+        // No fences: the resolve is ordered by the command buffer it sits in, like every other call here.
+        _buffer->resolveCounterHeap(
+            lease->heap, NS::Range(0, NS::UInteger(lease->next_slot)),
+            MTL4::BufferRange(staging.buffer->gpuAddress() + u64(staging.offset), u64(size_in_bytes)), nullptr, nullptr);
+
+        auto destination = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
+        auto completion = cc::make_async_manual<cc::unit>();
+
+        _pending_downloads.push_back({.copy_out =
+                                          [staging, destination, size_in_bytes, completion]() mutable
+                                      {
+                                          cc::memcpy(destination.data(), staging.bytes().data(), size_t(size_in_bytes));
+                                          completion->push_value(cc::unit{});
+                                      },
+                                      .completion = completion,
+                                      .staging_retained = retain_download_staging(staging),
+                                      .ring_copy = account_download_staging(staging)});
+
+        // Assigned in place, so the handles already handed out see it.
+        *lease->shared_future = sg::data_future<u64>(
+            sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion)));
+    }
+
+    // Back through the epoch rather than straight away: the resolve just recorded still names each heap, right up
+    // until this epoch's work has finished.
+    for (auto& lease : _leased_counter_heaps)
+        _metal_context.epochs().defer([system = &_metal_context.queries(), held = cc::move(lease)]() mutable
+                                      { system->release_heap(cc::move(held)); });
+    _leased_counter_heaps.clear();
+    _active_timestamp_lease = -1;
+}
+
+void metal_command_list::release_queries_on_drop()
+{
+    // Straight back rather than through the epoch: nothing was committed, so no pending command names them.
+    for (auto& lease : _leased_counter_heaps)
+        _metal_context.queries().release_heap(cc::move(lease));
+    _leased_counter_heaps.clear();
+    _active_timestamp_lease = -1;
 }
 } // namespace sg::backend::metal

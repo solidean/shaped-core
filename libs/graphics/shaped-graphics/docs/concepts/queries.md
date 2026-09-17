@@ -48,6 +48,31 @@ Creating it inside the submission lock is safe: transient creation touches only 
 Dropping an unsubmitted list returns its leased heaps to the pool unresolved.
 The handles it already handed out keep their still-invalid future forever, so they stay `is_valid() && !is_ready()` and `wait_for` fails instead of hanging — exactly like a cancelled download.
 
+## How the metal backend implements it (what differs)
+
+The shape above is the shared one.
+A [`metal_query_system`](../../backends/metal/src/shaped-graphics/backends/metal/metal_query.hh) pools 4096-slot heaps, and a list leases one and bump-allocates slots.
+The shared per-heap future is assigned in place at submit, exactly as above.
+Metal needs neither of dx12's and vulkan's awkward steps, and it gains one small constant of its own.
+
+**A timestamp is written at command-buffer level.**
+`MTL4::CommandBuffer::writeTimestampIntoHeap` is not an encoder call, so `metal_command_list` closes the open encoder before each one.
+That removes vulkan's problem rather than replacing it: there is no render-pass instance to be inside, so nothing has to be reset on the host to avoid one.
+
+**The resolve writes straight into the download ring.**
+`resolveCounterHeap` names a GPU address rather than a bound resource, so the ring's own buffer is as good a destination as a transient.
+Vulkan copies into a transient buffer first and reads that back.
+The readback is then an ordinary entry in the list's `_pending_downloads`, settled from the commit's feedback handler like every other inline download.
+
+**A heap is invalidated when it goes back, not when it comes out.**
+`invalidateCounterRange` has no recording restriction, so release is the natural place: a pooled heap always comes out clean, and a resolve can never read what a previous leaseholder wrote.
+The leases themselves go back through the epoch, since the resolve recorded above still names each heap until that epoch's work has finished.
+
+**The tick-to-seconds factor is a constant, because Metal offers nothing to query.**
+Metal reports GPU and CPU timestamps on one timebase, in nanoseconds.
+`MTL::Device::sampleTimestamps` shows it directly: over a measured interval the two deltas are equal.
+`tests/metal-query-test.cc` pins both halves of that, so a device that ever counted on its own clock would be caught rather than silently scaling every measurement.
+
 ## Extending to other query types
 
 The `dx12_query_heap_type` enum, the per-type free list, and the lease/resolve/readback flow are shaped to grow.

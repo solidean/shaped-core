@@ -2,7 +2,7 @@
 
 `sg::backend::metal` — shaped-graphics on Metal 4, for macOS and iOS.
 
-Real across the surface, presenting windowed and headless; GPU timestamps are the remaining gap.
+Real across the surface, presenting windowed and headless and recording GPU timestamps.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
 Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, raster draws, and a swapchain presents.

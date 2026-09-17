@@ -69,7 +69,7 @@ src/shaped-graphics/
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (both backends real)
-    query.hh/.cc                  [done]        cmd.query: record_gpu_timestamp / is_supported (both backends real)
+    query.hh/.cc                  [done]        cmd.query: record_gpu_timestamp / is_supported (real on all three backends)
 
   compute/
     compute_pipeline.hh/.cc       [done]        abstract: compute shader + pipeline layout; dx12 = PSO, vulkan = VkPipeline + VkPipelineCache
@@ -135,7 +135,7 @@ backends/                                       # each subclasses the abstract s
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
   vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real across the surface
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents windowed and headless; GPU timestamps are the gap
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents windowed and headless; records GPU timestamps
   webgpu/                         [planned]     tier 2
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
@@ -146,7 +146,7 @@ backends/                                       # each subclasses the abstract s
 - **Tier 1 (now):** dx12, vulkan.
   Both are real across the surface, including ray tracing.
 - **Tier 2 (soon):** metal, webgpu.
-  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless; GPU timestamps are the remaining gap.
+  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
   It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep in a threaded build.
   With SC_THREADS=OFF its driver registers disabled — see TODO.md.
 - **Legacy compat (planned):** opengl, webgl.
@@ -226,8 +226,8 @@ raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.ray
                                   acceleration_structure binding (inline RayQuery); dx12 real (WARP), vulkan stub.
                                   Deferred: local root signatures, a dedicated shader-table buffer usage, a cached blob
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
-                                  per list, one batched inline readback per heap at submit; dx12 real (WARP),
-                                  vulkan stub. Deferred: occlusion + pipeline-statistics queries
+                                  per list, one batched inline readback per heap at submit; real on all three
+                                  backends. Deferred: occlusion + pipeline-statistics queries
 gpu metrics          [in progress]  ctx.query_gpu_memory -> { budget, usage } and adapter().dedicated_video_memory_bytes;
                                   dx12 QueryVideoMemoryInfo, vulkan VK_EXT_memory_budget. ctx.read_gpu_counters +
                                   sg::gpu_load_sampler -> busiest engine; Windows reads the GPU Engine perf counters

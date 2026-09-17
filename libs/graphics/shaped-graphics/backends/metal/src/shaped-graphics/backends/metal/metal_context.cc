@@ -43,6 +43,7 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
     CC_RETURN_IF_ERROR(_residency.create(_device, _queue));
     CC_RETURN_IF_ERROR(_transfers.create(*this));
     _streams.create(*this);
+    CC_RETURN_IF_ERROR(_queries.create(*this));
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
     CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
@@ -114,7 +115,8 @@ bool metal_context::supports(sg::feature f) const
         // Always: the chain is emulated with ordinary render targets, so there is no surface extension to be missing.
         return true;
     case sg::feature::timestamp_query:
-        return false;
+        // Probed rather than assumed: the answer is whether the device handed out a counter heap at bring-up.
+        return _queries.supports_timestamps();
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
@@ -186,7 +188,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
 
     auto const scope = autorelease_scope();
 
-    list.end_recording();
+    list.end_recording(true);
 
     // **Wait, finalize, claim, commit and signal are one step in a single global order.**
     //
@@ -308,7 +310,7 @@ void metal_context::drop_command_list(std::unique_ptr<sg::command_list> cmd)
 
     auto const scope = autorelease_scope();
 
-    list.end_recording();
+    list.end_recording(false);
 
     auto* const buffer = list.buffer();
     auto* const allocator = list.allocator();
@@ -466,6 +468,9 @@ void metal_context::shutdown()
     _transfers.shutdown();
 
     _epochs.shutdown();
+
+    // After the drain, since every leased heap goes back through the epoch that resolved it.
+    _queries.shutdown();
 
     // After the epoch shutdown drained the queue, so no notification handler is still due to run.
     _streams.release_listener();

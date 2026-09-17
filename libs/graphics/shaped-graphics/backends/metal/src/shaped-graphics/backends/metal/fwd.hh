@@ -23,10 +23,12 @@ class metal_command_list;
 class metal_epoch_system;
 class metal_swapchain;
 class metal_transfer_system;
-class metal_staging_ring;  // CPU-visible bytes an inline transfer stages through (see metal_staging_ring.hh)
-class metal_residency_set; // what MTL4 requires instead of useResource (see metal_residency.hh)
-class metal_feedback_sink; // the detachable end of a commit-feedback handler (see metal_feedback.hh)
-struct metal_barrier;      // one MTL4 barrier, as the stage pair an encoder takes (see metal_barrier.hh)
+class metal_staging_ring;        // CPU-visible bytes an inline transfer stages through (see metal_staging_ring.hh)
+struct metal_counter_heap_lease; // one MTL4 counter heap while a list holds it (see metal_query.hh)
+class metal_query_system;        // the GPU-timestamp tier behind cmd.query (see metal_query.hh)
+class metal_residency_set;       // what MTL4 requires instead of useResource (see metal_residency.hh)
+class metal_feedback_sink;       // the detachable end of a commit-feedback handler (see metal_feedback.hh)
+struct metal_barrier;            // one MTL4 barrier, as the stage pair an encoder takes (see metal_barrier.hh)
 class metal_binding_group;
 class metal_binding_group_layout;
 class metal_pipeline_layout;

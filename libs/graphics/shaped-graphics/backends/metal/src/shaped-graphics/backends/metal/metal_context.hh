@@ -15,6 +15,7 @@
 #include <shaped-graphics/backends/metal/metal_epoch.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
 #include <shaped-graphics/backends/metal/metal_memory_heap.hh>
+#include <shaped-graphics/backends/metal/metal_query.hh>
 #include <shaped-graphics/backends/metal/metal_raster_pipeline.hh>
 #include <shaped-graphics/backends/metal/metal_residency.hh>
 #include <shaped-graphics/backends/metal/metal_sampler_cache.hh>
@@ -90,6 +91,9 @@ public:
     [[nodiscard]] metal_transfer_system& transfers() { return _transfers; }
 
     [[nodiscard]] metal_stream_system& streams() { return _streams; }
+
+    /// The GPU-timestamp tier behind cmd.query, and what says whether this device has one.
+    [[nodiscard]] metal_query_system& queries() { return _queries; }
 
     /// MTLSamplerStates for bound sampler values, shared context-wide.
     [[nodiscard]] metal_sampler_cache& samplers() { return _samplers; }
@@ -344,6 +348,7 @@ private:
     metal_sampler_cache _samplers;
     metal_transfer_system _transfers;
     metal_stream_system _streams;
+    metal_query_system _queries;
     metal_texture_view_cache _texture_views;
     MTL4::Compiler* _compiler = nullptr;
     /// Serializes finalize, commit and signal on the direct queue, so a token's order is the order its work is

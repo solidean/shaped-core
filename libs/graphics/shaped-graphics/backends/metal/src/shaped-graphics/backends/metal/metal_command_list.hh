@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_barrier.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
+#include <shaped-graphics/backends/metal/metal_query.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -37,7 +38,10 @@ public:
 
     /// Closes recording, so the buffer may be committed.
     /// Idempotent.
-    void end_recording();
+    ///
+    /// `will_submit` is false on the drop path, where the buffer is closed only to be thrown away: a resolve recorded
+    /// into it would never run, and it would take a staging reservation with it.
+    void end_recording(bool will_submit);
 
     /// One download this list recorded: the copy out of staging, plus what settles when it runs — or when it never
     /// does.
@@ -166,6 +170,16 @@ private:
 
     [[nodiscard]] bool query_timestamps_supported() const override;
     [[nodiscard]] gpu_timestamp query_record_gpu_timestamp() override;
+
+    /// Resolves every leased counter heap into the download ring and starts one readback per heap.
+    /// Called from end_recording, after the last encoder closed: a resolve is a command-buffer-level call, and it has
+    /// to follow everything it measures.
+    void finalize_queries_before_close();
+
+    /// Hands every leased heap back unresolved.
+    /// A dropped list never runs, so each handle keeps its invalid future — which is what "never ready" means for a
+    /// timestamp whose list was dropped.
+    void release_queries_on_drop();
 
     /// The encoder every copy and dispatch records into, opened on first use.
     ///
@@ -298,4 +312,11 @@ private:
     /// `ctx.block_until_idle()` drains the GPU without advancing, and an open epoch's payload never runs — so a
     /// deferral onto the epoch would leave every download in an unadvanced frame unsettled forever.
     cc::vector<pending_download> _pending_downloads;
+
+    /// The counter heaps this list holds while recording, in lease order.
+    /// Returned at submit through the epoch that resolved them, or straight back on a drop.
+    cc::vector<cc::unique_ptr<metal_counter_heap_lease>> _leased_counter_heaps;
+
+    /// Index into `_leased_counter_heaps` of the one still handing out slots, or -1 before the first timestamp.
+    int _active_timestamp_lease = -1;
 };
