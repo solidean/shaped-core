@@ -49,7 +49,7 @@ An unthreaded actor registers itself with clean-core's [pump registry](../../../
 Every blocking wait — `cc::async_blocking_get`, a frame loop, one of the waits below — sweeps that registry rather than draining the actors it happens to know about.
 `cc::thread_pump_all()` is the whole entry point, and it costs one atomic load where every actor has a thread of its own.
 
-The completion asyncs are the one place sg registers a pump itself, standing in for the waiter thread it cannot start.
+The completion asyncs are the one place sg registers a pump itself, in the `sg::impl::completion_waiter` dx12 and vulkan own, standing in for the waiter thread it cannot start.
 It settles what is due, then sweeps its siblings, and parks on the GPU only when no sibling made progress.
 It parks only on work the GPU already has: the open epoch closes on an advance, and the thread that would advance is the one sweeping.
 A GPU target may wait on a copy only an unthreaded actor signals, which is why the siblings run first.

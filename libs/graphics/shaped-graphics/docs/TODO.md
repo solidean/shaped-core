@@ -221,18 +221,33 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   sv's `frames_until_executed` and the furnace loop re-record frames until a path-traced state object lands; the same signal for that would turn both into one await.
   What still blocks otherwise — manual window loops, fuzz steps, a few synchronous compile helpers — is allowed by file in each library's `.shaped-lint.yml`.
 
-- **Tier 2 / legacy backends:** metal, webgpu, then opengl, webgl.
-  The never-block work this branch did is the prerequisite, not the backend: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
+- **Tier 2 / legacy backends:** metal, then opengl, webgl.
+  webgpu exists on wasm; what it still owes is its own item below.
+
+- **The webgpu backend's remaining gaps.**
+  - **The WGSL twins of sg's tier-1 shader tests.**
+    The shader package and the routine tests need DXC, so on wasm no tier-1 test dispatches or draws.
+    `shaped-graphics-webgpu-test` covers compute, raster, group 3 and presentation by hand until a WGSL package runs the same tests.
+  - **The rotating-cube example on webgpu**, with `SC_EXAMPLE_BACKEND=webgpu`, and the shaped-rendering blit and imgui shaders in WGSL.
+  - **Per-test attribution of WebGPU errors.**
+    One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
+  - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
+  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express, and `clamp_border` / `mirror_clamp_edge` approximate.
+  - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
+    Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
+  - **A native Dawn build**, an additive CMake gate over the same sources.
+
+- **Frame loops still throttle by blocking.**
+  The never-block work is done: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
   What is left is smaller and more specific than "migrate the frame loops": **no frame loop in the tree uses `try_advance_epoch` yet.**
   Every one of them — `sv::viewer`, both examples, every window test — throttles with `block_until_epochs_in_flight`.
   That is allowed under the amortization rule, and it still asserts on a `never_block` context.
-  So the per-frame back-pressure call is the one thing a WebGPU target will hit on its first frame, and `try_advance_epoch` is the spelling that already exists for it.
-  What remains sg-side before a WebGPU backend is the WGSL declaration parser slib needs (see its [structure.md](../../shaped-shader-library/docs/structure.md)).
-  **The completion-signal contract is blocking, and WebGPU in a browser cannot block.**
-  `sg::context` owns a waiter thread that calls the backend's `wait_for_completion_signal` until a GPU counter reaches a target, then settles what is due.
-  WebGPU offers only a callback, `onSubmittedWorkDone`, so the contract flips there.
-  The backend calls `settle_due_completions()` when it learns of progress, and dx12 and vulkan run the waiter themselves.
-  Reshape the seam that way before writing the backend, rather than emulating a blocking wait over the callback.
+  So the per-frame back-pressure call is the one thing a webgpu frame loop hits on its first frame, and `try_advance_epoch` or `epochs_in_flight_completion` is the spelling that already exists for it.
+  The completion-signal seam is callback-shaped now (`arm_completion_signal`), and a never-block tier-1 driver on dx12 and vulkan proves the suite gets by without waiting.
+  Two gaps that driver leaves:
+  - **dx12's and vulkan's own caller-thread waits** — inline ring back-pressure, a ring budget change, the transient descriptor ring, swapchain acquire — still wait under a `never_block` config.
+    They are backend internals no WebGPU code reaches, and the intended fix is the growth fallback *after* the wait, with a knob to skip the wait and trade VRAM for throughput.
+  - **The transfer fuzz test skips under `never_block`**, since its ops are synchronous and read downloads after a blocking drain; awaiting an op would need nexus fuzz support.
 
 - **`shaped-graphics-test` crashed once with an access violation, in the release preset under load.**
   The sixth of twelve loaded repeats of the release suite faulted; the binary has no symbols there and its log was overwritten before the faulting site was known.

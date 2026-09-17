@@ -89,7 +89,8 @@ ctx.backend()                                      // sg::backend_kind (coarse t
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
-                                                   //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader
+                                                   //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
+                                                   //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
@@ -117,7 +118,7 @@ ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_han
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
 ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
-ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); applied at the next advance_epoch; default 128 MiB
+ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); the next advance_epoch drops the heap, never waits; default 128 MiB
 sg::context_transient_scope::default_budget_bytes  // isize — that 128 MiB default, e.g. for a test putting it back
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
                                                    //   using any transient resource past its epoch is a hard error (asserts)
@@ -178,6 +179,11 @@ ctx.is_shut_down()                                 // bool
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
+#include <shaped-graphics/backends/webgpu/webgpu_context.hh>   // wasm + SC_WASM_WEBGPU only
+co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; the node FAILS where there is no WebGPU or no adapter (async_as_result to SKIP)
+sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested
+// webgpu: ctx.execution() == never_block, single_threaded, accepts wgsl only; call it from the thread that requested the device
+//   (a threaded wasm build: the main thread — a test asks for main_thread AND singlethreaded). See backends/webgpu/readme.md
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
@@ -229,9 +235,11 @@ ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
 co_await ctx.idle_completion();         // block_until_idle, awaited: submissions, actors, epochs. COLD; retires as it goes,
                                         //   so never await it while another thread advances the epoch
+co_await ctx.epochs_in_flight_completion(N); // block_until_epochs_in_flight, awaited: settles once <= N are in flight
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 
 ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
+                                        //   (dx12_config / vulkan_config::execution report never_block, for tests only)
 ctx.block_until_idle()                  // void — submissions done, every transfer actor drained, every epoch retired.
                                         //   `block_until_` greps as the complete inventory of where a thread stops.
                                         //   Asserts unless execution() == may_block. A bytes_future SUBMITTED before it

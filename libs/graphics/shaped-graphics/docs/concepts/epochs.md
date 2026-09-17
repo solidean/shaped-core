@@ -78,15 +78,18 @@ Every question the `wait_for_*` family answers by stopping a thread has a form t
 | `is_submission_complete(token)` polled | `submission_completion(token)` |
 | a download's blocking read | `future.completion()`, or `future.bytes()` / `future.data()` resolving to the result |
 | a timestamp's blocking read | `timestamp.completion()`, or `timestamp.ticks()` |
-| `block_until_epochs_in_flight(N)` | `try_advance_epoch(N)`, which declines instead |
+| `block_until_epochs_in_flight(N)` | `epochs_in_flight_completion(N)`, or `try_advance_epoch(N)`, which declines instead |
 | `block_until_idle()` | `idle_completion()` — the same three steps, awaited |
 
 A completion node for something already finished comes back ready, so a caller never special-cases the past, and asking twice for the same target hands back the same node rather than two.
 **They settle on their own: nobody has to sweep, advance or wait for one to arrive.**
-The first outstanding one starts a waiter that parks on the backend's GPU signals — a fence event on dx12, a timeline wait on vulkan — beside a wake the next lower target raises.
+The context tells the backend the lowest outstanding targets (`arm_completion_signal`), and the backend settles what is due once it learns of progress.
+How it learns is the backend's own business.
+dx12 and vulkan own an `sg::impl::completion_waiter`, a thread parked on their GPU signals — a fence event on dx12, a timeline wait on vulkan — beside a wake a lower target raises.
+Without threads the waiter is a pump instead, which settles what is due and parks only on work the GPU already has — never on the open epoch, which only that same thread can close.
+A backend whose API calls back, as WebGPU's `onSubmittedWorkDone` does, settles from the callback and needs no waiter at all.
 A transfer drain reaching zero settles the drain half from whichever actor dropped it.
 Nothing polls and nothing times out, so a wait that looks like a stall is a signal that has not fired.
-Without threads there is no waiter: a pump stands in, and a sweep settles what is due and parks only on work the GPU already has — never on the open epoch, which only that same thread can close.
 A lost device settles every outstanding node as an error, since its fences jump to their maximum and would otherwise read as success, and so does a shutdown that comes first.
 
 `idle_completion()` retires epochs in its own segments, so it is awaited under retire's rule: never while another thread advances the epoch.

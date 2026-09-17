@@ -84,7 +84,8 @@ One-liner per library:
   Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
-  dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.
+  dx12 and vulkan cover the whole surface; webgpu covers it but ray tracing, on wasm over emdawnwebgpu, and never blocks.
+  metal and opengl/webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
   Namespace `sg`. Depends on clean-core + typed-geometry.
   Early stage — see [docs/graphics.md](docs/graphics.md).
