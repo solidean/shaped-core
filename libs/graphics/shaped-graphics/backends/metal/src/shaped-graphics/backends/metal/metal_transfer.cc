@@ -422,13 +422,14 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
 
 void metal_transfer_system::order_stream_copy(metal_stream_job const& job)
 {
+    // **Queue-wide, and a cycle is possible through it** — see libs/graphics/shaped-graphics/docs/TODO.md.
     if (job.direct_wait > 0)
         _stream_queue->wait(_ctx->epochs().submission_timeline(), job.direct_wait);
 
     // The direct queue is one of two writers, and the other one is right here: an async upload committed to the
     // transfer queue has no relationship to a stream committed to the streaming one.
-    // Same shape as `wait_for_queues` — read at admission, so a transfer issued after this stream was admitted has no
-    // claim to order ahead of it.
+    // No cycle on this one: an async transfer never queues behind a stream.
+    // Read at admission, so a transfer issued after this stream was admitted has no claim to order ahead of it.
     if (job.transfer_wait > 0)
         _stream_queue->wait(_timeline, job.transfer_wait);
 }

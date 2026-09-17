@@ -129,6 +129,10 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A one-face view of a cube is a 2D texture; reusing the texture's own type asks Metal for a one-slice Cube, which it refuses.
   The whole-texture shortcut — return the texture rather than mint a view — therefore checks the type as well as the format and the range.
   And a cube's range counts faces where `arrayLength` counts cubes, so that range check multiplies by six.
+- **A streamed texture row is a row of BLOCKS, and the extent is slice-major.**
+  `staging_layout_of` counts rows in blocks, so a BC1 row covers four texel rows — treating the two as one fills the top quarter of a compressed texture and overruns a 3D one.
+  And a chunk that crosses `bytes_per_image` continues on the next z, which one copy of depth 1 cannot express.
+  So a chunk is encoded as one copy per slice, with the last block row of each clamped to the region's height.
 - **Host-visible memory is free.**
   `MTLStorageModeShared` on unified memory is exactly the thing whose absence blocked every one of the vulkan backend's transfer paths.
 - **A heap reports a size that is not a multiple of its own alignment.**

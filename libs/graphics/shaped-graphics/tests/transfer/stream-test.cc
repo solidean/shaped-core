@@ -459,6 +459,81 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
+// A streamed texture's rows are rows of BLOCKS, and its extent is slice-major.
+//
+// Both of those are invisible on an uncompressed 2D texture, where a block is one texel and there is one slice — so
+// every texture stream test above passes on a backend that conflates them.
+// A BC1 texture fills only its top quarter, and a 3D texture overruns its own height.
+
+ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // 16x16 BC1 is 4x4 blocks of 8 bytes: 32 bytes per block row, four block rows, one slice.
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::bc1_rgba_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    isize const block_row_bytes = 4 * 8;
+    auto const src = pattern(block_row_bytes * 4, 71);
+
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0)
+        .context(cc::format("{} of {} bytes differ; a backend counting block rows as texel rows fills the top quarter",
+                            mismatches, src.size()));
+}
+
+ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streams slice by slice", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d3;
+    desc.width = 8;
+    desc.height = 8;
+    desc.depth = 4;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto const src = pattern(8 * 8 * 4 * 4, 73);
+
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0)
+        .context(cc::format("{} of {} bytes differ; a backend that never advances z writes every slice over the first",
+                            mismatches, src.size()));
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

@@ -47,8 +47,14 @@ struct sg::backend::metal::metal_stream_job
     sg::texture_region region;
     texture_staging_layout layout; ///< textures only, and the row size chunk offsets are measured in
 
-    sg::stream_sink sink;              ///< downloads with a sink; empty for the resident form
-    cc::pinned_data<byte> destination; ///< downloads without a sink
+    sg::stream_sink sink; ///< downloads with a sink; empty for the resident form
+    /// Where a resident download's bytes land, as a bare span.
+    ///
+    /// **A span rather than the `pinned_data`**, because the pin beside it is what says the caller still wants them:
+    /// holding a strong pin here keeps the destination alive forever, `weak_destination.lock()` always succeeds, and
+    /// dropping the future stops meaning cancelled.
+    /// The span is only read while that lock succeeds.
+    cc::span<byte> destination;
     std::weak_ptr<void const> weak_destination;
     cc::shared_async<cc::unit> bytes_completion; ///< the resident form's future, settled with the last chunk
 

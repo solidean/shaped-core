@@ -391,22 +391,56 @@ bool metal_stream_system::actor_impl::run_cycle()
         {
             auto const& mtl_texture = static_cast<metal_texture const&>(*job->texture);
             auto const row = job->layout.bytes_per_row;
-            auto const first_row = row > 0 ? chunk.extent_offset / row : 0;
-            auto const rows = row > 0 ? chunk.size_in_bytes / row : 0;
-            auto const origin
-                = MTL::Origin(NS::UInteger(job->region.offset[0]), NS::UInteger(job->region.offset[1] + first_row),
-                              NS::UInteger(job->region.offset[2]));
-            auto const size = MTL::Size(NS::UInteger(job->region.size[0]), NS::UInteger(rows), NS::UInteger(1));
+            auto const image = job->layout.bytes_per_image;
 
-            if (chunk.is_download)
-                encoder->copyFromTexture(mtl_texture.texture(), NS::UInteger(job->subresource.array_layer),
-                                         NS::UInteger(job->subresource.mip_level), origin, size, b.staging,
-                                         NS::UInteger(chunk.staging_offset), NS::UInteger(row), NS::UInteger(row * rows));
-            else
-                encoder->copyFromBuffer(b.staging, NS::UInteger(chunk.staging_offset), NS::UInteger(row),
-                                        NS::UInteger(row * rows), size, mtl_texture.texture(),
-                                        NS::UInteger(job->subresource.array_layer),
-                                        NS::UInteger(job->subresource.mip_level), origin);
+            // **A staged row is a row of BLOCKS, and a chunk may span slices.**
+            //
+            // `staging_layout_of` counts rows in blocks, so a BC row covers `block_extent` texel rows and treating the
+            // two as one fills the top quarter of a BC texture and overruns a 3D one.
+            // And the extent is slice-major, so a chunk that crosses `bytes_per_image` continues on the next z — which
+            // one copy with a depth of 1 cannot express.
+            // So the chunk is walked as one copy per slice, which is also the shape dx12's row packer produces.
+            //
+            // sg requires a texture chunk to start and end on a row boundary (see stream_source.hh), which is what
+            // makes the walk whole rows throughout.
+            auto const block = isize(sg::format_block_extent(job->texture->description().format));
+            auto const rows_per_image = row > 0 ? image / row : 0;
+            CC_ASSERT(row > 0 && rows_per_image > 0, "a texture stream chunk needs a row and an image stride");
+            CC_ASSERT(chunk.extent_offset % row == 0 && chunk.size_in_bytes % row == 0,
+                      "a texture stream chunk must start and end on a row boundary");
+
+            auto remaining_rows = chunk.size_in_bytes / row;
+            auto staged = chunk.staging_offset;
+            auto cursor_row = chunk.extent_offset / row; // block rows into the region, slice-major
+
+            while (remaining_rows > 0)
+            {
+                auto const slice = cursor_row / rows_per_image;
+                auto const row_in_slice = cursor_row % rows_per_image;
+                auto const rows = cc::min(remaining_rows, rows_per_image - row_in_slice);
+
+                // The last block row of a slice is partial whenever the height is not a multiple of the block extent.
+                auto const top = row_in_slice * block;
+                auto const height = cc::min(rows * block, isize(job->region.size[1]) - top);
+
+                auto const origin
+                    = MTL::Origin(NS::UInteger(job->region.offset[0]), NS::UInteger(isize(job->region.offset[1]) + top),
+                                  NS::UInteger(isize(job->region.offset[2]) + slice));
+                auto const size = MTL::Size(NS::UInteger(job->region.size[0]), NS::UInteger(height), NS::UInteger(1));
+
+                if (chunk.is_download)
+                    encoder->copyFromTexture(mtl_texture.texture(), NS::UInteger(job->subresource.array_layer),
+                                             NS::UInteger(job->subresource.mip_level), origin, size, b.staging,
+                                             NS::UInteger(staged), NS::UInteger(row), NS::UInteger(row * rows));
+                else
+                    encoder->copyFromBuffer(b.staging, NS::UInteger(staged), NS::UInteger(row), NS::UInteger(row * rows),
+                                            size, mtl_texture.texture(), NS::UInteger(job->subresource.array_layer),
+                                            NS::UInteger(job->subresource.mip_level), origin);
+
+                staged += rows * row;
+                cursor_row += rows;
+                remaining_rows -= rows;
+            }
         }
         else
         {
@@ -711,7 +745,7 @@ sg::stream_download_handle metal_stream_system::finish_download(metal_stream_job
     // Weak, because dropping the future cancels the transfer — the same channel meaning an async download has.
     job.weak_destination = std::weak_ptr<void const>(destination.pin());
     job.bytes_completion = completion;
-    job.destination = destination;
+    job.destination = destination.span();
 
     auto future = sg::bytes_future(cc::pinned_data<byte const>(cc::move(destination)), cc::move(completion));
     admit(cc::move(job));
