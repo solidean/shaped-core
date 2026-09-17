@@ -2,7 +2,6 @@
 
 #include <clean-core/common/time.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/backends/metal/metal_context.hh>
 
 // What the tier-1 query test cannot reach: the two facts metal's timestamp path is built on.
 // The round trip itself is backend-agnostic and lives in tests/query/query-test.cc.
@@ -10,22 +9,22 @@
 namespace mtl = sg::backend::metal;
 using namespace cc::primitive_defines;
 
-TEST("sg - metal timestamps are nanoseconds on the CPU's own timebase", exclusive("metal-device"))
+TEST("sg metal - timestamps are nanoseconds on the CPU's own timebase")
 {
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
     // metal_query_system hands out a constant tick-to-seconds rather than querying one, because Metal offers nothing to
     // query — so this is what says the constant is still right.
     // A device that ever counted on its own clock would scale every measurement sg reports, silently.
-    auto const ctx_r = sg::create_metal_context({});
-    REQUIRE(ctx_r.has_value());
-    auto const ctx = ctx_r.value();
-
-    auto& metal_ctx = static_cast<mtl::metal_context&>(*ctx);
-    REQUIRE(metal_ctx.queries().supports_timestamps());
-    CHECK(metal_ctx.queries().timestamp_tick_to_seconds() == 1e-9);
+    if (!ctx->queries().supports_timestamps())
+        SKIP("this metal device hands out no counter heap");
+    CHECK(ctx->queries().timestamp_tick_to_seconds() == 1e-9);
 
     MTL::Timestamp cpu_before = 0;
     MTL::Timestamp gpu_before = 0;
-    metal_ctx.device()->sampleTimestamps(&cpu_before, &gpu_before);
+    ctx->device()->sampleTimestamps(&cpu_before, &gpu_before);
 
     // A measured interval rather than a pause: a ratio needs a baseline, and this is the baseline.
     // Short enough to cost nothing and long enough that a per-sample rounding error cannot reach 1%.
@@ -36,7 +35,7 @@ TEST("sg - metal timestamps are nanoseconds on the CPU's own timebase", exclusiv
 
     MTL::Timestamp cpu_after = 0;
     MTL::Timestamp gpu_after = 0;
-    metal_ctx.device()->sampleTimestamps(&cpu_after, &gpu_after);
+    ctx->device()->sampleTimestamps(&cpu_after, &gpu_after);
 
     auto const cpu_delta = double(cpu_after - cpu_before);
     auto const gpu_delta = double(gpu_after - gpu_before);
@@ -55,15 +54,16 @@ TEST("sg - metal timestamps are nanoseconds on the CPU's own timebase", exclusiv
     CHECK(measured_seconds < 1.1);
 }
 
-TEST("sg - a metal counter heap goes back to the free list and comes out clean", exclusive("metal-device"))
+TEST("sg metal - a counter heap goes back to the free list and comes out clean")
 {
-    // Heaps are pooled, so the slots one list wrote are what the next list would read had they not been invalidated.
-    auto const ctx_r = sg::create_metal_context({});
-    REQUIRE(ctx_r.has_value());
-    auto const ctx = ctx_r.value();
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
 
-    auto& queries = static_cast<mtl::metal_context&>(*ctx).queries();
-    REQUIRE(queries.supports_timestamps());
+    // Heaps are pooled, so the slots one list wrote are what the next list would read had they not been invalidated.
+    auto& queries = ctx->queries();
+    if (!queries.supports_timestamps())
+        SKIP("this metal device hands out no counter heap");
 
     auto lease = queries.acquire_heap();
     REQUIRE(lease != nullptr);
