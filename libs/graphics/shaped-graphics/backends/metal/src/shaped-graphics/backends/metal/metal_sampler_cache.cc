@@ -1,6 +1,7 @@
 #include "metal_sampler_cache.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 
 namespace sg::backend::metal
@@ -93,7 +94,12 @@ MTL::SamplerState* metal_sampler_cache::acquire(MTL::Device* device, sg::sampler
             descriptor->setRAddressMode(address_mode_of(s.address_w));
             descriptor->setLodMinClamp(s.min_lod);
             descriptor->setLodMaxClamp(s.max_lod);
-            descriptor->setMaxAnisotropy(NS::UInteger(s.max_anisotropy < 1 ? 1 : s.max_anisotropy));
+            // Metal's range is 1..16 and it refuses anything outside it, where sg documents the cap as per-backend.
+            descriptor->setMaxAnisotropy(NS::UInteger(cc::clamp(s.max_anisotropy, u32(1), u32(16))));
+
+            // `lodBias` is S4.6 over [-16, 15.999] — a bias outside that is a caller's number rather than a format
+            // Metal will round, so it is clamped rather than passed through.
+            descriptor->setLodBias(cc::clamp(s.mip_lod_bias, -16.0f, 15.999f));
             descriptor->setBorderColor(border_color_of(s.border_color));
             if (s.compare.has_value())
                 descriptor->setCompareFunction(compare_function_of(s.compare.value()));

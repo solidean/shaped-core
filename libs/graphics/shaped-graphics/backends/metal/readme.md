@@ -85,12 +85,18 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4 splits what a D3D12 PSO folds together.
   The render pipeline state carries the shaders, the vertex layout and the colour attachments' blending.
   The depth and stencil test is a separate `MTLDepthStencilState` bound on the encoder.
-  Cull mode, fill mode, winding and depth bias are encoder calls rather than pipeline state at all.
+  Cull mode, fill mode, winding, depth bias and depth clip are encoder calls rather than pipeline state at all.
   The third group is replayed on every `bind_pipeline`, which is what keeps it consistent with the pipeline a caller believes is bound.
+- **A depth-only pass keeps rasterization on.**
+  A pipeline with no fragment function is a depth-only pass, and Metal runs one from the vertex stage alone.
+  `setRasterizationEnabled(false)` because there is no fragment function discards every primitive *before* the depth test, so the pass writes nothing at all.
+- **One sg depth-stencil target is two Metal attachments.**
+  A combined format needs `stencilAttachment` set from the same texture as `depthAttachment`, with its own load/store action and `setClearStencil`.
+  Without it the stencil is never cleared and every stencil test compares against whatever was in memory.
 - **Attachment formats are not pipeline state.**
   MTL4's render pipeline descriptor has no depth or stencil attachment format at all, and its colour formats are only what the blend descriptor needs.
   The render pass establishes the rest at encode time.
-  sg's `depth_stencil_format` is therefore carried for validation rather than for building.
+  sg's `depth_stencil_format` is therefore carried for validation rather than for building — `metal_raster_pipeline::depth_stencil_format()` is what the rendering scope is checked against.
   That is the opposite of dx12's DSVFormat and vulkan's dynamic-rendering formats.
 - **A barrier is flushed before the render encoder opens, not inside it.**
   Vulkan forbids a barrier inside a dynamic-rendering instance and closes the pass around one.
@@ -111,11 +117,18 @@ Each of these is a fact about Metal rather than a gap in the backend.
   is what it is for.
   The subresource partition is an optimization not taken: a texture is one undivided state, so two mips written and
   read in turn get a barrier they would not strictly need.
-- **A texture view is cached on sg view identity, never on the texture's address.**
+- **A texture view is cached on a per-texture identity stamp, never on the texture's address.**
   That distinction is the vulkan build-out's most expensive bug repeated cheaply: a per-frame texture's address is
   recycled, so an address-keyed cache hands a new texture the previous one's view, of an object that no longer exists.
   It needs an allocator to reuse an address, so a suite reports it as flaky and a frame loop reports it every few
   seconds.
+  **`hash(sg::raw_texture_view)` is not that identity**, and reaching for it was how this backend shipped the bug anyway: sg's view hash folds `texture.get()`.
+  So the key is `metal_texture_view_key`, over `metal_texture::identity()` plus the fields that reach `newTextureView`, and each entry is evicted on its texture's own finalizer.
+  The eviction matters on its own: a view retains its parent, so an entry that outlives the texture keeps that MTLTexture alive for the context's whole lifetime.
+- **A view's MTLTextureType comes from the view's dimension, not the texture's.**
+  A one-face view of a cube is a 2D texture; reusing the texture's own type asks Metal for a one-slice Cube, which it refuses.
+  The whole-texture shortcut — return the texture rather than mint a view — therefore checks the type as well as the format and the range.
+  And a cube's range counts faces where `arrayLength` counts cubes, so that range check multiplies by six.
 - **Host-visible memory is free.**
   `MTLStorageModeShared` on unified memory is exactly the thing whose absence blocked every one of the vulkan backend's transfer paths.
 - **A heap reports a size that is not a multiple of its own alignment.**

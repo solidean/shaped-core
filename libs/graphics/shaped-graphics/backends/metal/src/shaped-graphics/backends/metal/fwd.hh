@@ -32,6 +32,7 @@ class metal_pipeline_layout;
 class metal_compute_pipeline;
 class metal_raster_pipeline;
 class metal_staging_binding_group;
+struct metal_texture_view_key;  // what a cached texture view is keyed by (see metal_texture_view_cache.hh)
 class metal_texture_view_cache; // MTLTextures for bound texture views (see metal_texture_view_cache.hh)
 class metal_sampler_cache;      // MTLSamplerStates for bound sampler values (see metal_sampler_cache.hh)
 class metal_buffer;

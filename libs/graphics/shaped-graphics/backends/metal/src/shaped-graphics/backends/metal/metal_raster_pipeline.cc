@@ -70,6 +70,13 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     sg::raster_pipeline_description const& desc,
     sg::lifetime_scope)
 {
+    // Refused rather than ignored: a pipeline built without the stage a caller asked for draws something plausible
+    // and wrong, and there is no later point at which the omission surfaces.
+    if (desc.geometry_shader.has_value())
+        return cc::error("raster_pipeline: the metal backend has no geometry stage");
+    if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value())
+        return cc::error("raster_pipeline: the metal backend has no tessellation stages");
+
     auto const scope = autorelease_scope();
 
     auto vertex = load_stage(_device, desc.vertex_shader, "vertex");
@@ -96,8 +103,9 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     descriptor->setInputPrimitiveTopology(topology_class_of(desc.topology));
     descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
 
-    // A pipeline with no fragment stage rasterizes nothing a colour attachment would receive — a depth-only pass.
-    descriptor->setRasterizationEnabled(desc.fragment_shader.has_value());
+    // Rasterization is left on with no fragment stage: that is a depth-only pass, and Metal runs one correctly from
+    // the vertex stage alone.
+    // Disabling it there discards every primitive before the depth test, so the pass writes nothing at all.
 
     for (auto i = isize(0); i < desc.color_targets.size(); ++i)
     {
@@ -143,7 +151,10 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     auto* const ds_descriptor = MTL::DepthStencilDescriptor::alloc()->init();
     auto const& ds = desc.depth_stencil;
     ds_descriptor->setDepthCompareFunction(ds.depth_test ? compare_of(ds.depth_compare) : MTL::CompareFunctionAlways);
-    ds_descriptor->setDepthWriteEnabled(ds.depth_write);
+
+    // A disabled depth test writes nothing, which is what dx12 and vulkan do: `depth_write` alone is not a licence to
+    // write depth through a pass that declared it is not testing it.
+    ds_descriptor->setDepthWriteEnabled(ds.depth_test && ds.depth_write);
 
     if (ds.stencil_test)
     {
@@ -171,6 +182,6 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     ds_descriptor->release();
 
     return std::make_shared<metal_raster_pipeline>(*this, state, depth_stencil, desc.rasterization, desc.topology,
-                                                   desc.layout);
+                                                   desc.depth_stencil_format, desc.layout);
 }
 } // namespace sg::backend::metal

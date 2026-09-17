@@ -8,6 +8,12 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
+namespace sg::backend::metal
+{
+/// Mints the process-unique stamp behind `metal_texture::identity()`.
+[[nodiscard]] u64 next_texture_identity();
+} // namespace sg::backend::metal
+
 /// Metal implementation of sg::raw_texture.
 ///
 /// One MTLTexture, and — unlike both other backends — no layout state beside it.
@@ -35,6 +41,13 @@ public:
     /// The direct-queue submission that last named this texture; see `submission_stamp`.
     [[nodiscard]] submission_stamp& submission() const { return _submission; }
 
+    /// A stamp no other texture in this process shares, minted at construction.
+    ///
+    /// **What the view cache keys on, rather than this object's address.**
+    /// A transient texture is destroyed and recreated every frame and the allocator hands the new one the dead one's
+    /// address, so an address key lets it inherit views of a texture that no longer exists.
+    [[nodiscard]] u64 identity() const { return _identity; }
+
     /// The id an argument buffer names this texture by.
     /// Metal 4 binds a resource id rather than a descriptor, so this is the whole of what a binding writes.
     [[nodiscard]] u64 gpu_resource_id() const { return _texture != nullptr ? _texture->gpuResourceID()._impl : u64(0); }
@@ -48,4 +61,5 @@ private:
     sg::memory_heap_handle _heap;
     mutable cc::mutex<metal_resource_access> _access;
     mutable submission_stamp _submission; // mutable: a list declares against a handle to const
+    u64 _identity = next_texture_identity();
 };

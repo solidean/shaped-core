@@ -271,6 +271,15 @@ private:
     /// The pipeline currently bound, for the workgroup size a thread-count dispatch divides by.
     metal_compute_pipeline const* _bound_compute = nullptr;
 
+    /// The open rendering scope's depth-stencil target format, `undefined` for none.
+    /// What a bound pipeline's own `depth_stencil_format` is checked against, since MTL4 builds the pipeline without
+    /// it and would otherwise never notice a mismatch.
+    sg::pixel_format _scope_depth_stencil_format = sg::pixel_format::undefined;
+
+    /// The layout of whichever pipeline was bound last, and what every group bound after it is checked against.
+    /// One member for all three kinds: a bind replaces it, which is the same rule the encoders follow.
+    metal_pipeline_layout const* _bound_layout = nullptr;
+
     /// The ray-tracing pipeline a dispatch_rays must have had its table built for.
     /// Nothing is bound to an encoder at bind time: which compute state runs is decided by the raygen the dispatch
     /// names, so this is the check rather than the binding.

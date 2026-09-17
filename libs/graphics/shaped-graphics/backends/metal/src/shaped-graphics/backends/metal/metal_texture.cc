@@ -4,8 +4,18 @@
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
 
+#include <atomic>
+
 namespace sg::backend::metal
 {
+u64 next_texture_identity()
+{
+    // Monotonic and never reused, which is the whole of what a key needs: two live textures never share one, and a
+    // dead texture's stamp cannot come back on a new object at the same address.
+    static std::atomic<u64> next = 1;
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 metal_texture::~metal_texture()
 {
     release_storage();

@@ -607,6 +607,7 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
 {
     auto const& mtl_pipeline = static_cast<metal_compute_pipeline const&>(pipeline);
     _bound_compute = &mtl_pipeline;
+    _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(mtl_pipeline.state());
@@ -623,6 +624,16 @@ void metal_command_list::bind_group_to_table(int group_index, binding_group cons
     // read the table slot it expects.
     if (auto const pinned = mtl_group.layout().group_index(); pinned.has_value())
         CC_ASSERT(int(pinned.value()) == group_index, "this binding group's layout pins it to a different group index");
+
+    // The group's schema must be the one the bound pipeline's layout declared at this slot.
+    // Metal binds an address rather than a descriptor table, so a mismatch is not a bind-time error anywhere below —
+    // the shader simply reads an argument buffer laid out to a different schema.
+    // libs/graphics/shaped-graphics/docs/concepts/bindings.md says every backend carries this check.
+    CC_ASSERT(_bound_layout != nullptr, "bind a pipeline before binding its groups");
+    auto const& declared = _bound_layout->description().groups;
+    CC_ASSERT(group_index < isize(declared.size()), "the bound pipeline layout declares no group at this slot");
+    CC_ASSERT(declared[group_index].get() == &mtl_group.layout(), "binding_group's layout does not match the pipeline "
+                                                                  "layout's slot");
 
     // The group's argument buffer address goes into the table's buffer slot, which IS the MSL [[buffer(N)]] index.
     argument_table()->setAddress(mtl_group.argument_address(), NS::UInteger(group_index));
@@ -779,6 +790,20 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
         attachment->setStoreAction(store_action_of(target.op));
         attachment->setClearDepth(target.clear_depth);
 
+        // A combined format is two attachments in Metal's model, where sg names one target.
+        // Without the second, a stencil format gets no clear and every stencil test reads whatever was there.
+        auto const format = target.view.texture()->description().format;
+        if (sg::has_stencil(format))
+        {
+            auto* const stencil = descriptor->stencilAttachment();
+            stencil->setTexture(mtl_texture.texture());
+            stencil->setLevel(NS::UInteger(target.view.range().mip_range.start));
+            stencil->setSlice(NS::UInteger(target.view.range().array_range.start));
+            stencil->setLoadAction(load_action_of(target.op));
+            stencil->setStoreAction(store_action_of(target.op));
+            stencil->setClearStencil(target.clear_stencil);
+        }
+
         width = width != 0 ? width : target.view.width();
         height = height != 0 ? height : target.view.height();
     }
@@ -787,6 +812,10 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
     // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed
     // memory.
     // It cost a sanitizer run to see, because the freed object is usually still readable.
+    _scope_depth_stencil_format = info.depth_stencil_target.has_value()
+                                    ? info.depth_stencil_target.value().view.texture()->description().format
+                                    : sg::pixel_format::undefined;
+
     _render_encoder = _buffer->renderCommandEncoder(descriptor)->retain();
     descriptor->release();
     CC_ASSERT(_render_encoder != nullptr, "metal refused a render command encoder");
@@ -821,6 +850,7 @@ void metal_command_list::raster_end_rendering()
     _render_encoder->release();
     _render_encoder = nullptr;
     _bound_raster = nullptr;
+    _scope_depth_stencil_format = sg::pixel_format::undefined;
 }
 
 void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
@@ -828,7 +858,14 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     CC_ASSERT(_render_encoder != nullptr, "binding a raster pipeline needs an open rendering scope");
 
     auto const& mtl_pipeline = static_cast<metal_raster_pipeline const&>(pipeline);
+
+    // The one thing `depth_stencil_format` is carried for: MTL4 builds the pipeline without it, so a pipeline drawn
+    // into a scope whose depth target is a different format is not an error anywhere below this.
+    CC_ASSERT(mtl_pipeline.depth_stencil_format() == _scope_depth_stencil_format,
+              "this pipeline's depth_stencil_format is not the rendering scope's depth-stencil target format");
+
     _bound_raster = &mtl_pipeline;
+    _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
     _render_encoder->setRenderPipelineState(mtl_pipeline.state());
     if (mtl_pipeline.depth_stencil_state() != nullptr)
@@ -841,6 +878,7 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     _render_encoder->setTriangleFillMode(fill_mode_of(raster.fill));
     _render_encoder->setFrontFacingWinding(winding_of(raster.front));
     _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
+    _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
 
     _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
 }
@@ -897,6 +935,7 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     // dispatch names, and the table is what resolves it.
     // So this only records the pipeline a later dispatch_rays must have been built for.
     _bound_raytracing = static_cast<metal_raytracing_pipeline const*>(&pipeline);
+    _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)

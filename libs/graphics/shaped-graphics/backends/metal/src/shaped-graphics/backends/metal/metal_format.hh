@@ -28,6 +28,11 @@ namespace sg::backend::metal
                                                bool is_cube,
                                                bool is_multisampled);
 
+/// The MTLTextureType a *view* asks for, which is the view's own dimension rather than the texture's shape.
+/// A one-face view of a cube is a 2D texture, and a 2D-array view of a cube is a 2D array — reusing the texture's type
+/// would ask Metal for a one-slice cube, which it refuses.
+[[nodiscard]] MTL::TextureType texture_type_of(sg::texture_view_dimension dimension);
+
 /// The MTLTextureUsage bits `usage` implies.
 ///
 /// Metal has no copy bits at all — every texture can be a copy source and destination — so `copy_src` and `copy_dst`

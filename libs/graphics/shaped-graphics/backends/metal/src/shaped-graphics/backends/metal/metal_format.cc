@@ -1,5 +1,6 @@
 #include "metal_format.hh"
 
+#include <shaped-graphics/resource/views.hh> // sg::texture_view_dimension
 #include <shaped-graphics/types.hh>
 
 namespace sg::backend::metal
@@ -151,6 +152,33 @@ MTL::TextureType texture_type_of(sg::texture_dimension dimension, bool is_array,
     case sg::texture_dimension::d3:
         // Metal has no 3D array and no multisampled 3D; sg's description validation rejects both before here.
         return MTL::TextureType3D;
+    }
+
+    return MTL::TextureType2D;
+}
+
+MTL::TextureType texture_type_of(sg::texture_view_dimension dimension)
+{
+    switch (dimension)
+    {
+    case sg::texture_view_dimension::tex_1d:
+        return MTL::TextureType1D;
+    case sg::texture_view_dimension::tex_1d_array:
+        return MTL::TextureType1DArray;
+    case sg::texture_view_dimension::tex_2d:
+        return MTL::TextureType2D;
+    case sg::texture_view_dimension::tex_2d_ms:
+        return MTL::TextureType2DMultisample;
+    case sg::texture_view_dimension::tex_2d_array:
+        return MTL::TextureType2DArray;
+    case sg::texture_view_dimension::tex_2d_ms_array:
+        return MTL::TextureType2DMultisampleArray;
+    case sg::texture_view_dimension::tex_3d:
+        return MTL::TextureType3D;
+    case sg::texture_view_dimension::cube:
+        return MTL::TextureTypeCube;
+    case sg::texture_view_dimension::cube_array:
+        return MTL::TextureTypeCubeArray;
     }
 
     return MTL::TextureType2D;

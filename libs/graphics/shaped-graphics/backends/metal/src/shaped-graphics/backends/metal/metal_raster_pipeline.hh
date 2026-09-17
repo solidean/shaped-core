@@ -18,7 +18,8 @@
 /// **Attachment formats are not pipeline state here.**
 /// MTL4's render pipeline descriptor has no depth or stencil attachment format, and its colour formats are only what
 /// the blend descriptor needs — the render pass establishes the rest at encode time.
-/// sg's `depth_stencil_format` is therefore carried for validation rather than for building.
+/// sg's `depth_stencil_format` is therefore carried for validation rather than for building: `depth_stencil_format()`
+/// is what a rendering scope's bound target is checked against.
 class sg::backend::metal::metal_raster_pipeline final : public sg::raster_pipeline
 {
 public:
@@ -27,12 +28,14 @@ public:
                           MTL::DepthStencilState* depth_stencil,
                           sg::rasterization_state rasterization,
                           sg::primitive_topology topology,
+                          sg::pixel_format depth_stencil_format,
                           sg::pipeline_layout_handle layout)
       : _ctx(ctx),
         _state(state),
         _depth_stencil(depth_stencil),
         _rasterization(rasterization),
         _topology(topology),
+        _depth_stencil_format(depth_stencil_format),
         _layout(cc::move(layout))
     {
     }
@@ -46,6 +49,13 @@ public:
     [[nodiscard]] sg::rasterization_state const& rasterization() const { return _rasterization; }
     [[nodiscard]] sg::primitive_topology topology() const { return _topology; }
 
+    /// The depth-stencil format this pipeline was declared against, `undefined` for none.
+    /// Not pipeline state on MTL4, so it exists only to check the rendering scope a draw is issued in.
+    [[nodiscard]] sg::pixel_format depth_stencil_format() const { return _depth_stencil_format; }
+
+    /// The layout every group bound alongside this pipeline is checked against.
+    [[nodiscard]] sg::pipeline_layout_handle const& layout() const { return _layout; }
+
     /// Metal has no serialized-PSO blob on this path; see metal_compute_pipeline for why.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override { return {}; }
 
@@ -55,5 +65,6 @@ private:
     MTL::DepthStencilState* _depth_stencil = nullptr;
     sg::rasterization_state _rasterization;
     sg::primitive_topology _topology = sg::primitive_topology::triangle_list;
+    sg::pixel_format _depth_stencil_format = sg::pixel_format::undefined;
     sg::pipeline_layout_handle _layout;
 };

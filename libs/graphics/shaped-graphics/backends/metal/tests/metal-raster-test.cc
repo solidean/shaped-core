@@ -209,3 +209,183 @@ TEST("sg metal - an empty rendering scope opens and closes")
 
     CHECK(!ctx->is_device_lost());
 }
+
+namespace
+{
+/// A pipeline over the fixture's vertex stage with no fragment stage at all — which is what a depth-only pass is.
+[[nodiscard]] cc::result<sg::backend::metal::metal_raster_pipeline_handle> make_depth_only_pipeline(
+    mtl::metal_context_handle const& ctx,
+    sg::depth_stencil_state const& depth_stencil)
+{
+    auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
+    if (layout.has_error())
+        return cc::error(layout.error().to_string());
+
+    return ctx->create_metal_raster_pipeline(
+        {
+            .layout = layout.value(),
+            .vertex_shader = triangle_stage(sg::shader_stage::vertex, "vertex_main"),
+            .rasterization = {.cull = sg::cull_mode::none},
+            .depth_stencil = depth_stencil,
+            .depth_stencil_format = sg::pixel_format::depth32_float,
+        },
+        sg::lifetime_scope::persistent);
+}
+
+/// The depth texels of a 4×4 `depth32_float` target, read back.
+[[nodiscard]] cc::vector<float> draw_depth_only(mtl::metal_context_handle const& ctx,
+                                                sg::depth_stencil_state const& depth_stencil)
+{
+    constexpr auto k_size = 4;
+    auto const depth = ctx->persistent.create_texture_2d({
+        .format = sg::pixel_format::depth32_float,
+        .width = k_size,
+        .height = k_size,
+        .usage = sg::texture_usage::depth_stencil | sg::texture_usage::copy_src,
+    });
+
+    auto pipeline = make_depth_only_pipeline(ctx, depth_stencil);
+    CC_ASSERT(pipeline.has_value(), "the depth-only fixture pipeline could not be built");
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto info = sg::rendering_info{};
+        info.depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f);
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*pipeline.value());
+        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    auto future = cmd->download.bytes_from_texture(depth.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    ctx->block_until_idle();
+
+    auto const bytes = future.try_get_bytes();
+    CC_ASSERT(bytes.has_value(), "the depth readback never landed");
+
+    auto out = cc::vector<float>();
+    auto const* const texels = reinterpret_cast<float const*>(bytes.value().data());
+    for (auto i = 0; i < k_size * k_size; ++i)
+        out.push_back(texels[i]);
+    return out;
+}
+} // namespace
+
+TEST("sg metal - a depth-only pass writes depth")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // A pipeline with no fragment stage is a depth-only pass, and Metal runs one from the vertex stage alone.
+    // Turning rasterization off because there is no fragment function discards every primitive before the depth test,
+    // so the pass writes nothing and this reads back the clear.
+    auto const depth = draw_depth_only(ctx, {.depth_test = true, .depth_write = true});
+
+    REQUIRE(depth.size() == 16);
+    auto wrong = 0;
+    for (auto const value : depth)
+        if (value > 0.001f)
+            ++wrong;
+    CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were not written; first is {}", wrong, depth[0]));
+}
+
+TEST("sg metal - depth is not written with the test off")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // `depth_write` alone is not a licence to write depth through a pass that declared it is not testing it — dx12 and
+    // vulkan both write nothing here, and mapping a disabled test to `CompareFunctionAlways` while keeping the write
+    // makes metal the odd one out.
+    auto const depth = draw_depth_only(ctx, {.depth_test = false, .depth_write = true});
+
+    REQUIRE(depth.size() == 16);
+    auto wrong = 0;
+    for (auto const value : depth)
+        if (value < 0.999f)
+            ++wrong;
+    CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were written; first is {}", wrong, depth[0]));
+}
+
+TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // Metal takes a depth attachment and a stencil attachment separately where sg names one target, so a combined
+    // format needs both set from the same texture.
+    // With only the depth half, the stencil clear never happens and the comparison below reads whatever was in memory:
+    // the two draws stop differing, and which of them is wrong is a matter of luck.
+    constexpr auto k_size = 4;
+
+    auto const make_color = [&]
+    {
+        return ctx->persistent.create_texture_2d({
+            .format = sg::pixel_format::rgba8_unorm,
+            .width = k_size,
+            .height = k_size,
+            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src,
+        });
+    };
+    auto const masked_out = make_color();
+    auto const drawn = make_color();
+
+    auto const depth = ctx->persistent.create_texture_2d({
+        .format = sg::pixel_format::depth32_float_stencil8,
+        .width = k_size,
+        .height = k_size,
+        .usage = sg::texture_usage::depth_stencil,
+    });
+
+    auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
+    REQUIRE(layout.has_value());
+
+    auto desc = sg::raster_pipeline_description{
+        .layout = layout.value(),
+        .vertex_shader = triangle_stage(sg::shader_stage::vertex, "vertex_main"),
+        .fragment_shader = triangle_stage(sg::shader_stage::fragment, "fragment_main"),
+        .rasterization = {.cull = sg::cull_mode::none},
+        // Draw only where the stencil equals the reference, which each pass sets for itself.
+        .depth_stencil
+        = {.stencil_test = true, .front = {.compare = sg::compare_op::equal}, .back = {.compare = sg::compare_op::equal}},
+        .depth_stencil_format = sg::pixel_format::depth32_float_stencil8,
+    };
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
+
+    auto pipeline = ctx->create_metal_raster_pipeline(desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    auto cmd = ctx->create_command_list();
+    auto const pass = [&](auto const& target, u32 reference)
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        info.depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f, 1);
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*pipeline.value());
+        scope.set_stencil_reference(reference);
+        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    };
+
+    pass(masked_out, 0); // stencil is 1 everywhere, so nothing passes and the clear survives
+    pass(drawn, 1);      // matches the clear, so the triangle covers the target
+
+    auto masked_future = cmd->download.bytes_from_texture(masked_out.raw());
+    auto drawn_future = cmd->download.bytes_from_texture(drawn.raw());
+    ctx->submit_command_list(cc::move(cmd));
+    ctx->block_until_idle();
+
+    auto const masked_bytes = masked_future.try_get_bytes();
+    auto const drawn_bytes = drawn_future.try_get_bytes();
+    REQUIRE(masked_bytes.has_value());
+    REQUIRE(drawn_bytes.has_value());
+
+    // Red is the clear; the fragment shader writes 0.25/0.5/0.75.
+    CHECK(int(u8(masked_bytes.value()[0])) == 255);
+    CHECK(int(u8(masked_bytes.value()[1])) == 0);
+    CHECK(int(u8(drawn_bytes.value()[0])) < 128)
+        .context(cc::format("the stencil-passing draw wrote {}", int(u8(drawn_bytes.value()[0]))));
+    CHECK(int(u8(drawn_bytes.value()[1])) > 100);
+}

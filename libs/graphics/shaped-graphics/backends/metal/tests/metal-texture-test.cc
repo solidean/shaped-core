@@ -3,6 +3,10 @@
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
+#include <shaped-graphics/backends/metal/metal_texture.hh>
+#include <shaped-graphics/backends/metal/metal_texture_view_cache.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/resource/views.hh>
 
 // Textures: creation, the format and shape translation, and a round trip through inline transfer.
 
@@ -92,4 +96,87 @@ TEST("sg metal - a texture round-trips through inline transfer")
         if (bytes.value()[i] != source[i])
             ++mismatches;
     CHECK(mismatches == 0).context(cc::format("{} of {} bytes differ", mismatches, source.size()));
+}
+
+TEST("sg metal - a view's texture type comes from the view, not the texture")
+{
+    // A one-face view of a cube is a 2D texture: asking Metal for a one-slice Cube is a combination it refuses, and
+    // the texture's own type is the wrong answer for every view that reshapes it.
+    using sg::texture_view_dimension;
+
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d) == MTL::TextureType1D);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d_array) == MTL::TextureType1DArray);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d) == MTL::TextureType2D);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d_ms) == MTL::TextureType2DMultisample);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d_array) == MTL::TextureType2DArray);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d_ms_array) == MTL::TextureType2DMultisampleArray);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_3d) == MTL::TextureType3D);
+    CHECK(mtl::texture_type_of(texture_view_dimension::cube) == MTL::TextureTypeCube);
+    CHECK(mtl::texture_type_of(texture_view_dimension::cube_array) == MTL::TextureTypeCubeArray);
+}
+
+TEST("sg metal - a one-face view of a cube is a 2D texture")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto texture = ctx->persistent.create_raw_texture({.format = sg::pixel_format::rgba8_unorm,
+                                                       .width = 32,
+                                                       .height = 32,
+                                                       .mip_levels = 1,
+                                                       .is_cube = true,
+                                                       .usage = sg::texture_usage::readonly_texture});
+    REQUIRE(texture != nullptr);
+
+    // Face 2 alone, which is where reusing the texture's own type asks for a one-slice Cube.
+    auto* const face = ctx->texture_views().acquire(
+        {.access = sg::view_class::readonly,
+         .texture = texture,
+         .view_dimension = sg::texture_view_dimension::tex_2d,
+         .range = {{.start = 0, .end = 1}, {.start = 2, .end = 3}, {.start = 0, .end = 1}}});
+    REQUIRE(face != nullptr);
+    CHECK(face->textureType() == MTL::TextureType2D);
+
+    // And the whole cube, in its own format and shape, is the texture itself rather than a minted view.
+    auto* const whole = ctx->texture_views().acquire(
+        {.access = sg::view_class::readonly,
+         .texture = texture,
+         .view_dimension = sg::texture_view_dimension::cube,
+         .range = {{.start = 0, .end = 1}, {.start = 0, .end = 6}, {.start = 0, .end = 1}}});
+    CHECK(whole == static_cast<mtl::metal_texture const&>(*texture).texture());
+}
+
+TEST("sg metal - a cached view is evicted with its texture")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // A view retains its parent, so an entry that outlives its texture keeps that MTLTexture alive for the context's
+    // whole lifetime — and hands the next texture at that address a view of an object that no longer exists.
+    auto const before = ctx->texture_views().debug_entry_count();
+
+    {
+        auto texture = ctx->persistent.create_raw_texture({.format = sg::pixel_format::rgba8_unorm,
+                                                           .width = 32,
+                                                           .height = 32,
+                                                           .mip_levels = 4,
+                                                           .usage = sg::texture_usage::readonly_texture});
+        REQUIRE(texture != nullptr);
+
+        auto* const mip = ctx->texture_views().acquire(
+            {.access = sg::view_class::readonly,
+             .texture = texture,
+             .view_dimension = sg::texture_view_dimension::tex_2d,
+             .range = {{.start = 1, .end = 2}, {.start = 0, .end = 1}, {.start = 0, .end = 1}}});
+        REQUIRE(mip != nullptr);
+        CHECK(ctx->texture_views().debug_entry_count() == before + 1);
+    }
+
+    // The eviction rides the texture's finalizer, which runs where its MTLTexture is released: at epoch retire.
+    ctx->advance_epoch();
+    ctx->block_until_idle();
+
+    CHECK(ctx->texture_views().debug_entry_count() == before);
 }
