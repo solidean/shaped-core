@@ -45,9 +45,12 @@ TEST("cc system_metrics - cpu counters climb across readings")
     auto total_climbed = false;
     auto core_climbed = cc::vector<bool>::create_filled(baseline.per_core.size(), false);
 
-    // Ten readings a tick apart, stopping as soon as everything has climbed, which is usually the second.
+    // Readings a tick apart until everything has climbed, which is usually the second.
+    // The bound is generous because an idle core in tickless idle books its idle time only when it next wakes, which on a quiet machine can be well past a fifth of a second.
+    // It is a limit on a condition rather than a wait: a healthy run never comes near it.
     auto previous = baseline;
-    for (auto reading = 0; reading < 10; ++reading)
+    auto const give_up_at = cc::current_time_steady_secs() + 2.0;
+    while (cc::current_time_steady_secs() < give_up_at)
     {
         spend_secs(0.02);
         auto next = cc::read_cpu_counters();
@@ -151,8 +154,11 @@ TEST("cc system_metrics - two samplers do not interfere")
     auto fast = cc::cpu_load_sampler();
     spend_secs(0.02);
 
-    auto const slow_load = slow.sample();
+    // Fast first, so slow's interval contains fast's whole interval plus the gap between the two constructions.
+    // The other order lets a slow counter read inside fast.sample() stretch fast's interval past slow's.
+    // A shared process-wide baseline would still fail here: slow's interval would be only the gap since fast sampled.
     auto const fast_load = fast.sample();
+    auto const slow_load = slow.sample();
     REQUIRE(slow_load.has_value());
     REQUIRE(fast_load.has_value());
 
