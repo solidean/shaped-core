@@ -124,6 +124,7 @@ rules:
       - src/clean-core/common/assert.cc
       - src/clean-core/error/crash_handler.cc
       - src/clean-core/record/thread_scopes.cc
+      - src/clean-core/thread/async_backlog.cc
 
   - kind: allow-include
     value: <cstdlib>

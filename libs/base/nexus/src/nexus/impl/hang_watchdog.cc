@@ -7,6 +7,7 @@
 #include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/thread_scopes.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/tests/execute.hh>
@@ -87,6 +88,10 @@ void write_secs(double secs)
 
     // The scope stacks first: they work on every platform and name the logical task rather than the instruction.
     cc::rec::report_thread_scopes(what);
+
+    // What work is still outstanding, which for a hang that is a WAIT is usually the whole answer.
+    // Covers tracked work only, and says so.
+    cc::report_async_backlogs(what);
 
     // Then the recording itself, which is the part a reader opens afterwards rather than reads here.
     //

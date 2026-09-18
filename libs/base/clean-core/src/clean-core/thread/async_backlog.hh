@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/fwd.hh>
 #include <clean-core/memory/shared_ptr.hh>
+#include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
 
 // cc::async_backlog — the work a component started and does not await itself, kept so someone can wait for it to settle.
@@ -12,6 +14,24 @@ namespace cc::impl
 {
 struct async_backlog_state;
 }
+
+namespace cc
+{
+/// Calls `f` for every live backlog, so a diagnostic can say what work is still outstanding and whose it is.
+///
+/// **This is the in-flight picture, and it covers only what was deliberately detached.**
+/// A node awaited in the ordinary way is in nobody's list, and making every node enumerable would mean an atomic
+/// pair on a path measured in nanoseconds — so this reports the work a component chose to track and says nothing
+/// about the rest, rather than pretending to a completeness it does not have.
+///
+/// Never waits: a report must not hang on the thing it is reporting about.
+/// False means `f` never ran.
+[[nodiscard]] bool try_for_each_async_backlog(cc::function_ref<void(async_backlog const&)> f);
+
+/// Writes every live backlog and what it still owes to stderr.
+/// The rendering half, beside the query, so a crash and a hang print the same thing.
+void report_async_backlogs(char const* reason) noexcept;
+} // namespace cc
 
 /// Work a component detached, tracked so a caller can wait for all of it to settle.
 ///
@@ -27,8 +47,16 @@ struct async_backlog_state;
 /// Thread-safe: any thread may track while another waits.
 struct cc::async_backlog
 {
-    async_backlog();
+    /// `name` is what a diagnostic calls this backlog, and it is worth giving one.
+    ///
+    /// A hang report lists every live backlog and what each still owes; an unnamed one reports a count with nothing
+    /// to attribute it to, which names the symptom and not the component.
+    /// The view must outlive the backlog — a literal, or something the owner keeps.
+    explicit async_backlog(cc::string_view name = {});
     ~async_backlog();
+
+    /// What this backlog is called, or empty.
+    [[nodiscard]] cc::string_view name() const { return _name; }
 
     async_backlog(async_backlog const&) = delete;
     async_backlog(async_backlog&&) = delete;
@@ -79,5 +107,14 @@ struct cc::async_backlog
 private:
     void track_node(async_node_weak node);
 
+    cc::string_view _name;
     cc::shared_ptr<impl::async_backlog_state> _state;
+
+    /// The process-wide list every live backlog is on, so a report can find them all.
+    /// Threaded through the objects themselves rather than a container, since a backlog is not copyable or movable
+    /// and a list needs no allocation.
+    async_backlog* _registry_next = nullptr;
+    async_backlog* _registry_prev = nullptr;
+
+    friend bool cc::try_for_each_async_backlog(cc::function_ref<void(async_backlog const&)>);
 };
