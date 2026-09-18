@@ -787,6 +787,7 @@ cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
 m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for void) — nullopt if not acquired
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
+bool ok = m.wait_for(cv, 1.0, pred);      // bounded: true once pred holds, false on timeout; without threads checks once
 auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold; g-> / *g reach the value, released when g dies
                                           // move-only. NOT the default: lock(f) is, and it keeps references inside the callback.
                                           // for the critical section that cannot be one call (spans your statements / handed to a caller)

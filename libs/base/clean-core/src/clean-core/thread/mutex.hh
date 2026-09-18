@@ -130,6 +130,27 @@ struct cc::mutex
         return cc::invoke(cc::forward<F>(f), _value);
     }
 
+    /// wait() bounded by `timeout_secs`: true once `pred` holds, false if the time ran out first.
+    /// The mutex is held during every predicate check, and a spurious wakeup is not a timeout.
+    ///
+    /// Without threads nothing could make `pred` true meanwhile, so it is checked once and nothing waits.
+    /// Usage (a stop request another thread signals, or a period elapsing):
+    ///   while (!stop.wait_for(cv, 1.0, [](bool const& s) { return s; }))
+    ///       tick();
+    template <class Pred>
+    [[nodiscard]] bool wait_for(std::condition_variable& cv, double timeout_secs, Pred&& pred)
+    {
+#if CC_HAS_THREADS
+        std::unique_lock lock(_mutex);
+        return cv.wait_for(lock, std::chrono::duration<double>(timeout_secs),
+                           [&]() { return bool(cc::invoke(pred, _value)); });
+#else
+        (void)cv;
+        (void)timeout_secs;
+        return bool(cc::invoke(pred, _value));
+#endif
+    }
+
     /// Default constructor - default-constructs the protected value
     mutex() = default;
 
