@@ -1,4 +1,4 @@
-name: WASM (Emscripten, threads + WebGPU)
+name: WASM (Emscripten threads + WebGPU)
 
 # The threads-plus-WebGPU wasm build, tests run under Node with Dawn's binding as navigator.gpu.
 # It exists for the build and harness paths those two knobs switch on, since a runner has no GPU: every GPU test SKIPs for want of an adapter.
