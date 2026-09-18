@@ -329,6 +329,25 @@ void record_metric(cc::string_view name, double value, cc::rec::unit const& unit
 // benchmark that failed.
 void record_benchmark_result(bench::result result);
 
+/// One thread's currently running test, as the hang watchdog reads it.
+struct running_test_snapshot
+{
+    /// The declaration's own name, which outlives the run — so this stays valid however the table churns.
+    cc::string_view name;
+
+    int section = 0;
+
+    /// When it started, on the steady clock.
+    double started_secs = 0;
+};
+
+/// Fills `out` with what every thread is running, returning how many entries were written.
+///
+/// Allocation-free and lock-free, because the watchdog reads this while the run it is watching carries on, and a
+/// watchdog that took a lock would hang on exactly the run it exists to report.
+/// A snapshot rather than a fact: a slot may change while this walks the table.
+[[nodiscard]] isize snapshot_running_tests(cc::span<running_test_snapshot> out);
+
 // Crash-context hook (cc::crash_context_hook): writes the currently running test and section index to stderr.
 // Registered with cc::add_crash_context_hook, so a fatal fault points at the offending test.
 // Reads only plain globals updated per test, so it is safe to call from a constrained crash context.

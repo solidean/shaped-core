@@ -16,6 +16,7 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
+#include <nexus/impl/hang_watchdog.hh>
 #include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
@@ -598,6 +599,12 @@ int nx::run(int argc, char** argv)
                                    .benchmark_pinned = benchmark_pinned,
                                    .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
 
+    // Armed for the whole run, including the hosted path below, which stops it from its own finish callback.
+    //
+    // After the schedule is built rather than before: a deadline that covers discovery would fire on a binary that
+    // is slow to enumerate rather than on one that is stuck, and those are different problems.
+    impl::start_hang_watchdog({.per_test_secs = config.test_timeout_secs, .per_run_secs = config.run_timeout_secs});
+
     // A host that owns the thread gets the run in steps, and the report once the last one finishes.
     // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.
     if (impl::has_host_event_loop())
@@ -615,6 +622,7 @@ int nx::run(int argc, char** argv)
         impl::run_in_host_loop([hosted] { return hosted->run->step(); },
                                [hosted]
                                {
+                                   impl::stop_hang_watchdog();
                                    auto const code
                                        = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
                                    delete hosted;
@@ -623,5 +631,7 @@ int nx::run(int argc, char** argv)
         return 0; // not reached: the host loop ends the process
     }
 
-    return report_run(config, reporting, execute_tests(schedule, config));
+    auto const result = execute_tests(schedule, config);
+    impl::stop_hang_watchdog();
+    return report_run(config, reporting, result);
 }

@@ -106,6 +106,18 @@ struct nx::test_schedule_config
     u64 seed = 0;
     bool shuffle = false;
 
+    // How long one test may run before the run is declared hung, in seconds; 0 disables the watchdog.
+    //
+    // A guard that turns a hang into a message rather than a budget: a green run never reaches it, so the value
+    // costs nothing until something is already wrong.
+    // Generous on purpose — tight enough to catch a merely slow test is tight enough to be flaky on a loaded
+    // machine, and the failure it would produce looks exactly like the one it exists to report.
+    // A hand-built config leaves it off, since a test that drives a schedule is not a run anybody is waiting on.
+    double test_timeout_secs = 0;
+
+    // The same for the whole run, which catches one that makes progress forever without any test overrunning.
+    double run_timeout_secs = 0;
+
     // Let every test run at full strength rather than narrowed to what a default run can afford.
     // Read from a test body through nx::is_thorough(); set via --thorough.
     bool thorough = false;

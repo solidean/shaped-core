@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <nexus/impl/hang_watchdog.hh>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -37,6 +38,14 @@ void host_turn(void* user)
     auto* const run = static_cast<host_run*>(user);
     if (!run->step())
     {
+        // **The only place a hang can be noticed here.**
+        //
+        // A stepped run gives the thread back between turns and nowhere else, so a body that never returns is past
+        // the reach of any timer — the thing that would notice is queued behind the thing it would notice.
+        // What this does catch is a run that keeps returning here and never finishing, which is every hang a
+        // never-blocking design actually produces.
+        nx::impl::check_hang_deadlines();
+
         emscripten_set_timeout(&host_turn, 1, user);
         return;
     }

@@ -339,6 +339,11 @@ struct running_test_slot
 {
     cc::atomic<nx::test_declaration const*> declaration = {nullptr};
     cc::atomic<int> section = {0};
+
+    /// When this thread started what it is running, on the steady clock.
+    /// The hang watchdog's whole input: a slot still holding the same test long past a deadline is the definition of
+    /// a hung test, and nothing else in the run notices one.
+    cc::atomic<double> started_secs = {0.0};
 };
 
 running_test_slot g_running_tests[max_running_test_slots];
@@ -392,7 +397,11 @@ void publish_running_test(running_test_slot* slot, nx::test_declaration const& d
     if (slot == nullptr)
         return;
     slot->section.store(section, cc::memory_order_relaxed);
-    slot->declaration.store(&decl, cc::memory_order_relaxed);
+    slot->started_secs.store(cc::current_time_steady_secs(), cc::memory_order_relaxed);
+
+    // Last, and with release ordering, so a watchdog that sees the declaration never reads the previous test's
+    // start time and blames this one for its predecessor's runtime.
+    slot->declaration.store(&decl, cc::memory_order_release);
 }
 
 /// The tests running on OTHER threads right now, as one annotation line, or empty when this test is alone.
@@ -1585,6 +1594,29 @@ cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
     if (ctx == nullptr)
         return {};
     return ctx->section_scopes;
+}
+
+isize nx::impl::snapshot_running_tests(cc::span<nx::impl::running_test_snapshot> out)
+{
+    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
+    auto written = isize(0);
+
+    for (auto i = 0; i < claimed && written < out.size(); ++i)
+    {
+        // Acquire, paired with the release in publish_running_test: the start time below must be this test's.
+        auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_acquire);
+        if (decl == nullptr || decl->name.empty())
+            continue;
+
+        out[written] = nx::impl::running_test_snapshot{
+            .name = decl->name,
+            .section = g_running_tests[i].section.load(cc::memory_order_relaxed),
+            .started_secs = g_running_tests[i].started_secs.load(cc::memory_order_relaxed),
+        };
+        ++written;
+    }
+
+    return written;
 }
 
 void nx::impl::report_running_test() noexcept

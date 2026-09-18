@@ -5,6 +5,7 @@ project(nexus LANGUAGES CXX)
 add_library(nexus
     src/nexus/run.cc
     src/nexus/impl/host_loop.cc
+    src/nexus/impl/hang_watchdog.cc
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
@@ -189,6 +190,7 @@ sc_target_pch(nexus CC)
 if(SC_BUILD_TESTS)
     add_executable(nexus-test
         tests/main.cc
+        tests/hang-watchdog-test.cc
         tests/args-grammar-test.cc
         tests/args-value-test.cc
         tests/args-diagnostic-test.cc
