@@ -147,7 +147,7 @@ private:
     /// Allocators handed back from a commit feedback handler, drained by `lease_allocator`.
     /// Separate from `_free_allocators` because it is written from Apple's threads, which `_mutex` does not cover with
     /// SC_THREADS off.
-    callback_mutex<cc::vector<MTL4::CommandAllocator*>> _callback_free_allocators;
+    cc::mutex<cc::vector<MTL4::CommandAllocator*>> _callback_free_allocators;
 
     bool _is_shut_down = false;
 };

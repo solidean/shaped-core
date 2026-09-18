@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
@@ -42,5 +43,5 @@ public:
 private:
     // A callback mutex rather than cc::mutex: every commit handler removes its staging allocation from here, and
     // that handler runs on a Metal thread even in a build with SC_THREADS off.
-    callback_mutex<MTL::ResidencySet*> _set;
+    cc::mutex<MTL::ResidencySet*> _set;
 };

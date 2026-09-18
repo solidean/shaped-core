@@ -161,7 +161,7 @@ MTL::Buffer* metal_command_list::retain_download_staging(metal_staging_ring::res
     return staging.owned->retain();
 }
 
-cc::shared_ptr<std::atomic<int>> metal_command_list::account_download_staging(metal_staging_ring::reservation const& staging)
+cc::shared_ptr<cc::atomic<int>> metal_command_list::account_download_staging(metal_staging_ring::reservation const& staging)
 {
     // The same problem for a reservation inside the ring, where a retain has nothing to hold: the span is charged to
     // the open epoch's copy count instead, and the ring will not hand those bytes out again until it drops to zero.

@@ -4,13 +4,12 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
-
-#include <atomic>
 
 /// The off-frame transfer path: a second MTL4 queue, its own timeline, and the ordering that makes a command list and
 /// an async copy of the same resource compose.
@@ -206,12 +205,10 @@ private:
     MTL::SharedEvent* _download_timeline = nullptr;
 
     // A callback mutex, because `forget_value` runs inside a commit handler — see metal_common.hh.
-    mutable callback_mutex<state> _state;
+    mutable cc::mutex<state> _state;
 
     /// Transfers committed but not yet finished.
-    ///
-    /// `std::atomic` rather than `cc::atomic`, for the reason `callback_mutex` exists: a commit handler decrements
-    /// this from a dispatch queue Apple owns, and `cc::atomic` is a plain value once `SC_THREADS` is off.
+    /// Decremented from a commit handler, on a dispatch queue Apple owns, which is what makes it atomic rather than an int.
 
     /// Serializes claim, record, commit and signal on the transfer queue, so a claimed value is signalled in the order
     /// it was claimed in.
@@ -224,5 +221,5 @@ private:
     /// expensive step, so uploads serialize their recording but not their copying.
     cc::mutex<int> _submit;
 
-    std::atomic<int> _pending = 0;
+    cc::atomic<int> _pending = 0;
 };

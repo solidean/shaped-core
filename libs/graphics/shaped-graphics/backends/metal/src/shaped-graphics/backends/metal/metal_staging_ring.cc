@@ -49,7 +49,7 @@ cc::result<cc::unit> metal_staging_ring::create(MTL::Device* device,
         [](ring_state& s)
         {
             s = {};
-            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+            s.open_copies = cc::make_shared<cc::atomic<int>>(0);
         });
     return cc::unit{};
 }
@@ -114,7 +114,7 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
     return {.buffer = dedicated, .offset = 0, .size = size, .owned = dedicated};
 }
 
-cc::shared_ptr<std::atomic<int>> metal_staging_ring::account_pending_copy()
+cc::shared_ptr<cc::atomic<int>> metal_staging_ring::account_pending_copy()
 {
     return _state.lock(
         [](ring_state& s)
@@ -130,7 +130,7 @@ void metal_staging_ring::on_epoch_advance(sg::epoch closed)
         [&](ring_state& s)
         {
             s.checkpoints.push_back({closed, s.next_pos, cc::move(s.open_copies)});
-            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+            s.open_copies = cc::make_shared<cc::atomic<int>>(0);
             s.warned_this_epoch = false;
         });
 }
@@ -183,7 +183,7 @@ void metal_staging_ring::shutdown()
         [](ring_state& s)
         {
             s = {};
-            s.open_copies = cc::make_shared<std::atomic<int>>(0);
+            s.open_copies = cc::make_shared<cc::atomic<int>>(0);
         });
 }
 } // namespace sg::backend::metal

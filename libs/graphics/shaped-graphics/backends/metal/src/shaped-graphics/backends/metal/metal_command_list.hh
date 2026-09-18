@@ -7,6 +7,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_barrier.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
@@ -58,7 +59,7 @@ public:
         MTL::Buffer* staging_retained = nullptr;
 
         /// Non-null when the bytes came from the ring: the epoch's copy count, which holds its span until this runs.
-        cc::shared_ptr<std::atomic<int>> ring_copy;
+        cc::shared_ptr<cc::atomic<int>> ring_copy;
 
         /// Releases what the copy out borrowed, whether it ran or was cancelled.
         void settle_staging();
@@ -239,7 +240,7 @@ private:
     [[nodiscard]] static MTL::Buffer* retain_download_staging(metal_staging_ring::reservation const& staging);
 
     /// The open epoch's copy count for a download staged inside the ring, or null for an overflow reservation.
-    [[nodiscard]] cc::shared_ptr<std::atomic<int>> account_download_staging(metal_staging_ring::reservation const& staging);
+    [[nodiscard]] cc::shared_ptr<cc::atomic<int>> account_download_staging(metal_staging_ring::reservation const& staging);
 
     /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
     /// Called immediately before the op those declares were for.

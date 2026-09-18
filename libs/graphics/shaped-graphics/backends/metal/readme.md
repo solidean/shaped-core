@@ -186,10 +186,9 @@ Each of these is a fact about Metal rather than a gap in the backend.
   The residency set caught it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
   The rule is now at configure time instead: an Apple target refuses `SC_THREADS=OFF` outright, per [docs/platforms.md](../../../../../docs/platforms.md#threading-sc_threads).
   So a build where `cc::mutex` is hollow and a Metal thread is live cannot be produced at all.
-  `callback_mutex` in `metal_common.hh` predates that rule.
-  It is `cc::mutex`'s shape with a lock that is always real, held by the residency set, the transfer system's pending map and the feedback sink's context pointer.
-  Two commit-handler counters are `std::atomic` for the same reason.
-  Both are redundant now rather than wrong, since `cc::mutex` and `cc::atomic` are already real in every build this backend compiles in; collapsing them back is a simplification nobody has taken yet.
+  A `callback_mutex` used to stand in for `cc::mutex` wherever a handler wrote, and two commit-handler counters were `std::atomic` for the same reason.
+  Both are gone: `cc::mutex` and `cc::atomic` are the std types in every build this backend compiles in, so the stand-ins said nothing the originals did not.
+  What survives is `std::mutex` and `std::condition_variable` in `completion_signal`, and that is a different reason — clean-core has no condition variable.
 - **An async texture transfer needs no layout settling, where dx12 needs a whole command list for it.**
   A D3D12 copy queue cannot run layout barriers, so dx12 submits a direct-queue fixup before it stamps the job.
   Metal textures have no layout at all, so the off-frame path is the buffer path with a footprint: same queue, same two waits, `staging_layout_of` in place of a byte count.

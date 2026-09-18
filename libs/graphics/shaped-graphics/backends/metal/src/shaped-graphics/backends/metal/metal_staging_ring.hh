@@ -5,12 +5,11 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
-
-#include <atomic>
 
 /// A shared-storage MTLBuffer that inline transfers stage through, reclaimed an epoch at a time.
 ///
@@ -90,7 +89,7 @@ public:
 
     /// Counts one copy still owing against the open epoch, and hands back the counter to release it with.
     /// The caller's copy-out decrements it, whether it runs or is cancelled — until then the epoch's bytes stay held.
-    [[nodiscard]] cc::shared_ptr<std::atomic<int>> account_pending_copy();
+    [[nodiscard]] cc::shared_ptr<cc::atomic<int>> account_pending_copy();
 
     /// Records where the closing epoch's staging ends, so its bytes are reclaimed when it retires.
     void on_epoch_advance(sg::epoch closed);
@@ -131,7 +130,7 @@ private:
     {
         sg::epoch epoch_id = sg::epoch::invalid;
         u64 end_pos = 0;
-        cc::shared_ptr<std::atomic<int>> outstanding; ///< copy-outs still owing against this epoch's bytes
+        cc::shared_ptr<cc::atomic<int>> outstanding; ///< copy-outs still owing against this epoch's bytes
     };
 
     struct ring_state
@@ -146,7 +145,7 @@ private:
         bool warned_this_epoch = false;
 
         /// The counter reservations made right now are charged to; moved onto a checkpoint at the next advance.
-        cc::shared_ptr<std::atomic<int>> open_copies;
+        cc::shared_ptr<cc::atomic<int>> open_copies;
     };
 
     /// Walks the checkpoint FIFO, freeing every leading one that has retired and owes no copy.

@@ -6,9 +6,7 @@
 
 namespace sg::backend::metal
 {
-class autorelease_scope; // an NSAutoreleasePool held for a block (see metal_common.hh)
-template <class T>
-struct callback_mutex;         // cc::mutex's shape, but real even without SC_THREADS (see metal_common.hh)
+class autorelease_scope;       // an NSAutoreleasePool held for a block (see metal_common.hh)
 struct pending_transfers;      // what a resource still owes each transfer queue (see metal_common.hh)
 struct submission_stamp;       // the last direct-queue submission that named a resource (see metal_common.hh)
 struct texture_staging_layout; // how one texture region's bytes sit in staging (see metal_format.hh)

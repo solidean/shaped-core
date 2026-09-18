@@ -4,6 +4,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_binding_group.hh>
@@ -30,7 +31,6 @@
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/fwd.hh>
 
-#include <atomic>
 #include <condition_variable>
 #include <mutex>
 
@@ -375,9 +375,9 @@ private:
     /// Parks on the GPU timelines and settles what they reach; built on the first arm.
     std::unique_ptr<sg::impl::completion_waiter> _completion_waiter;
 
-    /// **A real mutex and condition even with SC_THREADS off.**
-    /// `MTL::SharedEvent::notifyListener` runs its block on a dispatch queue Apple owns, which that flag does not
-    /// reach — the same hole `callback_mutex` exists for.
+    /// `std::` rather than `cc::`, because this needs a condition variable and clean-core has none.
+    /// `MTL::SharedEvent::notifyListener` runs its block on a dispatch queue Apple owns, and the waiter parks here
+    /// until one of them fires.
     struct completion_signal
     {
         std::mutex mutex;
@@ -405,11 +405,9 @@ private:
 
     mutable completion_signal _completion;
 
-    /// Download copy-outs committed but not yet run, so block_until_transfers_drained knows when it is done.
-    ///
-    /// `std::atomic` rather than `cc::atomic`, for the reason `callback_mutex` exists: a commit handler decrements
-    /// this from a dispatch queue Apple owns, and `cc::atomic` is a plain value once `SC_THREADS` is off.
-    std::atomic<int> _pending_downloads = 0;
+    /// Download copy-outs committed but not yet run, so the transfer drain knows when it is done.
+    /// Decremented from a commit handler, on a dispatch queue Apple owns, which is what makes it atomic rather than an int.
+    cc::atomic<int> _pending_downloads = 0;
 
     /// Transient resources created in the open epoch, expired when it closes.
     ///

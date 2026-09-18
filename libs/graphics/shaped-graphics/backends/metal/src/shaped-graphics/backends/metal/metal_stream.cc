@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
@@ -135,9 +136,9 @@ private:
     sg::impl::transfer_scheduler _upload_scheduler;
     sg::impl::transfer_scheduler _download_scheduler;
 
-    cc::vector<batch> _in_flight;              ///< committed, waiting on the GPU
-    cc::vector<u64> _completed;                ///< batch ids the handler reported, to deliver next cycle
-    callback_mutex<cc::vector<u64>> _reported; ///< what the commit handler hands over, from its own thread
+    cc::vector<batch> _in_flight;         ///< committed, waiting on the GPU
+    cc::vector<u64> _completed;           ///< batch ids the handler reported, to deliver next cycle
+    cc::mutex<cc::vector<u64>> _reported; ///< what the commit handler hands over, from its own thread
     u64 _next_batch = 1;
 
     /// The lowest direct-queue submission any job was held back on in the last cycle, or 0 for none.
