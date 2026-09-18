@@ -63,7 +63,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a transient attachment recreated every pipelin
         ctx.submit_command_list(cc::move(cmd));
 
         ctx.advance_epoch();
-        ctx.block_until_epochs_in_flight(k_epochs_in_flight);
+        co_await ctx.epochs_in_flight_completion(k_epochs_in_flight);
         REQUIRE(!ctx.is_device_lost()).context(cc::format("frame {}", frame));
     }
 

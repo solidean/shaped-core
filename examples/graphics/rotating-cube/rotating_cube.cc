@@ -313,7 +313,8 @@ ASYNC_EXAMPLE("shaped-graphics/rotating-cube")
         co_return;
     }
 
-    auto const color_format = sg::pixel_format::bgra8_unorm; // what write_capture_image reads back, and what a swapchain wants
+    // What write_capture_image_async reads back, and what a swapchain wants.
+    auto const color_format = sg::pixel_format::bgra8_unorm;
     auto const size = capture.active ? capture.size : tg::vec2i(1280, 720);
 
     // Settled and then read in place: the result is move-only, so awaiting it for its value would copy it.

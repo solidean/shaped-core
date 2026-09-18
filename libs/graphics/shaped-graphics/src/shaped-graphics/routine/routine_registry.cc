@@ -3,6 +3,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -35,9 +36,9 @@ routine_tick_result routine_registry::tick(routine_tick_options const& options)
     // Asserts where there is none rather than standing up a private one: a phase nothing can drive would leave every
     // routine pending forever, which is a configuration error and not a state to report.
     //
-    // The exception is a single-threaded context, whose calls must all come from one thread: a phase resuming on a pool worker would call it from another.
+    // The exception is a thread-bound context, whose bound calls must all come from one thread: a phase resuming on a pool worker would call it from another.
     // Its phases start on a scheduler of the registry's own, bound to whichever thread ticks and driven only here.
-    auto const pins_phases = _ctx.threading() == thread_model::single_threaded;
+    auto const pins_phases = _ctx.threading() != thread_model::multi_threaded;
     if (pins_phases && _phase_scheduler == nullptr)
         _phase_scheduler = std::make_unique<cc::singlethreaded_scheduler>();
     auto& scheduler = pins_phases ? *_phase_scheduler : cc::ambient_async_scheduler();
@@ -145,31 +146,117 @@ void routine_registry::close_window()
 
 cc::shared_async<cc::unit> routine_registry::next_window()
 {
-    return _window.lock(
+    auto gate = _window.lock(
         [](window_state& w)
         {
             if (w.gate == nullptr)
                 w.gate = cc::make_async_manual<cc::unit>();
             return w.gate;
         });
+
+    // Whoever waits between ticks has to tick again for this phase to move, so it is told.
+    // Fired outside the window lock, since the waiter it wakes goes straight into a tick that takes it.
+    auto const signal = _progress.lock([](std::shared_ptr<impl::routine_progress_signal>& p) { return p; });
+    if (signal != nullptr)
+        signal->fire();
+    return gate;
 }
 
-routine_tick_result routine_registry::tick_until_idle()
+namespace
 {
+/// Fire `signal` once `phase` settles, however it settles.
+cc::shared_async<cc::unit> fire_when_settled(cc::shared_async<cc::unit> phase,
+                                             std::shared_ptr<impl::routine_progress_signal> signal)
+{
+    co_await cc::async_settled(phase);
+    signal->fire();
+    co_return;
+}
+} // namespace
+
+cc::vector<cc::shared_async<cc::unit>> routine_registry::in_flight_phases()
+{
+    auto out = cc::vector<cc::shared_async<cc::unit>>();
+    for (auto const& routine : snapshot())
+        routine->_init.lock(
+            [&](render_routine_base::init_state& s)
+            {
+                if (s.in_flight != nullptr)
+                    out.push_back(s.in_flight);
+            });
+    return out;
+}
+
+cc::shared_async<routine_tick_result> routine_registry::idle_completion()
+{
+    auto node = idle_completion_steps();
+    if (auto* const home = _ctx.device_home())
+        (void)node->try_home_cold(*home);
+    return node;
+}
+
+cc::shared_async<routine_tick_result> routine_registry::idle_completion_steps()
+{
+    auto const signal = std::make_shared<impl::routine_progress_signal>();
+    _progress.lock([&](std::shared_ptr<impl::routine_progress_signal>& p) { p = signal; });
+
+    // One watcher per running phase, kept until the end: a watcher still finishing when this settles would outlive
+    // the caller that awaited it.
+    struct watched_phase
+    {
+        cc::shared_async<cc::unit> phase;
+        cc::shared_async<cc::unit> watcher;
+    };
+    auto watched = cc::vector<watched_phase>();
+
     auto total = routine_tick_result();
-    // Bounded by the routine count rather than by a timeout: each pass initializes at least one routine or finds
-    // nothing left, and a routine's initialization may register further routines for the next pass.
     while (true)
     {
+        // Armed BEFORE the tick: a phase that settles or asks for a window while the tick runs must not be lost to the
+        // gap between the tick returning and this parking.
+        auto const woken = signal->arm();
+
         auto const pass = tick();
         total.initialized += pass.initialized;
         total.pending = pass.pending;
-        // A tick on a context that cannot block leaves as soon as nothing progresses within it.
-        // An empty pass there says only that this tick found nothing to do yet, so the loop goes on while anything is still pending.
-        if (pass.initialized == 0 && (pass.pending == 0 || _ctx.execution() == execution_model::may_block))
+
+        // A routine's init may register another one, which only the next tick sees.
+        if (pass.initialized > 0)
+            continue;
+        if (pass.pending == 0)
             break;
+
+        // A thread-bound context's phases run on the registry's own scheduler, which only a tick drives.
+        if (_phase_scheduler != nullptr && !_phase_scheduler->empty())
+            continue;
+
+        // Pending with nothing running: a tick collected a phase and left before starting the next one, or a reload
+        // landed mid-tick.
+        // Either way the next tick starts what is pending, so this goes straight back rather than parking on a signal
+        // nothing would fire.
+        auto const phases = in_flight_phases();
+        if (phases.empty())
+            continue;
+
+        for (auto const& phase : phases)
+        {
+            auto known = false;
+            for (auto const& w : watched)
+                known |= w.phase == phase;
+            if (!known)
+                watched.push_back({.phase = phase, .watcher = cc::async_start(fire_when_settled(phase, signal))});
+        }
+        co_await woken;
     }
-    return total;
+
+    _progress.lock([](std::shared_ptr<impl::routine_progress_signal>& p) { p = nullptr; });
+
+    // A settled phase's watcher is running or about to, so it finishes first; one whose phase never settled (a
+    // reload abandoned it) is simply dropped.
+    for (auto const& w : watched)
+        if (w.phase->is_ready())
+            co_await cc::async_settled(w.watcher);
+    co_return total;
 }
 
 void routine_registry::add_dependency(render_routine_base const* from, std::shared_ptr<render_routine_base> to)

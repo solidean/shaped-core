@@ -76,7 +76,7 @@ rules:
     files: tests/**
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the waits run on pools the test owns under no_scheduler, and where a check lands from them is the subject
     files:
       - tests/test-threaded-check-test.cc

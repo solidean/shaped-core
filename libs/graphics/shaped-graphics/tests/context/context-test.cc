@@ -79,23 +79,14 @@ ASYNC_INVOCABLE_TEST("sg - completed epoch trails current across advances", (sg:
     }
 }
 
-INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - epoch waits and reclaim are safe to call", (sg::context_handle ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    // With nothing in flight these are no-ops, but must not fault or move the epoch backwards.
-    // A context that cannot block refuses both blocking spellings instead, before touching any state.
+    // With nothing in flight these settle at once, but must not fault or move the epoch backwards.
     ctx->process_completed_epochs();
-    if (ctx->execution() == sg::execution_model::may_block)
-    {
-        ctx->block_until_epochs_in_flight(0);
-        ctx->block_until_idle();
-    }
-    else
-    {
-        CHECK_ASSERTS(ctx->block_until_epochs_in_flight(0));
-        CHECK_ASSERTS(ctx->block_until_idle());
-    }
+    co_await ctx->epochs_in_flight_completion(0);
+    co_await ctx->idle_completion();
     CHECK(u64(ctx->completed_epoch()) <= u64(ctx->current_epoch()));
 }
 
@@ -126,10 +117,10 @@ INVOCABLE_TEST("sg - limits report the portable floors", (sg::context_handle con
     CHECK(limits.max_sample_count >= 1);
 }
 
-// The async forms of the two completion questions, and the one blocking spelling that is left.
+// The async forms of the two completion questions.
 //
 // The point of each is that a caller can learn a thing has finished WITHOUT a thread stopping, which is the whole
-// reason the blocking family is going away: a browser cannot stop a thread at all.
+// reason sg has no blocking spelling: a browser cannot stop a thread at all.
 ASYNC_INVOCABLE_TEST("sg - an epoch's completion is readable as an async", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -199,36 +190,6 @@ ASYNC_INVOCABLE_TEST("sg - try_advance_epoch declines instead of waiting", (sg::
     co_await ctx->idle_completion();
 }
 
-// block_until_idle is the only blocking spelling left, and it has to mean more than "the GPU is idle": the readback
-// actor delivers a download's bytes on its own thread, after the copy the GPU already finished.
-INVOCABLE_TEST("sg - block_until_idle drains the actors, not just the GPU", (sg::context_handle const& ctx))
-{
-    REQUIRE(ctx != nullptr);
-    if (ctx->execution() != sg::execution_model::may_block)
-        SKIP("this context cannot block; the idle_completion twin below covers the same guarantee");
-
-    auto const src = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
-
-    auto cmd = ctx->create_command_list();
-    u32 const values[] = {1, 2, 3, 4};
-    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
-    auto const future = cmd->download.data_from_buffer(src);
-    (void)ctx->submit_command_list(cc::move(cmd));
-
-    ctx->advance_epoch();
-    ctx->block_until_idle();
-    ctx->block_until_idle();
-
-    // Delivered, without any blocking read on the future — which is the guarantee the download API used to be the only
-    // source of.
-    REQUIRE(future.is_ready());
-    auto const data = future.try_get_data();
-    REQUIRE(data.has_value());
-    REQUIRE(data.value().size() == 4);
-    CHECK(data.value()[0] == 1);
-    CHECK(data.value()[3] == 4);
-}
-
 // The completion asyncs settle from the backend's own GPU signals and the actors' own drain reports.
 // Each test below awaits one with nothing else in the body that sweeps, advances or waits — so one that only settled
 // on a sweep would hang here rather than pass.
@@ -278,7 +239,9 @@ ASYNC_INVOCABLE_TEST("sg - idle_completion with nothing outstanding settles", (s
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
 
-// block_until_idle's guarantee, awaited: the readback actor has delivered, and every closed epoch has retired.
+// idle_completion has to mean more than "the GPU is idle": the readback actor delivers a download's bytes on its own
+// thread, after the copy the GPU already finished.
+// So once it settles the actor has delivered, and every closed epoch has retired.
 ASYNC_INVOCABLE_TEST("sg - idle_completion drains the actors, not just the GPU", (sg::context_handle ctx))
 {
     REQUIRE(ctx != nullptr);

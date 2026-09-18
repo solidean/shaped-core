@@ -313,11 +313,12 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_epochs_in_flight(sc->buffer_count()); // throttle CPU ahead of the GPU + retire finished frames
+        // Throttles the CPU ahead of the GPU, and retires finished frames.
+        (void)cc::async_blocking_get(ctx.epochs_in_flight_completion(sc->buffer_count()));
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle(); // drain before the swapchain / window tear down
+    (void)cc::async_blocking_get(ctx.idle_completion()); // drain before the swapchain / window tear down
     if (!s_window_closed)
         DestroyWindow(hwnd);
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly

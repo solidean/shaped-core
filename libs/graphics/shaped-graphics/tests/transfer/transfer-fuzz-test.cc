@@ -1,6 +1,9 @@
+#include "../backends/sg_backends.hh"
+
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/thread/async.hh>
 #include <nexus/fuzz/test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -21,13 +24,10 @@ using namespace cc::primitive_defines;
 // The full search is a thorough-run cost: on vulkan nearly all of it is synchronization validation, which is the point of running it there.
 // A default run narrows the seed count instead of dropping the layer, so every backend still sees random op sequences under its own checks.
 
-INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
+namespace
 {
-    // The fuzz ops are synchronous and read their downloads after a blocking drain, which a context that cannot block refuses.
-    // An async op sequence would need nexus to await an op.
-    if (ctx->execution() != sg::execution_model::may_block)
-        SKIP("the transfer fuzz ops block to read their downloads, and this context cannot block");
-
+void fuzz_transfers(sg::context_handle const& ctx)
+{
     REQUIRE(ctx != nullptr);
 
     auto test = nx::fuzz::test::create();
@@ -115,7 +115,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch();
-                     ctx->block_until_idle();
+                     (void)cc::async_blocking_get(ctx->idle_completion());
                  })
         ->execute_at_least(5);
 
@@ -214,7 +214,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                      auto dl = t.cmd->download.data_from_buffer<u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
-                     ctx->block_until_idle();
+                     (void)cc::async_blocking_get(ctx->idle_completion());
                      auto dl_data = dl.try_get_data().value();
 
                      CHECK(ref_data.size() == dl_data.size());
@@ -247,7 +247,7 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
                          ref[i] = t.data[start + i];
 
                      auto dl = ctx->download.data_from_buffer<u32>(t.buffer, start, cnt);
-                     ctx->block_until_idle();
+                     (void)cc::async_blocking_get(ctx->idle_completion());
                      auto dl_data = dl.try_get_data().value();
 
                      CHECK(isize(cnt) == dl_data.size());
@@ -259,13 +259,31 @@ INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx)
     if (!nx::is_thorough())
         test->cap_seed_count(24);
 
-    SECTION("fuzz")
-    {
-        CHECK(test->execute_fuzz_test());
+    CHECK(test->execute_fuzz_test());
 
-        // The ops start async transfers they do not all await, and a test settles what it started.
-        ctx->block_until_idle();
+    // The ops start async transfers they do not all await, and a test settles what it started.
+    (void)cc::async_blocking_get(ctx->idle_completion());
+}
+} // namespace
+
+// A workaround, not the shape this test wants: one test running alone over every backend's context, instead of an invocable in each backend's sweep.
+// The fuzz ops are synchronous and block on their downloads, and a blocking get participates in the pool while it waits.
+// Beside other tests that ran their bodies on this thread and credited their checks here, so alone there is nothing to take.
+// An async op sequence retires it; nexus's TODO records the attribution half.
+TEST("sg - upload download fuzz test", exclusive())
+{
+    auto fuzzed = 0;
+    for (auto& factory : sg_test::context_factories())
+    {
+        auto ctx = factory.create();
+        if (ctx.has_error())
+            continue; // that backend has no device here
+        fuzz_transfers(ctx.value());
+        ctx.value()->shutdown();
+        ++fuzzed;
     }
+    if (fuzzed == 0)
+        SKIP("no backend here has a context factory with a device, which a wasm build never does");
 }
 
 /*

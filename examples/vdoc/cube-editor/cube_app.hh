@@ -5,6 +5,7 @@
 
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/imgui_context.hh>
@@ -40,7 +41,9 @@ public:
     /// by the routine tick rather than at bring-up, and a failure surfaces as a routine that reports failed.
     [[nodiscard]] static cc::unique_ptr<app> create(cc::string_view title);
 
-    ~app();
+    /// Drains what the last frames left in flight; awaited once, after the loop, before the app goes away.
+    /// The swapchain is released before the context, so skipping it tears down a chain the GPU may still present from.
+    [[nodiscard]] cc::shared_async<cc::unit> finish();
 
     [[nodiscard]] sr::window_system& windows() const { return *_wsys; }
     [[nodiscard]] sr::window& window() const { return *_win; }
@@ -55,7 +58,12 @@ public:
 
     /// Draws the cubes, then imgui over them, and presents.
     /// One scope for both: imgui composites onto the 3D image rather than replacing it.
-    void end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::entity_id selected);
+    ///
+    /// Settles once the frame is inside the pipelining bound, which is the loop's one suspension point.
+    /// `doc` and `cam` are read before that, but must still outlive the returned async: await it where it is called.
+    [[nodiscard]] cc::shared_async<cc::unit> end_frame(vdoc::document const& doc,
+                                                       orbit_camera const& cam,
+                                                       vdoc::entity_id selected);
 
     /// Whether this run is a capture rather than a session someone is sitting in front of.
     ///

@@ -122,7 +122,7 @@ public:
 
     /// Blocks until every SUBMITTED readback has been delivered, cancelled or dropped.
     ///
-    /// This is what makes ctx.block_until_idle() a delivery guarantee and not just a GPU one: the copy the GPU
+    /// This is what makes ctx.idle_completion() a delivery guarantee and not just a GPU one: the copy the GPU
     /// finished still has to be memcpy'd into the caller's destination, and only the actor does that.
     /// Submitted-only on purpose — a download recorded into a list the caller has not submitted yet can never
     /// progress, so counting it would turn this into a hang rather than a wait.

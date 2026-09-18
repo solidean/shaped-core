@@ -183,14 +183,14 @@ ASYNC_INVOCABLE_TEST("sg vulkan - submission token reports completion", (vulkan:
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-INVOCABLE_TEST("sg vulkan - throttle bounds epochs in flight", (vulkan::vulkan_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg vulkan - throttle bounds epochs in flight", (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;
 
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)
         c.advance_epoch();
-    c.block_until_epochs_in_flight(1);
+    co_await c.epochs_in_flight_completion(1);
 
     auto const in_flight = c._epoch_state.lock([](vulkan::vulkan_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);
@@ -331,7 +331,7 @@ ASYNC_TEST("sg vulkan - staging survives more uploads than the ring holds at onc
         cmd.value()->upload.bytes_to_buffer(buffer.value(), payload);
         c.submit_vulkan_command_list(cc::move(cmd.value()));
         c.advance_epoch();
-        c.block_until_epochs_in_flight(1); // bounds what is in flight, so the ring must be reclaimed to keep going
+        co_await c.epochs_in_flight_completion(1); // bounds what is in flight, so the ring must be reclaimed to keep going
     }
 
     c.advance_epoch();

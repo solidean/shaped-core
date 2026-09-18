@@ -150,7 +150,7 @@ template <class F>
         auto const outcome = body(*cmd);
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        (void)cc::async_blocking_get(ctx.idle_completion());
 
         if (outcome == sg::routine_outcome::executed)
             return true;

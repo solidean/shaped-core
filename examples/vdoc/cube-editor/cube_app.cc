@@ -3,6 +3,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <imgui/imgui.h>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
@@ -93,13 +94,10 @@ cc::unique_ptr<app> app::create(cc::string_view title)
     return out;
 }
 
-app::~app()
+cc::shared_async<cc::unit> app::finish()
 {
-    if (_ctx != nullptr)
-    {
-        _ctx->advance_epoch();
-        _ctx->block_until_idle(); // the last frames are still in flight
-    }
+    _ctx->advance_epoch();
+    co_await _ctx->idle_completion(); // the last frames are still in flight
 }
 
 bool app::begin_frame()
@@ -142,10 +140,10 @@ tg::mat4f app::view_projection(orbit_camera const& cam) const
     return perspective(this->vertical_fov(), aspect, 0.1f, 500.0f) * cam.view();
 }
 
-void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::entity_id selected)
+cc::shared_async<cc::unit> app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::entity_id selected)
 {
     if (_viewport[0] == 0 || _viewport[1] == 0)
-        return; // minimized: begin_frame never opened an imgui frame either
+        co_return; // minimized: begin_frame never opened an imgui frame either
 
     _imgui.end_frame();
 
@@ -178,13 +176,13 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
     {
         _ctx->submit_command_list_and_present(*_swapchain, cc::move(cmd));
         _ctx->advance_epoch();
-        _ctx->block_until_epochs_in_flight(_swapchain->buffer_count());
-        return;
+        co_await _ctx->epochs_in_flight_completion(_swapchain->buffer_count());
+        co_return;
     }
 
     _ctx->submit_command_list(cc::move(cmd));
     _ctx->advance_epoch();
-    _ctx->block_until_epochs_in_flight(2);
+    co_await _ctx->epochs_in_flight_completion(2);
     ++_captured_frames;
 
     // Written on the last frame rather than after the loop, because the loop is the caller's and this is the only
@@ -193,10 +191,14 @@ void app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::en
     // No convergence to wait for here: this is a raster pass, so the image is finished the moment it is drawn, and
     // the frame count exists to let imgui settle its layout rather than to let an estimator converge.
     if (_captured_frames < _capture.accumulate_frames)
-        return;
+        co_return;
 
-    auto const written = sr::write_capture_image(*_ctx, _capture_target, _capture.output_path);
-    if (written.has_error())
-        cc::eprintln("capture failed: {}", written.error().to_string());
+    // Settled and then read in place: the result is move-only, so awaiting it for its value would copy it.
+    auto const writing = sr::write_capture_image_async(*_ctx, _capture_target, _capture.output_path);
+    co_await cc::async_settled(writing);
+    auto const* const written = writing->try_value();
+    if (written == nullptr || written->has_error())
+        cc::eprintln("capture failed: {}",
+                     written != nullptr ? written->error().to_string() : cc::string("the readback never landed"));
 }
 } // namespace cube_editor

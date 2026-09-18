@@ -68,6 +68,6 @@ ASYNC_INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epoc
         CHECK(matches);
 
         c.advance_epoch();
-        c.block_until_epochs_in_flight(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
+        co_await c.epochs_in_flight_completion(2); // keep at most 2 epochs in flight → the bump head resets, aliasing storage
     }
 }

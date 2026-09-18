@@ -232,7 +232,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - inline transfer reused across epochs", (dx12::dx
         CHECK(matches);
 
         c.advance_epoch();
-        c.block_until_epochs_in_flight(2);
+        co_await c.epochs_in_flight_completion(2);
     }
 }
 

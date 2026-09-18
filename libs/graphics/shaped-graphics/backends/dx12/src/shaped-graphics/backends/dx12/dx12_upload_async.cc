@@ -293,7 +293,7 @@ private:
     // What a settle does need is a wake once its value lands, which arm_settle_wake provides.
     // Release the drain tokens whose copies the GPU has now run.
     // Same shape and same cycle as the stream settles below, because it is the same question asked for a different
-    // reason: one settles a caller's node, the other lets block_until_idle() return.
+    // reason: one settles a caller's node, the other lets ctx.idle_completion() settle.
     void release_reached_drains()
     {
         if (_pending_drains.empty())
@@ -335,7 +335,7 @@ private:
             return;
 
         // Drains are armed exactly like settles: without this the actor sleeps with tokens outstanding and nothing
-        // ever wakes it to release them, so a caller blocked in block_until_idle() waits forever.
+        // ever wakes it to release them, so a caller awaiting ctx.idle_completion() waits forever.
         for (auto const& p : _pending_drains)
         {
             HRESULT const hr = p.completion.group->fence->SetEventOnCompletion(p.completion.value, _sys._settle_event);

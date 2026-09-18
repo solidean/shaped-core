@@ -94,14 +94,9 @@ namespace sr
 /// An earlier signature took the size separately, and the only guard caught a size larger than the texture — a
 /// smaller one walked the readback at the wrong stride and produced a sheared image that read as a rendering bug.
 ///
-/// Blocking: it waits on the download, which is what a capture wants — the run is over either way.
-/// The texture must carry `copy_src` usage and must be `bgra8_unorm`: the channel swap below is written for it.
-[[nodiscard]] cc::result<cc::unit> write_capture_image(sg::context& ctx,
-                                                       sg::texture_2d const& texture,
-                                                       cc::string_view path);
-
-/// The same, awaiting the download instead of blocking for it — what a context that never blocks must use.
-/// `texture` must outlive the returned async, which reads it before its first suspension and never again.
+/// Awaits the download rather than blocking for it, so it serves a context that never blocks as well.
+/// The texture must carry `copy_src` usage and must be `bgra8_unorm`: the channel swap is written for it.
+/// `texture` must outlive the returned async: it is read once the list is recorded, which may be after a hop to the device's home.
 [[nodiscard]] cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ctx,
                                                                                sg::texture_2d const& texture,
                                                                                cc::string path);

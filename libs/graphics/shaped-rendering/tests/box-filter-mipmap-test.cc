@@ -33,11 +33,11 @@ constexpr auto mip_usage
 /// this test to a choice the code under test makes.
 /// It goes away once a routine's readiness is an async, where this becomes a co_await on it;
 /// see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-void prewarm_every_variant(sg::context& ctx)
+cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx)
 {
     for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)
         sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant(v));
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 }
 } // namespace
 
@@ -86,7 +86,7 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain",
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 5) == 0);
     CHECK(sr::box_filter_mipmap_routine::level_count(tex_2d, 3) == 2);
 
-    prewarm_every_variant(ctx);
+    co_await prewarm_every_variant(ctx);
     auto cmd = ctx.create_command_list();
     CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_1d) == sg::routine_outcome::executed);
     CHECK(sr::box_filter_mipmap_routine::execute(*cmd, tex_2d) == sg::routine_outcome::executed);
@@ -171,7 +171,7 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
     constexpr u8 sentinel = 255;
     auto const face_value = [](int slice) { return u8(20 * (slice + 1)); };
 
-    prewarm_every_variant(ctx);
+    co_await prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     for (auto face = 0; face < 6; ++face)
     {
@@ -253,7 +253,7 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging p
         for (auto c = 0; c < 4; ++c)
             base.push_back(byte(u8(8 * x)));
 
-    prewarm_every_variant(ctx);
+    co_await prewarm_every_variant(ctx);
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), base, {.mip_level = 0});
     CHECK(sr::box_filter_mipmap_routine::execute(*up, tex) == sg::routine_outcome::executed);

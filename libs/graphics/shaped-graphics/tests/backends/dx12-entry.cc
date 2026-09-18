@@ -1,6 +1,7 @@
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>           // sg::create_dx12_context
@@ -89,6 +90,10 @@ ASYNC_TEST("sg dx12 never-block backend")
     else
     {
         co_await nx::async_invoke_tests_in_sequence("dx12-never-block", ctx.value());
+
+        // Nothing here can wait, so what the tests left running is awaited before the context goes.
+        co_await cc::async_settled(ctx.value()->backlog.settled());
+        co_await cc::async_settled(ctx.value()->idle_completion());
 
         auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
         dx.poll_device_removal();

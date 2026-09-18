@@ -68,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - submission token reports completion", (dx12::dx1
     CHECK(!c.is_submission_complete(sg::submission_token::not_submitted));
 }
 
-INVOCABLE_TEST("sg dx12 - throttle bounds epochs in flight", (dx12::dx12_context_handle const& handle))
+ASYNC_INVOCABLE_TEST("sg dx12 - throttle bounds epochs in flight", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
@@ -76,7 +76,7 @@ INVOCABLE_TEST("sg dx12 - throttle bounds epochs in flight", (dx12::dx12_context
     // Allow at most one prior epoch in flight; after several advances the FIFO stays bounded.
     for (int i = 0; i < 5; ++i)
         c.advance_epoch();
-    c.block_until_epochs_in_flight(1);
+    co_await c.epochs_in_flight_completion(1);
 
     auto const in_flight = c._epoch_state.lock([](dx12::dx12_epoch_state& s) { return s.in_flight.size(); });
     CHECK(in_flight <= 1);

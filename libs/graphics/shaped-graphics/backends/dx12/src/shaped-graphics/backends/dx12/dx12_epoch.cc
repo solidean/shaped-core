@@ -225,7 +225,7 @@ void dx12_context::wait_for_epoch(sg::epoch e)
     // A list submitted this epoch may be waiting on the async-upload completion fence, which only the copy actor signals.
     // Where the actor has no thread of its own, the GPU would never reach the epoch signal and the wait below would never return.
     // With threads this is a single false test.
-    // Covers block_until_epochs_in_flight too, which routes through here.
+    // Covers drain_at_shutdown too, which routes through here.
     drain_transfers();
 
     if (_epoch_fence)

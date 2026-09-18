@@ -213,8 +213,8 @@ private:
 };
 } // namespace
 
-INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclusive a move-only guard",
-               (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclusive a move-only guard",
+                     (sg::context_handle const& ctx))
 {
     // A mutable reference creeping back into the unlocked path would silently re-open unguarded writes.
     static_assert(std::is_same_v<decltype(guard_routine::try_acquire(std::declval<sg::command_list&>())),
@@ -230,7 +230,7 @@ INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclus
 
     // Registered by asking, brought up by the tick — the helpers below assert readiness rather than waiting for it.
     (void)guard_routine::try_acquire(*cmd);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     // Both entry points reach the one per-context instance — a write through the guard is what the read-only scope then sees.
     auto const before = guard_routine::count_of(*cmd);
@@ -241,16 +241,16 @@ INVOCABLE_TEST("sg - try_acquire hands out a read-only scope, try_acquire_exclus
     ctx->drop_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg - routine phases run once, then re-run init on a reload",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - routine phases run once, then re-run init on a reload",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
     // Asking registers it; the TICK is what runs the phases.
     (void)phases_routine::try_acquire(*cmd);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     auto const first = phases_routine::try_acquire(*cmd);
     REQUIRE(first.is_ready());
@@ -258,35 +258,35 @@ INVOCABLE_TEST("sg - routine phases run once, then re-run init on a reload",
     CHECK(first->inits == 1);
 
     // A second tick at the same generation changes nothing (same per-context instance).
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(first->once == 1);
     CHECK(first->inits == 1);
 
     // A reload bumps the global generation: init re-runs, init_once does not.
     sg::signal_reload();
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(first->once == 1);
     CHECK(first->inits == 2);
 
     ctx->drop_command_list(cc::move(cmd));
 }
 
-INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache does not resurrect it)",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
     (void)evict_routine::try_acquire(*cmd);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     auto const first = evict_routine::try_acquire(*cmd);
     REQUIRE(first.is_ready());
     CHECK(first->once == 1);
 
     // Drive the first instance's init count to 2, so it is distinguishable from a fresh one.
     sg::signal_reload();
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(first->inits == 2);
 
     evict_routine::evict(*ctx);
@@ -294,7 +294,7 @@ INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire cache do
     // A fresh instance, built from scratch: every phase back at 1.
     // A cached slot that survived the eviction would instead hand back the old object (inits == 2) — or worse, a freed one.
     (void)evict_routine::try_acquire(*cmd);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     auto const second = evict_routine::try_acquire(*cmd);
     REQUIRE(second.is_ready());
     CHECK(second->once == 1);
@@ -360,9 +360,9 @@ ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to 
 // It cannot any more -- only the tick runs them.
 // What is left to race is the registry: many threads asking for a routine that does not exist yet must produce one
 // instance rather than eight, and the phases must still run once over it.
-INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the tick initializes it once",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the tick initializes it once",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
 
@@ -400,15 +400,15 @@ INVOCABLE_TEST("sg - concurrent first acquires register one instance, and the ti
 
     // Eight racing registrations, one instance, and the phases run over it exactly once.
     CHECK(racing_routine::once.load() == 0); // nothing has ticked yet
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(racing_routine::once.load() == 1);
     CHECK(racing_routine::inits.load() == 1);
 }
 
 // Holds sg-reload-generation too: a reload another test signals re-runs this routine's init and resets the count.
-INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a routine's own state",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     // Unguarded, the plain-int increment races and the total lands below the expected count.
     REQUIRE(ctx != nullptr);
@@ -418,7 +418,7 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 
     auto probe = ctx->create_command_list();
     (void)racing_counter_routine::try_acquire(*probe);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     auto const before = racing_counter_routine::count_of(*probe);
     ctx->drop_command_list(cc::move(probe));
 
@@ -459,16 +459,16 @@ INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to a rou
 // Holds sg-reload-generation for the same reason as the concurrent-acquire test.
 // `inits == 1` is only meaningful while no other test signals a process-wide reload.
 // The tag is honoured because the drivers' async invocation takes it around this test's run.
-INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     auto cmd = ctx->create_command_list();
 
     (void)formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm);
     (void)formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     auto const rgba = formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm);
     auto const bgra = formatted_routine::try_acquire(*cmd, sg::pixel_format::bgra8_unorm);
@@ -494,7 +494,7 @@ INVOCABLE_TEST("sg - a parametrized routine has one instance per parameter value
 
     // The evicted one is gone, so asking registers a fresh instance that the next tick builds from scratch.
     CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm).is_pending());
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(formatted_routine::try_acquire(*cmd, sg::pixel_format::rgba8_unorm)->inits == 1);
 
     formatted_routine::evict_all(*ctx);
@@ -552,9 +552,9 @@ INVOCABLE_TEST("sg - prewarm registers a routine and the tick brings it up",
 // A tick whose budget runs out returns with its phases still in flight, and a later tick collects them.
 // Both halves are arranged rather than timed: the injected clock spends the budget within one pass, and the gate keeps
 // the phases in flight until the test opens it.
-INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
 
@@ -562,7 +562,7 @@ INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
     using second_slow = gated_routine<2>;
 
     // Bring everything else up, so the only pending routines are the two below.
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     first_slow::evict(*ctx);
     second_slow::evict(*ctx);
@@ -589,7 +589,7 @@ INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
 
     // The work the bounded tick started is still in flight; opening the gate and ticking again is what collects it.
     gate->push_value(cc::unit{});
-    auto const rest = ctx->routines.tick_until_idle();
+    auto const rest = co_await ctx->routines.idle_completion();
     CHECK(rest.is_idle());
     CHECK(first_slow::try_acquire(*ctx)->ran);
     CHECK(second_slow::try_acquire(*ctx)->ran);
@@ -603,9 +603,9 @@ INVOCABLE_TEST("sg - a tick stops at its budget and leaves the rest pending",
 // try_acquire REPORTS; it never initializes.
 // A routine nothing has ticked reads as pending rather than quietly bringing itself up on the frame path, which is the
 // whole difference between the two entry points.
-INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
 
@@ -618,7 +618,7 @@ INVOCABLE_TEST("sg - try_acquire reports readiness without initializing",
     CHECK(!pending.is_ready());
     CHECK(!pending.is_failed());
 
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     auto const ready = reported::try_acquire(*ctx);
     CHECK(ready.is_ready());
@@ -685,9 +685,9 @@ private:
 
 // A holder is not ready until its whole subtree is, which is what makes redeeming a token inside it infallible.
 // Without the fold, `top` would report ready while the leaf it transitively needs had never run.
-INVOCABLE_TEST("sg - a routine is not ready until its dependencies are",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - a routine is not ready until its dependencies are",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     chained_top::evict(*ctx);
@@ -697,7 +697,7 @@ INVOCABLE_TEST("sg - a routine is not ready until its dependencies are",
     // Registers top; its init has not run, so the edges do not exist yet either.
     CHECK(chained_top::try_acquire(*ctx).is_pending());
 
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     auto const top = chained_top::try_acquire(*ctx);
     CHECK(top.is_ready());
@@ -732,16 +732,16 @@ protected:
 // "Still compiling" and "will never compile" have to be different answers.
 // Collapsed into one, a routine with a broken shader reads as pending forever: every caller keeps skipping it, no
 // frame ever looks wrong enough to investigate, and nothing anywhere says why.
-INVOCABLE_TEST("sg - a routine whose init fails reports failed, not pending",
-               (sg::context_handle const& ctx),
-               exclusive("sg-reload-generation"))
+ASYNC_INVOCABLE_TEST("sg - a routine whose init fails reports failed, not pending",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
 {
     REQUIRE(ctx != nullptr);
     broken_routine::evict(*ctx);
 
     CHECK(broken_routine::try_acquire(*ctx).is_pending()); // registered, not yet attempted
 
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
 
     auto const failed = broken_routine::try_acquire(*ctx);
     CHECK(failed.is_failed());
@@ -751,7 +751,7 @@ INVOCABLE_TEST("sg - a routine whose init fails reports failed, not pending",
     // A reload is a fresh verdict: the phases run again and get another chance to compile.
     // (This one fails again, so it is the re-attempt that is being checked, not the outcome.)
     sg::signal_reload();
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(broken_routine::try_acquire(*ctx).is_failed());
 
     broken_routine::evict(*ctx);

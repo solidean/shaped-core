@@ -1,6 +1,7 @@
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
@@ -57,6 +58,10 @@ ASYNC_TEST("sg vulkan never-block backend")
     else
     {
         co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
+
+        // Nothing here can wait, so what the tests left running is awaited before the context goes.
+        co_await cc::async_settled(ctx.value()->backlog.settled());
+        co_await cc::async_settled(ctx.value()->idle_completion());
         CHECK(!ctx.value()->is_device_lost())
             .context(cc::format("the device was lost while running this binary's GPU tests: {}",
                                 ctx.value()->device_loss_reason()));

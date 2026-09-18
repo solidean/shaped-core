@@ -66,7 +66,8 @@ struct sg::backend::vulkan::vulkan_config
     ///
     /// Test-only in intent.
     /// It changes nothing about how the backend waits internally.
-    /// It makes every sg call that would wait on the caller's thread assert, which is how the suite proves sg and its callers get by without blocking.
+    /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
+    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
     /// Capacity of the staging ring behind cmd.upload, in bytes.
@@ -221,6 +222,7 @@ public:
         case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
+        case sg::feature::readwrite_storage_formats:
             return true;
         }
         return false;

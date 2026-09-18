@@ -378,7 +378,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
     auto const spent = m.record_pending_work(*cmd);
@@ -418,7 +418,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
     auto const drain = [&]() -> cc::shared_async<isize>

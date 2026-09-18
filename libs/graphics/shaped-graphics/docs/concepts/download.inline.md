@@ -27,7 +27,7 @@ One recorded into a list nobody has submitted cannot progress at all, which is w
 **What an epoch fence does not guarantee.**
 `advance_epoch` and the epoch fence say only that the GPU is done: every readback copy has finished and the ring bytes are valid.
 The actor thread may not yet have been scheduled to run the CPU memcpy, so `future.is_ready()` can be transiently **false** right after — a scheduling race, not a bug.
-`future.completion()` is how a caller learns the bytes landed without waiting, and `ctx.block_until_idle()` is how it waits.
+`future.completion()` is how a caller learns the bytes landed, and `ctx.idle_completion()` is how it waits for every download at once.
 That one drains the transfer actors as well as the GPU, counting outstanding jobs rather than watching an inbox.
 
 ## Why reclaim is epoch-granular (the load-bearing decision)

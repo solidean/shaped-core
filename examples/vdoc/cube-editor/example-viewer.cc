@@ -3,6 +3,7 @@
 
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 #if SR_HAS_WINDOW
@@ -21,18 +22,18 @@ constexpr cc::string_view ui_name = "viewer";
 ///
 ///     uv run dev.py example vdoc/cube-viewer
 ///
-EXAMPLE("vdoc/cube-viewer")
+ASYNC_EXAMPLE("vdoc/cube-viewer")
 {
     auto doc = cube_editor::document::open("cube-editor.vdoc");
     if (!doc.has_value())
     {
         cc::println("no SQLite backend was compiled in — there is nowhere to keep the document");
-        return;
+        co_return;
     }
 
     auto app = cube_editor::app::create("vdoc cube viewer — drag to orbit, scroll to zoom, close to end");
     if (app == nullptr)
-        return; // create() already said what was missing
+        co_return; // create() already said what was missing
 
     // The panel layout the last session left behind, restored before the first frame.
     // Under this example's own name: the editor opens the same file, and its layout is not this one's.
@@ -82,12 +83,14 @@ EXAMPLE("vdoc/cube-viewer")
         ImGui::TextWrapped("Run vdoc/cube-editor to change the scene.");
         ImGui::End();
 
-        app->end_frame(doc.value().current(), camera, vdoc::entity_id());
+        co_await app->end_frame(doc.value().current(), camera, vdoc::entity_id());
 
         // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
         if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value() && !app->is_capturing())
             doc.value().store_ui_settings(ui_name, ini.value());
     }
+
+    co_await app->finish(); // the last frames are still in flight
 
     // Written on exit, and flushed by the store's close(). No op, no ref move, no dirty document.
     // Skipped under capture, which is the other half of loading nothing: a capture moved no camera, so writing its

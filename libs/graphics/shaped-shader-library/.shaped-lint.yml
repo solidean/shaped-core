@@ -26,7 +26,7 @@ rules:
     files: tests/**
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the compile helper the synchronous slib tests share, finished before it is read
     files:
       - tests/dxc_compiler-test.cc
