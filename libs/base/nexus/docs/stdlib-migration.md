@@ -75,7 +75,7 @@ The XML exporters return a `cc::string` instead of writing to a `std::ostream`.
 - **`cc::string` out of the assertion handler.** `cc::impl::assertion_info` now exposes
   `cc::string` fields and the handler is a `cc::unique_function`, so the fuzz engine carries
   a failed-`CC_ASSERT` message as `cc::string` through `captured_assertion`
-  ([tests/check.hh](../src/nexus/tests/check.hh)) — no `<string>`/`<functional>` left in the
+  ([tests/check_divert.hh](../src/nexus/tests/check_divert.hh)) — no `<string>`/`<functional>` left in the
   assertion path.
 - **`cc::string` text ops** (`find` / `rfind` / `subview` / `replace_all`) replaced the
   `std::string` round-trips in [schedule.cc](../src/nexus/tests/schedule.cc) — Catch2 filter

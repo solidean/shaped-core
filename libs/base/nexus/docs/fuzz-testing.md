@@ -212,7 +212,7 @@ Sync and async ops mix freely, and a sync op still runs inline.
 While an op is awaited, every check reported for the running test is diverted to that step, from whichever thread reports it.
 That covers the op's own coroutine and work it awaits on a pool worker — and anything else reporting for the test meanwhile.
 That last part matters when an earlier step started work it never awaited: its failure lands on whichever step is running, which is the shared-state rule above in another form.
-A diverted `CC_ASSERT` fails the op's node rather than the process, and a node that fails, by an escaped exception or `cc::async_fail`, is a failing step carrying the message.
+A diverted `CC_ASSERT` in a node being polled fails that node rather than the process, and a node that fails, by an escaped exception or `cc::async_fail`, is a failing step carrying the message.
 
 **The engine takes the value.**
 It moves `T` out of the op's node, so a handle the op kept for itself reads a moved-from value afterwards.

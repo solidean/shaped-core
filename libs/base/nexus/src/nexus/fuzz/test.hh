@@ -53,9 +53,8 @@ struct nx::fuzz::test
     fuzz_operation* add_value(cc::string name, T value)
     {
         static_assert(!impl::async_result_of<T>::is_async && !impl::async_result_of<T>::is_scheduled,
-                      "a seed value is a constant, so it cannot be a cc::shared_async — to keep a handle in a slot, "
-                      "wrap "
-                      "it in a type of your own");
+                      "a seed value is a constant, so it cannot be a cc::shared_async — "
+                      "to keep a handle in a slot, wrap it in a type of your own");
         auto* op = add(fuzz_operation::create(cc::move(name), [value = cc::move(value)]() { return value; }));
         op->execute_at_least(1);
         return op;
