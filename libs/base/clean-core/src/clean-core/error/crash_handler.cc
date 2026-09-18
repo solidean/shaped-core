@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
+#include <clean-core/record/thread_scopes.hh>
 
 #include <csignal>
 #include <cstdio>
@@ -265,6 +266,14 @@ void report_stacks(char const* banner, char const* reason) noexcept
 #endif
 
     report_other_thread_stacks();
+
+    // **A peer of the stacks above, not a fallback for them.**
+    //
+    // They answer different questions: a stack says where the program counter is, and the scope stack says which
+    // logical task a thread is inside.
+    // In a deadlock the second is usually what identifies the bug, and it is the one the machine stacks above cannot
+    // reach at all off Windows -- or, on wasm, ever.
+    cc::rec::report_thread_scopes(reason);
 
     std::fputs("=======================================================\n", stderr);
     std::fflush(stderr);

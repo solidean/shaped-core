@@ -123,6 +123,7 @@ rules:
       - src/clean-core/string/print.cc
       - src/clean-core/common/assert.cc
       - src/clean-core/error/crash_handler.cc
+      - src/clean-core/record/thread_scopes.cc
 
   - kind: allow-include
     value: <cstdlib>

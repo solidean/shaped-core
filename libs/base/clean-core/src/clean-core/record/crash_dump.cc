@@ -5,6 +5,7 @@
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/record/chunk.hh>
+#include <clean-core/record/impl/published_blocks.hh>
 #include <clean-core/record/impl/serialized_format.hh>
 #include <clean-core/record/impl/system_state.hh>
 #include <clean-core/record/impl/thread_state.hh>
@@ -76,44 +77,6 @@ bool write_all(cc::impl::native_file& file, cc::span<byte const> bytes)
     return true;
 }
 
-/// Walks one thread's chunk queue, offering every published block to `f`.
-///
-/// Reads only up to each chunk's committed watermark, which is release-stored after the bytes it covers.
-/// So a live thread can never hand back a torn event, and none of this needs the thread stopped.
-void for_each_published_block(cc::rec::impl::thread_state const& ts, cc::function_ref<bool(cc::rec::chunk_view const&)> f)
-{
-    auto const info = cc::rec::thread_info{.id = ts.tid, .index = ts.index, .name = cc::string_view(ts.name)};
-
-    for (auto const* c = ts.queue_head.load(cc::memory_order_acquire); c != nullptr;
-         c = c->next_in_thread.load(cc::memory_order_acquire))
-    {
-        auto const committed = c->committed.load(cc::memory_order_acquire);
-        if (committed == 0)
-            continue;
-
-        // The seal pair is plain memory, published by the release store on `is_sealed`, so reading it from a live
-        // chunk races the owner writing it.
-        // A live chunk therefore reports zero, which event_view's interpolation already reads as "only the base pair
-        // is known".
-        auto const is_sealed = c->is_sealed.load(cc::memory_order_acquire);
-
-        auto const view = cc::rec::chunk_view{
-            .source = c,
-            .thread = info,
-            .bytes = cc::span<byte const>(c->data, isize(committed)),
-            .chunk_seq = c->seq,
-            .layer = c->layer,
-            .base_cycles = c->base_cycles,
-            .base_wall_secs = c->base_wall_secs,
-            .seal_cycles = is_sealed ? c->seal_cycles : 0,
-            .seal_wall_secs = is_sealed ? c->seal_wall_secs : 0,
-        };
-
-        if (!f(view))
-            return;
-    }
-}
-
 /// The whole dump, allocation-free from here down.
 bool write_dump()
 {
@@ -138,16 +101,16 @@ bool write_dump()
     auto const walked = cc::rec::impl::try_for_each_thread_state(
         [&](cc::rec::impl::thread_state& ts)
         {
-            for_each_published_block(ts,
-                                     [&](cc::rec::chunk_view const& view)
-                                     {
-                                         if (event_bytes + view.bytes.size() > g_dump.max_event_bytes)
-                                             return false;
-                                         if (!builder.add_block(view))
-                                             return false;
-                                         event_bytes += view.bytes.size();
-                                         return true;
-                                     });
+            cc::rec::impl::for_each_published_block(ts,
+                                                    [&](cc::rec::chunk_view const& view)
+                                                    {
+                                                        if (event_bytes + view.bytes.size() > g_dump.max_event_bytes)
+                                                            return false;
+                                                        if (!builder.add_block(view))
+                                                            return false;
+                                                        event_bytes += view.bytes.size();
+                                                        return true;
+                                                    });
         });
     if (!walked)
         return false;

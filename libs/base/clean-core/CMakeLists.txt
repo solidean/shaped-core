@@ -66,6 +66,7 @@ add_library(clean-core
     src/clean-core/record/impl/serialized_format.cc
     src/clean-core/record/serialize.cc
     src/clean-core/record/crash_dump.cc
+    src/clean-core/record/thread_scopes.cc
     src/clean-core/record/trace.cc
     src/clean-core/record/ambient.cc
     src/clean-core/record/async_scope.cc
@@ -256,6 +257,8 @@ target_sources(clean-core
     src/clean-core/record/hot_functions.hh
     src/clean-core/record/splicing_listener.hh
     src/clean-core/record/crash_dump.hh
+    src/clean-core/record/thread_scopes.hh
+    src/clean-core/record/impl/published_blocks.hh
     src/clean-core/record/trace.hh
     src/clean-core/record/impl/ambient_hook.hh
     src/clean-core/record/async_scope.hh
@@ -597,6 +600,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-trace-test.cc
         tests/record/record-async-scope-test.cc
         tests/record/record-sampling-test.cc
+        tests/record/record-thread-scopes-test.cc
     tests/record/record-hot-functions-test.cc
     tests/record/record-retention-test.cc
     tests/record/record-splicing-test.cc
