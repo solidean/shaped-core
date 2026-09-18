@@ -9,8 +9,8 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <nexus/async-test.hh> // nx::impl::invoking_home_if_any
+#include <nexus/fuzz/generator.hh>
 #include <nexus/fuzz/machine.hh>
-#include <nexus/fuzz/runner.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/seed.hh>
 
@@ -38,6 +38,17 @@ void report_finding(int seed,
     cc::eprintln("[fuzz] minimal reproducer ({} operations) - paste as a SECTION next to your fuzz SECTION:\n",
                  int(minimized.operations.size()));
     cc::eprintln(as_sv(code));
+}
+
+// A finished generator's outcome, as both drivers report it.
+test::fuzz_result to_fuzz_result(impl::generator& gen)
+{
+    if (!gen.has_failed())
+        return test::fuzz_result{.is_ok = true, .executed_operations = gen.executed_operations()};
+    return test::fuzz_result{.is_ok = false,
+                             .executed_operations = gen.executed_operations(),
+                             .failing_run = gen.take_run(),
+                             .error_message = gen.take_error()};
 }
 
 // "'a'", "'a' and 'b'", "'a', 'b' and 'c'"
@@ -141,57 +152,10 @@ test::fuzz_result test::execute_fuzzer(int seed)
         return r;
     }
 
-    // total-operation guard: protects against setups whose required-execution counts never settle.
-    constexpr int max_operations = 100000;
-
-    auto rng = cc::random(u64(seed));
-    fuzz_runner runner(*_machine, rng);
-    auto state = _machine->make_initial_state();
-
-    fuzz_run run;
-    run.machine = _machine.get();
-    int executed = 0;
-
-    auto failure = [&](cc::string error) -> fuzz_result
-    {
-        fuzz_result r;
-        r.is_ok = false;
-        r.executed_operations = executed;
-        r.error_message = cc::move(error);
-        r.failing_run = cc::move(run);
-        return r;
-    };
-
-    while (runner.should_continue())
-    {
-        executed_operation exec;
-        if (!runner.create_next_execution(state, exec))
-            break;
-
-        auto res = _machine->execute_operation(state, exec);
-        run.operations.push_back(exec);
-        ++executed;
-        if (!res.is_ok())
-            return failure(cc::move(res.error));
-
-        // invariants triggered by what this operation produced or mutated
-        for (auto const& inv : _machine->create_invariant_executions_for(exec))
-        {
-            auto ir = _machine->execute_operation(state, inv);
-            run.operations.push_back(inv);
-            ++executed;
-            if (!ir.is_ok())
-                return failure(cc::move(ir.error));
-        }
-
-        if (executed >= max_operations)
-            break;
-    }
-
-    fuzz_result ok;
-    ok.is_ok = true;
-    ok.executed_operations = executed;
-    return ok;
+    auto gen = impl::generator(*_machine, seed);
+    for (auto step = gen.next_step(); step.has_value(); step = gen.next_step())
+        gen.report(_machine->execute_operation(gen.state(), step.value()));
+    return to_fuzz_result(gen);
 }
 
 bool test::execute_fuzz_test(cc::string_view test_var)
@@ -255,56 +219,16 @@ cc::shared_async<test::fuzz_result> test::fuzzer_async(int seed, cc::async_sched
     if (!_setup_ok)
         co_return fuzz_result{.is_ok = false, .error_message = _setup_error};
 
-    constexpr int max_operations = 100000; // as in execute_fuzzer
-
-    auto rng = cc::random(u64(seed));
-    fuzz_runner runner(*_machine, rng);
-    auto state = _machine->make_initial_state();
-
-    fuzz_run run;
-    run.machine = _machine.get();
-    int executed = 0;
-
-    while (runner.should_continue())
+    auto gen = impl::generator(*_machine, seed);
+    for (auto step = gen.next_step(); step.has_value(); step = gen.next_step())
     {
-        executed_operation exec;
-        if (!runner.create_next_execution(state, exec))
-            break;
-
-        auto res = fuzz_machine::execute_result{};
-        if (_machine->op(exec.operation).is_async)
-            res = co_await cc::async_take(impl::place(_machine->execute_operation_async(state, exec, home), home));
+        if (_machine->op(step.value().operation).is_async)
+            gen.report(co_await cc::async_take(
+                impl::place(_machine->execute_operation_async(gen.state(), step.value(), home), home)));
         else
-            res = _machine->execute_operation(state, exec);
-        run.operations.push_back(exec);
-        ++executed;
-        if (!res.is_ok())
-            co_return fuzz_result{.is_ok = false,
-                                  .executed_operations = executed,
-                                  .failing_run = cc::move(run),
-                                  .error_message = cc::move(res.error)};
-
-        for (auto const& inv : _machine->create_invariant_executions_for(exec))
-        {
-            auto ir = fuzz_machine::execute_result{};
-            if (_machine->op(inv.operation).is_async)
-                ir = co_await cc::async_take(impl::place(_machine->execute_operation_async(state, inv, home), home));
-            else
-                ir = _machine->execute_operation(state, inv);
-            run.operations.push_back(inv);
-            ++executed;
-            if (!ir.is_ok())
-                co_return fuzz_result{.is_ok = false,
-                                      .executed_operations = executed,
-                                      .failing_run = cc::move(run),
-                                      .error_message = cc::move(ir.error)};
-        }
-
-        if (executed >= max_operations)
-            break;
+            gen.report(_machine->execute_operation(gen.state(), step.value()));
     }
-
-    co_return fuzz_result{.is_ok = true, .executed_operations = executed};
+    co_return to_fuzz_result(gen);
 }
 
 // execute_fuzz_test, awaiting each program and each shrinking candidate.

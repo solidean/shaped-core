@@ -47,6 +47,7 @@ add_library(nexus
     src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
+    src/nexus/fuzz/generator.cc
     src/nexus/fuzz/minimizer.cc
     src/nexus/fuzz/runner.cc
     src/nexus/fuzz/run.cc
@@ -128,6 +129,7 @@ target_sources(nexus
     src/nexus/fuzz/operation.hh
     src/nexus/fuzz/executed_operation.hh
     src/nexus/fuzz/machine.hh
+    src/nexus/fuzz/generator.hh
     src/nexus/fuzz/minimizer.hh
     src/nexus/fuzz/runner.hh
     src/nexus/fuzz/run.hh

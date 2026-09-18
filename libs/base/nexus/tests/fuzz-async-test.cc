@@ -272,6 +272,42 @@ ASYNC_TEST("fuzz async - set_inherit_home does nothing for a caller in no home")
     CHECK(co_await t->execute_fuzz_test_async());
 }
 
+// Both drivers step through one generator and one minimizer, so on an all-sync machine they must record and shrink identical programs.
+ASYNC_TEST("fuzz async - the awaited drivers generate and shrink exactly as the synchronous ones")
+{
+    auto t = nx::fuzz::test::create();
+    t->add_op("gen", [](cc::random& r) { return r.uniform(0, 3); });
+    t->add_op("add", [](int a, int b) { return a + b; });
+    t->add_invariant("below-9", [](int i) { return i < 9; });
+
+    auto const dialect = nx::fuzz::nexus_section_dialect();
+    auto found = false;
+    for (auto seed = 1; seed <= 256 && !found; ++seed)
+    {
+        auto const sync_res = t->execute_fuzzer(seed);
+        auto async_res = co_await cc::async_take(t->execute_fuzzer_async(seed));
+        REQUIRE(sync_res.is_ok == async_res.is_ok);
+        CHECK(sync_res.executed_operations == async_res.executed_operations);
+        if (sync_res.is_ok)
+            continue;
+
+        found = true;
+        REQUIRE(sync_res.failing_run.has_value());
+        REQUIRE(async_res.failing_run.has_value());
+        CHECK(sync_res.error_message == async_res.error_message);
+        CHECK(sync_res.failing_run.value().emit_regression("t", dialect)
+              == async_res.failing_run.value().emit_regression("t", dialect));
+
+        auto rng_sync = cc::random(11u);
+        auto const sync_min = sync_res.failing_run.value().minimize(rng_sync);
+        auto rng_async = cc::random(11u);
+        auto const async_min = co_await cc::async_take(async_res.failing_run.value().minimize_async(rng_async, nullptr));
+        CHECK(sync_min.operations.size() < sync_res.failing_run.value().operations.size());
+        CHECK(sync_min.emit_regression("t", dialect) == async_min.emit_regression("t", dialect));
+    }
+    CHECK(found);
+}
+
 // The reproducer: sync steps stay eval_op, async steps are awaited through eval_op_async.
 
 ASYNC_TEST("fuzz async - the reproducer awaits exactly the async steps")
