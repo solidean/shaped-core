@@ -64,6 +64,58 @@ TEST("slib wgsl - a workgroup size may name module-scope consts")
     CHECK(r.value().workgroup_size.value().y == 8);
 }
 
+TEST("slib wgsl - a const may be declared below its use, since WGSL module scope has no order")
+{
+    auto const r = slib::parse_wgsl_declarations(R"(
+        struct lights { colors: array<vec4f, light_count> }
+        @group(slot) @binding(0) var<uniform> l: lights;
+        @compute @workgroup_size(tile, tile) fn main() {}
+        const tile = 8u;
+        const light_count = 4;
+        const slot = 2;
+    )");
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().workgroup_size.has_value());
+    CHECK(r.value().workgroup_size.value().x == 8);
+    CHECK(r.value().workgroup_size.value().y == 8);
+    auto const* l = find(r.value(), "l");
+    REQUIRE(l != nullptr);
+    CHECK(l->group_index == 2u);
+    CHECK(l->block_size == isize(64)); // a fixed-size array, not a runtime-sized one
+}
+
+TEST("slib wgsl - an array count naming no const is refused, never read as runtime-sized")
+{
+    CHECK(error_of(R"(
+        struct lights { colors: array<vec4f, light_count> }
+        @group(0) @binding(0) var<uniform> l: lights;
+        @fragment fn fs() {}
+    )")
+              .contains("'light_count' is not a module-scope const"));
+}
+
+TEST("slib wgsl - integer arguments may be hex literals")
+{
+    auto const r = slib::parse_wgsl_declarations(R"(
+        @group(0x1) @binding(0xAu) var s: sampler;
+        @compute @workgroup_size(0x10) fn main() {}
+    )");
+    REQUIRE(r.has_value());
+    CHECK(find(r.value(), "s")->group_index == 1u);
+    CHECK(find(r.value(), "s")->index == 10u);
+    CHECK(r.value().workgroup_size.value().x == 16);
+}
+
+TEST("slib wgsl - a workgroup size sg would have to evaluate is refused as an expression")
+{
+    CHECK(error_of(R"(
+        const a = 1;
+        const b = 2;
+        @compute @workgroup_size(select(1, 2, a < b)) fn main() {}
+    )")
+              .contains("an expression sg does not evaluate"));
+}
+
 TEST("slib wgsl - an override-sized workgroup is refused by name")
 {
     auto const e = error_of(R"(
@@ -134,6 +186,7 @@ TEST("slib wgsl - sampled textures report dimension and sample type")
     CHECK(find(d, "d")->sample_type == sg::texture_sample_type::depth);
     CHECK(find(d, "e")->texture_dimension == sg::texture_view_dimension::tex_3d);
     CHECK(find(d, "f")->texture_dimension == sg::texture_view_dimension::tex_2d_ms);
+    CHECK(find(d, "f")->sample_type == sg::texture_sample_type::unfilterable_float); // WebGPU never filters one
     CHECK(find(d, "g")->texture_dimension == sg::texture_view_dimension::cube_array);
 }
 
@@ -152,6 +205,22 @@ TEST("slib wgsl - a storage texture reports the format WGSL declares, which HLSL
     CHECK(color->texture_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(find(r.value(), "out_mask")->storage_format == sg::pixel_format::r32_uint);
     CHECK(find(r.value(), "out_mask")->texture_dimension == sg::texture_view_dimension::tex_3d);
+
+    // The access mode is part of what a WebGPU layout entry must match, so `write` must not come back as read-write.
+    CHECK(color->storage_access == sg::storage_access::write);
+    CHECK(find(r.value(), "out_mask")->storage_access == sg::storage_access::read_write);
+}
+
+TEST("slib wgsl - a read-only storage texture reports read access")
+{
+    auto const r = slib::parse_wgsl_declarations(R"(
+        @group(0) @binding(0) var src: texture_storage_2d<r32float, read>;
+        @compute @workgroup_size(8, 8) fn main() {}
+    )");
+    REQUIRE(r.has_value());
+    REQUIRE(find(r.value(), "src") != nullptr);
+    CHECK(find(r.value(), "src")->type == sg::binding_type::readwrite_texture);
+    CHECK(find(r.value(), "src")->storage_access == sg::storage_access::read);
 }
 
 TEST("slib wgsl - a storage texture format sg has no pixel format for is refused by name")

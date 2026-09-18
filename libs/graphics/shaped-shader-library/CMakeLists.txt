@@ -113,6 +113,7 @@ if(SC_BUILD_TESTS)
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc
+        tests/wgsl_compiler-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )

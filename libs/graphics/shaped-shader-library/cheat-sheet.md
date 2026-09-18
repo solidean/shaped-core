@@ -110,7 +110,7 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 
 ```cpp
 #include <shaped-shader-library/compiler/shader_compiler.hh>
-slib::shader_language              // hlsl   (slang/glsl/wgsl planned)
+slib::shader_language              // hlsl | wgsl   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
 slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; }
 slib::shader_compiler              // ONE edge: source_language() -> target_format()
@@ -124,6 +124,18 @@ slib::create_dxc_compiler()        // -> cc::result<std::unique_ptr<shader_compi
 slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere DXC does
                                    //   register BOTH: a shader_asset picks by what the context accepts
                                    //   content-keyed cache inside: an identical recompile is free
+
+#include <shaped-shader-library/compiler/wgsl_compiler.hh>  // every platform, WebAssembly included
+slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
+                                   //   reflection only: a stage or entry point other than the package's is an async error
+
+#include <shaped-shader-library/binding/wgsl_declarations.hh>
+slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }
+                                   //   exactly ONE entry point per module; never looks inside a function body
+                                   //   module-scope order is free: a const may be declared below its use
+                                   //   group 3 is sg's: binding 0 = inline constants, k >= 1 = static sampler k - 1
+                                   //   gotcha: every `sampler` reports filtering, every f32 texture filterable_float
+                                   //   (multisampled excepted); a caller binding unfilterable data changes them
 ```
 
 ## binding groups

@@ -42,5 +42,8 @@ namespace slib
 ///
 /// Refused rather than reported as something close: binding arrays (WebGPU core has none), `texture_external`, an `override`-sized workgroup, and a storage texture format sg has no pixel format for.
 /// A sampled float texture is reported `filterable_float`, since WGSL cannot say otherwise; a caller binding an unfilterable format changes it.
+/// A multisampled one is the exception, reported `unfilterable_float` because WebGPU never filters it.
+/// Every `sampler` is reported `filtering` for the same reason, and a caller pairing one with a depth or unfilterable texture changes it to `non_filtering`.
+/// Module-scope declarations may come in any order, so a const may be declared below the count or attribute that names it.
 [[nodiscard]] cc::result<wgsl_declarations> parse_wgsl_declarations(cc::string_view source);
 } // namespace slib

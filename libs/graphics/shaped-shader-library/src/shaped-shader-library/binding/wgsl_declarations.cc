@@ -4,6 +4,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/from_string.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh> // sg::reserved_binding_group
 
@@ -119,18 +120,13 @@ struct type_layout
     cc::optional<isize> size;
 };
 
-isize round_up(isize value, isize align)
-{
-    return (value + align - 1) / align * align;
-}
-
 /// What a type expression names, once parsed: its layout where it has one, and the pieces a binding needs.
 struct parsed_type
 {
     cc::string name; // the outermost name, e.g. "texture_2d", "array", "vec4", a struct's name
     cc::vector<parsed_type> args;
-    cc::optional<isize> count; // an array's element count, or a template's integer argument
-    cc::string_view access;    // a storage texture's or pointer's access argument
+    cc::vector<token> count; // an array's element count, left unevaluated until every const is known
+    cc::string_view access;  // a storage texture's or pointer's access argument
 };
 
 class parser
@@ -140,7 +136,9 @@ public:
 
     cc::result<slib::wgsl_declarations> parse()
     {
-        auto entries = cc::vector<slib::wgsl_declarations>();
+        // Module-scope declarations may come in any order, so this loop only collects them.
+        // Every integer argument — a count, an address, a workgroup size — is evaluated after it, once every const is known.
+        auto entries = cc::vector<pending_entry>();
         auto bindings = cc::vector<pending_binding>();
 
         while (peek().kind != token_kind::end)
@@ -169,7 +167,7 @@ public:
             }
             if (is(t, "override"))
             {
-                // An override is only a problem where sg would need its value, which read_workgroup_size says.
+                // An override is only a problem where sg would need its value, which integer_of says.
                 _overrides.push_back(cc::string(_tokens[_pos + 1].text));
                 skip_statement();
                 continue;
@@ -198,9 +196,21 @@ public:
         if (entries.size() > 1)
             return cc::error(cc::format("the module declares {} entry points ('{}' and '{}'); sg reads one per module, "
                                         "since a declaration parser cannot tell which entry point uses which binding",
-                                        entries.size(), entries[0].entry_point, entries[1].entry_point));
+                                        entries.size(), entries[0].declared.entry_point, entries[1].declared.entry_point));
 
-        auto result = cc::move(entries[0]);
+        auto result = cc::move(entries[0].declared);
+        if (result.stage == sg::shader_stage::compute)
+        {
+            auto const& args = entries[0].workgroup_size;
+            auto dims = sg::compute_dimensions{};
+            for (auto k = isize(0); k < args.size() && k < 3; ++k)
+            {
+                auto value = integer_of(args[k], entries[0].line);
+                CC_RETURN_IF_ERROR(value);
+                (k == 0 ? dims.x : k == 1 ? dims.y : dims.z) = int(value.value());
+            }
+            result.workgroup_size = dims;
+        }
         for (auto& b : bindings)
         {
             auto binding = sg::binding{};
@@ -222,8 +232,8 @@ private:
     struct pending_binding
     {
         cc::string name;
-        u32 group = 0;
-        u32 index = 0;
+        cc::vector<token> group; // @group and @binding stay unevaluated until every const is known
+        cc::vector<token> index;
         cc::string_view address_space; // "uniform", "storage", or empty for a handle type
         cc::string_view access;        // a storage buffer's access mode
         parsed_type type;
@@ -233,8 +243,16 @@ private:
     struct struct_member
     {
         parsed_type type;
-        cc::optional<isize> explicit_size;
-        cc::optional<isize> explicit_align;
+        cc::vector<token> explicit_size; // empty when absent; unevaluated like every other integer argument
+        cc::vector<token> explicit_align;
+    };
+
+    /// An entry point as declared, its `@workgroup_size` arguments not yet evaluated.
+    struct pending_entry
+    {
+        slib::wgsl_declarations declared;
+        cc::vector<cc::vector<token>> workgroup_size;
+        int line = 1;
     };
 
     cc::vector<token> _tokens;
@@ -324,9 +342,10 @@ private:
                         current = {};
                         continue;
                     }
-                    if (is(t, "(") || is(t, "<"))
+                    // Only parentheses nest here: a '<' in an argument is as likely a comparison as a template.
+                    if (is(t, "("))
                         ++depth;
-                    if (is(t, ")") || is(t, ">"))
+                    if (is(t, ")"))
                         --depth;
                     current.push_back(t);
                 }
@@ -358,21 +377,31 @@ private:
         auto text = t.text;
         if (!text.empty() && (text.back() == 'u' || text.back() == 'i'))
             text = text.subview({.offset = 0, .size = text.size() - 1});
+        auto const not_literal
+            = [&] { return cc::error(cc::format("line {}: '{}' is not an integer literal", t.line, t.text)); };
+        if (text.size() <= 2 || text[0] != '0' || (text[1] != 'x' && text[1] != 'X'))
+        {
+            auto const value = cc::from_string<i64>(text);
+            if (!value.has_value())
+                return not_literal();
+            return value.value();
+        }
+
+        // cc has no hex from_string yet.
         auto value = i64(0);
-        auto const is_hex = text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X');
-        for (auto k = is_hex ? isize(2) : isize(0); k < text.size(); ++k)
+        for (auto k = isize(2); k < text.size(); ++k)
         {
             auto const c = text[k];
             auto digit = 0;
             if (c >= '0' && c <= '9')
                 digit = c - '0';
-            else if (is_hex && c >= 'a' && c <= 'f')
+            else if (c >= 'a' && c <= 'f')
                 digit = c - 'a' + 10;
-            else if (is_hex && c >= 'A' && c <= 'F')
+            else if (c >= 'A' && c <= 'F')
                 digit = c - 'A' + 10;
             else
-                return cc::error(cc::format("line {}: '{}' is not an integer literal", t.line, t.text));
-            value = value * (is_hex ? 16 : 10) + digit;
+                return not_literal();
+            value = value * 16 + digit;
         }
         return value;
     }
@@ -386,16 +415,22 @@ private:
             return type;
 
         next();
-        while (!is(peek(), ">"))
+        auto const is_array = type.name == "array" || type.name == "binding_array";
+        for (auto arg_index = 0; !is(peek(), ">"); ++arg_index)
         {
             auto const& t = peek();
-            if (t.kind == token_kind::number
-                || (t.kind == token_kind::identifier && _constants.contains(cc::string(t.text))))
+            if ((is_array && arg_index == 1) || t.kind == token_kind::number)
             {
-                auto value = integer_of({t}, t.line);
-                CC_RETURN_IF_ERROR(value);
-                type.count = value.value();
-                next();
+                // The count may name a const declared further down, so it stays a token run until parse() has seen them all.
+                auto depth = 0;
+                while (peek().kind != token_kind::end && (depth > 0 || (!is(peek(), ",") && !is(peek(), ">"))))
+                {
+                    if (is(peek(), "("))
+                        ++depth;
+                    else if (is(peek(), ")"))
+                        --depth;
+                    type.count.push_back(next());
+                }
             }
             else if (is(t, "read") || is(t, "write") || is(t, "read_write"))
             {
@@ -476,14 +511,8 @@ private:
 
             auto member = struct_member{.type = cc::move(type.value())};
             for (auto const& a : attrs)
-            {
                 if ((a.name == "size" || a.name == "align") && a.args.size() == 1)
-                {
-                    auto value = integer_of(a.args[0], a.line);
-                    CC_RETURN_IF_ERROR(value);
-                    (a.name == "size" ? member.explicit_size : member.explicit_align) = isize(value.value());
-                }
-            }
+                    (a.name == "size" ? member.explicit_size : member.explicit_align) = a.args[0];
             members.push_back(cc::move(member));
 
             if (is(peek(), ","))
@@ -533,31 +562,21 @@ private:
         }
         skip_statement();
 
-        auto group = cc::optional<i64>();
-        auto index = cc::optional<i64>();
         for (auto const& a : attrs)
-        {
             if ((a.name == "group" || a.name == "binding") && a.args.size() == 1)
-            {
-                auto value = integer_of(a.args[0], a.line);
-                CC_RETURN_IF_ERROR(value);
-                (a.name == "group" ? group : index) = value.value();
-            }
-        }
+                (a.name == "group" ? binding.group : binding.index) = a.args[0];
 
         // A var with no resource address is module-private state, which is nothing sg binds.
-        if (!group.has_value() && !index.has_value())
+        if (binding.group.empty() && binding.index.empty())
             return cc::unit{};
-        if (!group.has_value() || !index.has_value())
+        if (binding.group.empty() || binding.index.empty())
             return cc::error(cc::format("line {}: '{}' needs both @group and @binding", line, binding.name));
 
-        binding.group = u32(group.value());
-        binding.index = u32(index.value());
         bindings.push_back(cc::move(binding));
         return cc::unit{};
     }
 
-    cc::result<cc::unit> read_fn(cc::vector<attribute> const& attrs, cc::vector<slib::wgsl_declarations>& entries)
+    cc::result<cc::unit> read_fn(cc::vector<attribute> const& attrs, cc::vector<pending_entry>& entries)
     {
         next(); // fn
         auto name = expect_identifier();
@@ -595,21 +614,18 @@ private:
         if (!stage.has_value())
             return cc::unit{};
 
-        auto entry = slib::wgsl_declarations{.stage = stage.value(), .entry_point = cc::string(name.value().text)};
+        auto entry = pending_entry{
+            .declared = {.stage = stage.value(), .entry_point = cc::string(name.value().text)},
+            .workgroup_size = {},
+            .line = name.value().line,
+        };
         if (stage.value() == sg::shader_stage::compute)
         {
             if (!workgroup.has_value())
                 return cc::error(cc::format("line {}: compute entry point '{}' has no @workgroup_size",
                                             name.value().line, name.value().text));
-            auto const& args = workgroup.value()->args;
-            auto dims = sg::compute_dimensions{};
-            for (auto k = isize(0); k < args.size() && k < 3; ++k)
-            {
-                auto value = integer_of(args[k], workgroup.value()->line);
-                CC_RETURN_IF_ERROR(value);
-                (k == 0 ? dims.x : k == 1 ? dims.y : dims.z) = int(value.value());
-            }
-            entry.workgroup_size = dims;
+            entry.workgroup_size = workgroup.value()->args;
+            entry.line = workgroup.value()->line;
         }
         entries.push_back(cc::move(entry));
         return cc::unit{};
@@ -673,7 +689,8 @@ private:
             else if (type.args.size() == 1)
                 scalar_size = scalar(type.args[0].name).value_or(4);
             auto const column = vector(rows, scalar_size);
-            return type_layout{.align = column.align, .size = columns * round_up(column.size.value(), column.align)};
+            return type_layout{.align = column.align,
+                               .size = columns * cc::int_round_up_to_multiple(column.size.value(), column.align)};
         }
 
         if (n == "array")
@@ -685,10 +702,12 @@ private:
             auto const& e = element.value();
             if (!e.size.has_value())
                 return cc::error(cc::format("line {}: an array element must have a fixed size", line));
-            auto const stride = round_up(e.size.value(), e.align);
-            if (!type.count.has_value())
+            auto const stride = cc::int_round_up_to_multiple(e.size.value(), e.align);
+            if (type.count.empty())
                 return type_layout{.align = e.align, .size = {}};
-            return type_layout{.align = e.align, .size = stride * type.count.value()};
+            auto count = integer_of(type.count, line);
+            CC_RETURN_IF_ERROR(count);
+            return type_layout{.align = e.align, .size = stride * isize(count.value())};
         }
 
         if (auto const* members = _structs.get_ptr(n))
@@ -701,11 +720,22 @@ private:
                 auto const& m = (*members)[k];
                 auto layout = layout_of(m.type, line);
                 CC_RETURN_IF_ERROR(layout);
-                auto const member_align = m.explicit_align.value_or(layout.value().align);
-                auto const member_size
-                    = m.explicit_size.has_value() ? cc::optional<isize>(m.explicit_size.value()) : layout.value().size;
+                auto member_align = layout.value().align;
+                auto member_size = layout.value().size;
+                if (!m.explicit_align.empty())
+                {
+                    auto value = integer_of(m.explicit_align, line);
+                    CC_RETURN_IF_ERROR(value);
+                    member_align = isize(value.value());
+                }
+                if (!m.explicit_size.empty())
+                {
+                    auto value = integer_of(m.explicit_size, line);
+                    CC_RETURN_IF_ERROR(value);
+                    member_size = isize(value.value());
+                }
                 align = cc::max(align, member_align);
-                offset = round_up(offset, member_align);
+                offset = cc::int_round_up_to_multiple(offset, member_align);
                 if (!member_size.has_value())
                 {
                     if (k + 1 != members->size())
@@ -717,7 +747,7 @@ private:
                 offset += member_size.value();
             }
             if (size.has_value())
-                size = round_up(offset, align);
+                size = cc::int_round_up_to_multiple(offset, align);
             return type_layout{.align = align, .size = size};
         }
 
@@ -795,9 +825,15 @@ private:
     {
         auto const& type = resolved(p.type);
         auto const& n = type.name;
+        auto group_value = integer_of(p.group, p.line);
+        CC_RETURN_IF_ERROR(group_value);
+        auto index_value = integer_of(p.index, p.line);
+        CC_RETURN_IF_ERROR(index_value);
+        auto const group = u32(group_value.value());
+        auto const index = u32(index_value.value());
         b.name = p.name;
-        b.group_index = p.group;
-        b.index = p.index;
+        b.group_index = group;
+        b.index = index;
         b.count = 1;
 
         if (n == "binding_array")
@@ -842,6 +878,13 @@ private:
                 return cc::error(cc::format("line {}: storage texture '{}' uses format '{}', which has no "
                                             "sg::pixel_format",
                                             p.line, p.name, type.args[0].name));
+            // WGSL requires the access mode on a storage texture, so an absent one is a shader naga will refuse anyway.
+            if (type.access == "read")
+                b.storage_access = sg::storage_access::read;
+            else if (type.access == "write")
+                b.storage_access = sg::storage_access::write;
+            else
+                b.storage_access = sg::storage_access::read_write;
         }
         else if (n.starts_with("texture_"))
         {
@@ -855,6 +898,8 @@ private:
                 b.sample_type = sg::texture_sample_type::sint;
             else if (!type.args.empty() && type.args[0].name == "u32")
                 b.sample_type = sg::texture_sample_type::uint;
+            else if (n == "texture_multisampled_2d")
+                b.sample_type = sg::texture_sample_type::unfilterable_float; // WebGPU never filters a multisampled texture
             else
                 b.sample_type = sg::texture_sample_type::filterable_float;
         }
@@ -862,22 +907,22 @@ private:
             return cc::error(cc::format("line {}: '{}' of type '{}' is not a resource sg binds", p.line, p.name, n));
 
         // The reserved group reads differently: see wgsl_declarations::bindings.
-        if (p.group == u32(sg::reserved_binding_group))
+        if (group == u32(sg::reserved_binding_group))
         {
-            if (p.index == 0)
+            if (index == 0)
             {
                 if (b.type != sg::binding_type::uniform_buffer)
                     return cc::error(cc::format("line {}: @group({}) @binding(0) is the inline-constants block, so "
                                                 "'{}' must be a var<uniform>",
-                                                p.line, p.group, p.name));
+                                                p.line, group, p.name));
                 b.group_index = {};
             }
             else if (b.type == sg::binding_type::sampler)
-                b.index = p.index - 1;
+                b.index = index - 1;
             else
                 return cc::error(cc::format("line {}: @group({}) is sg's reserved group, which holds only the "
                                             "inline-constants block at binding 0 and static samplers after it",
-                                            p.line, p.group));
+                                            p.line, group));
         }
         return cc::unit{};
     }
