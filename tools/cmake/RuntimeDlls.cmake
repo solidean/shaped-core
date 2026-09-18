@@ -16,8 +16,8 @@
 
 if(CMAKE_SCRIPT_MODE_FILE)
     # ---- the staging step, run as a POST_BUILD command ----
-    # SC_STAGE_DLLS is '|'-separated: a ';' list would be split into separate arguments on its way here.
-    string(REPLACE "|" ";" _dlls "${SC_STAGE_DLLS}")
+    file(READ "${SC_STAGE_LIST}" _dlls)
+    string(STRIP "${_dlls}" _dlls)
 
     foreach(_src IN LISTS _dlls)
         if(_src STREQUAL "")
@@ -81,12 +81,16 @@ function(sc_stage_runtime_dlls target)
         set(STAGE_TAG "${target}")
     endif()
 
-    # A plain list's ';' would split this one argument in two before the genex ever sees it.
-    string(REPLACE ";" "$<SEMICOLON>" _dlls "${STAGE_DLLS}")
+    # **The list travels through a file, never the command line.**
+    # Ninja runs a POST_BUILD command inside a second `cmd /C "..."`, whose nested quotes flip the outer shell's quoting —
+    # so whatever joins the list reaches cmd bare, and '|' there is a pipe: CI ran the second DLL's path as a command.
+    # No separator survives a line cmd re-parses, so the list is written at generate time and read back by the step.
+    set(_list "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${STAGE_TAG}.$<CONFIG>.runtime-dlls")
+    file(GENERATE OUTPUT "${_list}" CONTENT "${STAGE_DLLS}")
 
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}"
-            "-DSC_STAGE_DLLS=$<JOIN:${_dlls},|>"
+            "-DSC_STAGE_LIST=${_list}"
             "-DSC_STAGE_DEST=$<TARGET_FILE_DIR:${target}>"
             "-DSC_STAGE_TAG=${STAGE_TAG}"
             -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
