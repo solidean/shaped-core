@@ -336,6 +336,13 @@ isize cc::rec::impl::thread_state_count()
     return g_registry.lock([](registry const& r) { return r.count; });
 }
 
+void cc::rec::impl::with_consumer_paused(cc::function_ref<void()> f)
+{
+    // The actor drains under exactly this lock, so holding it IS the consumer being stopped -- no pause flag, no
+    // second state to keep consistent with the first.
+    g_processing.lock([&](processing&) { f(); });
+}
+
 isize cc::rec::impl::with_nth_thread_state(isize n, cc::function_ref<void(thread_state&)> f)
 {
     return g_registry.lock(

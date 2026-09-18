@@ -1,4 +1,5 @@
 #include <clean-core/container/map.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/console_listener.hh>
 #include <clean-core/record/domain.hh>
@@ -277,6 +278,13 @@ bool nx::impl::begin_run_recording()
 bool nx::impl::run_recording_active()
 {
     return g_active;
+}
+
+cc::string nx::impl::run_dump_path()
+{
+    // Computed once, because install_crash_dump copies it and the hang report prints it -- and those have to agree.
+    static auto const path = cc::temp_file_path("nexus-run", ".ccrec");
+    return path;
 }
 
 void nx::impl::begin_run_capture(cc::string_view path)

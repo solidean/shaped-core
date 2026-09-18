@@ -47,6 +47,17 @@ void for_each_thread_state(cc::function_ref<void(thread_state&)> f);
 /// hang exactly where a dump is most wanted — so failing to write is the better answer, and it names the reason.
 [[nodiscard]] bool try_for_each_thread_state(cc::function_ref<void(thread_state&)> f);
 
+/// Runs `f` with the consumer excluded, so no chunk can be recycled underneath a reader.
+///
+/// **Waits**, which is what separates it from the crash path.
+/// The actor holds this lock for a whole drain pass, so a caller may sit here for one — fine for a hang report,
+/// where the process is healthy in every respect except that one thread is not moving, and wrong for a fault
+/// handler, where the thread holding it may be the one that died.
+///
+/// This is what closes the chunk-recycling race the crash dump deliberately leaves open: reading a thread's queue
+/// while the actor recycles the chunk behind it turns a rare crash into a rarer second one.
+void with_consumer_paused(cc::function_ref<void()> f);
+
 /// Runs `f` on one registered thread state, chosen as `n` modulo however many there are, and reports that count.
 ///
 /// The callback runs UNDER the registry lock, which is the whole point: a state is reaped the moment its owner has

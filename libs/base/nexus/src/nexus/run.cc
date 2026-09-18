@@ -6,6 +6,7 @@
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/process_metrics.hh>
+#include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -589,6 +590,14 @@ int nx::run(int argc, char** argv)
         // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
         // what happened BEFORE the interesting sample as much as the sample itself.
         nx::impl::begin_run_capture(config.benchmark_rec_file);
+
+        // A dump the crash handler and the hang watchdog can both write.
+        //
+        // Installed rather than left to the application, because in a test run there IS no application to install
+        // it: a fault or a blown deadline is exactly when someone wants to know what every thread was doing, and
+        // that is the one moment nothing will get a chance to set it up.
+        // The arena is reserved now for the same reason the handler cannot allocate later.
+        cc::rec::install_crash_dump({.path = nx::impl::run_dump_path()});
     }
 
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.

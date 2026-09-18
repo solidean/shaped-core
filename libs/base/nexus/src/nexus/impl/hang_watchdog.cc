@@ -4,6 +4,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/thread_scopes.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/atomic.hh>
@@ -86,6 +87,25 @@ void write_secs(double secs)
 
     // The scope stacks first: they work on every platform and name the logical task rather than the instruction.
     cc::rec::report_thread_scopes(what);
+
+    // Then the recording itself, which is the part a reader opens afterwards rather than reads here.
+    //
+    // **Quiescent, not constrained.** A hang is not a fault: the process is healthy in every respect except that one
+    // thread is not moving, so the dump may stop the consumer first and close the chunk-recycling race the crash
+    // path has to live with.
+    // The path is printed rather than assumed, since a report nobody can find the file for is a report without it.
+    if (cc::rec::is_crash_dump_installed())
+    {
+        auto const wrote = cc::rec::write_dump_now(cc::rec::dump_mode::quiescent);
+        auto const path = cc::rec::crash_dump_path();
+
+        std::fputs(wrote ? "\nrecording written to " : "\nrecording could NOT be written to ", stderr);
+        if (path.empty())
+            std::fputs("<the installed sink>", stderr);
+        else
+            std::fwrite(path.data(), 1, size_t(path.size()), stderr);
+        std::fputc('\n', stderr);
+    }
 
     // Then the machine stacks, which reach other threads only on Windows and not at all here.
     cc::report_all_thread_stacks(what);

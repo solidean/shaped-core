@@ -1298,7 +1298,7 @@ loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value(
 #include <clean-core/record/crash_dump.hh>
 cc::install_crash_handler();                                  // the hook list this rides on
 cc::rec::install_crash_dump({.path = "crash.ccrec"});         // reserves its arena NOW; the handler allocates nothing
-cc::rec::write_crash_dump_now();                              // -> bool; the identical path, on demand
+cc::rec::write_dump_now(cc::rec::dump_mode::constrained);                              // -> bool; the identical path, on demand
 // reads the chunks directly, so it sees events NO listener ever drained, and suspends no thread
 ```
 
