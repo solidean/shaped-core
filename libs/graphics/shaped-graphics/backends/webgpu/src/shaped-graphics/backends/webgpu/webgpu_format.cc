@@ -319,10 +319,8 @@ WGPUAddressMode to_wgpu_address(sg::sampler_address_mode m)
     case sg::sampler_address_mode::repeat:
         return WGPUAddressMode_Repeat;
     case sg::sampler_address_mode::mirror_repeat:
-    case sg::sampler_address_mode::mirror_clamp_edge:
         return WGPUAddressMode_MirrorRepeat;
     case sg::sampler_address_mode::clamp_edge:
-    case sg::sampler_address_mode::clamp_border:
         return WGPUAddressMode_ClampToEdge;
     }
     CC_UNREACHABLE("unhandled sampler_address_mode");

@@ -53,7 +53,6 @@ SAMPLER_FIELDS: tuple[tuple[str, str], ...] = (
     ("min_lod", "{}f"),
     ("max_lod", "{}f"),
     ("compare", "sg::compare_op::{}"),
-    ("border_color", "sg::sampler_border_color::{}"),
 )
 
 

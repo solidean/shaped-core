@@ -33,10 +33,6 @@ namespace
         return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
     case sg::sampler_address_mode::clamp_edge:
         return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    case sg::sampler_address_mode::clamp_border:
-        return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    case sg::sampler_address_mode::mirror_clamp_edge:
-        return D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE;
     }
     CC_UNREACHABLE("unhandled sampler address mode");
 }
@@ -70,28 +66,6 @@ namespace
 {
     return UINT(a < 1 ? 1 : (a > 16 ? 16 : a)); // D3D12 caps MaxAnisotropy at 16
 }
-
-[[nodiscard]] D3D12_STATIC_BORDER_COLOR to_static_border(sg::sampler_border_color c)
-{
-    switch (c)
-    {
-    case sg::sampler_border_color::transparent_black:
-        return D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
-    case sg::sampler_border_color::opaque_black:
-        return D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK;
-    case sg::sampler_border_color::opaque_white:
-        return D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-    }
-    CC_UNREACHABLE("unhandled sampler border color");
-}
-
-void fill_border(float (&out)[4], sg::sampler_border_color c)
-{
-    float const a = c == sg::sampler_border_color::transparent_black ? 0.0f : 1.0f;
-    float const rgb = c == sg::sampler_border_color::opaque_white ? 1.0f : 0.0f;
-    out[0] = out[1] = out[2] = rgb;
-    out[3] = a;
-}
 } // namespace
 
 D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler const& s)
@@ -104,7 +78,6 @@ D3D12_SAMPLER_DESC to_d3d12_sampler_desc(sg::sampler const& s)
     desc.MipLODBias = s.mip_lod_bias;
     desc.MaxAnisotropy = clamp_anisotropy(s.max_anisotropy);
     desc.ComparisonFunc = to_comparison(s.compare.value_or(sg::compare_op::never));
-    fill_border(desc.BorderColor, s.border_color);
     desc.MinLOD = s.min_lod;
     desc.MaxLOD = s.max_lod;
     return desc;
@@ -123,7 +96,6 @@ D3D12_STATIC_SAMPLER_DESC to_d3d12_static_sampler_desc(sg::sampler const& s,
     desc.MipLODBias = s.mip_lod_bias;
     desc.MaxAnisotropy = clamp_anisotropy(s.max_anisotropy);
     desc.ComparisonFunc = to_comparison(s.compare.value_or(sg::compare_op::never));
-    desc.BorderColor = to_static_border(s.border_color);
     desc.MinLOD = s.min_lod;
     desc.MaxLOD = s.max_lod;
     desc.ShaderRegister = shader_register;

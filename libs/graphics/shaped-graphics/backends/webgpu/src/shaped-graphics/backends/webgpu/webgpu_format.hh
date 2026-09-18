@@ -56,7 +56,6 @@ namespace sg::backend::webgpu
 [[nodiscard]] WGPUCompareFunction to_wgpu_compare(sg::compare_op op);
 
 /// A sampler descriptor for `s`.
-/// WebGPU has no border addressing and no mirror-once, so those two approximate as clamp-to-edge and mirror-repeat.
 [[nodiscard]] WGPUSamplerDescriptor to_wgpu_sampler(sg::sampler const& s);
 
 /// The sampler binding kind a sampler state needs when a binding does not say.
@@ -65,4 +64,12 @@ namespace sg::backend::webgpu
 
 /// The copy layout of `region` in `format`.
 [[nodiscard]] texel_copy_layout texel_copy_layout_of(sg::pixel_format format, tg::vec3i size);
+
+/// The extent a copy of `size` texels of `format` is recorded with: whole blocks, which a region running to a mip's edge needs.
+/// WebGPU measures a block-compressed copy against the mip's physical size, rounded up to whole blocks, so this is always in range.
+[[nodiscard]] inline WGPUExtent3D copy_extent_of(sg::pixel_format format, tg::vec3i size)
+{
+    auto const block = isize(sg::format_block_extent(format));
+    return WGPUExtent3D{u32(align_up(size[0], block)), u32(align_up(size[1], block)), u32(size[2])};
+}
 } // namespace sg::backend::webgpu

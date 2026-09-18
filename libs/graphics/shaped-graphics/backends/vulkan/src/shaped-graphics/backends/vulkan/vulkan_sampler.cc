@@ -27,26 +27,8 @@ VkSamplerAddressMode to_vk_address_mode(sg::sampler_address_mode m)
         return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
     case sg::sampler_address_mode::clamp_edge:
         return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    case sg::sampler_address_mode::clamp_border:
-        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    case sg::sampler_address_mode::mirror_clamp_edge:
-        return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
     }
     CC_UNREACHABLE("unhandled sampler_address_mode");
-}
-
-VkBorderColor to_vk_border_color(sg::sampler_border_color c)
-{
-    switch (c)
-    {
-    case sg::sampler_border_color::transparent_black:
-        return VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-    case sg::sampler_border_color::opaque_black:
-        return VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
-    case sg::sampler_border_color::opaque_white:
-        return VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    }
-    CC_UNREACHABLE("unhandled sampler_border_color");
 }
 } // namespace
 
@@ -96,7 +78,6 @@ VkSamplerCreateInfo to_vk_sampler_info(sg::sampler const& s)
         .compareOp = s.compare.has_value() ? to_vk_compare_op(s.compare.value()) : VK_COMPARE_OP_NEVER,
         .minLod = s.min_lod,
         .maxLod = s.max_lod,
-        .borderColor = to_vk_border_color(s.border_color),
         .unnormalizedCoordinates = VK_FALSE,
     };
 }
