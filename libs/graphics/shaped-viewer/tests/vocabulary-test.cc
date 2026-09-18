@@ -1,6 +1,7 @@
 #include <clean-core/common/hash.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh> // cc::bit_cast
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -693,7 +694,7 @@ TEST("sv - a light's unit, face and cone are checked against its path")
 
     // A negative color would emit negative light, and a NaN exposure would drop every path that sees the light.
     CHECK_ASSERTS(point.color(tg::vec3f(1, -0.1f, 1)));
-    CHECK_ASSERTS(point.exposure(0.0f / 0.0f));
+    CHECK_ASSERTS(point.exposure(cc::bit_cast<f32>(0x7FC00000u))); // a quiet NaN
     CHECK_ASSERTS(point.exposure(200));
     CHECK(sv::light_problem(point.exposure(-3)).empty());
 
