@@ -34,6 +34,7 @@ The example above fails (3 → 4 → 5 → 6 → 7) and prints a 6-step reproduc
 - **Operation** — any callable, registered with `add_op(name, fn)`; its argument types are deduced, and each argument is drawn from the values produced so far.
   Non-const reference parameters (`T&`) are **mutating**: the engine writes the mutation back.
   A `cc::random&` parameter is special — see *Randomized operations*.
+  An operation returning `cc::shared_async<T>` is awaited, and produces `T` — see *Async operations*.
 - **Invariant** — a univariate, non-mutating check registered with `add_invariant(name, fn)`.
   It runs automatically after **any** operation that produces or mutates a value of its argument type.
   It may return `bool`, which must be true, or return `void` and use `CHECK(...)` internally.
@@ -80,6 +81,7 @@ Inside an operation, all four of these are detected and stop the run:
 
 The thousands of failing executions the engine probes during generation and minimization do **not** pollute the host test.
 They are captured via nexus' `scoped_check_capture` and never recorded against it, so the only result the host test sees is the single `CHECK(test->execute_fuzz_test())`.
+An async operation leaves its thread, so its failures are diverted per test instead — see *Async operations*.
 
 > Like `CHECK_ASSERTS`, `CC_ASSERT`-based detection only works on assert-enabled presets (debug / relwithdebinfo).
 > On a `release-*` preset assertions are compiled out.
@@ -170,14 +172,91 @@ if (!nx::is_thorough())
 `dev.py test --thorough` runs the full search.
 [test-runtime](test-runtime.md) has the rules for what a narrowing may cut.
 
+## Async operations
+
+An op whose callable returns `cc::shared_async<T>` is an **async op**: the engine awaits it, and `T` is what reaches its slot.
+`cc::shared_async<cc::unit>` is an async op with no result.
+Registering one needs `<nexus/fuzz/async.hh>`, the one fuzz header that carries the coroutine machinery.
+
+```cpp
+#include <nexus/async-test.hh>
+#include <nexus/fuzz/async.hh>
+
+ASYNC_TEST("sg - transfers survive random op sequences")
+{
+    auto test = nx::fuzz::test::create();
+    test->add_op("mk_trace", [&] { return make_trace(ctx); })->execute_once(); // sync
+    test->add_op("advance epoch + wait",
+                 [&](trace& t) -> cc::shared_async<cc::unit>                   // async, no result
+                 {
+                     t.ensure_submitted_cmd();
+                     ctx->advance_epoch();
+                     (void)co_await ctx->idle_completion();
+                 });
+
+    SECTION("fuzz") { CHECK(co_await test->execute_fuzz_test_async()); }
+}
+```
+
+**Execution stays serial.**
+Each async op is awaited before the next step starts, and no two ops ever overlap.
+That is what makes a `T&` parameter safe across the op's suspends: nothing else touches the state while it is parked.
+Sync and async ops mix freely, and a sync op still runs inline.
+
+**Two entry points.**
+`execute_fuzz_test_async()` runs any mix of ops and returns a `cc::shared_async<bool>` for an async test to await.
+`execute_fuzz_test()` on a test holding even one async op is a setup error naming the ops, since it cannot await; it is a setup error rather than an assert so it holds on a `release-*` preset too.
+`execute_fuzzer_async(seed)`, `fuzz_run::replay_async` and `fuzz_run::minimize_async` are the awaited forms of the single-program calls.
+
+**An async op's failures are the step's, from any thread.**
+While an op is awaited, every check reported for the running test is diverted to that step, from whichever thread reports it.
+That covers the op's own coroutine and work it awaits on a pool worker — and anything else reporting for the test meanwhile.
+That last part matters when an earlier step started work it never awaited: its failure lands on whichever step is running, which is the shared-state rule above in another form.
+A diverted `CC_ASSERT` fails the op's node rather than the process, and a node that fails, by an escaped exception or `cc::async_fail`, is a failing step carrying the message.
+
+**The engine takes the value.**
+It moves `T` out of the op's node, so a handle the op kept for itself reads a moved-from value afterwards.
+To keep a pending handle in a slot — a "start download" op and a separate "finish download" op — wrap it in a type of your own and return that.
+Returning `cc::shared_async<T>` itself would be awaited, not stored.
+
+**Which kinds may be async.**
+Ops and invariants: an invariant returns `cc::shared_async<bool>`, or `cc::shared_async<cc::unit>` and checks inside.
+Preconditions are evaluated while the next step is chosen and seed values are constants, so an async one does not compile.
+Nor does a `cc::async_scheduled<T>` return, which would start before the engine awaits it; return the cold `cc::shared_async<T>`.
+
+**Where ops run.**
+By default an async op's body goes wherever cc places a coroutine nobody homed, which is the compute pool.
+`test->set_inherit_home(true)` runs the whole awaited fuzz where `execute_fuzz_test_async` is called from, when that caller runs in a home — every sync op and every async op's body.
+That is what a thread-bound device needs, and a caller in no home is unaffected, so one invocable body serves homed and unhomed sweeps alike.
+A coroutine an op awaits for itself still follows cc's usual placement.
+
+**The reproducer awaits exactly the async steps.**
+A sync step stays `test->eval_op(...)`, and an async one becomes `co_await test->eval_op_async(...)`, so the printed section belongs in an async test.
+
+```cpp
+SECTION("regression")
+{
+    auto t0 = test->eval_op("mk_trace");
+    test->eval_op("upload", cc::random::from_state(3737ull), t0);
+    co_await test->eval_op_async("advance epoch + wait", t0);
+    co_await test->eval_op_async("download + check", cc::random::from_state(5313ull), t0); // <-- fails here
+}
+```
+
+Each spelling refuses the other kind of op, failing the test with the call to use instead.
+`eval_op_to_async<T>` and `eval_op_bool_async` mirror their synchronous forms.
+
 ## Setup errors
 
 If some argument type can never be constructed — no value or operation produces it — `execute_fuzz_test` reports a setup error rather than a finding.
 Add a value or a producing operation for that type.
+The synchronous entry points also report one for a test holding an async op.
 
 ## Out of scope (for now)
 
 Corpus persistence, parallel fuzzing, coverage-guided generation, and multi-operation removal during minimization are not implemented.
+Nor is running async ops concurrently: the awaited engine interleaves nothing.
+A bug that needs two ops in flight at once is reachable only through an op that starts work and a later one that finishes it.
 
 ## See also
 

@@ -22,6 +22,8 @@
 //       }
 //   }
 //
+// An op returning cc::shared_async<T> is awaited by execute_fuzz_test_async; registering one needs nexus/fuzz/async.hh.
+//
 // See libs/base/nexus/docs/fuzz-testing.md for the model, determinism, and regression workflow.
 
 #include <clean-core/math/random.hh>
