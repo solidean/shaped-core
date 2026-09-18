@@ -147,8 +147,9 @@ backends/                                       # each subclasses the abstract s
   Both are real across the surface, including ray tracing.
 - **Tier 2 (soon):** metal, webgpu.
   metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
-  It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep in a threaded build.
-  With SC_THREADS=OFF its driver registers disabled — see TODO.md.
+  It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep unconditionally.
+  `SC_THREADS=OFF` is refused on Apple targets, because metal takes command-buffer completion on a thread the flag cannot remove.
+  See [platforms.md](../../../../docs/platforms.md#threading-sc_threads).
 - **Legacy compat (planned):** opengl, webgl.
 
 A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).
