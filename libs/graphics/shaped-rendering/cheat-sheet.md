@@ -224,13 +224,13 @@ req.accumulate_frames              // -> u32, default 60
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
 
-sr::write_capture_image(ctx, tex, path)  // -> cc::result<cc::unit>; blocking readback, bgra8 -> RGB, format from the extension
+sr::write_capture_image_async(ctx, tex, path)  // -> cc::shared_async<cc::result<cc::unit>>; awaited readback, bgra8 -> RGB, format from the extension
 ```
 
 - **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.
 - **A name the program does not offer must be an ERROR**, never a quiet fall back to the default view.
   Nothing discovers these names, so a renamed capture would go on producing an image under the old name's filename and nobody would look.
-- **`write_capture_image` takes its extent from the texture**, which is why it takes no size.
+- **`write_capture_image_async` takes its extent from the texture**, which is why it takes no size.
   A caller that disagreed by less than the texture's height walked the readback at the wrong stride and got a sheared image.
   The texture must be `bgra8_unorm` with `copy_src` usage, and it asserts the format.
 - **It flushes the write stream itself**, because `cc::file_write_stream_adapter`'s destructor does not drain.

@@ -7,6 +7,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -97,6 +98,29 @@ constexpr sr::key_modifiers move_modifiers = sr::key_modifiers::ctrl;
 /// The modifiers a caller holds to zoom into a view rather than move its camera.
 /// Ctrl+wheel is the near-universal binding for exactly this, and it leaves the plain wheel to the camera.
 constexpr sr::key_modifiers zoom_modifiers = sr::key_modifiers::ctrl;
+
+/// Blocks the calling thread until `node` settles, and hands back how it settled.
+///
+/// **A workaround, and marked as one:** the viewer is a synchronous pull loop, so it blocks where an async frame loop would await.
+/// It goes once `sv::viewer` grows an async frame loop, and until then it refuses a context that cannot block.
+/// An error is left to the caller, and a device lost mid-wait surfaces again as the next device call's throw.
+template <class T>
+[[nodiscard]] cc::result<T, cc::async_error> block_on(sg::context& ctx, cc::shared_async<T> const& node)
+{
+    auto const may_block = ctx.execution() == sg::execution_model::may_block;
+    CC_ASSERT(may_block, "sv::viewer blocks its caller's thread every frame, and this context cannot block");
+    return cc::try_async_blocking_get(node);
+}
+
+/// Why a capture write failed, or empty when it succeeded — its result is move-only, so it is read where it settled.
+[[nodiscard]] cc::shared_async<cc::string> capture_failure(cc::shared_async<cc::result<cc::unit>> writing)
+{
+    co_await cc::async_settled(writing);
+    auto const* const written = writing->try_value();
+    if (written == nullptr)
+        co_return cc::string("the readback never landed");
+    co_return written->has_error() ? written->error().to_string() : cc::string();
+}
 } // namespace
 
 struct viewer::impl
@@ -297,7 +321,7 @@ viewer::~viewer()
         end_frame();
 
         _impl->ctx->advance_epoch();
-        _impl->ctx->block_until_idle();
+        (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
     }
     catch (sg::device_lost_exception const&)
     {
@@ -871,13 +895,13 @@ void viewer::finish_frame(frame& f)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            im.ctx->block_until_epochs_in_flight(im.config.buffer_count);
+            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.config.buffer_count));
         }
         else
         {
             im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            im.ctx->block_until_epochs_in_flight(im.swapchain->buffer_count());
+            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.swapchain->buffer_count()));
         }
     }
     catch (sg::device_lost_exception const& e)
@@ -957,9 +981,11 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
                        session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
                        session.request().output_path);
 
-    auto const written = sr::write_capture_image(*im.ctx, im.offscreen, path);
-    if (written.has_error())
-        CC_LOG_ERROR("capture: {}", written.error().to_string());
+    auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+    if (failure.has_error())
+        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+    else if (!failure.value().empty())
+        CC_LOG_ERROR("capture: {}", failure.value());
 
     session.mark_done();
     request_close();

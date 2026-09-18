@@ -36,20 +36,17 @@ TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
     // A trilinear clamping sampler with 4x anisotropy.
     sg::sampler s;
     s.address_u = sg::sampler_address_mode::clamp_edge;
-    s.address_v = sg::sampler_address_mode::clamp_border;
+    s.address_v = sg::sampler_address_mode::repeat;
     s.address_w = sg::sampler_address_mode::mirror_repeat;
     s.max_anisotropy = 4;
-    s.border_color = sg::sampler_border_color::opaque_white;
 
     D3D12_SAMPLER_DESC const d = dx12::to_d3d12_sampler_desc(s);
     CHECK(d.Filter == D3D12_FILTER_ANISOTROPIC); // anisotropy overrides the per-axis filters
     CHECK(d.AddressU == D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    CHECK(d.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER);
+    CHECK(d.AddressV == D3D12_TEXTURE_ADDRESS_MODE_WRAP);
     CHECK(d.AddressW == D3D12_TEXTURE_ADDRESS_MODE_MIRROR);
     CHECK(d.MaxAnisotropy == 4u);
     CHECK(d.ComparisonFunc == D3D12_COMPARISON_FUNC_NEVER); // non-comparison sampler
-    CHECK(d.BorderColor[0] == 1.0f);
-    CHECK(d.BorderColor[3] == 1.0f);
 
     // A point-sampled comparison ("shadow") sampler encodes the comparison reduction.
     sg::sampler shadow;
@@ -63,13 +60,12 @@ TEST("sg dx12 - sampler translates to a D3D12 sampler desc")
                                        D3D12_FILTER_REDUCTION_TYPE_COMPARISON));
     CHECK(ds.ComparisonFunc == D3D12_COMPARISON_FUNC_LESS_EQUAL);
 
-    // The static-sampler form carries the register address + the enum border color.
+    // The static-sampler form carries the register address on top.
     D3D12_STATIC_SAMPLER_DESC const st
         = dx12::to_d3d12_static_sampler_desc(s, /*register*/ 3, /*space*/ 1, D3D12_SHADER_VISIBILITY_ALL);
     CHECK(st.ShaderRegister == 3u);
     CHECK(st.RegisterSpace == 1u);
-    CHECK(st.BorderColor == D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE);
-    CHECK(st.AddressV == D3D12_TEXTURE_ADDRESS_MODE_BORDER);
+    CHECK(st.AddressV == D3D12_TEXTURE_ADDRESS_MODE_WRAP);
 }
 
 INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group build",

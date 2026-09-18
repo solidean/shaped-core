@@ -7,7 +7,7 @@ namespace scl
 
 /// The `blocking-wait` rule.
 ///
-/// A call to a blocking wait — `cc::async_blocking_get`, sg's `block_until_idle` — in a file a `.shaped-lint.yml`
+/// A call to a blocking wait — `cc::async_blocking_get` and its siblings — in a file a `.shaped-lint.yml`
 /// denies it in.
 /// The configs deny them across test sources, where a test awaits instead, and allow them by name in the files whose
 /// subject is the wait itself: the scheduler tests, a test standing up its own pool.

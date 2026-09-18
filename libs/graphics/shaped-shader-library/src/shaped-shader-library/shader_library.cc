@@ -314,15 +314,18 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // unit, and because a decorating compiler could be displaced by any later add_compiler for the same edge.
     // It also keeps the compiler's cache key honest: everything the rewrite depends on is folded into the source
     // it hashes.
-    auto rewritten = rewrite_binding_groups(desc.source, format);
-    if (rewritten.has_error())
+    // The pass reads HLSL's binding attributes, so a WGSL module, which states its own addresses, never goes through it.
+    if (compiler->source_language() == shader_language::hlsl)
     {
-        outcome.shader = make_failed_shader(
-            cc::format("rewriting the bindings of '{}' failed: {}", label, rewritten.error().to_string()));
-        return;
+        auto rewritten = rewrite_binding_groups(desc.source, format);
+        if (rewritten.has_error())
+        {
+            outcome.shader = make_failed_shader(
+                cc::format("rewriting the bindings of '{}' failed: {}", label, rewritten.error().to_string()));
+            return;
+        }
+        desc.source = cc::move(rewritten.value());
     }
-
-    desc.source = cc::move(rewritten.value());
     outcome.shader = compiler->compile(desc);
     _backlog.track(outcome.shader);
 }

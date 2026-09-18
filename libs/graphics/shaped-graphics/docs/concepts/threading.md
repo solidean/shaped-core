@@ -2,24 +2,43 @@
 
 ## What the thread model is
 
-A backend declares its threading guarantees through [`sg::thread_model`](../../src/shaped-graphics/types.hh), reported by [`ctx.threading()`](context.md).
-A caller reads it to know which context operations may run concurrently and which it must serialize itself.
-
-The model is deliberately coarse today and expected to gain nuance — whether *concurrent command-list recording* is allowed, or per-queue guarantees.
-Treat it as a small, growing capability tag, not a fixed contract.
+A backend declares, through [`sg::thread_model`](../../src/shaped-graphics/types.hh) reported by [`ctx.threading()`](context.md), how a context may be used across threads.
+It is a contract on the caller about *this context*, never about whether the application has threads at all — that is `SC_THREADS`, and the two are independent.
 
 ```cpp
 enum class thread_model
 {
-    single_threaded, // every context operation must be externally synchronized to one thread at a time
-    multi_threaded,  // resource / command-list ops are concurrency-safe; epoch management + shutdown are not
+    main_thread,     // the bound calls on the main thread only
+    single_threaded, // the bound calls on the creating thread only; any thread may create a context
+    multi_threaded,  // the bound calls from any thread, with the synchronization listed below
 };
 ```
 
-## What each value promises
+## Free-threaded, whatever the model
 
-**`single_threaded`** — the caller must ensure no two context operations overlap.
-A backend picks this when its underlying API or its own bookkeeping is not safe to touch from several threads at once.
+**Anything returning an async, layouts and samplers may be called from any thread, on every backend.**
+
+- **Asyncs move themselves.** A backend whose device lives on one thread starts its async work there before touching the device — `request_webgpu_context`, the async pipeline builds, the cached tier.
+  A caller never needs to know where that is.
+- **Layouts and samplers describe.** A binding-group layout or a pipeline layout validates and records its description at creation.
+  Its backend objects are made on first use, which is always a bound call.
+- **Dropping anything is free too.** A handle released off its device thread travels back there and is released at the next `advance_epoch`.
+
+Resource creation is bound today, and nothing forces that: the same laziness would make it free-threaded (see [TODO](../TODO.md)).
+Command lists, submission, presentation and epochs are bound by their nature — they are the device's queue.
+
+`ctx.is_on_device_thread()` says whether the caller may make a bound call, and `ctx.device_home()` is where sg's own asyncs move to.
+
+## What each value promises for the bound calls
+
+**`main_thread`** — every bound call is made on the main thread.
+A backend picks this when its device exists only in the main thread's realm: WebGPU in a threaded wasm build.
+`device_home()` is the main thread's scheduler, and a bound call from elsewhere asserts.
+
+**`single_threaded`** — every bound call is made on the thread that created the context.
+Any thread may create one, and several contexts on several threads are fine; what is refused is moving one between threads.
+It is the shape an OpenGL context has.
+`device_home()` is null, since the creating thread has no home unless the application gives it one.
 
 **`multi_threaded`** — split into two tiers:
 
@@ -27,8 +46,8 @@ A backend picks this when its underlying API or its own bookkeeping is not safe 
   - resource and command-list operations — `create_command_list`, `create_raw_buffer`, `submit_command_list`, `drop_command_list`, and a resource's refcount reaching zero;
   - retire — `process_completed_epochs`, internally synchronized because the backends' own ring back-pressure invokes it from within concurrent recording;
   - the completion queries — `epoch_completion`, `submission_completion`, `is_submission_complete` — which read a fence and a guarded list;
-  - awaiting `idle_completion`, which retires as it goes and so shares retire's one exclusion: it must not overlap advancing.
-- **Externally synchronized:** advancing (`advance_epoch`, `try_advance_epoch`), the two `block_until_*` waits, and **`shutdown`**.
+  - awaiting `idle_completion` or `epochs_in_flight_completion`, which retire as they go and so share retire's one exclusion: neither may overlap advancing.
+- **Externally synchronized:** advancing (`advance_epoch`, `try_advance_epoch`) and **`shutdown`**.
   The caller must guarantee none of these overlaps any other context operation.
   Advancing closes an epoch and rewrites the shared in-flight state, including the current-epoch counter every other op reads, so fencing it off is the caller's job.
   That is also why advancing is a deliberate, rationed operation (see [epochs](epochs.md)).
@@ -49,7 +68,8 @@ An unthreaded actor registers itself with clean-core's [pump registry](../../../
 Every blocking wait — `cc::async_blocking_get`, a frame loop, one of the waits below — sweeps that registry rather than draining the actors it happens to know about.
 `cc::thread_pump_all()` is the whole entry point, and it costs one atomic load where every actor has a thread of its own.
 
-The completion asyncs are the one place sg registers a pump itself, standing in for the waiter thread it cannot start.
+The completion asyncs register a pump of sg's own, in the `sg::impl::completion_waiter` dx12 and vulkan own, standing in for the waiter thread it cannot start.
+webgpu's stream system registers the other, driving its queued writes where nothing else would.
 It settles what is due, then sweeps its siblings, and parks on the GPU only when no sibling made progress.
 It parks only on work the GPU already has: the open epoch closes on an advance, and the thread that would advance is the one sweeping.
 A GPU target may wait on a copy only an unthreaded actor signals, which is why the siblings run first.
@@ -97,6 +117,9 @@ A transfer whose future was dropped outlives the test that started it, and insta
   The open-command-list counter is atomic and the command-pool set is mutex-guarded.
   The completion token is assigned together with the `vkQueueSubmit` and timeline-semaphore signal under one lock, so token order equals signal order.
   `advance_epoch` and `shutdown` are externally synchronized.
+- **webgpu** — `main_thread`.
+  The bound calls assert at the device and queue accessors and at the command list's encoder, so a wrong thread is named before WebGPU fails obscurely.
+  Its layouts make their WebGPU objects on first use, and a WebGPU handle dropped off main is released there at the next advance.
 
 ## See also
 

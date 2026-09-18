@@ -39,7 +39,7 @@ def _publish_compile_commands(preset: Preset) -> None:
     shutil.copyfile(src, preset.build_dir.parent / "compile_commands.json")
 
 
-def _ensure_prereqs(root: Path, preset: Preset) -> None:
+def _ensure_prereqs(root: Path, preset: Preset, emsdk_path: str | None = None) -> None:
     """Fetch the external prerequisites this preset needs; prereqs.py carries the policy.
 
     Kept out of `_configure_one` so the concurrent path can run it once per preset up front:
@@ -48,6 +48,7 @@ def _ensure_prereqs(root: Path, preset: Preset) -> None:
     prereqs.ensure_dxc(root, preset.name)
     prereqs.ensure_zydis(root, preset.name)
     prereqs.ensure_sdl3(root, preset.name)
+    prereqs.ensure_node_webgpu(root, preset.name, emsdk_path)
     prereqs.ensure_sqlite(root, preset.name)
 
 
@@ -56,7 +57,7 @@ def _configure_one(
     prereqs_done: bool = False, publish: bool = True, concurrent: bool = False,
 ) -> StepResult:
     if not prereqs_done:
-        _ensure_prereqs(root, preset)
+        _ensure_prereqs(root, preset, emsdk_path)
 
     # Request a File API codemodel so target discovery works after configure.
     targets.write_query(preset.build_dir)
@@ -147,7 +148,7 @@ def ensure_configured_all(
         return []
 
     for preset in stale:
-        _ensure_prereqs(root, preset)
+        _ensure_prereqs(root, preset, emsdk_path)
 
     if len(stale) == 1:
         return [(stale[0], _configure_one(stale[0], root=root, mirror=mirror, verbose=verbose,

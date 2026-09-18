@@ -59,6 +59,8 @@ namespace
 INVOCABLE_TEST("sg - a staging binding must be set, even to nothing", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 8);
     REQUIRE(staging != nullptr);
@@ -75,6 +77,8 @@ INVOCABLE_TEST("sg - a staging binding must be set, even to nothing", (sg::conte
 INVOCABLE_TEST("sg - an empty staging range counts as setting the binding", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 8);
     REQUIRE(staging != nullptr);
@@ -88,6 +92,8 @@ INVOCABLE_TEST("sg - an empty staging range counts as setting the binding", (sg:
 INVOCABLE_TEST("sg - staging binding group caches an unchanged snapshot", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 8);
     REQUIRE(staging != nullptr);
@@ -111,6 +117,8 @@ INVOCABLE_TEST("sg - staging binding group caches an unchanged snapshot", (sg::c
 INVOCABLE_TEST("sg - a staging snapshot survives later mutation", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 4);
     REQUIRE(staging != nullptr);
@@ -130,6 +138,8 @@ INVOCABLE_TEST("sg - a staging snapshot survives later mutation", (sg::context_h
 INVOCABLE_TEST("sg - staging binding group resolves names to slots", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 4);
     REQUIRE(staging != nullptr);
@@ -151,6 +161,8 @@ INVOCABLE_TEST("sg - staging binding group resolves names to slots", (sg::contex
 INVOCABLE_TEST("sg - setting a whole staging array clears what the run does not cover", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 4);
     REQUIRE(staging != nullptr);
@@ -180,6 +192,8 @@ INVOCABLE_TEST("sg - setting a whole staging array clears what the run does not 
 INVOCABLE_TEST("sg - staging binding group demands its scalar bindings", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // A scalar has nothing to be "deliberately empty" about — it is set to a view, and only then snapshots.
     auto staging = make_staging(ctx, 1);
@@ -198,6 +212,8 @@ INVOCABLE_TEST("sg - staging binding group demands its scalar bindings", (sg::co
 INVOCABLE_TEST("sg - a staging scalar binding can be set to an empty view", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // An empty scalar is a VALUE, not an absence: sg::tlas_view{} is the null acceleration structure every ray misses.
     // It goes in through set_binding like any other view, and satisfies the demand above.
@@ -217,6 +233,8 @@ INVOCABLE_TEST("sg - a staging scalar binding can be set to an empty view", (sg:
 INVOCABLE_TEST("sg - a staging setter rejects the wrong binding shape", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto array = make_staging(ctx, 4);
     auto scalar = make_staging(ctx, 1);
@@ -237,6 +255,8 @@ INVOCABLE_TEST("sg - a staging setter rejects the wrong binding shape", (sg::con
 INVOCABLE_TEST("sg - staging element indices are bounds-checked", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 4);
     REQUIRE(staging != nullptr);
@@ -257,6 +277,8 @@ INVOCABLE_TEST("sg - staging element indices are bounds-checked", (sg::context_h
 INVOCABLE_TEST("sg - a staging setter rejects a view of the wrong kind", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto staging = make_staging(ctx, 4);
     REQUIRE(staging != nullptr);

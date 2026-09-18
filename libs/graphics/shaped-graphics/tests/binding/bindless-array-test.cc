@@ -63,6 +63,8 @@ namespace
 ASYNC_INVOCABLE_TEST("sg - an unchanged bindless working set serves the same snapshot", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
@@ -101,6 +103,8 @@ ASYNC_INVOCABLE_TEST("sg - an unchanged bindless working set serves the same sna
 ASYNC_INVOCABLE_TEST("sg - two bindless arrays over one group are independent", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
@@ -122,6 +126,8 @@ ASYNC_INVOCABLE_TEST("sg - two bindless arrays over one group are independent", 
 ASYNC_INVOCABLE_TEST("sg - a full bindless array clears the descriptors it reclaims", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // The seam only these cover: the stale sweep has to reach the group, or the table and the descriptors
     // drift apart and the reused element still points at the resource it was reclaimed from.
@@ -158,6 +164,8 @@ ASYNC_INVOCABLE_TEST("sg - a full bindless array clears the descriptors it recla
 ASYNC_INVOCABLE_TEST("sg - a moved bindless array keeps its binding and its table", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // An owner holding one array per table keeps them in a container, so a relocation must not lose the
     // mapping — which is what would silently remint every index the next epoch.
@@ -187,6 +195,8 @@ ASYNC_INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acq
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // A capacity of 2 with one element pinned leaves exactly one slot for the transient working set, which is
     // what makes the pin observable: the sweep has to route around it.
@@ -225,6 +235,8 @@ ASYNC_INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acq
 ASYNC_INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto group = make_group(ctx, 4);
     REQUIRE(group != nullptr);
@@ -272,6 +284,8 @@ ASYNC_INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (
 ASYNC_INVOCABLE_TEST("sg - a bindless element survives the array that minted it", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // The reason the state is shared: a handle stored in a material buffer may outlive every bindless_array
     // value naming that binding, and releasing it then still has to clear the right descriptor.

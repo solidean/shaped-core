@@ -30,6 +30,7 @@ struct shader_struct_member;
 struct shader_vertex_input;
 struct shader_payload;
 struct shader_bindings;
+struct wgsl_declarations;
 
 // shader packages
 enum class shader_language;

@@ -208,6 +208,7 @@ void dx12_command_list::raster_end_rendering()
 
 void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline)
 {
+    keep_bound(pipeline.weak_from_this().lock());
     CC_ASSERT(_in_render_pass, "bind_pipeline requires an open rendering scope");
     auto const* rp = dynamic_cast<dx12_raster_pipeline const*>(&pipeline);
     CC_ASSERT(rp != nullptr, "raster_pipeline is not a dx12 raster_pipeline");
@@ -225,6 +226,7 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
 
 void dx12_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
 {
+    keep_bound(group.weak_from_this().lock());
     CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before binding groups");
     CC_ASSERT(group_index >= 0 && group_index < int(_bound_raster_groups.size()),
               "binding-group slot out of range for the bound "

@@ -13,21 +13,14 @@ rules:
     files: src/shaped-viewer/fwd.hh
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: a manual window test runs a real frame loop, which is where a wait belongs
-    files:
-      - tests/pathtraced-window-manual-test.cc
-      - tests/viewer-window-manual-test.cc
-
-  - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a frame is re-recorded until a path-traced state object lands, and nothing yet says when it has
     files:
       - tests/viewer_test_env.hh
       - tests/volumetric-furnace-test.cc
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the compile checks the synchronous material tests share, finished before they are read
     files:
       - tests/material-shader-cache-test.cc

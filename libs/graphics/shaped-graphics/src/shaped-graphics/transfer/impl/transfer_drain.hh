@@ -19,7 +19,7 @@
 /// Where delivery is deferred past the job — packed into a window now and memcpy'd when that window drains later —
 /// the token travels with whatever carries the deferral, and a copy per chunk is how that is spelled.
 /// dx12's async download is the worked case: its jobs leave `_active` the moment their last chunk is PACKED, so a
-/// token that died with the job let block_until_idle() return before any bytes had landed.
+/// token that died with the job let an idle drain report done before any bytes had landed.
 ///
 /// Tying it to a lifetime rather than to an explicit "delivered" call is still what makes it correct on every exit
 /// path at once: delivered, cancelled, dropped unsubmitted, or abandoned at shutdown.

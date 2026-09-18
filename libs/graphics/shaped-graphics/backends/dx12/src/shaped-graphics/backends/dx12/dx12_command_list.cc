@@ -216,6 +216,7 @@ void dx12_command_list::transition_texture_to(dx12_texture_handle const& texture
 
 void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
+    keep_bound(pipeline.weak_from_this().lock());
     auto const* dp = dynamic_cast<dx12_compute_pipeline const*>(&pipeline);
     CC_ASSERT(dp != nullptr, "compute_pipeline is not a dx12 compute_pipeline");
 
@@ -234,6 +235,7 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
 
 void dx12_command_list::compute_bind_group(int group_index, sg::binding_group const& group)
 {
+    keep_bound(group.weak_from_this().lock());
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before binding groups");
     CC_ASSERT(group_index >= 0 && group_index < int(_bound_groups.size()),
               "binding-group slot out of range for the bound pipeline "
@@ -325,6 +327,7 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
 
 void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& pipeline)
 {
+    keep_bound(pipeline.weak_from_this().lock());
     auto const* rp = dynamic_cast<dx12_raytracing_pipeline const*>(&pipeline);
     CC_ASSERT(rp != nullptr, "raytracing_pipeline is not a dx12 raytracing_pipeline");
 
@@ -347,6 +350,7 @@ void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& 
 
 void dx12_command_list::raytracing_bind_group(int group_index, sg::binding_group const& group)
 {
+    keep_bound(group.weak_from_this().lock());
     // Identical to compute: DXR binds through the compute root signature.
     compute_bind_group(group_index, group);
 }

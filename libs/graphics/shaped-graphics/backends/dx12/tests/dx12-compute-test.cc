@@ -147,7 +147,8 @@ ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         CHECK(ok);
 
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2); // keep at most 2 epochs in flight → the rings reclaim older slots/windows
+        // Keep at most 2 epochs in flight, so the rings reclaim older slots and windows.
+        co_await ctx->epochs_in_flight_completion(2);
     }
 }
 

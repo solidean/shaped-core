@@ -132,7 +132,7 @@ void ClosestHit(inout Payload payload, in Attributes attribs)
     REQUIRE(tlas != nullptr);
     ctx.submit_command_list(cc::move(build));
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    (void)cc::async_blocking_get(ctx.idle_completion());
 
     auto raygen = compile_rt(comp.value(), sg::shader_stage::raygen, "RayGen", payload_raygen_hlsl);
     auto miss = compile_rt(comp.value(), sg::shader_stage::miss, "Miss", payload_miss_hlsl);
@@ -193,7 +193,7 @@ void ClosestHit(inout Payload payload, in Attributes attribs)
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 6);
     ctx.submit_command_list(cc::move(down));
-    ctx.block_until_idle();
+    (void)cc::async_blocking_get(ctx.idle_completion());
     auto const data = future.try_get_data();
     REQUIRE(data.has_value());
 

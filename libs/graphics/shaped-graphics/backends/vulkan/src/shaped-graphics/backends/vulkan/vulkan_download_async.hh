@@ -50,7 +50,7 @@ struct sg::backend::vulkan::vulkan_async_download_job
 
     /// Counts this job as outstanding for as long as it exists.
     /// Destroyed with the job on every exit path — delivered, cancelled, or abandoned at shutdown — which is what
-    /// makes ctx.block_until_idle() a delivery guarantee rather than a GPU one.
+    /// makes ctx.idle_completion() a delivery guarantee rather than a GPU one.
     sg::impl::transfer_drain::token drain;
     cc::shared_async<cc::unit> completion;
 

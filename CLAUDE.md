@@ -85,14 +85,14 @@ One-liner per library:
   Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
-  dx12 and vulkan exist today (vulkan creates devices and resources but stubs its recording paths); metal/webgpu and opengl/webgl are intended tiers with no backend yet.
+  dx12 and vulkan cover the whole surface; webgpu covers it but ray tracing, on wasm over emdawnwebgpu, and never blocks.
+  metal and opengl/webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
   Namespace `sg`. Depends on clean-core + typed-geometry.
   Early stage — see [docs/graphics.md](docs/graphics.md).
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache.
   Namespace `ssc::dxc`. Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
-* **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
   Namespace `slib`. Depends on shaped-graphics, plus shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.

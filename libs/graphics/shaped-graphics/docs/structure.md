@@ -134,9 +134,11 @@ src/shaped-graphics/
 backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
-  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): device + resource creation; recording is stubbed
+  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): the whole surface, ray tracing included
   metal/                          [planned]     tier 2
-  webgpu/                         [planned]     tier 2
+  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but ray tracing;
+                                                never blocks. See backends/webgpu/readme.md
+    tests/                                      shaped-graphics-webgpu-test over hand-written WGSL
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
 ```
@@ -144,13 +146,12 @@ backends/                                       # each subclasses the abstract s
 ## Backend tiers
 
 - **Tier 1 (now):** dx12, vulkan.
-  dx12 is real across the surface.
-  vulkan brings up the device, its single queue and the epochs, and creates command lists, buffers and textures.
-  Every other `try_create_*`, both async transfer scopes, and all recording are still stubs.
-- **Tier 2 (soon):** metal, webgpu.
+  Both are real across the surface.
+- **Tier 2:** webgpu is real across the surface except ray tracing, on wasm; metal is planned.
+  What WebGPU lacks is emulated or refused, and [backends/webgpu/readme.md](../backends/webgpu/readme.md) has the table.
 - **Legacy compat (planned):** opengl, webgl.
 
-A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).
+A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop, webgpu → Emscripten with `SC_WASM_WEBGPU`).
 dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`), always present on the Windows path.
 vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`, so it builds wherever a Vulkan SDK is installed.
 
@@ -257,6 +258,6 @@ See [concepts/epochs.md](concepts/epochs.md).
 4. textures + views                                        [in progress]  resource, creation, views and host↔device copies done (dx12 real, vulkan minimal); texel buffer views remain
 5. pipelines + shaders                                     [in progress]  compute + raster bind paths dx12-real, DXC compiler in place (vulkan pending)
 6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
-7. tier 2 backends (metal, webgpu)                         [planned]
+7. tier 2 backends (metal, webgpu)                         [in progress]  webgpu real on wasm but ray tracing; metal planned
 8. legacy backends (opengl, webgl)                         [planned]
 ```

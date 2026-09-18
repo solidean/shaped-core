@@ -25,6 +25,7 @@
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/memory/allocation_info.hh>
 
@@ -99,6 +100,14 @@ struct sg::backend::dx12::dx12_config
     /// The adapter the device is created on.
     dx12_adapter adapter = dx12_adapter::hardware;
 
+    /// What `execution()` reports: `may_block` for a real renderer, `never_block` to run this context under a browser's rules on the dev box.
+    ///
+    /// Test-only in intent.
+    /// It changes nothing about how the backend waits internally.
+    /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
+    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
+    sg::execution_model execution = sg::execution_model::may_block;
+
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
@@ -167,6 +176,8 @@ public:
     /// Surfaced through cmd.raytracing.is_supported().
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
+    [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
     /// Headless is a fact about the emulation rather than about the device: DXGI needs a real presentation target, so a
@@ -182,7 +193,9 @@ public:
             return _query_system.supports_timestamps();
         case sg::feature::headless_present:
         case sg::feature::geometry_shader:
+        case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
+        case sg::feature::readwrite_storage_formats:
             return true;
         }
         return false;
@@ -558,8 +571,11 @@ public:
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
     [[nodiscard]] bool are_transfers_drained() const override;
     [[nodiscard]] sg::submission_token last_issued_submission() override;
-    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
-    void wake_completion_signal(u64 generation) override;
+    void arm_completion_signal(u64 submission, u64 epoch) override;
+
+    // The completion_waiter's hooks: park on the GPU timelines or a host wake, and raise that wake.
+    void park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation);
+    void wake_completion_signal(u64 generation);
 
     void shutdown() override;
 
@@ -606,6 +622,11 @@ public:
     HANDLE _completion_wake_event = nullptr;
     u64 _armed_submission = 0;
     u64 _armed_epoch = 0;
+    // Parks a thread (or a pump) on the timelines above for the completion asyncs.
+    // Created on the first arm, stopped in shutdown.
+    std::unique_ptr<sg::impl::completion_waiter> _completion_waiter;
+
+    sg::execution_model _execution = sg::execution_model::may_block;
 
     // Written only by advance (externally synchronized), read concurrently by create/submit/drop.
     sg::epoch _current_epoch = sg::epoch::first;

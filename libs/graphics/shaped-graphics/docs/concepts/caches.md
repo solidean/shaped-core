@@ -103,9 +103,9 @@ They are the producing `cc::async<T>` rather than the read-only `cc::async<T con
 `try_value()` yields the const `*_handle`, and `cc::async_blocking_get` yields the handle by value.
 A build failure surfaces as an **async error** on the node (`has_error()`) carrying the DXC / PSO diagnostics; it is not thrown.
 
-> **Threading caveat.** The async pipeline build calls a *backend* create from a pool worker.
-> That is only safe where the backend permits concurrent pipeline creation — dx12 device creates are free-threaded.
-> On a `single_threaded` [thread_model](threading.md), make the ambient scheduler a `cc::singlethreaded_scheduler`, and the build runs inline on whichever thread blocks on it.
+> **Threading.** The cache is free-threaded, like every async and every layout (see [thread_model](threading.md)).
+> A build runs on the context's `device_home()` where it has one, so a `main_thread` backend builds on main whoever asked.
+> Without a home it runs wherever its node is scheduled, which the `multi_threaded` backends allow — their pipeline creates are free-threaded.
 
 Binding-layout acquisition stays **synchronous**: layout creation is cheap (a root signature), so paying for an async node would be pure overhead.
 

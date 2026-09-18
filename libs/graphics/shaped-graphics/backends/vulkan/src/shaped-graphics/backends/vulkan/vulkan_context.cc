@@ -186,13 +186,15 @@ void vulkan_context::shutdown()
     if (_device != VK_NULL_HANDLE && _epoch_timeline != VK_NULL_HANDLE)
     {
         advance_epoch();
-        block_until_idle();
+        drain_at_shutdown();
     }
 
     if (_device != VK_NULL_HANDLE)
     {
         // Before the device goes idle rather than after: stopping wakes the waiter with an empty submit, and that submit
         // must have finished before the timeline it raises is destroyed below.
+        if (_completion_waiter != nullptr)
+            _completion_waiter->stop();
         stop_completion_signals();
         _queue_guard.lock([&](int&) { vkDeviceWaitIdle(_device); });
 

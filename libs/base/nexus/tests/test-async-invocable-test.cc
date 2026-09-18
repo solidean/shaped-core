@@ -2,6 +2,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/to_string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
@@ -23,6 +24,13 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+// Where one point of a child ran, `where` naming the point.
+struct thread_note
+{
+    cc::string where;
+    u64 thread = 0;
+};
+
 struct probe
 {
     cc::mutex<cc::vector<cc::string>> order;
@@ -30,6 +38,7 @@ struct probe
     cc::atomic<int> most_inside = {0};
     cc::atomic<u64> thread = {0};
     cc::shared_async<int> latch = cc::make_async_manual<int>();
+    cc::mutex<cc::vector<thread_note>> threads;
     nx::invocation_result result;
 };
 
@@ -101,6 +110,46 @@ cc::shared_async<cc::unit> child_records_thread(probe_key const& k)
     k.p->thread.store(u64(cc::current_thread_id()));
     CHECK(true);
     co_return;
+}
+
+void note_thread(probe_key const& k, cc::string_view where)
+{
+    k.p->threads.lock([&](cc::vector<thread_note>& t)
+                      { t.push_back({.where = cc::string(where), .thread = u64(cc::current_thread_id())}); });
+}
+
+/// A cold helper of the kind a child's body awaits, suspending on the compute pool in the middle.
+cc::shared_async<int> helper_notes_thread(probe_key const& k, cc::string_view child)
+{
+    note_thread(k, cc::string(child) + " helper");
+    (void)co_await a_moment_later();
+    note_thread(k, cc::string(child) + " helper, resumed");
+    co_return 1;
+}
+
+/// Notes its thread in its own body and, through the helper, in a cold dependency it awaits.
+cc::shared_async<cc::unit> child_plain_notes_threads(probe_key const& k)
+{
+    note_thread(k, "plain body");
+    CHECK(co_await helper_notes_thread(k, "plain") == 1);
+    note_thread(k, "plain body, resumed");
+}
+
+cc::shared_async<cc::unit> child_on_main_notes_threads(probe_key const& k)
+{
+    note_thread(k, "on-main body");
+    CHECK(co_await helper_notes_thread(k, "on-main") == 1);
+    note_thread(k, "on-main body, resumed");
+}
+
+cc::shared_async<cc::unit> drive_inheriting_in_sequence(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_sequence("g", nx::invocation_options{.inherit_home = true}, k);
+}
+
+cc::shared_async<cc::unit> drive_inheriting_in_parallel(probe_key k)
+{
+    k.p->result = co_await nx::async_invoke_tests_in_parallel("g", nx::invocation_options{.inherit_home = true}, k);
 }
 
 cc::shared_async<cc::unit> drive_in_sequence(probe_key k)
@@ -269,6 +318,47 @@ TEST("async invocables - a child asking for main_thread runs on main under a dri
         auto const exec = run_driver(reg, p, &drive_in_parallel, 4);
         CHECK(exec.count_failed_tests() == 0);
         CHECK(p.thread.load() == u64(cc::thread_id::main));
+    }
+}
+
+TEST("async invocables - inherit_home homes a child's body and nothing else", no_scheduler)
+{
+    REQUIRE(cc::current_thread_id() == cc::thread_id::main);
+    auto const on_main = nx::impl::merge_config(nx::config::main_thread);
+
+    for (auto const driver : {&drive_inheriting_in_sequence, &drive_inheriting_in_parallel})
+    {
+        probe p;
+        nx::test_registry reg;
+        add_async_child(reg, "plain", &child_plain_notes_threads);
+        add_async_child(reg, "asks for main itself", &child_on_main_notes_threads, on_main);
+
+        // Four jobs, so a child that escaped the driver's home would have pool workers to land on.
+        auto const exec = run_driver(reg, p, driver, 4, on_main);
+        CHECK(exec.count_failed_tests() == 0);
+        CHECK(p.result.executed == 2);
+
+        // Pinned on main: both children's bodies, across their suspends.
+        // Not pinned: either helper, which is an unhomed async and goes to compute like any homed body's.
+        auto const notes = p.threads.lock([](cc::vector<thread_note>& t) { return t; });
+        CHECK(notes.size() == 8);
+        auto const is_pinned = [](cc::string_view where)
+        {
+            for (auto const pinned : {"plain body", "plain body, resumed", "on-main body", "on-main body, resumed"})
+                if (where == pinned)
+                    return true;
+            return false;
+        };
+        auto const main = cc::to_string(u64(cc::thread_id::main));
+        auto seen = 0;
+        for (auto const& n : notes)
+        {
+            if (!is_pinned(n.where))
+                continue;
+            ++seen;
+            CHECK(n.where + " on " + cc::to_string(n.thread) == n.where + " on " + main); // names the point that escaped
+        }
+        CHECK(seen == 4);
     }
 }
 

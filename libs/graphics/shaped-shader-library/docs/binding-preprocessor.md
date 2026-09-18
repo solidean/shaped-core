@@ -148,6 +148,7 @@ A sampler binding marked `static` is baked into the pipeline layout's root signa
 The keys are `sg::sampler`'s fields and everything omitted takes its default, which is a trilinear repeating sampler.
 Two shorthands make it writable: `filter=linear` sets all three filters, `address=clamp_edge` sets all three axes.
 The tuple form addresses them individually, in the field order `sg::sampler` declares.
+`clamp_border`, `mirror_clamp_edge` and `border_color` are errors that give the reason: WebGPU has no border or mirror-once addressing, so `sg::sampler` has neither.
 
 The generated struct exposes what the shader declared as a constant, and `ctx.cached.acquire_binding_group_layout<G>(samplers)` takes runtime samplers for one the shader left undeclared.
 **A declared sampler wins**: passing a runtime sampler for one the shader already declared is an error, not an override.

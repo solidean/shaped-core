@@ -33,7 +33,7 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     ///
     /// Handed on to the `_awaiting` entry when the job leaves `_pending`, because an upload is not delivered when it
     /// is staged — it is delivered when the window carrying it completes.
-    /// That is what makes ctx.block_until_idle() true of the upload half as well; see sg::impl::transfer_drain.
+    /// That is what makes ctx.idle_completion() true of the upload half as well; see sg::impl::transfer_drain.
     sg::impl::transfer_drain::token drain;
 
     /// The context of whoever enqueued this, captured on their thread when the job is built.

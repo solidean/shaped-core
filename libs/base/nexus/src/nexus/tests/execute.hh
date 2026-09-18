@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/function_ref.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/source_location.hh>
 #include <clean-core/record/fwd.hh>
 #include <clean-core/string/string.hh>
@@ -216,6 +217,37 @@ namespace nx
 test_schedule_execution execute_tests(test_schedule const& schedule, test_schedule_config const& config);
 
 } // namespace nx
+
+namespace nx::impl
+{
+/// One run of a schedule, driven in steps rather than to completion.
+///
+/// `step` drives every test it can and returns once the run finishes or nothing here can progress, instead of parking the thread.
+/// That is what a host needs whose results arrive only after the current call returns — a browser, or node and deno under Emscripten.
+/// Every test runs one after another on the calling thread, as a `-j1` run does.
+/// Between steps the run's scheduler stays bound to the calling thread, so work completing in between lands where the next step drives it.
+///
+/// `schedule` and `config` must outlive the run.
+class test_run
+{
+public:
+    test_run(test_schedule const& schedule, test_schedule_config const& config);
+    ~test_run();
+
+    test_run(test_run const&) = delete;
+    test_run& operator=(test_run const&) = delete;
+
+    /// Drives the run until it finishes (true) or nothing here can progress (false).
+    [[nodiscard]] bool step();
+
+    /// The run's result, once `step` has returned true.
+    [[nodiscard]] test_schedule_execution take_result();
+
+private:
+    struct state;
+    cc::unique_ptr<state> _state;
+};
+} // namespace nx::impl
 
 namespace nx::impl
 {

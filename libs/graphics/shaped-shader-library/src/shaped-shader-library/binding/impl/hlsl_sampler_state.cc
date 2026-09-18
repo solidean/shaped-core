@@ -23,15 +23,31 @@ constexpr named_value<sg::sampler_address_mode> k_address_modes[] = {
     {"repeat", sg::sampler_address_mode::repeat},
     {"mirror_repeat", sg::sampler_address_mode::mirror_repeat},
     {"clamp_edge", sg::sampler_address_mode::clamp_edge},
-    {"clamp_border", sg::sampler_address_mode::clamp_border},
-    {"mirror_clamp_edge", sg::sampler_address_mode::mirror_clamp_edge},
 };
 
-constexpr named_value<sg::sampler_border_color> k_border_colors[] = {
-    {"transparent_black", sg::sampler_border_color::transparent_black},
-    {"opaque_black", sg::sampler_border_color::opaque_black},
-    {"opaque_white", sg::sampler_border_color::opaque_white},
-};
+// Border and mirror-once addressing, which D3D and Vulkan have and WebGPU does not.
+// Named so a shader asking for one hears why, rather than that the word is unknown.
+// Keep in step with UNPORTABLE_ADDRESS_MODES in cmake/binding_grammar.py, the messages included.
+constexpr cc::string_view k_unportable_address_modes[] = {"clamp_border", "mirror_clamp_edge"};
+
+[[nodiscard]] bool is_unportable_address_mode(cc::string_view key, cc::string_view value)
+{
+    if (!key.starts_with("address"))
+        return false;
+    for (auto const mode : k_unportable_address_modes)
+        if (mode == value)
+            return true;
+    return false;
+}
+
+[[nodiscard]] cc::string not_a_value(cc::string_view where, cc::string_view key, cc::string_view value)
+{
+    if (is_unportable_address_mode(key, value))
+        return cc::format("{}: '{}' is not a value of '{}': sg has no border or mirror-once addressing, because "
+                          "WebGPU has neither",
+                          where, value, key);
+    return cc::format("{}: '{}' is not a value of '{}'", where, value, key);
+}
 
 constexpr named_value<sg::compare_op> k_compare_ops[] = {
     {"never", sg::compare_op::never},
@@ -80,7 +96,7 @@ cc::result<sg::sampler> slib::impl::parse_sampler_state(annotation const& attrib
             {
                 auto const value = value_of(table, values[i]);
                 if (!value.has_value())
-                    return cc::error(cc::format("{}: '{}' is not a value of '{}'", where, values[i], key));
+                    return cc::error(not_a_value(where, key, values[i]));
                 parsed[values.size() == 1 ? 0 : i] = value.value();
             }
 
@@ -97,7 +113,7 @@ cc::result<sg::sampler> slib::impl::parse_sampler_state(annotation const& attrib
 
             auto const value = value_of(table, values[0]);
             if (!value.has_value())
-                return cc::error(cc::format("{}: '{}' is not a value of '{}'", where, values[0], key));
+                return cc::error(not_a_value(where, key, values[0]));
             field = value.value();
             return cc::unit();
         };
@@ -155,8 +171,9 @@ cc::result<sg::sampler> slib::impl::parse_sampler_state(annotation const& attrib
         }
         else if (key == "border_color")
         {
-            CC_RETURN_IF_ERROR(assign_one(cc::span<named_value<sg::sampler_border_color> const>(k_border_colors),
-                                          sampler.border_color));
+            return cc::error(cc::format("{}: 'border_color' is not a field of sg::sampler: sg has no border "
+                                        "addressing, because WebGPU has none",
+                                        where));
         }
         else if (key == "compare")
         {

@@ -11,6 +11,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/context/adapter_info.hh>
@@ -36,6 +37,7 @@
 /// Abstract — a backend subclasses it (e.g. sg::backend::vulkan::vulkan_context), and you obtain one from that backend's sg::create_<backend>_context(config).
 /// Must outlive every command list and resource it creates.
 /// A backend's destructor runs shutdown() for you; call it yourself only to release the device early.
+/// Each entry point says whether it is free-threaded or bound by threading() — see libs/graphics/shaped-graphics/docs/concepts/threading.md.
 class sg::context
 {
     // Declared first, so it is destroyed last: a backend's teardown still releases device resources in the base's members.
@@ -78,11 +80,24 @@ public:
     /// The threading guarantees this backend provides (see libs/graphics/shaped-graphics/docs/concepts/threading.md).
     [[nodiscard]] thread_model threading() const { return _thread_model; }
 
+    /// Whether the calling thread may make the calls the thread model binds: always under multi_threaded,
+    /// on main under main_thread, and on the creating thread under single_threaded.
+    [[nodiscard]] bool is_on_device_thread() const;
+
+    /// Asserts is_on_device_thread(); every bound entry point of a thread-bound backend calls it.
+    void assert_on_device_thread() const;
+
     /// Whether a caller may block on this context at all — see sg::execution_model.
     ///
     /// A backend property, not a preference: a browser cannot wait, so nothing a caller sets could make it able to.
-    /// The two `block_until_` spellings are what ask, and both assert where the answer is `never_block`.
+    /// sg hands a caller no way to block, so what asks is sg's own code: the routine tick, and a registry clear that would wait for background work.
     [[nodiscard]] virtual execution_model execution() const { return execution_model::may_block; }
+
+    /// The home the bound calls run in, or null when there is none to move to.
+    ///
+    /// The main thread's under main_thread, null otherwise: a single_threaded context's creating thread has no home unless the application gives it one.
+    /// sg's own asyncs move there before touching the device, which is what keeps the free-threaded surface free.
+    [[nodiscard]] cc::async_scheduler* device_home() const { return _device_home; }
 
     /// Which GPU this context is running on, fixed at creation.
     /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
@@ -130,25 +145,32 @@ public:
     [[nodiscard]] cc::vector<device_error> take_pending_errors();
 
     /// Long-lived GPU resources: `ctx.persistent.create_raw_buffer(...)`.
+    /// Bound by the thread model.
     context_persistent_scope persistent;
 
     /// Per-frame scratch, recycled when the epoch retires: `ctx.transient.create_raw_buffer(...)`.
+    /// Bound by the thread model.
     context_transient_scope transient;
 
     /// Async host→device streaming off the frame path: `ctx.upload.bytes_to_buffer(...)`.
+    /// Bound by the thread model., since it queues device work; awaiting what it returns is free.
     context_upload_scope upload;
 
     /// Async device→host readback off the frame path: `ctx.download.bytes_from_buffer(...)`.
+    /// Bound by the thread model., since it queues device work; awaiting what it returns is free.
     context_download_scope download;
 
     /// Bulk transfers that may take a while, with priority / progress / cancellation: `ctx.stream.bytes_to_buffer(...)`.
     /// The weaker sibling of upload / download: no automatic command-list synchronization, a handle instead.
+    /// Bound by the thread model., since it queues device work; awaiting what it returns is free.
     context_stream_scope stream;
 
     /// Raw, uncached layout / pipeline factory: `ctx.uncached.create_binding_group_layout(...)` — prefer `ctx.cached`.
+    /// Layouts, samplers and the `_async` pipeline builds are free-threaded; the synchronous pipeline creates are bound.
     context_uncached_scope uncached;
 
     /// Deduplicated, async layout / pipeline cache: `ctx.cached.acquire_compute_pipeline(...)`.
+    /// Free-threaded.
     context_cached_scope cached;
 
     /// Work started against this context that nobody has to await — pipeline builds, or what a routine kicks off on the frame path.
@@ -162,11 +184,13 @@ public:
     routine_registry routines;
 
     /// Opens a new command list, already recording.
+    /// Bound by the thread model.
     /// Single-use: submit or drop it exactly once, in the epoch it was opened in.
     /// Throws sg::device_lost_exception if the device has been lost; any other creation failure is an internal bug and aborts.
     [[nodiscard]] std::unique_ptr<command_list> create_command_list();
 
     /// Creates a swapchain that presents into the window named by `desc` (see swapchain_description).
+    /// Bound by the thread model.
     /// Throwing façade over try_create_swapchain — sg::device_lost_exception if the device was lost, sg::swapchain_creation_exception on a bad handle / format / DXGI error.
     [[nodiscard]] swapchain_handle create_swapchain(swapchain_description const& desc = {});
 
@@ -176,18 +200,22 @@ public:
     [[nodiscard]] virtual cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc = {}) = 0;
 
     /// Submits a command list for execution and consumes it, returning a token for its completion.
+    /// Bound by the thread model.
     virtual submission_token submit_command_list(std::unique_ptr<command_list> cmd) = 0;
 
     /// Submits `cmd` and presents `sc`'s acquired back buffer — the way to present.
+    /// Bound by the thread model.
     /// `cmd` must contain this frame's rendering into the back buffer acquired from `sc`.
     /// The back buffer's final transition to the present layout is folded into `cmd` rather than recorded on a separate list.
     submission_token submit_command_list_and_present(swapchain& sc, std::unique_ptr<command_list> cmd);
 
     /// Discards a command list unsubmitted and consumes it — the same as letting it go out of scope.
+    /// Bound by the thread model.
     virtual void drop_command_list(std::unique_ptr<command_list> cmd) = 0;
 
     // Epochs — frame-level GPU lifetime + CPU↔GPU sync.
     // See libs/graphics/shaped-graphics/docs/concepts/epochs.md.
+    // Bound by the thread model, all of them, except the completion asyncs, which are free-threaded.
 public:
     /// The layout a texture must be in for an async or streaming transfer of `direction` to copy it without a barrier
     /// of its own.
@@ -229,8 +257,7 @@ public:
     /// This epoch's garbage becomes reclaimable once that fence signals.
     ///
     /// **It never waits.** Bounding pipelining depth is a separate decision, and it is spelled either way:
-    /// `try_advance_epoch(N)` declines instead of advancing, and `block_until_epochs_in_flight(N)` parks until the
-    /// depth is back inside the bound.
+    /// `try_advance_epoch(N)` declines instead of advancing, and `epochs_in_flight_completion(N)` settles once the depth is back inside the bound.
     virtual void advance_epoch() = 0;
 
     /// How many epochs have been advanced past but not yet retired.
@@ -240,9 +267,8 @@ public:
 
     /// Advance only if that would leave at most `allowed_in_flight` epochs in flight; false when it declined.
     ///
-    /// **The non-blocking throttle**, and the twin of `block_until_epochs_in_flight`: the same bound expressed as a
-    /// decision rather than a wait, for a caller that would rather do something else with the frame than stall in it —
-    /// or one that cannot stall at all.
+    /// **The declining throttle**, and the twin of `epochs_in_flight_completion`: the same bound expressed as a decision rather than an await.
+    /// For a caller that would rather do something else with the frame than park in it.
     /// A declined advance retires what it can first, so a caller that keeps asking makes progress.
     [[nodiscard]] bool try_advance_epoch(int allowed_in_flight);
 
@@ -262,8 +288,10 @@ public:
     /// `not_submitted` never settles, matching what the poll reports.
     [[nodiscard]] cc::shared_async<cc::unit const> submission_completion(submission_token token);
 
-    /// Settles once the GPU is idle AND every sg actor has drained — `block_until_idle` as an async, with the same three
-    /// conditions in the same order.
+    /// Settles once the GPU is idle AND every sg actor has drained.
+    ///
+    /// Draining the GPU is not on its own a completion guarantee: the readback actor delivers a download's bytes on its own thread, after the copy the GPU finished.
+    /// So this waits on the GPU, then on the actors, then on every closed epoch, and a `bytes_future` submitted before it is delivered once it settles.
     ///
     /// **Nobody has to pump, poll or advance for it to settle**: GPU progress arrives through the backend's fence and
     /// timeline signals, and the transfer actors report their own drain.
@@ -273,30 +301,17 @@ public:
     /// Cold, like every coroutine; settles as an error once the device is lost, or when the context shuts down first.
     [[nodiscard]] cc::shared_async<cc::unit> idle_completion();
 
-    /// Blocks until the GPU is idle AND every sg actor has drained.
+    /// Settles once at most `allowed_in_flight` epochs are still in flight, retiring as it goes.
     ///
-    /// **One of the two blocking spellings in sg**, which is why it says so in its name: `block_until_` greps as the
-    /// complete inventory of places a thread stops, and `block_until_epochs_in_flight()` is the other.
-    /// Asserts unless `execution()` is `may_block`.
-    ///
-    /// Draining the GPU is not on its own a completion guarantee — the readback actor delivers a download's bytes on
-    /// its own thread, after the copy the GPU finished.
-    /// So this alternates the two until neither has anything left, and a `bytes_future` submitted before it is
-    /// delivered after it.
-    void block_until_idle();
-
-    /// Blocks until at most `allowed_in_flight` epochs are still in flight, retiring as it goes.
-    ///
-    /// **The per-frame back-pressure spelling**, and the reason it is allowed to block at all: a windowed renderer
-    /// calls it once a frame with its swapchain's back-buffer count, so the wait amortizes over the whole frame.
-    /// That is the rule the whole API is shaped by — a wait may exist only where it amortizes over many operations.
-    /// Asserts unless `execution()` is `may_block`; `try_advance_epoch` is the same bound for a caller that cannot.
-    void block_until_epochs_in_flight(int allowed_in_flight);
+    /// **The per-frame back-pressure spelling**: a windowed renderer awaits it once a frame with its swapchain's back-buffer count.
+    /// Awaited under `process_completed_epochs`' rule: never while another thread advances the epoch.
+    [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_completion(int allowed_in_flight);
 
     /// Whether the command list that produced this token has finished executing.
     [[nodiscard]] virtual bool is_submission_complete(submission_token token) const = 0;
 
     /// Releases all backend resources; the context is unusable afterwards.
+    /// Bound by the thread model.
     /// Idempotent, and run for you by a backend's destructor.
     virtual void shutdown();
 
@@ -342,34 +357,24 @@ private:
         cc::shared_async<cc::unit> node;
     };
 
-    /// Everything that makes the completion asyncs settle on their own: the signal waiter, or the pump without threads.
-    /// Defined in context.cc, so this header pulls in no thread type.
+    /// The bookkeeping shared by the pending list: what was last armed, and whether the signals stopped.
+    /// Defined in context.cc.
     struct completion_signals;
 
     /// Hand back the node for `target`, minting one on a miss and making sure something will signal it.
     /// Already-settled targets never reach here — the public entry points answer those with a ready node.
     [[nodiscard]] cc::shared_async<cc::unit const> completion_for(u64 target, completion_kind kind);
 
+    /// The coroutines behind idle_completion and epochs_in_flight_completion, which place them on the device's home.
+    [[nodiscard]] cc::shared_async<cc::unit> idle_completion_steps();
+    [[nodiscard]] cc::shared_async<cc::unit> epochs_in_flight_steps(int allowed_in_flight);
+
     /// Settles when no transfer actor holds outstanding work; one of `idle_completion`'s three steps.
     [[nodiscard]] cc::shared_async<cc::unit const> transfers_drained_completion();
 
-    /// Push every node whose condition now holds, or fail every node once the device is lost.
-    /// Safe from any thread, a transfer actor's included.
-    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
-    void settle_due_completions();
-
-    /// Start the waiter thread, or register the pump without threads, the first time a completion needs signalling.
-    /// Called under the pending lock.
-    void ensure_completion_signals(cc::vector<pending_completion> const& pending);
-
-    /// Nudge a waiter already parked on older targets, so it re-arms for the one just added.
-    void wake_completion_signals();
-
-    /// The waiter thread's body: arm the lowest outstanding targets, park on them, settle, repeat.
-    void run_completion_signal_waiter();
-
-    /// The pump's body without threads: settle what is due, let siblings run, and park on the GPU only when nothing else can.
-    bool pump_completion_signals();
+    /// Hand the lowest outstanding targets to the backend when they changed since the last call.
+    /// Called under the pending lock, which is what keeps successive arms in order.
+    void rearm_completion_signal(cc::vector<pending_completion> const& pending);
 
     friend void impl::notify_transfer_drained(context& ctx);
 
@@ -392,7 +397,7 @@ protected:
     ///
     /// **Internal**, and no longer a caller's API: it is a wait per *resource* wherever a pool runs dry, which is the
     /// shape the amortization rule refuses.
-    /// What a caller reaches for instead is `epoch_completion(e)`, or one of the two `block_until_` spellings.
+    /// What a caller reaches for instead is `epoch_completion(e)`, `epochs_in_flight_completion` or `idle_completion`.
     /// A backend still needs it for ring back-pressure during recording, and implements it here.
     virtual void wait_for_epoch(epoch e) = 0;
 
@@ -406,12 +411,12 @@ protected:
     virtual void retire_completed_epochs() = 0;
 
     /// Blocks until every command list submitted so far has finished executing.
-    /// The GPU half of block_until_idle: it does NOT advance the epoch and does NOT drain the actors.
+    /// The GPU half of drain_at_shutdown: it does NOT advance the epoch and does NOT drain the actors.
     virtual void block_until_submissions_complete() = 0;
 
     /// Blocks until every transfer actor has drained what it was given.
     ///
-    /// The CPU half of block_until_idle, and the half that makes it a DELIVERY guarantee: a readback the GPU has
+    /// The CPU half of drain_at_shutdown, and the half that makes it a DELIVERY guarantee: a readback the GPU has
     /// finished still has to be copied into the caller's destination, and only the actor does that.
     /// Pumping is not enough to observe it — an actor with a thread of its own reports no pumpable work while it is
     /// still busy — so a backend waits on its own outstanding-copy accounting here.
@@ -424,20 +429,27 @@ protected:
     /// The newest submission token handed out, or `not_submitted` when nothing has been submitted yet.
     [[nodiscard]] virtual submission_token last_issued_submission() = 0;
 
-    /// Parks until the submission timeline reaches `submission`, the epoch timeline reaches `epoch`, or
-    /// `wake_completion_signal` is given a generation past `wake_generation` — whichever comes first.
+    /// Announces the lowest outstanding submission and epoch targets, zero where none waits.
     ///
-    /// **A GPU signal or a host wake, never a timeout.**
-    /// A zero target is not waited on, and a spurious return is harmless: the caller re-checks everything.
-    /// The completion signal waiter is its only caller, so it may keep per-waiter arming state without a lock.
-    virtual void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) = 0;
+    /// The backend arranges for `settle_due_completions()` to run once either is reached.
+    /// It learns that from a thread it parks on its GPU signals (`sg::impl::completion_waiter`), or from its API's own completion callback.
+    /// Called under a context lock whenever the targets change, lower or higher, so it must not block and must not call back into the context.
+    /// Settling later, from anywhere, is fine.
+    virtual void arm_completion_signal(u64 submission, u64 epoch) = 0;
 
-    /// Wakes a waiter parked in `wait_for_completion_signal`; generations are handed out strictly increasing.
-    /// Called only when a new target is lower than what the waiter is armed for, so at most once per such target.
-    virtual void wake_completion_signal(u64 generation) = 0;
+    /// Push every node whose condition now holds, or fail every node once the device is lost.
+    /// Safe from any thread, a transfer actor's and a GPU callback's included.
+    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
+    void settle_due_completions();
 
-    /// Stops the signal waiter and fails every completion still outstanding, so no dependent parks forever.
-    /// A backend calls it in shutdown after its final drain, while its fences still exist; idempotent.
+    /// `idle_completion`'s three steps as a blocking drain, for a backend's own shutdown.
+    ///
+    /// `never_block` is a promise about the caller's thread, and a backend that can park a thread still has to drain before its device goes.
+    /// A backend that cannot wait never calls this.
+    void drain_at_shutdown();
+
+    /// Fails every completion still outstanding, so no dependent parks forever; idempotent.
+    /// A backend calls it in shutdown after its final drain, once whatever observes its GPU signals has stopped.
     void stop_completion_signals();
 
     /// The fallible core behind the public create_command_list(): backends open a recording list here.
@@ -636,6 +648,18 @@ protected:
         raster_pipeline_description const& desc,
         lifetime_scope scope) = 0;
 
+    /// The async twins of the two creates above, which the cached tier awaits.
+    ///
+    /// The default schedules the synchronous create as a node, so it runs wherever the node is picked up, which is what every backend with a blocking pipeline build wants.
+    /// A backend whose API compiles pipelines asynchronously overrides these and settles the node from its callback.
+    /// The description is copied, so everything it references — the compiled shaders above all — must outlive the returned async.
+    [[nodiscard]] virtual cc::shared_async<compute_pipeline_handle> create_compute_pipeline_async(
+        compute_pipeline_description const& desc,
+        lifetime_scope scope);
+    [[nodiscard]] virtual cc::shared_async<raster_pipeline_handle> create_raster_pipeline_async(
+        raster_pipeline_description const& desc,
+        lifetime_scope scope);
+
     /// Builds a raytracing_pipeline (a DXR state object) from a description (shaders + pipeline layout).
     [[nodiscard]] virtual cc::result<raytracing_pipeline_handle> try_create_raytracing_pipeline(
         raytracing_pipeline_description const& desc,
@@ -676,6 +700,12 @@ protected:
 
     // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
     adapter_info _adapter;
+
+    // See device_home; set from the thread model at construction, never changed afterwards.
+    cc::async_scheduler* _device_home = nullptr;
+
+    // The thread that created the context, which single_threaded binds calls to.
+    cc::thread_id _creating_thread = cc::current_thread_id();
 
     // The portable floors a caller sizes against, raised by a backend that has actually measured them.
     device_limits _limits;

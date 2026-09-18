@@ -117,6 +117,15 @@ public:
     dx12_pipeline_layout const* _bound_pipeline_layout = nullptr;
     cc::vector<dx12_binding_group const*> _bound_groups;
 
+    /// What was bound, held until the list is consumed: a group or pipeline dropped between its bind and the draw that reads it must still be there.
+    cc::vector<std::shared_ptr<void const>> _bound_keep_alive;
+
+    void keep_bound(std::shared_ptr<void const> object)
+    {
+        if (object != nullptr && (_bound_keep_alive.empty() || _bound_keep_alive.back() != object))
+            _bound_keep_alive.push_back(cc::move(object));
+    }
+
     // Array-access declarations for the *next* dispatch (compute + ray tracing share them); cleared after it.
     // Resolved against the bound groups' array_bindings — every bound array binding must be covered by one.
     cc::vector<dx12_array_buffer_declare> _pending_array_buffer_declares;

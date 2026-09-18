@@ -90,7 +90,7 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     auto up = ctx.create_command_list();
     for (auto const& tex : {tex_srgb, tex_unorm})
@@ -161,7 +161,7 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
     // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
     sr::raster_box_filter_mipmap_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     auto up = ctx.create_command_list();
     up->upload.bytes_to_texture(tex.raw(), rgba8_constant(8 * 8, supplied), {.mip_level = 0});

@@ -41,6 +41,11 @@ rules:
     reason: the CRT's __argc / __argv, which is what Windows has instead of /proc/self/cmdline
     files: src/nexus/args/impl/os_args.cc
 
+  - kind: allow-include
+    value: <cstdlib>
+    reason: std::exit ends a run that returned to the JS event loop, which is the only way its exit code reaches node or deno
+    files: src/nexus/impl/host_loop.cc
+
 
   # =========================================================================================================
   # Waiting on a cc:: replacement — see docs/stdlib-migration.md
@@ -71,7 +76,7 @@ rules:
     files: tests/**
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the waits run on pools the test owns under no_scheduler, and where a check lands from them is the subject
     files:
       - tests/test-threaded-check-test.cc

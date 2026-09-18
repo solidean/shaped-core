@@ -3,6 +3,12 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
+- **The frame API blocks.**
+  `sv::viewer` is a synchronous pull loop — `is_running()`, `end_frame()`, a draining destructor.
+  So it throttles and drains with `cc::async_blocking_get` on sg's completions, behind a `may_block` assert.
+  sg has no blocking spellings left, so this is the one place the viewer cannot run on a never-block context such as WebGPU.
+  The shape that retires it is cube-editor's: `end_frame()` returning an async that awaits `epochs_in_flight_completion`, and `finish()` in place of the destructor's drain.
+
 ## The layout-tree restructure — what is left
 
 The rendering half is **done and joined**: a frame is flattened into a `render_plan`, `view_renderer` allocates what it
@@ -171,7 +177,7 @@ They are the only two tests in sv that use `cmd.download`.
 
 **What happens.**
 `shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
-Bisected with flushed markers to the advance-and-drain (now `ctx.block_until_idle()`), on the probe's ECHO dispatch.
+Bisected with flushed markers to the advance-and-drain (now a blocking get on `ctx.idle_completion()`), on the probe's ECHO dispatch.
 That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
 The workload is therefore not the cause, and neither is the closure.
 

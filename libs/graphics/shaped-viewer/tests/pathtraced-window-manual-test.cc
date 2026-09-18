@@ -1,6 +1,7 @@
 #include "viewer_test_env.hh"
 
 #include <clean-core/common/time.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -154,7 +155,7 @@ struct fly_camera
 };
 } // namespace
 
-TEST("sv - path-traced window (manual)", nx::config::manual)
+ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
 {
     auto wsys_r = sr::window_system::try_create();
     if (wsys_r.has_error())
@@ -318,12 +319,12 @@ TEST("sv - path-traced window (manual)", nx::config::manual)
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_epochs_in_flight(sc->buffer_count());
+        co_await ctx.epochs_in_flight_completion(sc->buffer_count());
 
         ++accum; // uncapped: a full-float mean goes on converging for as long as the view is left alone
     }
 
     ctx.advance_epoch();
-    ctx.block_until_idle();
+    co_await ctx.idle_completion();
     CHECK(true); // manual visual test — reaching here means the frame loop ran and tore down cleanly
 }

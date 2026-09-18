@@ -28,7 +28,7 @@ CORPUS = Path(__file__).parent.parent / "tests" / "data" / "binding-corpus.txt"
 
 # sg::sampler's own field order, and its defaults -- what a `static` line is rendered against.
 SAMPLER_FIELD_ORDER = ("min_filter", "mag_filter", "mip_filter", "address_u", "address_v", "address_w",
-                       "mip_lod_bias", "max_anisotropy", "min_lod", "max_lod", "compare", "border_color")
+                       "mip_lod_bias", "max_anisotropy", "min_lod", "max_lod", "compare")
 
 SAMPLER_DEFAULTS = {
     "min_filter": "linear", "mag_filter": "linear", "mip_filter": "linear",

@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-graphics/command_list/command_list.hh>
@@ -51,8 +52,8 @@ sg::context_handle make_context()
 }
 } // namespace
 
-TEST("sg - routines are per-context: each context builds its own instance from scratch",
-     exclusive("sg-reload-generation"))
+ASYNC_TEST("sg - routines are per-context: each context builds its own instance from scratch",
+           exclusive("sg-reload-generation"))
 {
     // Context A initializes the routine, then goes away.
     {
@@ -63,7 +64,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
         auto cmd_a = ctx_a->create_command_list();
         // Asking registers it; the tick is what runs the phases.
         (void)counting_routine::try_acquire(*cmd_a);
-        (void)ctx_a->routines.tick_until_idle();
+        (void)co_await ctx_a->routines.idle_completion();
         auto const ra = counting_routine::try_acquire(*cmd_a);
         REQUIRE(ra.is_ready());
         CHECK(ra->once == 1);
@@ -80,7 +81,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
 
     auto cmd_b = ctx_b->create_command_list();
     (void)counting_routine::try_acquire(*cmd_b);
-    (void)ctx_b->routines.tick_until_idle();
+    (void)co_await ctx_b->routines.idle_completion();
     auto const rb = counting_routine::try_acquire(*cmd_b);
     REQUIRE(rb.is_ready());
     CHECK(rb->once == 1); // ran again on ctx_b: the instance is per-context, not a process singleton
@@ -88,7 +89,7 @@ TEST("sg - routines are per-context: each context builds its own instance from s
     ctx_b->drop_command_list(cc::move(cmd_b));
 }
 
-TEST("sg - two live contexts keep separate routine instances", exclusive("sg-reload-generation"))
+ASYNC_TEST("sg - two live contexts keep separate routine instances", exclusive("sg-reload-generation"))
 {
     auto const ctx_a = make_context();
     if (ctx_a == nullptr)
@@ -101,8 +102,8 @@ TEST("sg - two live contexts keep separate routine instances", exclusive("sg-rel
 
     (void)counting_routine::try_acquire(*cmd_a);
     (void)counting_routine::try_acquire(*cmd_b);
-    (void)ctx_a->routines.tick_until_idle();
-    (void)ctx_b->routines.tick_until_idle();
+    (void)co_await ctx_a->routines.idle_completion();
+    (void)co_await ctx_b->routines.idle_completion();
 
     auto const ra = counting_routine::try_acquire(*cmd_a);
     auto const rb = counting_routine::try_acquire(*cmd_b);
@@ -176,9 +177,9 @@ struct cycle_assert
 //
 // Singlethreaded for a reason of the same kind: the handler stack is per-thread, so the phases have to run inline on
 // this thread rather than on a pool worker that nobody scoped.
-// That is also why this is a plain TEST on its own context rather than an invocable: a child dispatched by
+// That is also why this is a test on its own context rather than an invocable: a child dispatched by
 // nx::invoke_tests runs under its driver's scheduler, so `singlethreaded` and `exclusive` on it would be ignored.
-TEST("sg - a dependency cycle is refused where it is declared", exclusive("sg-reload-generation"), singlethreaded)
+ASYNC_TEST("sg - a dependency cycle is refused where it is declared", exclusive("sg-reload-generation"), singlethreaded)
 {
     auto const ctx = make_context();
     if (ctx == nullptr)
@@ -195,7 +196,7 @@ TEST("sg - a dependency cycle is refused where it is declared", exclusive("sg-re
             });
 
         cyclic_a::prewarm(*ctx);
-        (void)ctx->routines.tick_until_idle();
+        (void)co_await ctx->routines.idle_completion();
     }
     CHECK(asserts_seen == 1);
 
@@ -208,7 +209,7 @@ TEST("sg - a dependency cycle is refused where it is declared", exclusive("sg-re
     // What still has to hold is that nothing hangs: the readiness walk carries a visited set, so a cycle costs a leak
     // rather than a spin.
     cyclic_a::prewarm(*ctx);
-    (void)ctx->routines.tick_until_idle();
+    (void)co_await ctx->routines.idle_completion();
     CHECK(cyclic_a::try_acquire(*ctx).is_ready());
 #endif
 

@@ -50,6 +50,8 @@ namespace
 INVOCABLE_TEST("sg - a declared group index reaches the group layout", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     // A binding that names its descriptor set pins the layout built from it to that one bind slot,
     // which is what every backend's bind_group asserts against.
@@ -69,6 +71,8 @@ INVOCABLE_TEST("sg - a declared group index reaches the group layout", (sg::cont
 INVOCABLE_TEST("sg - array binding accepts a partially vacant element list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto const b = texture_array_binding(8);
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
@@ -93,6 +97,8 @@ INVOCABLE_TEST("sg - array binding accepts a partially vacant element list", (sg
 INVOCABLE_TEST("sg - array binding accepts an all-vacant element list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto const b = texture_array_binding(4);
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
@@ -110,6 +116,8 @@ INVOCABLE_TEST("sg - array binding accepts an all-vacant element list", (sg::con
 INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     sg::binding const b
         = {.name = "Buffers", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
@@ -133,6 +141,8 @@ INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (s
 INVOCABLE_TEST("sg - array binding rejects a wrong-size element list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto const b = texture_array_binding(4);
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
@@ -169,6 +179,8 @@ INVOCABLE_TEST("sg - scalar binding rejects an element list of the wrong size", 
 INVOCABLE_TEST("sg - array binding rejects a mismatched element", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
 
     auto const b = texture_array_binding(2);
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));

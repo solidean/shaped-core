@@ -115,6 +115,8 @@ namespace
         return cc::error("this build has no Wayland surface support");
 #endif
     }
+    case sg::window_platform::web_canvas:
+        return cc::error("vulkan cannot present to a web canvas; that is the webgpu backend's");
     }
     return cc::error("unhandled window platform");
 }

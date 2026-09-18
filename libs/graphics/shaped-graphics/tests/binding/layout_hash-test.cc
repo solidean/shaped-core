@@ -70,6 +70,10 @@ TEST("sg binding-group-layout hash separates every field it covers")
     dimensioned.texture_dimension = sg::texture_view_dimension::cube;
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&dimensioned, 1), {}) != key);
 
+    auto write_only = base[0];
+    write_only.storage_access = sg::storage_access::write;
+    CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&write_only, 1), {}) != key);
+
     // Order is part of the layout: slot i is a different slot from slot j.
     sg::binding const forward[] = {uniform("A", 0), uniform("B", 1)};
     sg::binding const backward[] = {uniform("B", 1), uniform("A", 0)};

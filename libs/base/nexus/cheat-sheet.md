@@ -54,7 +54,7 @@ ASYNC_TEST("cache - resolves a miss")    // a TEST whose body is a coroutine; ne
 }                                        // must be a coroutine: nothing to await? end with `co_return;`
 // Every TEST ask applies (main_thread, singlethreaded, own_pool, exclusive) except no_scheduler.
 // Awaiting an UNTHREADED component (actor, bcache store, io_system)? Ask for main_thread: only the main loop drives it.
-// A blocking get (cc::async_blocking_get, ctx.block_until_idle) in a library's tests is a `blocking-wait` lint finding:
+// A blocking get (cc::async_blocking_get and its siblings) in a library's tests is a `blocking-wait` lint finding:
 //   await instead, or allow the file by name in that library's .shaped-lint.yml where the wait is the subject.
 // SKIP / REQUIRE work as in a TEST, at any depth below the body.
 
@@ -367,6 +367,11 @@ ASYNC_TEST("sg dx12 backend")                        // only an ASYNC body can a
 {
     auto const r = co_await nx::async_invoke_tests_in_sequence("dx12", ctx);  // one child at a time, match order
     co_await nx::async_invoke_tests_in_parallel("dx12", {.max_concurrent = 4}, ctx);   // fan-out; serial under -j1
+    co_await nx::async_invoke_tests_in_sequence("webgpu", {.inherit_home = true}, ctx); // children on the DRIVER's home
+    // ^ nx::invocation_options {max_concurrent, inherit_home}. inherit_home is OFF by default and for a thread-BOUND
+    //   subject only (a webgpu device): it homes each child BODY where the driver is homed, and nothing else — the
+    //   child's helper coroutines go to compute as any homed body's do. The driver must be homed — main_thread does it.
+    //   A child's own main_thread still wins.
 }
 ```
 
@@ -402,6 +407,7 @@ uv run dev.py test                       # build + run the whole suite
 // --jobs N / -j N / -jN : cap on tests running at once; 0 means hardware concurrency, and IS THE DEFAULT.
 //   -j1 runs them one at a time in schedule order, exclusive() after the rest of each phase, rather than on a pool of one — the reproducible-debugging
 //   mode: a -jN failure that survives -j1 is a test bug, one that vanishes is a concurrency bug.
+//   Ignored on wasm (a host event loop): that run is stepped and SERIAL, own_pool included.
 //   See docs/parallel-execution.md.
 // --match-files / --match-names : pin how the filters are read, instead of names-then-files. A file match is
 //   still just a filter, so the disabled and bucket gates hold — only an exact test NAME opens those.

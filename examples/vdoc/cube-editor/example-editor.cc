@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 #include <limits> // no cc:: numeric limits yet
@@ -136,18 +137,18 @@ void draw_timeline(document& doc)
 }
 } // namespace
 
-EXAMPLE("vdoc/cube-editor")
+ASYNC_EXAMPLE("vdoc/cube-editor")
 {
     auto doc = cube_editor::document::open("cube-editor.vdoc");
     if (!doc.has_value())
     {
         cc::println("no SQLite backend was compiled in — there is nowhere to keep the document");
-        return;
+        co_return;
     }
 
     auto app = cube_editor::app::create("vdoc cube editor — click a cube, right-drag to orbit, close to end");
     if (app == nullptr)
-        return; // create() already said what was missing
+        co_return; // create() already said what was missing
 
     // The panel layout lives in the workspace too, so no imgui.ini is written anywhere.
     // It must be restored before the first frame, and under a name of its own — the viewer example opens this same file.
@@ -212,12 +213,14 @@ EXAMPLE("vdoc/cube-editor")
 
         ImGui::End();
 
-        app->end_frame(doc.value().current(), camera, selected);
+        co_await app->end_frame(doc.value().current(), camera, selected);
 
         // Empty on nearly every frame: imgui only asks for a save a few seconds after something moved.
         if (auto const ini = app->imgui().take_dirty_settings(); ini.has_value() && !app->is_capturing())
             doc.value().store_ui_settings(ui_name, ini.value());
     }
+
+    co_await app->finish(); // the last frames are still in flight
 
     // The last few seconds of layout are still only in imgui, so the exit save must precede `app` going away.
     // Skipped under capture, which is the other half of loading nothing: a capture moved no camera and dragged no

@@ -353,13 +353,13 @@ frame group=0
 #pragma sc group 0
 namespace shadow
 {
-#pragma sc static filter=(linear, linear, nearest) address=(clamp_edge, clamp_border, repeat) compare=less
+#pragma sc static filter=(linear, linear, nearest) address=(clamp_edge, mirror_repeat, repeat) compare=less
     SamplerComparisonState compare_sampler;
 }
 --- groups
 shadow group=0
   compare_sampler index=0 type=sampler count=1
-  static compare_sampler mip_filter=nearest address_u=clamp_edge address_v=clamp_border compare=less
+  static compare_sampler mip_filter=nearest address_u=clamp_edge address_v=mirror_repeat compare=less
 
 
 --- case everything omitted takes sg::sampler's default, which is a trilinear repeating sampler
@@ -381,13 +381,13 @@ frame group=0
 #pragma sc group 0
 namespace frame
 {
-#pragma sc static max_anisotropy=4 mip_lod_bias=0.5 border_color=opaque_white
+#pragma sc static max_anisotropy=4 mip_lod_bias=0.5
     SamplerState samp;
 }
 --- groups
 frame group=0
   samp index=0 type=sampler count=1
-  static samp mip_lod_bias=0.5 max_anisotropy=4 border_color=opaque_white
+  static samp mip_lod_bias=0.5 max_anisotropy=4
 
 
 --- case a sampler the shader did not mark `static` stays dynamic
@@ -468,6 +468,42 @@ namespace frame
 }
 --- error
 line 4: 'clamp_to_border' is not a value of 'address'
+
+
+--- case border addressing is refused with the reason, since WebGPU has none
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static address=(clamp_edge, clamp_border, repeat)
+    SamplerState samp;
+}
+--- error
+line 4: 'clamp_border' is not a value of 'address': sg has no border or mirror-once addressing, because WebGPU has neither
+
+
+--- case mirror-once addressing is refused with the reason, on a single axis too
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static address_w=mirror_clamp_edge
+    SamplerState samp;
+}
+--- error
+line 4: 'mirror_clamp_edge' is not a value of 'address_w': sg has no border or mirror-once addressing, because WebGPU has neither
+
+
+--- case a border color is refused with the reason, since sg has no border addressing to use it
+--- hlsl
+#pragma sc group 0
+namespace frame
+{
+#pragma sc static border_color=opaque_white
+    SamplerState samp;
+}
+--- error
+line 4: 'border_color' is not a field of sg::sampler: sg has no border addressing, because WebGPU has none
 
 
 --- case a shorthand takes one value or a tuple of three

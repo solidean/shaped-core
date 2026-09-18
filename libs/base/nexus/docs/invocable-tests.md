@@ -173,6 +173,7 @@ ASYNC_TEST("sg dx12 hardware backend")
 - `nx::async_invoke_tests_in_sequence(name, args...)` awaits each child in turn, in match order.
 - `nx::async_invoke_tests_in_parallel(name, [{.max_concurrent = n},] args...)` starts every child, then awaits them all.
   Reports keep match order however the children finished, and under `-j1` the children run one at a time.
+- Either form takes an `nx::invocation_options` before the arguments; `inherit_home` is below.
 
 **The synchronous `nx::invoke_tests` refuses a set containing an async invocable**, and checks the matched set before `-c` scoping.
 A driver that ran its sync children and silently skipped its async ones whenever a filter selected only sync ones would be wrong in a way nothing reports.
@@ -193,6 +194,28 @@ That makes it the one caller for which clean-core's by-value rule for coroutine 
 
 The never-both rule is the strict form on purpose.
 Accepting a child tag the chain already holds, or ordering acquisition by name, are the relaxations it leaves open, and neither breaks anything it accepts.
+
+### Children on the driver's thread: `inherit_home`
+
+A child that asks for nothing runs wherever the phase's scheduler puts it, which is a pool worker even under a `main_thread` driver.
+That is right by default — a driver's thread is not a child's business, and letting children spread is what finds the races that pinning would hide.
+
+It is wrong when the children's *subject* is pinned to one thread.
+A WebGPU device in a threaded wasm build exists only in the JS realm of the thread that requested it, so a child touching it from a worker finds no device at all.
+
+```cpp
+ASYNC_TEST("sg webgpu backend - device", main_thread)
+{
+    auto ctx = co_await sg::request_webgpu_context();
+    co_await nx::async_invoke_tests_in_sequence("device", nx::invocation_options{.inherit_home = true}, ctx);
+}
+```
+
+`inherit_home` homes every child body where the invoking body is homed, and nothing else.
+A child's helper coroutines are unhomed asyncs, so they go to compute as any homed body's do.
+A helper that must touch the pinned subject hops there itself; one that does not fails on its first line instead of after its first suspend, which is where driving it inline used to hide it.
+The driver must be homed when it invokes, which `main_thread` gives it; a child's own `main_thread` still wins, and a child that hops away itself is on its own.
+It is off by default, and only a suite whose subject is thread-bound should turn it on.
 
 ## Scheduling asks belong to the driver
 

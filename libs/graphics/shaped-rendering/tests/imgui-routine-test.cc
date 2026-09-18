@@ -57,7 +57,7 @@ struct imgui_fixture
         // It goes away once a routine's readiness is an async, where this becomes a co_await on it — see
         // libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
         sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
-        (void)ctx->routines.tick_until_idle();
+        (void)co_await ctx->routines.idle_completion();
 
         auto cmd = ctx->create_command_list();
         {

@@ -72,7 +72,7 @@ ASYNC_INVOCABLE_TEST("sg - a headless swapchain presents and cycles", (sg::conte
             all_correct = false;
 
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2);
+        co_await ctx->epochs_in_flight_completion(2);
     }
     CHECK(all_correct);
 
