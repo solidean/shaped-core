@@ -2,6 +2,7 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/impl/posix_thread_stacks.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
 #include <clean-core/record/thread_scopes.hh>
@@ -233,11 +234,14 @@ void report_other_thread_stacks() noexcept
 #else
 
 // Walking a thread that is not the calling one has no portable equivalent here: backtrace() captures only the caller.
-// Reaching the others means signalling each in turn — machinery this diagnostic does not justify.
-// The faulting thread's stack is still reported, and a core dump has the rest.
+// Reaching the others means asking each to report ITSELF, through a signal — see impl/posix_thread_stacks.hh, which
+// does that on Linux and nothing anywhere else yet.
+// Where it is unavailable the faulting thread's stack is still reported, and a core dump has the rest.
 void report_other_thread_stacks() noexcept
 {
-    std::fputs("\n<other threads' stacks are Windows-only; the core dump has them>\n", stderr);
+    std::fputs("\nother threads:\n", stderr);
+    if (!cc::impl::report_posix_thread_stacks())
+        std::fputs("  <not reached on this platform; the core dump has them>\n", stderr);
 }
 
 #endif
@@ -389,6 +393,10 @@ void cc::install_crash_handler()
     g_installed = true;
 #if !CC_CRASH_HANDLER_SANITIZED
     install_platform_handlers();
+
+    // Reserved now rather than when something goes wrong, which is the whole point: the collector and its handler
+    // both run in a process that is already in trouble, and neither may allocate.
+    cc::impl::install_posix_thread_stack_reporter();
 #endif
 }
 

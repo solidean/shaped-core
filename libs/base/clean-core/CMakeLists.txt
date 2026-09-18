@@ -75,6 +75,7 @@ add_library(clean-core
     src/clean-core/record/hot_functions.cc
     src/clean-core/record/splicing_listener.cc
     src/clean-core/error/crash_handler.cc
+    src/clean-core/error/impl/posix_thread_stacks.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/from_string.cc
     src/clean-core/string/format.cc
@@ -228,6 +229,7 @@ target_sources(clean-core
     src/clean-core/error/result.hh
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
+    src/clean-core/error/impl/posix_thread_stacks.hh
 
     src/clean-core/record/domain_fwd.hh
     src/clean-core/record/fwd.hh

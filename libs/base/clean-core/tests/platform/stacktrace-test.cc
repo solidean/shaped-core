@@ -1,3 +1,4 @@
+#include <clean-core/error/impl/posix_thread_stacks.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -61,5 +62,28 @@ TEST("stacktrace - max_depth caps what is kept")
     CHECK(capped.size() <= 2);
 #else
     CHECK(cc::stacktrace::current(0, 2).empty());
+#endif
+}
+
+// Reaching threads other than the calling one, which no platform does the same way.
+//
+// There is no assertion here about what the stacks CONTAIN: producing one means signalling a thread and waiting,
+// which a test cannot arrange without a thread deliberately stuck.
+// What is pinned is that the capability reports itself honestly, so an install that silently failed is a red test
+// rather than an empty section in a crash report.
+TEST("crash handler - the other-thread reporter says whether it is there")
+{
+    // nx::run installs the crash handler before anything runs, so by the time a test body executes the reporter is
+    // either up or has failed to come up.
+    auto const available = cc::impl::posix_thread_stacks_available();
+
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+    // The whole point on the platform this exists for.
+    // A false here means sigaction or sem_init failed at install time, which is exactly the silent failure that
+    // would otherwise surface as "other threads: <not reached>" in a report somebody needed.
+    CHECK(available);
+#else
+    // Everywhere else the answer is no, and saying so is what keeps the crash report honest rather than empty.
+    CHECK(!available);
 #endif
 }

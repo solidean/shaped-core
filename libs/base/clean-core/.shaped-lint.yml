@@ -463,3 +463,8 @@ rules:
     files:
       - tests/record/record-async-scope-test.cc
       - tests/record/record-trace-test.cc
+
+  - kind: allow-include
+    value: [<cerrno>, <cstdio>, <cstring>, <dirent.h>, <semaphore.h>, <signal.h>, <sys/syscall.h>, <time.h>, <unistd.h>]
+    reason: asking another thread to report its own stack is a POSIX-only mechanism with no portable half - a real-time signal, a semaphore the handler posts, and /proc/self/task for the thread list
+    files: src/clean-core/error/impl/posix_thread_stacks.cc
