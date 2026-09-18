@@ -6,6 +6,7 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/async.hh> // the async invoker's handle type
 #include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/signature.hh>
 #include <nexus/fwd.hh>
@@ -25,18 +26,47 @@ struct nx::fuzz::fuzz_operation
     /// Upper bound used when no explicit at-most is set ("effectively unbounded").
     static constexpr int unbounded = 1 << 30;
 
+    /// An op returning cc::shared_async<T> is async: the engine awaits it, and T is what reaches the slot.
+    /// cc::shared_async<cc::unit> is an async void op.
     template <class F>
     [[nodiscard]] static cc::unique_ptr<fuzz_operation> create(cc::string name, F&& fn)
     {
         using sig_t = cc::signature_of<F>;
+        using ret_t = std::remove_cvref_t<decltype(impl::return_of(sig_t{}))>;
+        using async_t = impl::async_result_of<ret_t>;
+        static_assert(!async_t::is_scheduled,
+                      "a fuzz op may not return cc::async_scheduled<T>: it starts before the engine "
+                      "awaits it — return the cold cc::shared_async<T> instead");
+
         auto op = cc::make_unique<fuzz_operation>();
         op->_name = cc::move(name);
         op->_arg_types = cc::arg_types_of(sig_t{});
         op->_arg_is_mutable = cc::arg_is_mutable_of(sig_t{});
-        op->_returns_void = cc::returns_void(sig_t{});
-        op->_return_type = cc::return_type_of(sig_t{});
-        op->_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in) -> typed_value
-        { return impl::invoke_operation(fn, in, sig_t{}); };
+
+        if constexpr (async_t::is_async)
+        {
+            using value_t = typename async_t::value_type;
+            static_assert(std::is_same_v<typename async_t::error_type, cc::async_error>,
+                          "an async fuzz op must fail on cc::async_error, the channel the engine reads messages from");
+            static_assert(!std::is_const_v<value_t>, "an async fuzz op produces its value, so it cannot be a read-only "
+                                                     "cc::shared_async<T const>");
+            static_assert(!impl::async_result_of<value_t>::is_async,
+                          "an async fuzz op may not produce another cc::shared_async — to keep a pending handle in a "
+                          "slot, wrap it in a type of your own");
+
+            op->_is_async = true;
+            op->_returns_void = std::is_same_v<value_t, cc::unit>;
+            op->_return_type = op->_returns_void ? std::type_index(typeid(void)) : std::type_index(typeid(value_t));
+            op->_async_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in) -> cc::shared_async<typed_value>
+            { return impl::async_op_glue<value_t>::box(impl::invoke_raw(fn, in, sig_t{})); };
+        }
+        else
+        {
+            op->_returns_void = cc::returns_void(sig_t{});
+            op->_return_type = cc::return_type_of(sig_t{});
+            op->_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in) -> typed_value
+            { return impl::invoke_operation(fn, in, sig_t{}); };
+        }
         return op;
     }
 
@@ -77,6 +107,8 @@ struct nx::fuzz::fuzz_operation
     fuzz_operation* when(F&& cond)
     {
         using sig_t = cc::signature_of<F>;
+        static_assert(!impl::async_result_of<std::remove_cvref_t<decltype(impl::return_of(sig_t{}))>>::is_async,
+                      "a precondition must be synchronous: it is evaluated while the next step is chosen");
         _preconditions.push_back([cond = cc::forward<F>(cond)](cc::span<typed_value*> in) -> bool
                                  { return impl::invoke_precondition(cond, in, sig_t{}); });
         return this;
@@ -90,12 +122,26 @@ struct nx::fuzz::fuzz_operation
     [[nodiscard]] std::type_index return_type() const { return _return_type; }
     [[nodiscard]] bool returns_void() const { return _returns_void; }
     [[nodiscard]] bool is_invariant() const { return _is_invariant; }
+    [[nodiscard]] bool is_async() const { return _is_async; }
     [[nodiscard]] int execute_at_least_times() const { return _at_least; }
     [[nodiscard]] int execute_at_most_times() const { return _at_most; }
 
     // ---- invocation ------------------------------------------------------------------------------
 
-    [[nodiscard]] typed_value invoke(cc::span<typed_value*> inputs) const { return _invoker(inputs); }
+    /// Calls a synchronous op.
+    [[nodiscard]] typed_value invoke(cc::span<typed_value*> inputs) const
+    {
+        CC_ASSERT(!_is_async, "an async op is called through invoke_async");
+        return _invoker(inputs);
+    }
+
+    /// Calls an async op, handing back the cold handle that resolves to its boxed value (invalid for a void op).
+    /// The handle may still point into `inputs`, so they must outlive it.
+    [[nodiscard]] cc::shared_async<typed_value> invoke_async(cc::span<typed_value*> inputs) const
+    {
+        CC_ASSERT(_is_async, "a synchronous op is called through invoke");
+        return _async_invoker(inputs);
+    }
 
     [[nodiscard]] bool check_preconditions(cc::span<typed_value*> inputs) const
     {
@@ -117,7 +163,7 @@ struct nx::fuzz::fuzz_operation
         storage.reserve(sizeof...(Args)); // reserve so &storage.back() stays valid as we fill
         ptrs.reserve(sizeof...(Args));
         (eval_arg(storage, ptrs, cc::forward<Args>(args)), ...);
-        return _invoker(cc::span<typed_value*>(ptrs));
+        return invoke(cc::span<typed_value*>(ptrs));
     }
 
     template <class T, class... Args>
@@ -149,7 +195,8 @@ private:
     }
 
     cc::string _name;
-    cc::unique_function<typed_value(cc::span<typed_value*>)> _invoker;
+    cc::unique_function<typed_value(cc::span<typed_value*>)> _invoker;                         // a synchronous op
+    cc::unique_function<cc::shared_async<typed_value>(cc::span<typed_value*>)> _async_invoker; // an async op
     cc::vector<cc::unique_function<bool(cc::span<typed_value*>)>> _preconditions;
 
     cc::vector<std::type_index> _arg_types;
@@ -157,6 +204,7 @@ private:
     std::type_index _return_type = std::type_index(typeid(void));
     bool _returns_void = true;
     bool _is_invariant = false;
+    bool _is_async = false;
     int _at_least = 50;
     int _at_most = unbounded;
 };

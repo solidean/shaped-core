@@ -38,6 +38,7 @@ struct nx::fuzz::fuzz_machine
         cc::vector<bool> arg_is_mutable;
         type_index return_type = type_index::invalid; // invalid for void
         bool is_invariant = false;
+        bool is_async = false; // returns a cc::shared_async the engine awaits
     };
 
     struct type_info

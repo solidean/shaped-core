@@ -28,6 +28,7 @@ fuzz_machine::fuzz_machine(cc::span<fuzz_operation* const> ops)
         op_info oi;
         oi.op = op;
         oi.is_invariant = op->is_invariant();
+        oi.is_async = op->is_async();
         for (auto at : op->arg_types())
             oi.arg_types.push_back(intern(at));
         for (bool m : op->arg_is_mutable())

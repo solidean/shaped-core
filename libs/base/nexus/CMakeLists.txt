@@ -121,6 +121,7 @@ target_sources(nexus
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
+    src/nexus/fuzz/async.hh
     src/nexus/fuzz/signature.hh
     src/nexus/fuzz/operation.hh
     src/nexus/fuzz/executed_operation.hh
@@ -231,6 +232,7 @@ if(SC_BUILD_TESTS)
         tests/bench-self-benchmark.cc
         tests/bench-hardware-counters-test.cc
         tests/bench-cache-traversal-test.cc
+        tests/fuzz-async-test.cc
         tests/fuzz-engine-test.cc
         tests/fuzz-minimize-test.cc
         tests/fuzz-regression-test.cc
