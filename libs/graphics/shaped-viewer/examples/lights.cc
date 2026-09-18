@@ -15,7 +15,7 @@
 // Every intensity is in its path's own unit — candela, nits, lux — and each is chosen to put about the same
 // illuminance on the floor under the stage, so the panels compare by shape rather than by brightness.
 // The dim studio sky in the first five is only there so the unlit side of each object still reads.
-// docs/lights.md has the design behind all of it.
+// ../docs/lights.md has the design behind all of it.
 //
 // Controls, per panel
 //   left-drag    orbit          middle-drag    pan          wheel    zoom
@@ -101,6 +101,14 @@ EXAMPLE("shaped-viewer/lights")
             auto scene = view.add_scene();
             scene.add_mesh(stage);
             scene.add_sphere(tg::sphere3f(tg::pos3f(0.9f, 0.6f, 0.2f), 0.6f));
+
+            // A row of posts behind them: their shadows are what tell the kinds apart.
+            // A point's fan out from under it, a parallel light's run side by side, and a sun's blur as they lengthen.
+            for (auto i = 0; i < 5; ++i)
+            {
+                auto const x = -2.2f + 1.1f * float(i);
+                scene.add_line(tg::segment3f(tg::pos3f(x, 0, 1.5f), tg::pos3f(x, 1.4f, 1.5f)), 0.06f);
+            }
             return scene;
         };
 

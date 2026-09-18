@@ -20,6 +20,7 @@ scene.add_light("key", sv::light::spot(p, down, 25_deg_f), {.intensity = 800, .u
 ```
 
 The `shaped-viewer/lights` example puts every kind side by side over one stage — [lights.cc](../examples/lights.cc).
+`shaped-viewer/light-stage` puts colored lights of every kind into one scene at once — [light-stage.cc](../examples/light-stage.cc).
 
 `sv::light` is **one record whatever the kind of light**, tagged by the path the integrator takes to sample it.
 Fixture factories — `point`, `spot`, `rect`, `directional`, `sun` — pick the path and fill its payload.
