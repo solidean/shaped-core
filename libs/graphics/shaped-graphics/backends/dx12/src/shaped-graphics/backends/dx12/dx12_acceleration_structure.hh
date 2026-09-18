@@ -8,9 +8,9 @@
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
 /// DirectX 12 bottom-level acceleration structure.
-/// The built structure lives in the storage buffer the base holds.
-/// This subclass keeps a typed handle to it, so a TLAS build can read its GPU virtual address — the AS location — without re-casting.
-/// Thin: the abstract base owns the lifetime and stats.
+/// DXR names a structure by the GPU virtual address of the buffer the driver built it into, so the buffer *is* the
+/// structure here — which is a D3D12 fact rather than a portable one, and why the base holds no handle to it.
+/// Thin otherwise: the abstract base owns the stats and the expiry protocol.
 class sg::backend::dx12::dx12_blas final : public sg::blas
 {
 public:
@@ -20,18 +20,20 @@ public:
               isize update_scratch_size_in_bytes,
               sg::accel_build_flags build_flags,
               int geometry_count)
-      : sg::blas(storage,
-                 size_in_bytes,
-                 build_scratch_size_in_bytes,
-                 update_scratch_size_in_bytes,
-                 build_flags,
-                 geometry_count),
+      : sg::blas(size_in_bytes, build_scratch_size_in_bytes, update_scratch_size_in_bytes, build_flags, geometry_count),
         _dx12_storage(cc::move(storage))
     {
     }
 
-    /// The storage buffer as a dx12_buffer — its GPU virtual address is the acceleration structure location.
+    /// The storage buffer — its GPU virtual address is the acceleration structure location.
     dx12_buffer_handle _dx12_storage;
+
+private:
+    void on_expired() const override
+    {
+        if (_dx12_storage)
+            _dx12_storage->expire();
+    }
 };
 
 /// DirectX 12 top-level acceleration structure, the same shape as dx12_blas.
@@ -46,8 +48,7 @@ public:
               sg::accel_build_flags build_flags,
               int instance_count,
               cc::vector<sg::blas_handle> referenced_blases)
-      : sg::tlas(storage,
-                 size_in_bytes,
+      : sg::tlas(size_in_bytes,
                  build_scratch_size_in_bytes,
                  update_scratch_size_in_bytes,
                  build_flags,
@@ -58,4 +59,11 @@ public:
     }
 
     dx12_buffer_handle _dx12_storage;
+
+private:
+    void on_expired() const override
+    {
+        if (_dx12_storage)
+            _dx12_storage->expire();
+    }
 };

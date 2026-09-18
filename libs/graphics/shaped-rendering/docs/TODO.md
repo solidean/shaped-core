@@ -38,11 +38,6 @@ Bigger design intent lives in [structure.md](structure.md).
 
 Windowing:
 
-- **macOS has no `native_window()` mapping.**
-  `sg::window_platform` names win32, xlib, xcb and wayland, and nothing there covers cocoa.
-  A `CAMetalLayer` from `SDL_PROP_WINDOW_COCOA_WINDOW_POINTER` is what a metal backend would want, and there is no metal backend to design it against.
-  Until then a macOS window returns an invalid handle, which is honest — nothing there can present.
-
 - **wayland is currently off in practice.**
   [extern/sdl3](../../../../extern/sdl3/CMakeLists.txt) forces `SDL_WAYLAND ON`, but SDL's wayland backend pkg-checks for `wayland-client`, `wayland-egl`, `wayland-cursor`, `egl` and `xkbcommon` —
   and degrades to X11-only, without an error, if any is missing.

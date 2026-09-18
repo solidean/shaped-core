@@ -204,7 +204,11 @@ Not invariants — v1 shortcuts:
 - **`ctx.download` has no sink form.**
   The packers underneath support one, so it is a small addition — but an async download's whole point is a future
   carrying bytes, and a sink form of it would return a future carrying nothing.
-- **dx12 only**, like the async tier it rides on.
+- **dx12 and metal**, like the async tier it rides on; vulkan has neither yet.
+  The two carry it differently: dx12 shares one window packer between the async and streaming tiers, so its ratio
+  decides who fills the next window.
+  Metal's async transfers never queue — unified memory lets the caller stage and commit on the spot — so a stream
+  contends only with other streams there, and the ratio knobs have nothing to arbitrate.
 
 ## See also
 

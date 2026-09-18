@@ -115,6 +115,12 @@ namespace
         return cc::error("this build has no Wayland surface support");
 #endif
     }
+    case sg::window_platform::cocoa:
+        // A CAMetalLayer is Metal's presentation surface, and the vulkan backend has no route to one.
+        // MoltenVK's VK_EXT_metal_surface would be that route, and this backend requires VK_EXT_descriptor_buffer,
+        // which MoltenVK does not implement.
+        // So this is a permanent refusal rather than a missing arm.
+        return cc::error("the vulkan backend cannot present to a CAMetalLayer");
     case sg::window_platform::web_canvas:
         return cc::error("vulkan cannot present to a web canvas; that is the webgpu backend's");
     }

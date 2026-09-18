@@ -2,9 +2,11 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/fwd.hh> // sg::submission_token
+#include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
@@ -83,4 +85,47 @@ ASYNC_INVOCABLE_TEST("sg - submission tokens advance across submits", (sg::conte
     co_await ctx->idle_completion();
     CHECK(ctx->is_submission_complete(first));
     CHECK(ctx->is_submission_complete(second));
+}
+
+// A recorded download is a promise to settle the future, and a list that never runs still has to keep it — as a
+// cancellation, which is what sg::bytes_future documents.
+// Leaving it unsettled is the failure this pins: the caller waits on bytes that will never arrive.
+
+INVOCABLE_TEST("sg - dropping a list cancels the downloads it recorded", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buffer != nullptr);
+
+    auto cmd = ctx->create_command_list();
+    auto const download = cmd->download.bytes_from_buffer(buffer, 0, 256);
+    REQUIRE(download.is_valid());
+    CHECK(!download.is_ready());
+
+    ctx->drop_command_list(cc::move(cmd));
+
+    // Settled, and settled on the error channel — which is what try_get_bytes reporting nothing means once ready.
+    CHECK(download.is_ready());
+    CHECK(!download.try_get_bytes().has_value());
+}
+
+INVOCABLE_TEST("sg - a list destroyed without submit or drop cancels its downloads", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buffer != nullptr);
+
+    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
+
+    auto download = sg::bytes_future();
+    {
+        auto cmd = ctx->create_command_list();
+        download = cmd->download.bytes_from_buffer(buffer, 0, 256);
+        // cmd leaves scope neither submitted nor dropped
+    }
+
+    CHECK(download.is_ready());
+    CHECK(!download.try_get_bytes().has_value());
 }

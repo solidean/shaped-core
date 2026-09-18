@@ -76,12 +76,17 @@ set(SDL_DUMMYVIDEO ON CACHE BOOL "" FORCE)
 set(SDL_OFFSCREEN ON CACHE BOOL "" FORCE)
 
 # Graphics-API loaders.
-# SDL needs these only to hand out a GL/Vulkan/Metal-capable window, which we never ask for.
-# Our swapchain comes from shaped-graphics and wants nothing but the native handle.
+# SDL needs GL and Vulkan only to hand out a window those APIs can draw into, which we never ask for:
+# our swapchain comes from shaped-graphics and wants nothing but the native handle.
 set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
 set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
 set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
-set(SDL_METAL OFF CACHE BOOL "" FORCE)
+
+# Metal is the exception, because on cocoa the native handle IS a Metal object.
+# A CAMetalLayer is the only surface Metal presents into, and SDL_Metal_GetLayer is what hands one out through plain C —
+# so sg's metal backend reaches a window without an NSView or a line of Objective-C.
+# Off, SDL_CreateWindow refuses SDL_WINDOW_METAL and macOS has no windowed presentation at all.
+set(SDL_METAL ON CACHE BOOL "" FORCE)
 
 # Both Linux window systems stay in — which one a machine runs is a runtime fact.
 # SDL loads them dynamically, so a machine missing one is fine at build time and at run time.

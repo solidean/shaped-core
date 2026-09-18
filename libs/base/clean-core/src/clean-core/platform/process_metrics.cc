@@ -162,7 +162,10 @@ cc::result<cc::process_usage, cc::query_error> read_usage()
 
     auto out = cc::process_usage();
     out.resident_bytes = i64(info.resident_size);
-    out.peak_resident_bytes = i64(info.resident_size_max);
+
+    // resident_size_max trails a growing process by a page, for the reason PeakWorkingSetSize does on Windows above —
+    // one arm64 page is exactly the 16 KiB the test caught it short by.
+    out.peak_resident_bytes = cc::max(i64(info.resident_size_max), out.resident_bytes);
 
     // phys_footprint is what Activity Monitor shows as a process's memory, and virtual_size is the reserved address
     // space — which on Darwin is enormous and means nothing.

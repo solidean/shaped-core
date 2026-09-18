@@ -51,6 +51,12 @@ option(SC_USE_VENDORED_MBEDTLS "Build the in-tree vendored Mbed TLS (OFF expects
 # reading them back is a parser rather than a query, and DXC emits no reflection container for a -spirv compile.
 option(SC_USE_VENDORED_SPIRV_REFLECT "Build the in-tree vendored SPIRV-Reflect (OFF expects an external `spirv-reflect` target)" ON)
 
+# metal-cpp, Apple's header-only C++ interface to Metal, Foundation and QuartzCore.
+# The whole of shaped-graphics-metal is written against it, which is what keeps Objective-C++ out of the tree —
+# our format, lint and PCH tooling all speak only ('.cc', '.hh'), so a `.mm` source would mean editing the dev driver first.
+# Apple-only by construction, so the add_subdirectory below is gated rather than this option.
+option(SC_USE_VENDORED_METAL_CPP "Build the in-tree vendored metal-cpp (OFF expects an external `metal-cpp` target)" ON)
+
 # Dear ImGui, tracked on the docking branch.
 # Consumed by shaped-rendering, which draws it through sg —
 # upstream's own per-API backends are not vendored, so nothing here pulls in native graphics calls.
@@ -124,6 +130,12 @@ endif()
 
 if(SC_USE_VENDORED_IMGUI)
     add_subdirectory(imgui)
+endif()
+
+# APPLE covers macOS and iOS alike, which is the platform set metal-cpp compiles on at all.
+# The metal backend gates itself on the target existing, so a non-Apple build simply never sees one.
+if(SC_USE_VENDORED_METAL_CPP AND APPLE)
+    add_subdirectory(metal-cpp)
 endif()
 
 # The four fetched deps below are host-side, so a cross-target build must not pick them up.

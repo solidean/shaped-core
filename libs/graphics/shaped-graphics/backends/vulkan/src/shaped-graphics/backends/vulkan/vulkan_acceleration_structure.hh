@@ -15,8 +15,8 @@
 /// DXR names an acceleration structure by the GPU address of its storage, so dx12's subclasses hold nothing but a
 /// typed handle to that buffer; here the object is created explicitly and is what a build and a trace refer to.
 ///
-/// It owns no memory of its own — the storage buffer does — so the object is destroyed when this is, and the buffer
-/// follows the ordinary expiry path the base already runs.
+/// It owns no memory of its own — the storage buffer does — so the object is destroyed when this is, and expiry
+/// releases the buffer under it.
 
 class sg::backend::vulkan::vulkan_blas final : public sg::blas
 {
@@ -30,12 +30,7 @@ public:
                 isize update_scratch_size_in_bytes,
                 sg::accel_build_flags build_flags,
                 int geometry_count)
-      : sg::blas(storage,
-                 size_in_bytes,
-                 build_scratch_size_in_bytes,
-                 update_scratch_size_in_bytes,
-                 build_flags,
-                 geometry_count),
+      : sg::blas(size_in_bytes, build_scratch_size_in_bytes, update_scratch_size_in_bytes, build_flags, geometry_count),
         _ctx(ctx),
         _vulkan_storage(cc::move(storage)),
         _accel(accel),
@@ -51,6 +46,13 @@ public:
     /// The structure object, and the device address a TLAS instance names it by.
     VkAccelerationStructureKHR _accel = VK_NULL_HANDLE;
     VkDeviceAddress _address = 0;
+
+private:
+    void on_expired() const override
+    {
+        if (_vulkan_storage)
+            _vulkan_storage->expire();
+    }
 };
 
 class sg::backend::vulkan::vulkan_tlas final : public sg::tlas
@@ -66,8 +68,7 @@ public:
                 sg::accel_build_flags build_flags,
                 int instance_count,
                 cc::vector<sg::blas_handle> referenced_blases)
-      : sg::tlas(storage,
-                 size_in_bytes,
+      : sg::tlas(size_in_bytes,
                  build_scratch_size_in_bytes,
                  update_scratch_size_in_bytes,
                  build_flags,
@@ -86,4 +87,11 @@ public:
     vulkan_buffer_handle _vulkan_storage;
     VkAccelerationStructureKHR _accel = VK_NULL_HANDLE;
     VkDeviceAddress _address = 0;
+
+private:
+    void on_expired() const override
+    {
+        if (_vulkan_storage)
+            _vulkan_storage->expire();
+    }
 };

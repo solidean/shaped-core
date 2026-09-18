@@ -3,6 +3,32 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **The metal backend serializes no pipeline blob.**
+  `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
+  caller persisting a blob across runs gets nothing to persist and every build is a cold one.
+  It is not a missing call: sg's surface is **one blob per pipeline**, and Metal 4's `MTL4Archive` is **one store per
+  compiler** that accumulates every pipeline built through it.
+  dx12 hands back a `ID3D12PipelineState` blob and vulkan gives each pipeline a `VkPipelineCache` of its own; neither
+  shape exists here.
+  The options are an archive per context serialized as a whole (which sg's per-pipeline key cannot address), an
+  archive per pipeline (one compiler each, which is heavy), or a surface change so a backend may own the store.
+  Pinned as deliberate by `sg metal - a compute pipeline builds from a metal library`, so closing it is a failing test
+  rather than something nobody notices.
+
+- **`context::_device_lost` is a plain bool, and metal writes it from a driver thread.**
+  Every other piece of sticky context state is guarded or atomic; this one is a bare `bool` set by `mark_device_lost`
+  and read by `is_device_lost` on any thread.
+  It was sound while no backend wrote it from a thread sg does not own.
+  Metal is the first that does: its only error channel is the `MTL4CommitFeedback` handler, which runs on a dispatch
+  queue Apple owns, and that handler calls `report_feedback_error` and so `mark_device_lost`.
+  dx12 polls `GetDeviceRemovedReason` from the calling thread and vulkan's debug callback normally arrives on it too,
+  so neither backend exposed this.
+  The race is benign in practice — a sticky flag written once with one value — and it is still a data race a
+  sanitizer is entitled to report, on a field every backend reads per frame.
+  The fix is `cc::atomic<bool>` plus the release/acquire pair, which costs nothing on the read path; what makes it a
+  question rather than a patch is that `SC_THREADS=OFF` turns `cc::atomic` back into a plain value, and a driver
+  thread does not go away with that flag — so it may want the same treatment metal's own callback state got.
+
 - **Transfer.** Still open:
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
@@ -13,7 +39,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The async tier does not — a download job reads `_pending_async_upload_value` and no stream value, and the upload side mirrors that.
     So `ctx.stream.bytes_to_buffer` followed by `ctx.download.bytes_from_buffer` on one resource is unordered, and the readback can beat the stream.
     Found while writing [tests/transfer/stream-test.cc](../tests/transfer/stream-test.cc)'s stream-wait test, whose first draft used the async tier as the consumer and read zeroes on dx12.
-    The fix mirrors what the command lists already do, in the async enqueue paths of both backends.
+    The fix mirrors what the command lists already do, in dx12's async enqueue paths.
+    Metal already does it: its streaming timeline is per resource, so an async transfer waits on the same value a
+    command list would — which is also what makes `promote_to_async` a pure statement of intent there.
+    The reverse edge there — a *stream* ordering behind an in-flight async transfer — was missing until the tier-1
+    sweep read zeroes out of a texture an async upload was still filling, and `order_stream_copy` now waits on the
+    transfer timeline as well.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.
@@ -95,12 +126,60 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
-  The abstract types already carry the stats a refit needs — build and update scratch sizes, flags, the storage handle.
+  The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
   - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
+- **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
+  `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
+  nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
+  queue-scoped form or an encoder boundary, which is the raster milestone's problem".
+  Raster landed after that was written, so the premise no longer holds.
+  The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
+  `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
+  Read that with the queue barrier pair's limit in mind: it carries visibility, and a queue wait between two commits
+  leaves the consumer half with nothing to find, which is why cross-list *ordering* now rides the submission timeline
+  instead.
+  What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
+  clamped away, and that cannot be established without a Metal device.
+  If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
+  rather than leaving a deferral to a milestone that has already arrived.
+
+- **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**
+  `.shaped-lint.yml` allows that by name.
+  Converting them was tried and reverted while `SC_THREADS=OFF` was still buildable on macOS, since it aborted there at the first download.
+  That build no longer exists: `SC_THREADS=OFF` is refused on Apple targets, per [docs/platforms.md](../../../../docs/platforms.md#threading-sc_threads).
+  So the conversion is unblocked whenever someone wants it.
+
+- **No metal shader toolchain exists.**
+  `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
+  `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.
+  So the metal backend's ray-tracing and compute paths are reachable by a caller who brings their own bytecode and by nobody else.
+  The agreed shape for a fixture is HLSL run through SPIRV-Cross once by hand, with all three artifacts checked in.
+  That matters because the argument-buffer layout was chosen to match what SPIRV-Cross emits, so a hand-written kernel would pin a convention no real pipeline produces.
+  **What blocks it is DXC, and only on the host.**
+  Microsoft ships no macOS release binary, and building it from source is an LLVM-scale build.
+  [extern/dxc/dependency.yml](../../../../extern/dxc/dependency.yml) records that as `unavailable_on: [macos]`.
+  SPIRV-Cross is not vendored at all, but it is plain CMake and would build here; it is not the constraint.
+
+  That splits the work into two pieces with different costs, and they are worth deciding separately.
+  Regenerating the *fixtures* needs DXC once, on any machine — the artifacts are checked in either way, so a Windows or Linux host does it and macOS never needs a compiler.
+  A *toolchain* — a metal arm in `shaped-shader-library`, compiling at build time — is what genuinely needs DXC where the build runs, and there is no macOS path to HLSL → SPIR-V today.
+  Apple's own `metal` command-line compiler is the third shape.
+  It takes MSL rather than HLSL, so it would serve metallibs while giving up the one-source-two-backends property the HLSL route exists for.
+
+  **The stand-in is `backends/metal/tests/raytrace.metal`**, hand-written and marked temporary in its own comment — regenerate it from HLSL once the toolchain exists.
+
+- **Metal implements refit, compaction and placement natively, and sg exposes none of them.**
+  Recorded here so the eventual surface is designed against three APIs rather than two.
+  `MTL4::ComputeCommandEncoder` carries `refitAccelerationStructure(source, descriptor, destination, scratch)`, with `VertexData` / `PerPrimitiveData` options.
+  Beside it are `copyAndCompactAccelerationStructure` and `writeCompactedAccelerationStructureSize`.
+  `MTL::Device::accelerationStructureSizes` already returns the refit scratch, which is the number `update_scratch_size_in_bytes()` holds a slot for.
+  Placement is `heapAccelerationStructureSizeAndAlign` plus `MTL::Heap::newAccelerationStructure(size, offset)`.
+  All three APIs support refitting in place and into a separate structure, so a refit call would not be a Metal shape the others get bent into.
+
 - **Raytracing pipeline.** The dx12 trace path is in — see [concepts/raytracing-pipeline.md](concepts/raytracing-pipeline.md).
   Still open: **local root signatures** and a **state-object cached blob**.
   Plus a **dedicated shader-table buffer**: `raytracing_shader_table` exists, but its records sit in a plain shader-readable buffer as a stand-in.
@@ -176,9 +255,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Thread model nuance:** `sg::thread_model` says which thread may make the bound calls.
   Grow it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
 - **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
-  dx12 and vulkan are real, windowed and headless; webgpu presents headless and to a canvas.
+  dx12, vulkan and metal are real, windowed and headless; webgpu presents headless and to a canvas.
   Still open:
-  - a **cocoa arm on `sg::window_platform`**, for the metal backend that would consume it — see shaped-rendering's [TODO](../../shaped-rendering/docs/TODO.md);
   - **deeper HDR** — metadata and tone-mapping beyond the colorspace set.
     Including whether the request was *granted*: `enable_hdr` is best-effort on dx12 and vulkan, and webgpu's canvas has no HDR arm yet, and `is_hdr_enabled()`
     reports what was asked for, so nothing tells a caller which colorspace it actually got;

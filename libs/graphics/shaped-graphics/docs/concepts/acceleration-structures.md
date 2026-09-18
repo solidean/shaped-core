@@ -14,8 +14,16 @@ The resources are **plain vocabulary types with no typed wrapper**, and **creati
 They do so because they carry a *user-defined element type* worth layering type safety over.
 An acceleration structure has none: it is an opaque structure the driver builds and the tracer reads, with nothing to type.
 So there is no `raw_blas` — **`blas` and `tlas` are the resources directly**, handled as `blas_handle` / `tlas_handle` (`std::shared_ptr<... const>`, shared-immutable like every sg resource handle).
-Each is abstract; a backend subclasses it and owns one opaque [`accel_structure_storage`](../../src/shaped-graphics/types.hh) buffer plus cheaply-derived stats.
+Each is abstract; a backend subclasses it, owns the native structure, and the cheaply-derived stats live on the base.
 That a backend may represent BLAS and TLAS with the same native object is its business — sg keeps them distinct.
+
+**The base holds no handle to the structure's memory**, and that is a portability choice rather than an omission.
+DXR names a structure by the GPU virtual address of the buffer the driver built it into, so on dx12 the buffer *is* the structure.
+Vulkan wraps a `VkAccelerationStructureKHR` around such a buffer.
+Metal's `MTL::AccelerationStructure` derives from `MTL::Resource` and is not a buffer at all.
+There is no `MTLBuffer` in the caller's hands at any point, and it is named by a `gpuResourceID()` instead.
+So "one opaque storage buffer per structure" was a D3D12 fact that had leaked into the portable layer, and `size_in_bytes()` answers the only question it was being asked.
+Releasing whatever backs the structure is the backend's, through the `on_expired()` hook.
 
 ## A BLAS is built from geometry; a TLAS from instances that reference BLASes
 
@@ -25,15 +33,16 @@ buffer for procedural primitives), an opaque flag, and an optional per-geometry 
 A **TLAS** takes *instances*. Each instance names a `blas_handle`, a world transform, and a few small
 fields (below). Holding the handle is the ownership edge: **a TLAS instance keeps its BLAS alive**, and the
 **BLAS must be fully built before the TLAS that references it is built** — the top-level build reads each
-referenced BLAS's storage.
+referenced BLAS.
 
 Build-input buffers — vertices, indices, AABBs, transforms — must carry the [`accel_structure_build_input`](../../src/shaped-graphics/types.hh) usage.
-The result lives in an `accel_structure_storage` buffer.
+What the result lives in is the backend's, and differs by API — see the paragraph above.
 
 ## Build inputs are a backend-neutral common denominator
 
-The input vocabulary is deliberately the **intersection of DXR and Vulkan RT**, so the same description
-builds on either without reshaping:
+The input vocabulary is deliberately the **intersection of every supported backend**, so the same description
+builds on any of them without reshaping.
+It was computed against DXR and Vulkan RT first, and Metal — checked field by field when that backend landed — is no narrower:
 
 - **Vertices are `float3` only.** Half/normalized/integer position formats exist in one API or the other,
   not both; excluded until a capability query justifies them.
@@ -54,6 +63,8 @@ Flags select trade-offs the driver bakes into the structure; they cannot be chan
 - **fast-trace vs fast-build** — optimize traversal speed (default) or build speed.
 - **allow-update** — permit later *refit* (cheap rebuild reusing topology). Must be set at build time.
 - **allow-compaction** (BLAS only) — enable copying the built structure into a smaller buffer.
+  Metal needs no opt-in for this and ignores the flag: `copyAndCompactAccelerationStructure` works on any built structure, where DXR and Vulkan want it declared at build.
+  That is Metal asking for less ceremony rather than offering less capability.
 - **minimize-memory** (TLAS only) — smaller scratch/result at some build cost.
 
 ## Building is a recorded command, so it lives on `cmd.raytracing`
@@ -62,7 +73,7 @@ Every other sg resource is created by a `ctx.*` factory that just allocates.
 An acceleration structure cannot be: its result size comes from a **prebuild query over the build inputs**, and producing it is GPU work.
 Allocation and build are therefore one **recorded** step, and sg never records command work from a `ctx.*` method.
 So creation is a command-list op on the **`cmd.raytracing`** scope, which also carries `dispatch_rays`.
-`cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the result buffer, record the build with **transient** scratch, and return the handle.
+`cmd.raytracing.build_blas(...)` / `build_tlas(...)` size and allocate the structure, record the build with **transient** scratch, and return the handle.
 
 The returned handle is **persistent — valid across epochs**.
 "How long may I use this handle" *is* the persistent-vs-transient axis — see [memory](memory.md).
@@ -71,7 +82,7 @@ A **transient (single-epoch) variant may come later** for structures rebuilt fro
 Build scratch is transient either way.
 
 Ordering is inferred, never hand-synchronized.
-A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over its storage, and `accel_read` over each referenced BLAS.
+A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over the structure it produces, and `accel_read` over each referenced BLAS.
 A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
 ## Load-bearing invariants
@@ -82,8 +93,8 @@ Preserve these; the rest is tuning:
    24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`. Widen only behind a capability query.
 2. **A referenced BLAS is fully built before its TLAS**, and a `tlas` instance holds a `blas_handle` so the
    BLAS outlives every TLAS using it.
-3. **One opaque `accel_structure_storage` buffer per structure; scratch is transient** (single-epoch),
-   never retained.
+3. **Scratch is transient** (single-epoch), never retained.
+   What the built structure itself *is* belongs to the backend — a buffer on DXR, an object of its own on Metal.
 4. **Build/refit/trace ordering is inferred** from `accel_build`/`accel_write`/`accel_read` + the
    `raytracing` stage — resources are never hand-synchronized.
 
@@ -101,17 +112,38 @@ Preserve these; the rest is tuning:
   D3D12 forbids transitioning an AS resource, and both the enhanced AS barriers and `BuildRaytracingAccelerationStructure` require that state.
   This is the one buffer usage that overrides the backend's default COMMON creation, in [`dx12_buffer.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc).
 
-The **vulkan** backend stubs the path until its own raytracing milestone.
-`to_vk_buffer_usage` does not yet map the `accel_structure_*` usages, nor add the buffer device address they need.
-Placed allocations, which a future transient variant would want, are not implemented either.
+## metal implementation
+
+- Sizing via `MTL::Device::accelerationStructureSizes`, which answers the result, build-scratch and **refit**-scratch sizes in one query.
+  So `update_scratch_size_in_bytes()` is filled in from the start, long before anything refits.
+- The structure is minted by `newAccelerationStructure(size)` and built on the **compute encoder**.
+  MTL4 puts `buildAccelerationStructure` alongside dispatch and the copies that stand in for a blit encoder, so there is no separate acceleration-structure encoder to open.
+- Residency is declared rather than inferred, like every other Metal resource.
+  A structure outside the queue's residency set is simply not there when the build runs, with no validation message to say so.
+- **MTL4 requires the instance descriptor Metal calls "indirect".**
+  `setInstancedAccelerationStructures` — the side array the default and userID descriptors index into — exists only on the Metal 3 `MTL::InstanceAccelerationStructureDescriptor`.
+  So a TLAS built through MTL4 uses `MTL::IndirectAccelerationStructureInstanceDescriptor`, whose `accelerationStructureID` names each BLAS by handle.
+  Despite the name that is the *direct* analogue of DXR's by-address reference.
+  Its fields — `options`, `mask`, `intersectionFunctionTableOffset`, `userID`, `transformationMatrix` — are exactly `sg::tlas_instance`'s.
+  The name invites picking the wrong one.
+- **Row-major 3×4 transforms are taken verbatim**, through `MTL::MatrixLayoutRowMajor` on the geometry descriptor — no transpose.
+  The *instance* transform is the exception: `PackedFloat4x3` is four packed `float3` columns and its layout is fixed, so that one is transposed on the way in.
+- The four `MTL::AccelerationStructureInstanceOptions` bits map 1:1 onto `instance_cull_mode` plus `opaque_override`.
+- `metal-cpp`'s umbrella `Metal.hpp` does **not** include `MTL4AccelerationStructure.hpp`, and nothing else in the package does either.
+  So those descriptors need that header named directly, unlike every other MTL4 type.
+
+The **vulkan** backend builds through `VK_KHR_acceleration_structure`, with `to_vk_buffer_usage` mapping both
+`accel_structure_*` usages and the buffer device address they need.
+Placed allocations, which a future transient variant would want, are not implemented there.
 
 ## What's implemented today vs deferred
 
-**Today:** the single-shot build path.
+**Today:** the single-shot build path, on all three backends.
 `sg::blas` / `sg::tlas` with `blas_handle` / `tlas_handle`, plus the input vocabulary: `blas_triangles`, `blas_aabbs`, `tlas_instance`, `accel_build_flags`, `instance_cull_mode`, `index_format`.
 On the `cmd.raytracing` scope: `build_blas` for triangles and procedural AABBs, `build_tlas`, and `is_supported()`.
 **dx12** is the reference realization — prebuild-sized result plus transient scratch, `BuildRaytracingAccelerationStructure`, gated on `D3D12_RAYTRACING_TIER` — and it runs on WARP.
-**vulkan** stubs the build (`CC_UNREACHABLE`) and reports `is_supported() == false` until its raytracing milestone.
+**metal** builds on the compute encoder, as above, and reports `is_supported() == true` on every device above its Metal 4 floor.
+**vulkan** builds through `VK_KHR_acceleration_structure` and reports `is_supported()` from `sg::feature::raytracing`, so a device without the extension answers false.
 
 **The trace side is in.**
 A `tlas` binds as a shader resource through the `acceleration_structure` binding type and view kind — inline `RayQuery` in a compute dispatch.

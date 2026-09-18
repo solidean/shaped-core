@@ -85,6 +85,13 @@ The vulkan backend rejects one by name rather than leaving it to the validation 
 The portable rule is the one `binding`'s own documentation already implies: `index` is the address *within its group*, and two things at one address are one thing.
 A layout reflected from HLSL for a Vulkan target does not hit this, because `[[vk::binding]]` annotations make the shader state its own set and binding — see [shaders](../shaders.md).
 
+**An array binding occupies `count` indices, so unique indices alone are not enough.**
+An array at index 0 with `count = 4` addresses 0, 1, 2 and 3, and a scalar binding at index 1 is then at an address the array already owns.
+The metal backend writes both into the same argument-buffer slot and the second silently wins; nothing reports it on any backend.
+**Space array bindings by their counts** — the rule a layout must follow, rather than a check a layout builder performs.
+There is no check because a layout is built often — once per pipeline, and again per staging group.
+A pairwise range test over every pair of bindings is a cost every correct layout would pay for a mistake a caller can simply not make.
+
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.

@@ -121,6 +121,16 @@ A transfer whose future was dropped outlives the test that started it, and insta
   The bound calls assert at the device and queue accessors and at the command list's encoder, so a wrong thread is named before WebGPU fails obscurely.
   Its layouts make their WebGPU objects on first use, and a WebGPU handle dropped off main is released there at the next advance.
 
+- **metal** — `multi_threaded`, mirroring dx12.
+  The command-list slot allocator, the residency set, the staging rings and the transfer system's pending map are all mutex-guarded.
+  The submission token is assigned together with the queue commit and shared-event signal under one lock, so token order equals signal order.
+  The transfer queue has a lock of its own covering claim, record, commit and signal, because there its claim and its commit sit at opposite ends of recording a copy.
+  `advance_epoch` and `shutdown` are externally synchronized.
+  One divergence: **pipeline compilation is serialized process-wide**, because concurrent `MTL4Compiler` builds abort inside the driver.
+  That is a lock the other two backends do not need — see [the backend's readme](../../backends/metal/readme.md).
+  A second divergence is invisible from sg's side.
+  Metal's own completion handlers run on a dispatch queue whatever `SC_THREADS` says, so the state they touch is guarded by a lock that does not compile away.
+
 ## See also
 
 - [context](context.md) — the operations this classifies, and which scope each one lives on.
