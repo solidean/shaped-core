@@ -41,9 +41,20 @@ if(EMSCRIPTEN)
     # cc::stacktrace's Emscripten backend renders whatever emscripten_get_callstack can see, and without this it can
     # see only numbers -- which is the difference between a usable assert and a useless one.
     # Release is left stripped: those names are a large part of the size a release wasm build exists to avoid.
+    #
+    # It also decides CC_WASM_KEEPS_FRAME_STRUCTURE, which is a separate observation about the same builds.
+    # A Release wasm build collapses calls that the source keeps apart: two functions marked CC_DONT_INLINE, neither
+    # tail-calling, still arrive as one frame in the engine's stack trace, while the same source at RelWithDebInfo
+    # reports both.
+    # Which stage does it -- LLVM, or the Binaryen pass that runs after and never saw the C++ attribute -- is not
+    # pinned down here, so this says only what is measured.
+    # Nothing but a test should care: a walk reports the frames that exist, and these are the frames that exist.
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
         add_compile_options(--profiling-funcs)
         add_link_options(--profiling-funcs)
+        add_compile_definitions(CC_WASM_KEEPS_FRAME_STRUCTURE=1)
+    else()
+        add_compile_definitions(CC_WASM_KEEPS_FRAME_STRUCTURE=0)
     endif()
 
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they

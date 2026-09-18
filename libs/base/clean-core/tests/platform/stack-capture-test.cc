@@ -2,6 +2,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/impl/wasm_frames.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
@@ -22,6 +23,13 @@ using namespace cc::primitive_defines;
 namespace
 {
 constexpr isize max_frames = 64;
+
+/// How many frames two otherwise-comparable captures are allowed to disagree on.
+///
+/// Two of them are ours — each capture's own call site, and the call site of whatever took both.
+/// The rest is the platform's: a toolchain may interpose frames between ours that no source-level call explains,
+/// and wasm built with -fexceptions does, routing anything that might throw through a JS `invoke_*` trampoline.
+constexpr isize max_interposed_frames = 4;
 
 /// A capture plus its frames, so a test can compare two of them.
 struct capture
@@ -76,6 +84,18 @@ CC_DONT_INLINE capture take_at_depth(int depth)
     while (shared < a.size() && shared < b.size() && a[a.size() - 1 - shared] == b[b.size() - 1 - shared])
         ++shared;
     return shared;
+}
+
+/// Captures at several depths from ONE call site, which is what makes the counts comparable.
+///
+/// The same rule take_both follows, and it bites harder here: a call site is free to need cleanup the one beside
+/// it does not, and under -fexceptions that cleanup is a JS trampoline frame the engine reports.
+/// So three captures written as three statements measure three call sites, not three depths.
+CC_DONT_INLINE void take_at_depths(cc::span<int const> depths, cc::span<capture> out)
+{
+    for (auto i = isize(0); i < depths.size(); ++i)
+        out[i] = take_at_depth(depths[i]);
+    g_no_tail_call = int(out[0].result.count);
 }
 
 CC_DONT_INLINE capture take_one_deeper()
@@ -167,12 +187,22 @@ TEST("stack capture - a deeper capture extends a shallower one")
     take_both(shallow, deep);
 
     REQUIRE(shallow.result.count > 3);
-    CHECK(deep.result.count == shallow.result.count + 1);
 
-    // One frame deeper, and everything above the innermost couple is the same ancestry.
-    // The two that may differ are each capture's own call site and take_both's, which calls the two helpers from two
+    // An exact count assumes the build reports a frame per call the source makes, which a Release wasm build does
+    // not — see CC_WASM_KEEPS_FRAME_STRUCTURE.
+    if (CC_WASM_KEEPS_FRAME_STRUCTURE)
+        CHECK(deep.result.count == shallow.result.count + 1);
+    else
+        CHECK(deep.result.count >= shallow.result.count);
+
+    // One frame deeper, and everything above the innermost few is the same ancestry.
+    //
+    // What may differ is each capture's own call site and take_both's, which calls the two helpers from two
     // different places — neither of which the walk has any say in.
-    CHECK(common_suffix(deep.frames, shallow.frames) >= shallow.result.count - 2);
+    // The budget is four rather than two because a platform may interpose frames of its own between ours: wasm
+    // built with -fexceptions routes a call that might throw through a JS `invoke_*` trampoline, which is a real
+    // frame the engine reports and nothing in this file put there.
+    CHECK(common_suffix(deep.frames, shallow.frames) >= shallow.result.count - max_interposed_frames);
 }
 
 TEST("stack capture - a recursive call site repeats once per level")
@@ -180,14 +210,29 @@ TEST("stack capture - a recursive call site repeats once per level")
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
 
-    auto const shallow = take_at_depth(2);
-    auto const deep = take_at_depth(6);
+    int const depths[] = {2, 6, 10};
+    capture taken[3];
+    take_at_depths(depths, taken);
+
+    auto const& shallow = taken[0];
+    auto const& middle = taken[1];
+    auto const& deep = taken[2];
 
     REQUIRE(shallow.result.count > 0);
 
     // Four more levels of the same call site, so four more frames — unless the capture ran out of room.
-    if (!deep.result.truncated && !deep.result.broken && !shallow.result.broken)
-        CHECK(deep.result.count == shallow.result.count + 4);
+    if (!deep.result.truncated && !deep.result.broken && !middle.result.broken && !shallow.result.broken)
+    {
+        // Four per four levels only where a call is a frame; elsewhere the levels must still cost something, and
+        // cost it evenly.
+        auto const first = middle.result.count - shallow.result.count;
+        auto const second = deep.result.count - middle.result.count;
+
+        CHECK(first > 0);
+        CHECK(second == first);
+        if (CC_WASM_KEEPS_FRAME_STRUCTURE)
+            CHECK(first == 4);
+    }
 
     // ... and they are literally the same address, because it is one call site.
     cc::set<void*> distinct;
@@ -234,8 +279,8 @@ TEST("stack capture - an empty output captures nothing and says so")
 
 TEST("stack capture - a scope frame stops the walk short")
 {
-    if (!cc::stack_capture_available())
-        SKIP("no stack walking on this platform");
+    if (!cc::stack_capture_supports_stop_frame())
+        SKIP("no stack addresses to bound a walk by on this platform");
 
     auto const unbounded = take();
     REQUIRE(unbounded.result.count > 0);
@@ -258,6 +303,8 @@ TEST("stack capture - works on a thread we did not start it on")
 {
     if (!cc::stack_capture_available())
         SKIP("no stack walking on this platform");
+    if (!CC_HAS_THREADS)
+        SKIP("no threads in this build, so there is no second thread to walk");
 
     // The stack bounds are cached per thread, so a fresh thread exercises the query rather than the cache.
     isize count = 0;
@@ -296,3 +343,105 @@ TEST("stack capture - the available walk matches the platform")
     CHECK(!chase);
 #endif
 }
+
+// wasm has no walkable native stack, so its capture goes through the JS engine's frame text and the parser in
+// platform/impl/wasm_frames.hh.
+//
+// What recorded sample strings cannot check is the SKEW: how many of the capture's own frames sit above the caller.
+// Getting it wrong drops the caller's own frame and reports its parent as the innermost, which reads as correct and is
+// not — so it is pinned here rather than trusted.
+#if defined(__EMSCRIPTEN__)
+
+namespace
+{
+/// Deliberately not inlined, and deliberately not tail-calling, so each of these is a frame the engine reports.
+/// `g_no_tail_call` is what forces the second to have something left to do once the first returns — without it
+/// `return f(...)` is a jump and the frame is never pushed.
+CC_DONT_INLINE cc::stack_capture_result wasm_capture_at_depth_1(cc::span<void*> out)
+{
+    auto const r = cc::capture_stack(out);
+    g_no_tail_call = int(r.count);
+    return r;
+}
+
+CC_DONT_INLINE cc::stack_capture_result wasm_capture_at_depth_2(cc::span<void*> out)
+{
+    auto const r = wasm_capture_at_depth_1(out);
+    g_no_tail_call = int(r.count);
+    return r;
+}
+} // namespace
+
+TEST("capture_stack - wasm captures wasm frames")
+{
+    void* frames[64];
+    auto const result = wasm_capture_at_depth_1(frames);
+
+    REQUIRE(result.count > 0);
+
+    // **A wasm stack genuinely alternates**, so this counts rather than asserting about any one frame.
+    //
+    // Built with -fexceptions, a call that might throw goes wasm -> JS `invoke_*` trampoline -> wasm, and the engine
+    // reports that trampoline as a frame like any other.
+    // So JS frames appear THROUGHOUT a stack rather than only under it, and an assertion that the innermost is a wasm
+    // frame is simply false.
+    // What must hold is that most of the stack is ours.
+    auto wasm_frames = 0;
+    for (auto i = 0; i < result.count; ++i)
+        if ((reinterpret_cast<u32>(frames[i]) & cc::impl::wasm_js_frame_bit) == 0)
+            ++wasm_frames;
+
+    CHECK(wasm_frames > result.count / 2);
+}
+
+TEST("capture_stack - wasm's skew is right, so the caller is the innermost frame")
+{
+    if (!CC_WASM_KEEPS_FRAME_STRUCTURE)
+        SKIP("this build collapses calls the source keeps apart, so there is no skew to pin");
+
+    void* shallow[64];
+    void* deep[64];
+    auto const shallow_result = wasm_capture_at_depth_1(shallow);
+    auto const deep_result = wasm_capture_at_depth_2(deep);
+
+    REQUIRE(shallow_result.count > 0);
+    REQUIRE(deep_result.count > 0);
+
+    // One extra frame between the capture and this test, and exactly one extra frame reported.
+    CHECK(deep_result.count == shallow_result.count + 1);
+
+    // **This is what pins the skew**, and it is an equality rather than a count.
+    //
+    // Both stacks reach `cc::capture_stack` through the one call site inside `wasm_capture_at_depth_1`, so if the
+    // innermost frame reported is the caller of `capture_stack` — which is what the contract says — then both
+    // captures must report that same call site, and the addresses are equal.
+    //
+    // A skew one too large would instead report each capture's GRANDparent: this test's call site for the shallow
+    // one and `wasm_capture_at_depth_2`'s for the deep one, which are different places and compare unequal.
+    // A skew one too small reports a frame inside `cc::capture_stack` itself, which likewise differs from neither
+    // consistently nor usefully.
+    CHECK(shallow[0] == deep[0]);
+
+    // And the two stacks are otherwise the same stack, one frame apart: the shallow capture's second frame is
+    // this test, and the deep one's third is too -- different call sites in this body, hence compared from the
+    // frame above them, where both are this test's own caller.
+    REQUIRE(deep_result.count >= 4);
+    for (auto i = 2; i < shallow_result.count; ++i)
+        CHECK(shallow[i] == deep[i + 1]);
+}
+
+TEST("capture_stack - wasm is available and prices itself honestly")
+{
+    CHECK(cc::stack_capture_available());
+    CHECK(cc::stack_walk_available(cc::stack_walk::automatic));
+
+    // The whole reason the query exists: a caller that samples at a rate must be able to tell that this platform
+    // is three orders of magnitude off the cheap one.
+    CHECK(cc::stack_capture_cost_ns() > 1'000);
+
+    // No stack addresses here, so nothing to compare a stop frame against, and no foreign thread can be walked.
+    CHECK(!cc::stack_capture_supports_stop_frame());
+    CHECK(!cc::stack_capture_from_context_available());
+}
+
+#endif // __EMSCRIPTEN__

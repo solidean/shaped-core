@@ -38,6 +38,7 @@ add_library(clean-core
     src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/platform/impl/text_file.cc
+    src/clean-core/platform/impl/wasm_frames.cc
     src/clean-core/platform/system_info.cc
     src/clean-core/platform/system_identifier.cc
     src/clean-core/platform/resource_limits.cc
@@ -149,6 +150,7 @@ target_sources(clean-core
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
     src/clean-core/platform/impl/text_file.hh
+    src/clean-core/platform/impl/wasm_frames.hh
     src/clean-core/platform/system_info.hh
     src/clean-core/platform/system_identifier.hh
     src/clean-core/platform/resource_limits.hh
@@ -506,6 +508,7 @@ if(SC_BUILD_TESTS)
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
+        tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
         tests/platform/system_info-test.cc

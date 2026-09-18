@@ -108,11 +108,32 @@ namespace cc
 /// `automatic` is always available where any walk is.
 [[nodiscard]] bool stack_walk_available(cc::stack_walk walk);
 
+/// Whether `stop_frame` means anything in this build.
+///
+/// It names a STACK address, and wasm has no stack a program can address — the call stack lives inside the JS
+/// engine and a capture there reads code offsets out of frame text.
+/// So a stop frame is silently ignored rather than honored, and a profiling caller that bounds its walk by the
+/// innermost open scope gets the whole stack instead of a suffix of it.
+[[nodiscard]] bool stack_capture_supports_stop_frame();
+
 /// Whether a foreign thread's context can be walked at all.
 /// True only on Windows today, which is the only platform whose sampler runs outside the sampled thread.
 [[nodiscard]] bool stack_capture_from_context_available();
 
 /// Whether this build can walk a stack at all.
-/// Constant per platform, and false under Emscripten.
+/// Constant per platform.
 [[nodiscard]] bool stack_capture_available();
+
+/// Roughly what one capture costs on this platform, in nanoseconds.
+///
+/// **This is policy input, not a measurement of the last call.** It is a constant per platform, and it exists
+/// because the spread across them is three orders of magnitude — so a rate that is free on one platform is a
+/// permanent tax on another, and the only way a sampler or a logging policy can tell is to ask.
+///
+/// Chasing a frame pointer is a few nanoseconds a frame, unwinding from tables on Windows is roughly a
+/// microsecond for a deep stack, and wasm is **about ten microseconds**: there the only mechanism is asking the
+/// JS engine to format an error, which no amount of care on our side makes cheaper.
+///
+/// Zero where no capture is possible at all.
+[[nodiscard]] isize stack_capture_cost_ns();
 } // namespace cc
