@@ -161,13 +161,7 @@ if(SC_BUILD_TESTS)
         # Stage SDL3.dll next to the test binary so it starts.
         # SDL3::SDL3 is a real (not imported) shared target, so $<TARGET_RUNTIME_DLLS> reaches it through sr's PRIVATE link — no hand-listed DLL variable, unlike the DXC wiring.
         # The expression is empty off Windows.
-        if(WIN32)
-            add_custom_command(TARGET shaped-rendering-test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_RUNTIME_DLLS:shaped-rendering-test> $<TARGET_FILE_DIR:shaped-rendering-test>
-                COMMAND_EXPAND_LISTS
-            )
-        endif()
+        sc_stage_runtime_dlls(shaped-rendering-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-rendering-test>")
     endif()
 
     # The GPU tests run on the dx12 contexts tests/dx12-entry.cc brings up, and compile their shaders through DXC, so they need both the dx12 backend and a compiler.

@@ -123,6 +123,10 @@ include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 # CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (the nopch-* presets) turns every application into a no-op.
 include(PrecompiledHeaders)
 
+# Staging an executable's DLLs beside it on Windows (sc_stage_runtime_dlls), which the example and shader-package
+# helpers below both call.
+include(RuntimeDlls)
+
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
 # Release, but the inlining downgrade alone leaves heavily-inlined code several times slower (e.g. xxHash's
