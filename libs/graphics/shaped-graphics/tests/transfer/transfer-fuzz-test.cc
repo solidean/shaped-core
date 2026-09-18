@@ -213,8 +213,7 @@ ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const
                      auto dl = t.cmd->download.data_from_buffer<u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
-                     (void)co_await ctx->idle_completion();
-                     auto dl_data = dl.try_get_data().value();
+                     auto const dl_data = co_await dl.data();
 
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)
@@ -246,8 +245,7 @@ ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const
                          ref[i] = t.data[start + i];
 
                      auto dl = ctx->download.data_from_buffer<u32>(t.buffer, start, cnt);
-                     (void)co_await ctx->idle_completion();
-                     auto dl_data = dl.try_get_data().value();
+                     auto const dl_data = co_await dl.data();
 
                      CHECK(isize(cnt) == dl_data.size());
                      for (auto i = 0; i < cnt; ++i)
