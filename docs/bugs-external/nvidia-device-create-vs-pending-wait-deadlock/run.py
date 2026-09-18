@@ -26,7 +26,12 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
-SOURCE = HERE / "repro.cc"
+
+# Each binary: its source, and the libraries beyond vulkan-1 it links.
+BINARIES = {
+    "repro": (HERE / "repro.cc", []),
+    "cross": (HERE / "cross-api" / "repro.cc", ["d3d12", "dxgi"]),
+}
 
 
 def find_vulkan_sdk() -> Path | None:
@@ -42,26 +47,27 @@ def find_vulkan_sdk() -> Path | None:
     return None
 
 
-def build(sdk: Path, workdir: Path) -> Path | None:
-    """Compile repro.cc against the SDK with whatever compiler is on PATH.
+def build(sdk: Path, workdir: Path, name: str) -> Path | None:
+    """Compile one of BINARIES against the SDK with whatever compiler is on PATH.
 
     Returns the exe, or None when it could not be built.
     """
-    exe = workdir / "repro.exe"
+    source, libs = BINARIES[name]
+    exe = workdir / f"{name}.exe"
 
     if shutil.which("clang++"):
         cmd = [
             "clang++", "-O2", "-std=c++20",
-            f"-I{sdk / 'Include'}", str(SOURCE),
-            f"-L{sdk / 'Lib'}", "-lvulkan-1",
+            f"-I{sdk / 'Include'}", str(source),
+            f"-L{sdk / 'Lib'}", "-lvulkan-1", *(f"-l{lib}" for lib in libs),
             "-o", str(exe),
         ]
     elif shutil.which("clang-cl"):
         cmd = [
             "clang-cl", "/O2", "/std:c++20", "/EHsc",
-            f"/I{sdk / 'Include'}", str(SOURCE),
-            f"/Fe:{exe}", f"/Fo:{workdir / 'repro.obj'}",
-            "/link", f"/LIBPATH:{sdk / 'Lib'}", "vulkan-1.lib",
+            f"/I{sdk / 'Include'}", str(source),
+            f"/Fe:{exe}", f"/Fo:{workdir / (name + '.obj')}",
+            "/link", f"/LIBPATH:{sdk / 'Lib'}", "vulkan-1.lib", *(f"{lib}.lib" for lib in libs),
         ]
     else:
         print("no clang++ or clang-cl on PATH", file=sys.stderr)
@@ -77,17 +83,23 @@ def build(sdk: Path, workdir: Path) -> Path | None:
 
 
 # Each case removes one variable, so the table says what the hang actually needs.
-# The last one is the suspected hang; everything above it is a control.
+# The cross-API cases come first: none of them hangs, so they cost nothing to run before the ones that do.
 CASES = [
-    ("create B, no pending wait on A",         ["--no-wait"]),
-    ("pending wait on A, no create",           ["--no-create"]),
-    ("pending wait + create B, host signal",   ["--signal", "host"]),
-    ("pending wait + create B, queue signal",  []),
+    ("cross", "D3D12 wait + vkCreateDevice, host signal",   ["--wait", "dx", "--create", "vk", "--signal", "host"]),
+    ("cross", "D3D12 wait + vkCreateDevice, queue signal",  ["--wait", "dx", "--create", "vk", "--signal", "queue"]),
+    ("cross", "Vulkan wait + D3D12CreateDevice, host",      ["--wait", "vk", "--create", "dx", "--signal", "host"]),
+    ("cross", "Vulkan wait + D3D12CreateDevice, queue",     ["--wait", "vk", "--create", "dx", "--signal", "queue"]),
+    ("repro", "create B, no pending wait on A",             ["--no-wait"]),
+    ("repro", "pending wait on A, no create",               ["--no-create"]),
+    ("repro", "pending wait + create B, host signal",       ["--signal", "host"]),
+    ("repro", "pending wait + create B, queue signal",      []),
 ]
+QUICK = "pending wait + create B, host signal"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--cross-only", action="store_true", help="run only the cross-API cases, none of which hangs")
     parser.add_argument("--quick", action="store_true", help="run only the host-signal case, the cleanest hang")
     parser.add_argument("--timeout", type=int, default=30, help="seconds before the repro calls itself hung")
     parser.add_argument("--delay", type=int, default=500, help="ms between starting device B and signalling A")
@@ -103,14 +115,19 @@ def main() -> int:
 
     workdir = Path(tempfile.mkdtemp(prefix="vk-create-vs-wait-"))
     try:
-        exe = build(sdk, workdir)
-        if exe is None:
+        exes = {name: build(sdk, workdir, name) for name in BINARIES}
+        if any(exe is None for exe in exes.values()):
             return 2
 
-        cases = CASES[2:3] if args.quick else CASES
+        cases = CASES
+        if args.quick:
+            cases = [c for c in CASES if c[1] == QUICK]
+        elif args.cross_only:
+            cases = [c for c in CASES if c[0] == "cross"]
         rows: list[tuple[str, str, str]] = []
 
-        for name, flags in cases:
+        for binary, name, flags in cases:
+            exe = exes[binary]
             verdicts: list[str] = []
             for attempt in range(args.repeat):
                 cmd = [str(exe), "--timeout", str(args.timeout), "--delay", str(args.delay),
@@ -154,6 +171,9 @@ def main() -> int:
 
         reproduced = any(int(r[1].split('/')[0]) > 0 for r in rows)
         print()
+        if args.cross_only:
+            print("cross-API cases done; none is expected to hang - see readme.md")
+            return 1 if reproduced else 0
         if reproduced:
             print("reproduced - see readme.md")
             return 1

@@ -43,11 +43,29 @@ pending wait + create B, host signal  HUNG: B not created, vkSignalSemaphore nev
 Neither half hangs alone; together they always do.
 The queue-signal case is the shape shaped-core hit, and the stack above is that one.
 
+## It does not cross APIs
+
+[cross-api/repro.cc](cross-api/repro.cc) puts the pending wait in one API and the device creation in the other, with the signal held back three seconds.
+
+```
+case                                          result
+--------------------------------------------  -----------------------------------------------
+D3D12 queue waits, vkCreateDevice, CPU signal  ok: created at 418 ms, signalled at 3381 ms
+D3D12 queue waits, vkCreateDevice, queue sig.  ok: created at 331 ms, signalled at 3288 ms
+Vulkan queue waits, D3D12CreateDevice, host    ok: created at 288 ms, signalled at 3170 ms
+Vulkan queue waits, D3D12CreateDevice, queue   ok: created at 285 ms, signalled at 3169 ms
+```
+
+Each device is created, and destroyed again, seconds before the other API's wait is released.
+So `vkCreateDevice`'s idle wait covers only Vulkan queues, and `D3D12CreateDevice` waits for none.
+A D3D12 device is a per-adapter singleton within a process, so the D3D12-on-D3D12 case cannot be posed at all.
+
 ## Reproducing
 
 ```bash
-uv run run.py            # the controls, then the hanging cases
-uv run run.py --quick    # just the host-signal case
+uv run run.py                 # the cross-API cases, the controls, then the hanging cases
+uv run run.py --quick         # just the host-signal case
+uv run run.py --cross-only    # just the cross-API cases, none of which hangs
 ```
 
 **Every hang leaves a process the OS cannot terminate until the next reboot.**
@@ -76,6 +94,7 @@ It follows the rule NVIDIA gives for wait-before-signal elsewhere (below): nothi
 - Signals come only from the transfer actors, whose waits name only each other's signals and never form a cycle, so both sides always finish.
 
 It deliberately leaves the device lifecycle lock alone: an actor that had to take it could never signal a barrier's way out.
+Only the Vulkan backend reports into it, since a D3D12 wait never holds up a Vulkan device, as the cross-API cases above show.
 The cost is that creating or destroying a device now waits until the async transfers already in flight have submitted their signals.
 
 ## Known elsewhere
