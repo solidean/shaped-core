@@ -11,6 +11,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_texture_copy_regions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_async.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -543,21 +544,24 @@ bool vulkan_upload_async_system::run_one_window()
             // Which rows of the region this chunk covers.
             auto const first_row = dst_offset / job.row_bytes;
             auto const row_count = chunk_bytes / job.row_bytes;
-            auto const copy = VkBufferImageCopy{
-                .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
-                .bufferRowLength = 0, // tightly packed to imageExtent, which is what sg hands over
-                .bufferImageHeight = 0,
-                .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
-                                     .mipLevel = u32(job.subresource.mip_level),
-                                     .baseArrayLayer = u32(job.subresource.array_layer),
-                                     .layerCount = 1},
-                .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
-                .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
-            };
+
+            // A row is a BLOCK row on a compressed format and rows run slice-major on a 3D one, so a run of them is
+            // not one box — see vulkan_texture_copy_regions.hh.
+            VkBufferImageCopy copies[max_copy_regions] = {};
+            auto const subresource = VkImageSubresourceLayers{.aspectMask = vk_aspect_mask_from(range, texture->format()),
+                                                              .mipLevel = u32(job.subresource.mip_level),
+                                                              .baseArrayLayer = u32(job.subresource.array_layer),
+                                                              .layerCount = 1};
+            auto const count = build_texture_copy_regions(
+                job.region, texture->description().format, first_row, row_count, job.row_bytes,
+                VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
+
             // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
             // and one layout for both directions is what keeps a transfer of the other direction from
             // moving it — see vulkan_context::async_ready_layout.
-            vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL, 1, &copy);
+            if (count > 0)
+                vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL,
+                                       u32(count), copies);
         }
         else
         {
@@ -742,9 +746,11 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
     job.sequence = _next_sequence.fetch_add(1, cc::memory_order_relaxed);
     job.completion = {.group = dst->_upload_group, .value = dst->_upload_group->reserve()};
 
-    // The streaming tier deliberately stamps only the LIFETIME value: a later command list waits on nothing, which is
-    // the guarantee it trades away for its priority.
-    // Deferred deletion still gates on it, so the buffer cannot go while a copy is queued.
+    // The streaming tier stamps the STREAM value rather than the async one, and the difference is no longer whether
+    // anything waits.
+    // A command list waits on this stamp too (vulkan_command_list.cc) and so does a readback, so what the async
+    // stamp adds is the absence of the stall warning — see promote_to_async below.
+    // Deferred deletion gates on it as well, so the buffer cannot go while a copy is queued.
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
     if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
