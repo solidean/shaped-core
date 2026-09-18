@@ -146,6 +146,11 @@ It falls out of `sv::resident_mesh` carrying exactly one `material_id`.
 referencing one glTF mesh produce ten meshes with ten transforms over a single upload.
 `asset_data::nodes` keeps the tree for callers who want it.
 
+**A glTF's `KHR_lights_punctual` lights land on `asset_data::lights`**, placed by the same walk and the same `flatten_hierarchy` rule as the meshes.
+Each is an `sv::light` plus the id to add it under — the file's name, or `name##i` when the name is empty or shared.
+A punctual light takes only a position and a direction from its node, since the extension says its node's scale does not affect it.
+`range` is kept on the `asset_light` and not honoured by the tracer, and a cone or intensity the extension forbids is clamped; each is an issue.
+
 **A scene is not the importer's concept**, so `scene` and `default_scene` are read by nothing.
 A file may carry several arrangements of the same meshes, and picking one is a decision about what the caller wanted rather than
 about what the file contains — an importer that took it would drop meshes `find_mesh` is then asked for and cannot answer.

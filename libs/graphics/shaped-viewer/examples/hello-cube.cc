@@ -97,10 +97,7 @@ EXAMPLE("shaped-viewer/hello-cube")
         scene.add_mesh(cube);
 
         // An overhead rect facing down: cross(+x, +z) is -y, so the emitting face looks at the cube.
-        scene.add_light({.center = tg::pos3f(0, 3, 0),
-                         .half_extent_u = tg::vec3f(0.9f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 0.9f),
-                         .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        scene.add_rect_light("key", tg::pos3f(0, 3, 0), tg::vec3f(0.9f, 0, 0), tg::vec3f(0, 0, 0.9f)).nits(14.0f);
 
         // A cool-blue sky, brighter overhead: the miss shader shows it behind the cube and it lights the cube too.
         scene.background(sv::background::gradient(tg::vec3f(0.70f, 0.96f, 1.44f), tg::vec3f(0.21f, 0.28f, 0.37f)));

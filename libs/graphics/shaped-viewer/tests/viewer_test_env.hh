@@ -15,7 +15,9 @@
 #include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/material/material_library.hh>
+#include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table
 #include <shaped-viewer/rendering/shaders.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
@@ -345,7 +347,7 @@ inline indexed_mesh weld_triangle_list(cc::span<tg::pos3f const> triangle_list)
 
 /// The rectangular ceiling light of a Cornell box.
 /// The geometry (a quad in `positions`) is what emits.
-/// These fields let the caller fill the path tracer's pt_frame_constants_gpu so its next-event estimation samples the exact same rectangle.
+/// These fields let the caller hand the path tracer the exact same rectangle to sample — see `light_table_of`.
 struct sv_test::area_light
 {
     tg::vec3f center;   // rect center in world space (on the ceiling plane)
@@ -361,6 +363,32 @@ struct sv_test::cornell_box
     cc::vector<sv::pbr_material> materials; // one per triangle
     area_light light;
 };
+
+namespace sv_test
+{
+/// A Cornell box's ceiling light as the path tracer's light table: one rect, emitting straight down.
+/// Built as the wire record directly, since what these tests pin is the tracer, not the authoring path.
+[[nodiscard]] inline sv::pt_light_table light_table_of(area_light const& l)
+{
+    auto const record = sv::light_gpu{.position = l.center,
+                                      .path = u32(sv::light_path::area),
+                                      .u = tg::vec3f(l.half_x, 0, 0),
+                                      .area = 4.0f * l.half_x * l.half_z,
+                                      .v = tg::vec3f(0, 0, l.half_z),
+                                      .emission = l.emission,
+                                      .normal = tg::vec3f(0, -1, 0)};
+    return sv::pt_light_table::grouped(cc::span<sv::light_gpu const>(&record, 1));
+}
+
+/// The records `lights` holds, uploaded for one recording — what `pt_trace_desc::lights` takes.
+[[nodiscard]] inline sg::buffer<sv::light_gpu> upload_lights(sg::command_list& cmd, sv::pt_light_table const& lights)
+{
+    auto const buffer = cmd.context().transient.create_buffer<sv::light_gpu>(
+        lights.records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.data_to_buffer(buffer, lights.records);
+    return buffer;
+}
+} // namespace sv_test
 
 namespace sv_test
 {

@@ -6,6 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
@@ -50,6 +51,23 @@ struct sv::asset_node
     i32 mesh_count = 0;
 };
 
+/// One light a file placed — what `scene.add_light(l.id, l.light)` takes.
+///
+/// Placed like the meshes are: world-placed by default, at its node's local transform when the loader does not flatten.
+/// Only a position and a direction come from the node, since a punctual light is unaffected by its node's scale.
+struct sv::asset_light
+{
+    /// What to pass `add_light`: the file's own name, or `name##i` when the name is empty or shared — so every light of
+    /// one asset has its own id, and a human still reads the file's name.
+    cc::string id;
+
+    sv::light light;
+
+    /// The file's cut-off hint, kept for a re-export.
+    /// The tracer does not honour it: the extension makes it optional, and cutting a light off draws an edge in the image.
+    cc::optional<f32> range;
+};
+
 /// Everything one loaded file describes, as plain data made of the types the scene API already takes.
 ///
 /// That is the whole reason there is almost no API here: filtering and overriding are ordinary code over these vectors
@@ -80,6 +98,12 @@ struct sv::asset_data
     /// the hierarchy, in a parents-first order
     cc::vector<sv::asset_node> nodes;
 
+    /// Every light the file places, in the order its nodes were walked.
+    ///
+    ///     for (auto const& l : asset.lights)
+    ///         scene.add_light(l.id, l.light);
+    cc::vector<sv::asset_light> lights;
+
     /// babel's issues plus the importer's own, forwarded verbatim
     ///
     /// A successful load with a non-empty `issues` is the normal case for a real-world asset: check it before
@@ -88,7 +112,7 @@ struct sv::asset_data
 
     // queries
 public:
-    [[nodiscard]] bool is_empty() const { return meshes.empty(); }
+    [[nodiscard]] bool is_empty() const { return meshes.empty() && lights.empty(); }
 
     /// The mesh named `name`, or nullptr.
     /// First match wins — a name is not an identity here either.

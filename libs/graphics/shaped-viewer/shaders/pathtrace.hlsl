@@ -4,14 +4,15 @@
 // integrates global illumination by following the continuation each hit hands back.
 //
 // The SHADING is not here. Each closest-hit evaluates its material's OpenPBR BSDF, estimates direct light through
-// it toward both sources — the rectangular area light and the SH environment — and importance-samples the next
-// direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
+// it toward both sources — one of the trace's lights, picked uniformly, and the SH environment — and importance-samples
+// the next direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
 // reports, carry the throughput, and decide when a path ends.
 //
-// Both light sources are gathered by two strategies combined with balance-heuristic multiple importance sampling: the
-// hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
+// Every source a sampled ray can reach is gathered by two strategies combined with balance-heuristic multiple importance
+// sampling: the hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
 // The weight for the second is applied here, because only the caller knows where the bounce went — escaping to the
-// environment, or crossing the area light's rect, which is analytic and so is intersected rather than traced.
+// environment or into a sun's disc, or crossing a rect, which is analytic and so is intersected rather than traced.
+// Point and parallel lights are deltas that no sampled ray reaches, so they have only the first strategy.
 
 [shader("raygeneration")]
 void PathTraceRayGen()
@@ -63,6 +64,7 @@ void PathTraceRayGen()
             p.medium_albedo = medium_albedo;
             p.medium_g = medium_g;
             p.channel = channel;
+            p.last_bounce = b + 1 >= pt_bindings::frame.max_bounces ? 1u : 0u;
 
             RayDesc ray;
             ray.Origin = origin;
@@ -86,12 +88,6 @@ void PathTraceRayGen()
             float3 N = p.normal;
             float pdf = p.bsdf_pdf;
 
-            // The BSDF strategy for the area light: the continuation this ray came from may have aimed at the rect.
-            //
-            // Only from b >= 1, because that is what pairs with a next-event estimate — the primary ray has none to
-            // balance against, and weighting it here would make the light visible to the camera, which it is not.
-            // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
-            // than the light blocks it, and nothing else can.
             bool const inside = any(medium_sigma_t > float3(0, 0, 0));
             bool const scattering = inside && any(medium_albedo > float3(0, 0, 0));
 
@@ -178,15 +174,65 @@ void PathTraceRayGen()
                 throughput *= exp(-medium_sigma_t * hit_t);
             }
 
-            if (b > 0)
+            // The BSDF strategy for every light a sampled ray can reach, and the camera's view of the ones it may see.
+            //
+            // Every rect this segment crosses counts, not only the nearest: lights are analytic and occlude nothing — a
+            // shadow ray toward one passes straight through another — so the BSDF strategy has to treat them as
+            // transparent too, or it stops covering what next-event estimation leaves to it.
+            // A sun counts when the segment runs into its disc: on escaping, or past the surface for one casting no shadow.
+            //
+            // A rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer than the
+            // light blocks it, and nothing else can.
+            // A light that casts no shadow is credited past the surface as well, because next-event estimation ignores
+            // what stands in front of it and the two strategies have to agree on what they integrate.
+            //
+            // The primary ray has no next-event estimate to balance against, so it counts a light at full weight — and only
+            // one the camera is meant to see, and only in front of the surface, since a camera does not see through walls.
             {
-                float t_light = 0.0;
-                float cos_light = 0.0;
-                if (pt_light_intersect(origin, dir, t_light, cos_light) && (hit_t < 0.0 || t_light < hit_t))
+                uint const begin = pt_bindings::frame.path_offset[sv::light_path_area];
+                uint const end = begin + pt_bindings::frame.path_count[sv::light_path_area];
+                for (uint i = begin; i < end; ++i)
                 {
+                    sv::light light = pt_bindings::Lights[i];
+                    float t_light = 0.0;
+                    float cos_light = 0.0;
+                    if (!pt_rect_intersect(light, origin, dir, t_light, cos_light))
+                        continue;
+
                     // `dir` is unit, so the distance along it is the distance to the rect.
-                    float w = pt_mis_weight(prev_pdf, pt_light_pdf(t_light * t_light, cos_light));
-                    radiance += throughput * pt_bindings::frame.light.emission * w;
+                    bool const in_front = hit_t < 0.0 || t_light < hit_t;
+                    float3 const arriving = light.emission * sv::light_cone(light, cos_light);
+                    if (b == 0)
+                    {
+                        if (in_front && sv::light_visible_to_camera(light))
+                            radiance += throughput * arriving;
+                    }
+                    else if (in_front || !sv::light_casts_shadows(light))
+                    {
+                        float w = pt_mis_weight(prev_pdf, pt_light_pdf(light, t_light * t_light, cos_light));
+                        radiance += throughput * arriving * w;
+                    }
+                }
+            }
+
+            // A path still inside a solid when it escapes travelled an unbounded distance through it, and sees nothing.
+            if (!(inside && hit_t < 0.0))
+            {
+                uint const begin = pt_bindings::frame.path_offset[sv::light_path_distant_disc];
+                uint const end = begin + pt_bindings::frame.path_count[sv::light_path_distant_disc];
+                for (uint i = begin; i < end; ++i)
+                {
+                    sv::light light = pt_bindings::Lights[i];
+                    if (dot(dir, -light.normal) < light.cos_angular_radius)
+                        continue;
+
+                    if (b == 0)
+                    {
+                        if (hit_t < 0.0 && sv::light_visible_to_camera(light))
+                            radiance += throughput * light.emission;
+                    }
+                    else if (hit_t < 0.0 || !sv::light_casts_shadows(light))
+                        radiance += throughput * light.emission * pt_mis_weight(prev_pdf, pt_disc_pdf(light));
                 }
             }
 

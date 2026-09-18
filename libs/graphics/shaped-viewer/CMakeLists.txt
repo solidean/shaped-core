@@ -71,6 +71,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/viewer.hh
     src/shaped-viewer/context.hh
     src/shaped-viewer/shader_library.hh
+    src/shaped-viewer/stable_id.hh
     src/shaped-viewer/scene/pbr_material.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
@@ -92,7 +93,6 @@ target_sources(shaped-viewer
     src/shaped-viewer/material/shader_generator.hh
     src/shaped-viewer/material/impl/material_hash.hh
     src/shaped-viewer/scene/scene_item.hh
-    src/shaped-viewer/view/view_id.hh
     src/shaped-viewer/view/camera.hh
     src/shaped-viewer/view/camera_controller.hh
     src/shaped-viewer/view/render_settings.hh

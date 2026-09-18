@@ -195,22 +195,36 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
     return buffer;
 }
 
-/// The area light the path tracer integrates: the view's first, or the fallback below so a light-less view is still lit.
-/// The tracer samples one rect for now.
-/// Further area lights are the multi-light seam.
-area_light primary_light(layer const& l)
+/// The lights the path tracer samples, grouped by path: every light in the layer, or the layer's fallback when it has
+/// none — so a layer nobody lit is still visible, unless its fallback was turned off.
+[[nodiscard]] pt_light_table traced_lights(layer const& l)
 {
-    // A 1.5 x 1.5 rect three units overhead facing down (cross(+x, +z) is -y), a key light for a scene near the origin.
-    auto const fallback = area_light{.center = tg::pos3f(0, 3, 0),
-                                     .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                     .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                     .emission = tg::vec3f(12.0f, 12.0f, 12.0f)};
-    return l.area_lights.empty() ? fallback : l.area_lights.front();
+    auto records = cc::vector<light_gpu>();
+    for (auto const& sl : l.lights)
+        records.push_back(light_gpu::from(sl.light));
+
+    if (records.empty() && l.fallback_light.has_value())
+        records.push_back(light_gpu::from(l.fallback_light.value()));
+
+    return pt_light_table::grouped(records);
+}
+
+/// The table `lights` holds, uploaded for this recording.
+/// Null for no lights, which the routine binds a stand-in for, since a buffer cannot be empty.
+[[nodiscard]] sg::buffer<light_gpu> upload_lights(sg::command_list& cmd, pt_light_table const& lights)
+{
+    if (lights.records.empty())
+        return {};
+
+    auto const buffer = cmd.context().transient.create_buffer<light_gpu>(
+        lights.records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.data_to_buffer(buffer, lights.records);
+    return buffer;
 }
 
 pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
                                                    layer const& l,
-                                                   area_light const& light,
+                                                   pt_light_table const& lights,
                                                    tg::vec2i resolution)
 {
     auto fc = pt_frame_constants_gpu{};
@@ -221,7 +235,7 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
     cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1] > 0 ? resolution[1] : 1);
     fc.camera = camera_gpu::from(cam);
 
-    fc.light = area_light_gpu::from(light);
+    lights.describe_in(fc);
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
     fc.max_bounces = l.settings.max_bounces;
@@ -251,6 +265,7 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 /// exchange no smearing, no per-pixel rejection heuristic, and an uncapped mean that converges to ground truth.
 [[nodiscard]] u64 trace_hash(pt_frame_constants_gpu fc,
                              background_gpu const& bg,
+                             pt_light_table const& lights,
                              resolved_view const& r,
                              tg::vec2i resolution,
                              u64 shader_generation)
@@ -261,6 +276,9 @@ pt_frame_constants_gpu make_pt_frame_constants_gpu(view_data const& v,
 
     auto h = cc::make_hash_of_bytes(cc::span<pt_frame_constants_gpu const>(&fc, 1).as_bytes());
     h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<background_gpu const>(&bg, 1).as_bytes()));
+
+    // Every byte of a light_gpu is written, pads included, so equal lights hash equal and any change is seen.
+    h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<light_gpu const>(lights.records).as_bytes()));
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
@@ -461,9 +479,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
-    auto fc = make_pt_frame_constants_gpu(v, l, primary_light(l), tr.resolution);
+    auto const lights = traced_lights(l);
+    auto fc = make_pt_frame_constants_gpu(v, l, lights, tr.resolution);
     auto const bg = background_gpu::from(l.background);
-    auto const hash = trace_hash(fc, bg, resolved, tr.resolution, self->_shader_generation);
+    auto const hash = trace_hash(fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
 
     auto& rec = store.get_or_create(v.id);
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
@@ -491,6 +510,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);
+    auto const light_buffer = upload_lights(cmd, lights);
 
     // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
@@ -508,6 +528,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .instances = resolved.instances,
               .output = output,
               .instance_table = instance_table,
+              .lights = light_buffer,
               .hit_groups = resolved.hit_groups,
               // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.
@@ -553,9 +574,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // bindless index this trace reads.
     auto const resolved = resolve_scene(cmd, *scene, resources);
 
-    auto fc = make_pt_frame_constants_gpu(v, *scene, primary_light(*scene), v.resolution);
+    auto const lights = traced_lights(*scene);
+    auto fc = make_pt_frame_constants_gpu(v, *scene, lights, v.resolution);
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = trace_hash(fc, bg, resolved, v.resolution, shader_generation);
+    auto const hash = trace_hash(fc, bg, lights, resolved, v.resolution, shader_generation);
 
     // No plan here to size the view's temporal inputs, so this path resolves the ones it needs itself.
     // The layer index is the primary scene_3d's, which `primary_scene_3d` already found.
@@ -591,6 +613,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);
+    auto const light_buffer = upload_lights(cmd, lights);
     auto const bindless = resources.freeze();
 
     // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
@@ -606,6 +629,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
               .instances = resolved.instances,
               .output = slot.texture,
               .instance_table = instance_table,
+              .lights = light_buffer,
               .hit_groups = resolved.hit_groups,
               // One material still compiling, or one that does not compile, degrades to gray
               // shading on its own meshes rather than costing the view its whole image.

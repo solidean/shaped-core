@@ -12,6 +12,8 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/scene/light.hh>
+#include <shaped-viewer/stable_id.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/pos_ops.hh>
 
@@ -778,4 +780,72 @@ TEST("sv::asset - a load that cannot be resolved reports it rather than throwing
     auto unknown = loader.load_async("mem/quad.fbx");
     CHECK(!unknown.wait());
     CHECK(unknown.has_error());
+}
+
+TEST("sv::asset_loader - a glTF's punctual lights arrive world-placed, in the units the extension gives them")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    // No meshes at all: a file of nothing but lights is still something to import.
+    // The quaternion is a quarter turn about -x, taking the light's -Z onto -Y, straight down.
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_lights_punctual"],
+        "extensions": {"KHR_lights_punctual": {"lights": [
+            {"type": "spot", "name": "key", "intensity": 800, "color": [1, 0.9, 0.8], "range": 20,
+             "spot": {"innerConeAngle": 0.2, "outerConeAngle": 0.5}},
+            {"type": "directional", "name": "sun", "intensity": 5},
+            {"type": "point", "name": "bulb", "intensity": 100},
+            {"type": "point", "name": "bulb", "intensity": 50},
+            {"type": "point"}
+        ]}},
+        "nodes": [
+            {"name": "rig", "translation": [0, 5, 0], "children": [1]},
+            {"extensions": {"KHR_lights_punctual": {"light": 0}}, "translation": [1, 0, 0], "scale": [3, 3, 3]},
+            {"extensions": {"KHR_lights_punctual": {"light": 1}}, "rotation": [-0.70710678, 0, 0, 0.70710678]},
+            {"extensions": {"KHR_lights_punctual": {"light": 2}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 3}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 4}}}
+        ]})"));
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "rig.gltf");
+    REQUIRE(asset.has_value());
+    auto const& a = asset.value();
+    REQUIRE(a.lights.size() == 5);
+    CHECK(a.meshes.empty());
+
+    // A spot is a point with a cone, placed through its parent, and untouched by its node's scale.
+    auto const& key = a.lights[0];
+    CHECK(key.id == "key");
+    CHECK(key.light.path() == sv::light_path::point);
+    CHECK(key.light.shaping.kind == sv::light_shaping_kind::cone);
+    CHECK(tg::abs(key.light.shaping.inner.radians() - 0.2f) < 1e-6f);
+    CHECK(tg::abs(key.light.shaping.outer.radians() - 0.5f) < 1e-6f);
+    CHECK(key.light.emission.unit == sv::light_unit::candela);
+    CHECK(key.light.emission.intensity == 800);
+    CHECK(key.light.emission.color == tg::vec3f(1, 0.9f, 0.8f));
+    CHECK((key.light.placement.translation() - tg::vec3f(1, 5, 0)).length() < 1e-5f);
+
+    // The range is kept, and its not being honoured is on the record.
+    REQUIRE(key.range.has_value());
+    CHECK(key.range.value() == 20);
+    auto noted_range = false;
+    for (auto const& issue : a.issues)
+        noted_range = noted_range || cc::string_view(issue).find(cc::string_view("range")) >= 0;
+    CHECK(noted_range);
+
+    // A directional light is in lux, travelling down its node's -Z.
+    auto const& sun = a.lights[1];
+    CHECK(sun.id == "sun");
+    CHECK(sun.light.path() == sv::light_path::distant_point);
+    CHECK(sun.light.emission.unit == sv::light_unit::lux);
+    auto const travel = sun.light.placement.transform(tg::vec3f(0, 0, -1));
+    CHECK(tg::abs(travel[1] + 1.0f) < 1e-5f);
+
+    // Two lights sharing a name, and one with none, each get an id of their own that still reads as the file's name.
+    CHECK(a.lights[2].id == "bulb##2");
+    CHECK(a.lights[3].id == "bulb##3");
+    CHECK(a.lights[4].id == "light##4");
+    CHECK(sv::display_name_of(a.lights[2].id) == "bulb");
 }

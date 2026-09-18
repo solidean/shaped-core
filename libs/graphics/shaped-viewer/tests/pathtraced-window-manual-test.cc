@@ -267,11 +267,8 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
         auto fc = sv::pt_frame_constants_gpu{};
         fc.camera = sv::camera_gpu::from(cam);
         // the box light is an axis-aligned XZ rect, emitting straight down
-        fc.light = {.center = box.light.center,
-                    .u = tg::vec3f(box.light.half_x, 0, 0),
-                    .v = tg::vec3f(0, 0, box.light.half_z),
-                    .emission = box.light.emission,
-                    .normal = tg::vec3f(0, -1, 0)};
+        auto const lights = sv_test::light_table_of(box.light);
+        lights.describe_in(fc);
         fc.samples_per_pixel = 2; // low per-frame count — accumulation does the heavy lifting when still
         fc.max_bounces = 5;
         fc.accum_frame = accum;
@@ -296,6 +293,7 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
             auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
                 records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
             trace_cmd->upload.data_to_buffer(instance_table, records);
+            auto const light_buffer = sv_test::upload_lights(*trace_cmd, lights);
 
             auto const bindless = resources.freeze();
 
@@ -304,6 +302,7 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
                                                                             .instances = instances,
                                                                             .output = color,
                                                                             .instance_table = instance_table,
+                                                                            .lights = light_buffer,
                                                                             .hit_groups = hit_groups,
                                                                             .bindless = &bindless});
             ctx.submit_command_list(cc::move(trace_cmd));

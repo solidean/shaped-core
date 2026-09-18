@@ -33,14 +33,87 @@ void quadric_ref::transform(tg::affine_transform3f const& t)
     target().transform = t;
 }
 
-area_light& light_ref::target() const
+scene_light& light_ref::target() const
 {
-    return _frame->_views[u32(_view)].layers[_layer].area_lights[_light];
+    return _frame->_views[u32(_view)].layers[_layer].lights[_light];
 }
 
-void light_ref::light(area_light const& l)
+light_id light_ref::id() const
 {
-    target() = l;
+    return target().id;
+}
+
+void light_ref::light(sv::light const& l)
+{
+    auto const problem = light_problem(l);
+    CC_ASSERTS(problem.empty(), problem);
+    target().light = l;
+}
+
+light_ref& light_ref::candela(f32 value)
+{
+    target().light.candela(value);
+    return *this;
+}
+
+light_ref& light_ref::lux(f32 value)
+{
+    target().light.lux(value);
+    return *this;
+}
+
+light_ref& light_ref::nits(f32 value)
+{
+    target().light.nits(value);
+    return *this;
+}
+
+light_ref& light_ref::lumens(f32 value)
+{
+    target().light.lumens(value);
+    return *this;
+}
+
+light_ref& light_ref::color(tg::vec3f c)
+{
+    target().light.color(c);
+    return *this;
+}
+
+light_ref& light_ref::exposure(f32 stops)
+{
+    target().light.exposure(stops);
+    return *this;
+}
+
+light_ref& light_ref::face(light_face f)
+{
+    target().light.face(f);
+    return *this;
+}
+
+light_ref& light_ref::cone(tg::angle_f inner_half_angle, tg::angle_f outer_half_angle)
+{
+    target().light.cone(inner_half_angle, outer_half_angle);
+    return *this;
+}
+
+light_ref& light_ref::spread(tg::angle_f half_angle)
+{
+    target().light.spread(half_angle);
+    return *this;
+}
+
+light_ref& light_ref::visible_to_camera(bool visible)
+{
+    target().light.visible_to_camera(visible);
+    return *this;
+}
+
+light_ref& light_ref::casts_shadows(bool casts)
+{
+    target().light.casts_shadows(casts);
+    return *this;
 }
 
 // ---- scene_ref -------------------------------------------------------------------------------------------
@@ -125,11 +198,71 @@ void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style
     _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
-light_ref scene_ref::add_light(area_light const& light)
+light_ref scene_ref::add_light(cc::string_view id, sv::light const& light)
 {
-    auto& lights = target().area_lights;
-    lights.push_back(light);
+    CC_ASSERT(_frame->_open, "cannot author a closed frame");
+
+    auto const problem = light_problem(light);
+    CC_ASSERTS(problem.empty(), problem);
+
+    auto const lid = light_id::from_string(id, _frame->_id_seed);
+    auto& lights = target().lights;
+
+    // Linear, since a layer's lights number in the tens; a set per layer would cost more than the scan.
+    for (auto const& existing : lights)
+        CC_ASSERT(existing.id != lid,
+                  "duplicate light id in one scene layer — two lights with one id would share whatever the renderer "
+                  "keeps per light; wrap the body in frame::scoped_id(i), suffix the id with ##i, or give them "
+                  "distinct names");
+
+    lights.push_back({.id = lid, .light = light});
     return light_ref(_frame, _view, _layer, u32(lights.size() - 1));
+}
+
+light_ref scene_ref::add_light(cc::string_view id, sv::light const& light, light_emission const& emission)
+{
+    auto l = light;
+    l.emission = emission;
+    return add_light(id, l);
+}
+
+light_ref scene_ref::add_point_light(cc::string_view id, tg::pos3f position)
+{
+    return add_light(id, sv::light::point(position));
+}
+
+light_ref scene_ref::add_spot_light(cc::string_view id,
+                                    tg::pos3f position,
+                                    tg::vec3f direction,
+                                    tg::angle_f outer_half_angle,
+                                    tg::angle_f inner_half_angle)
+{
+    return add_light(id, sv::light::spot(position, direction, outer_half_angle, inner_half_angle));
+}
+
+light_ref scene_ref::add_rect_light(cc::string_view id, tg::pos3f center, tg::vec3f half_extent_u, tg::vec3f half_extent_v)
+{
+    return add_light(id, sv::light::rect(center, half_extent_u, half_extent_v));
+}
+
+light_ref scene_ref::add_directional_light(cc::string_view id, tg::vec3f direction)
+{
+    return add_light(id, sv::light::directional(direction));
+}
+
+light_ref scene_ref::add_sun_light(cc::string_view id, tg::vec3f direction, tg::angle_f angular_diameter)
+{
+    return add_light(id, sv::light::sun(direction, angular_diameter));
+}
+
+void scene_ref::fallback_light(cc::optional<sv::light> const& light)
+{
+    if (light.has_value())
+    {
+        auto const problem = light_problem(light.value());
+        CC_ASSERTS(problem.empty(), problem);
+    }
+    target().fallback_light = light;
 }
 
 void scene_ref::background(sv::background const& bg)

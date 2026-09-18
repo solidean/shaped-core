@@ -9,6 +9,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -253,7 +254,11 @@ struct gltf_importer
 
         // `emission_luminance` multiplies the color, and its OpenPBR default is 0 — so an emissive glTF material has to
         // bind it or it emits nothing.
-        // KHR_materials_emissive_strength would scale this; babel does not interpret it yet.
+        //
+        // glTF gives `emissiveFactor` no physical unit, so the mapping is the format's own: factor times
+        // KHR_materials_emissive_strength, read one-to-one as nits — the unit sv's area lights and OpenPBR share.
+        // The strength defaults to 1 and babel does not interpret the extension yet, so 1 is what it is until it does;
+        // reading it is the same babel extension KHR_lights_punctual needs.
         if (m.emissive_factor != tg::vec3f::zero)
         {
             bindings.push_back(binding::of("emission_color", m.emissive_factor));
@@ -627,6 +632,88 @@ struct gltf_importer
         }
     }
 
+    /// The file's light `index`, placed at `placement` — a position and the -Z it points down, and nothing else of it.
+    ///
+    /// The extension says a node's scale does not affect its light, which is why a scaled or even sheared node is not an
+    /// issue here: the direction is normalized, and the intensity is read from the light alone.
+    /// What the extension permits and sv cannot mean — a negative intensity, a cone out of order — is clamped and noted.
+    void emit_light(bg::light_index index, tg::affine_transform3f const& placement)
+    {
+        auto const& l = *doc.find(index);
+        auto const where = placement.transform(tg::pos3f::zero);
+        auto const direction = placement.transform(tg::vec3f(0, 0, -1));
+        auto const label = l.name.empty() ? cc::format("light {}", int(index)) : cc::format("light '{}'", l.name);
+
+        if (direction.length() <= 1e-12f)
+        {
+            note(cc::format("gltf: {} is placed by a node that collapses its direction, so it was not imported", label));
+            return;
+        }
+
+        auto intensity = l.intensity;
+        if (!(intensity >= 0.0f))
+        {
+            note(cc::format("gltf: {} has intensity {}, imported as 0", label, l.intensity));
+            intensity = 0.0f;
+        }
+
+        auto light = sv::light::point(where);
+        switch (l.type)
+        {
+        case bg::light_type::directional:
+            light = sv::light::directional(direction).lux(intensity);
+            break;
+        case bg::light_type::point:
+            light = sv::light::point(where).candela(intensity);
+            break;
+        case bg::light_type::spot:
+        {
+            // The extension requires 0 <= inner < outer <= pi / 2; a file that breaks it is held to it rather than refused.
+            auto const outer
+                = l.outer_cone_angle < 0.0f ? 0.0f : (l.outer_cone_angle > 1.5707964f ? 1.5707964f : l.outer_cone_angle);
+            auto const inner
+                = l.inner_cone_angle < 0.0f ? 0.0f : (l.inner_cone_angle > outer ? outer : l.inner_cone_angle);
+            if (outer != l.outer_cone_angle || inner != l.inner_cone_angle)
+                note(cc::format("gltf: {} has a cone of {} to {} rad, imported as {} to {}", label, l.inner_cone_angle,
+                                l.outer_cone_angle, inner, outer));
+
+            light = sv::light::spot(where, direction, tg::angle_f::make_from_radians(outer),
+                                    tg::angle_f::make_from_radians(inner))
+                        .candela(intensity);
+            break;
+        }
+        }
+        light.color(l.color);
+
+        if (l.range.has_value())
+            note(cc::format("gltf: {} has a range of {}, kept on the light but not honoured by the tracer", label,
+                            l.range.value()));
+
+        out.lights.push_back({.id = l.name, .light = light, .range = l.range});
+    }
+
+    /// Makes every light id unique within the asset: a name that is empty or shared is suffixed with the light's position,
+    /// which keeps what a human reads while giving each its own identity.
+    ///
+    /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
+    /// second looking unique.
+    void disambiguate_light_ids()
+    {
+        auto shared = cc::vector<u8>::create_filled(out.lights.size(), u8(0));
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+            for (auto j = isize(0); j < out.lights.size(); ++j)
+                if (j != i && out.lights[j].id == out.lights[i].id)
+                    shared[i] = 1;
+
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+        {
+            if (out.lights[i].id.empty())
+                out.lights[i].id = cc::format("light##{}", i);
+            else if (shared[i] != 0)
+                out.lights[i].id = cc::format("{}##{}", out.lights[i].id, i);
+        }
+    }
+
     void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world, int depth)
     {
         auto const raw = isize(int(index));
@@ -655,6 +742,9 @@ struct gltf_importer
 
         if (n->mesh != bg::mesh_index::invalid)
             emit_mesh(n->mesh, cfg.flatten_hierarchy ? world : local);
+
+        if (n->light != bg::light_index::invalid)
+            emit_light(n->light, cfg.flatten_hierarchy ? world : local);
 
         // Counted before the children run, since their meshes belong to them and not to this node.
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
@@ -717,8 +807,9 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
 
     importer.build_materials();
     importer.walk_nodes();
+    importer.disambiguate_light_ids();
 
-    if (importer.out.meshes.empty())
+    if (importer.out.is_empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));
 
     definitions = cc::move(importer.definitions);

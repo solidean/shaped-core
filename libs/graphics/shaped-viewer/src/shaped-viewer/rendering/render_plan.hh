@@ -5,9 +5,9 @@
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/post_process.hh>
-#include <shaped-viewer/view/view_id.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
@@ -58,7 +59,11 @@ struct sv::layer
     /// A traced layer writes no meaningful alpha yet, so it is always opaque and is forced to `replace`.
     /// Compositing one `over` another needs the raygen to write coverage into `.a` first (see libs/graphics/shaped-viewer/docs/TODO.md).
     cc::vector<scene_item> items;
-    cc::vector<area_light> area_lights;
+    cc::vector<scene_light> lights; ///< in the caller's order, which the GPU record does not have to keep
+
+    /// Traced in place of `lights` when that is empty, so a layer nobody lit is still visible.
+    /// Empty turns it off, and such a layer is lit by its background alone.
+    cc::optional<sv::light> fallback_light = default_fallback_light();
     sv::background background;
     render_settings settings;
 

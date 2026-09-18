@@ -448,6 +448,11 @@ What follows is everything else the importer left behind.
 
 ## Everything else
 
+- **Light linking is reserved, not built.** Both GPU records carry a mask, all ones, and nothing reads it yet.
+  Building it is testing the light's mask against the hit instance's in both estimators, plus an authoring call that sets them.
+- **A scene item has no stable identity.** Lights and views carry a `stable_id<Tag>`, and a mesh carries only a name, which is a label.
+  A mesh is a resource placed any number of times, so the identity belongs to the placement.
+  Picking is the first thing that will need it, and it is an added `add_mesh(id, mesh)` overload rather than a redesign.
 - Define the dev-friendly renderer/scene API once shaped-rendering provides enough of the underlying render routines.
 - **A failing `CC_ASSERT` inside the frame loop turns into `std::terminate`**, not a test failure.
   nexus reports the assert by throwing, the stack unwinds through `viewer::~viewer`, and `advance_epoch` asserts

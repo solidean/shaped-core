@@ -23,7 +23,7 @@ inline constexpr u32 accumulation_frame_cap = 4096;
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
 /// Just the path-tracer integration controls for now.
-/// Lighting and the environment live elsewhere on the view (its area_lights list and its background).
+/// Lighting and the environment live elsewhere on the layer (its lights and its background).
 /// This is the home for the post-process sequence, exposure, ... as they land.
 struct sv::render_settings
 {

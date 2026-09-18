@@ -48,10 +48,9 @@ TEST("sv - interactive viewer, a layout of views (manual)", nx::config::manual)
 
             // Ctrl+left-drag lifts either of these out of the row; the other then takes the whole width.
             view.movable();
-            view.add_scene().add_light({.center = tg::pos3f(0, 3, 0),
-                                        .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                        .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                        .emission = tg::vec3f(12.0f, 12.0f, 12.0f)});
+            view.add_scene()
+                .add_rect_light("key", tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f))
+                .nits(12.0f);
         }
 
         // The bottom row is a single view holding a *nested* layout — its own texture, subdivided again.
@@ -95,10 +94,10 @@ TEST("sv - interactive viewer, the manual begin_frame/end_frame loop (manual)", 
 
         auto rows = f.window().view().layout_rows({.padding = 8, .spacing = 6});
         rows.add_view("left").initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 5.0});
-        rows.add_view("right").add_scene().add_light({.center = tg::pos3f(0, 3, 0),
-                                                      .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                                      .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                                      .emission = tg::vec3f(12.0f, 12.0f, 12.0f)});
+        rows.add_view("right")
+            .add_scene()
+            .add_rect_light("key", tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f))
+            .nits(12.0f);
 
         // A manual frame presents here and nowhere else — the viewer owns it until this call.
         viewer.end_frame();
@@ -130,10 +129,7 @@ TEST("sv - interactive viewer, one scene with no ceremony (manual)", nx::config:
     {
         auto scene = f.add_scene();
         scene.add_mesh(cloud);
-        scene.add_light({.center = tg::pos3f(0, 3, 0),
-                         .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                         .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        scene.add_rect_light("key", tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(14.0f);
         scene.background(sv::background::gradient(tg::vec3f(0.70f, 0.96f, 1.44f), tg::vec3f(0.21f, 0.28f, 0.37f)));
     }
 

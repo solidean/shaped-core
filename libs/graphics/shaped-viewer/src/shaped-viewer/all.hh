@@ -41,13 +41,13 @@
 #include <shaped-viewer/material/shader_generator.hh>
 
 // what a view is, and how it is framed
+#include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
 #include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/post_process.hh>
 #include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_data.hh>
-#include <shaped-viewer/view/view_id.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 

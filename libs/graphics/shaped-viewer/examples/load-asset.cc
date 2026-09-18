@@ -193,10 +193,9 @@ EXAMPLE("shaped-viewer/load-asset")
         // the light dominates the sky, not that the scene is bright.
         float const light_u = 2.0f;
         float const light_v = 2.0f;
-        scene.add_light({.center = tg::pos3f(-2.4f, 7.0f, 1.0f),
-                         .half_extent_u = tg::vec3f(light_u, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, light_v),
-                         .emission = tg::vec3f(1.0f, 0.97f, 0.92f) * (90.0f / (light_u * light_v))});
+        scene.add_rect_light("key", tg::pos3f(-2.4f, 7.0f, 1.0f), tg::vec3f(light_u, 0, 0), tg::vec3f(0, 0, light_v))
+            .color(tg::vec3f(1.0f, 0.97f, 0.92f))
+            .nits(90.0f / (light_u * light_v));
 
         // Deliberately dim: a bright sky is a dome light, and a dome fills the space under the roof until the pillars
         // cast no shadow anyone can see.

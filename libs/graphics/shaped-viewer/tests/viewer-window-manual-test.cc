@@ -98,10 +98,9 @@ ASYNC_TEST("sv - viewer window (manual)", nx::config::manual, main_thread)
         v.camera = controller.camera();
         sv::ensure_scene_3d(v).items.push_back(item);
         // an overhead rect facing down (cross(+x, +z) is -y)
-        sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
-                                                      .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                                      .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                                      .emission = tg::vec3f(14.0f, 14.0f, 14.0f)});
+        sv::ensure_scene_3d(v).lights.push_back(
+            {.id = sv::light_id::from_string("key"),
+             .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(14.0f)});
 
         // A cool-blue SH sky, brighter toward the zenith (+y).
         // The path tracer's miss shows it behind the cloud, and env NEE lights the cloud from it.
