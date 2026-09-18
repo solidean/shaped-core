@@ -63,7 +63,10 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/webgpu-entry.cc
         tests/webgpu-compute-test.cc
+        tests/webgpu-binding-test.cc
         tests/webgpu-raster-test.cc
+        tests/webgpu-threading-test.cc
+        tests/webgpu-stream-test.cc
     )
     sc_nexus_binary(shaped-graphics-webgpu-test KINDS tests)
     target_link_libraries(shaped-graphics-webgpu-test PRIVATE shaped-graphics-webgpu nexus)

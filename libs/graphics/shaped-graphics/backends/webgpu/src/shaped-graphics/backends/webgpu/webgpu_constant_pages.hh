@@ -23,8 +23,8 @@ struct sg::backend::webgpu::webgpu_constant_page
 /// The pages behind inline constants, which WebGPU does not have.
 ///
 /// A list's inline constants are written into a page leased to that list, at an offset aligned to the adapter's minimum uniform offset alignment, and bound as group 3 binding 0 with a dynamic offset.
-/// The page is written with one `queue.writeBuffer` just before the list submits, and returns to the free list right after it.
-/// A write after a submit lands after it in queue order, which is what makes the page reusable at once.
+/// The page is written with one `queue.writeBuffer` just before the list submits, and returns to the free list in that same step, still ahead of the submit.
+/// That is safe because the next write to it can only come from a later submit's flush, and queue order puts that write after this list's submit.
 ///
 /// An unchanged block binds again at the offset it already has, so a list that sets the same constants for every draw costs one block.
 class sg::backend::webgpu::webgpu_constant_pages

@@ -1,6 +1,7 @@
 // The bind path: binding group layouts, pipeline layouts with the reserved group 3, and binding groups.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
@@ -10,11 +11,51 @@ namespace sg::backend::webgpu
 {
 namespace
 {
+/// Whether a binding of this kind lets the shader write, which WebGPU forbids in the vertex stage.
+[[nodiscard]] bool is_writable(sg::binding const& b)
+{
+    switch (b.type)
+    {
+    case sg::binding_type::readwrite_structured_buffer:
+    case sg::binding_type::readwrite_raw_buffer:
+        return true;
+    case sg::binding_type::readwrite_texture:
+        return b.storage_access != sg::storage_access::read;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] WGPUStorageTextureAccess to_wgpu_storage_access(sg::storage_access access)
+{
+    switch (access)
+    {
+    case sg::storage_access::read:
+        return WGPUStorageTextureAccess_ReadOnly;
+    case sg::storage_access::write:
+        return WGPUStorageTextureAccess_WriteOnly;
+    case sg::storage_access::read_write:
+        return WGPUStorageTextureAccess_ReadWrite;
+    }
+    return WGPUStorageTextureAccess_ReadWrite;
+}
+
+[[nodiscard]] bool is_multisampled(sg::texture_view_dimension dim)
+{
+    return dim == sg::texture_view_dimension::tex_2d_ms || dim == sg::texture_view_dimension::tex_2d_ms_array;
+}
+
 /// One layout entry for `b`, which must not be an array.
+/// A sampler the layout binds itself is laid out as what it is, since a shader's reflection cannot tell a nearest sampler from a linear one.
 [[nodiscard]] WGPUBindGroupLayoutEntry layout_entry_of(sg::binding const& b,
                                                        u32 binding_index,
-                                                       WGPUSamplerBindingType static_sampler_type)
+                                                       cc::optional<WGPUSamplerBindingType> static_sampler_type)
 {
+    CC_ASSERTF(!(b.visibility.has(sg::shader_stage::vertex) && is_writable(b)),
+               "'{}' is writable storage marked vertex-visible, and webgpu allows no writable storage in the vertex "
+               "stage",
+               b.name);
+
     auto entry = WGPUBindGroupLayoutEntry{};
     entry.binding = binding_index;
     entry.visibility = to_wgpu_visibility(b.visibility, b.type);
@@ -37,24 +78,26 @@ namespace
     case sg::binding_type::readonly_texture:
     {
         auto const dim = b.texture_dimension.value_or(sg::texture_view_dimension::tex_2d);
+        auto const multisampled = is_multisampled(dim);
         entry.texture.sampleType
             = b.sample_type.has_value() ? to_wgpu_sample_type(b.sample_type.value()) : WGPUTextureSampleType_Float;
+        // WebGPU never filters a multisampled texture and refuses a layout that says it might.
+        if (multisampled && entry.texture.sampleType == WGPUTextureSampleType_Float)
+            entry.texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
         entry.texture.viewDimension = to_wgpu_view_dimension(dim);
-        entry.texture.multisampled
-            = dim == sg::texture_view_dimension::tex_2d_ms || dim == sg::texture_view_dimension::tex_2d_ms_array
-                ? WGPU_TRUE
-                : WGPU_FALSE;
+        entry.texture.multisampled = multisampled ? WGPU_TRUE : WGPU_FALSE;
         break;
     }
     case sg::binding_type::readwrite_texture:
-        entry.storageTexture.access = WGPUStorageTextureAccess_ReadWrite;
+        entry.storageTexture.access = to_wgpu_storage_access(b.storage_access);
         entry.storageTexture.format = to_wgpu_format(b.storage_format.value_or(sg::pixel_format::undefined));
         entry.storageTexture.viewDimension
             = to_wgpu_view_dimension(b.texture_dimension.value_or(sg::texture_view_dimension::tex_2d));
         break;
     case sg::binding_type::sampler:
-        entry.sampler.type
-            = b.sampler_type.has_value() ? to_wgpu_sampler_binding_type(b.sampler_type.value()) : static_sampler_type;
+        entry.sampler.type = static_sampler_type.has_value() ? static_sampler_type.value()
+                           : b.sampler_type.has_value()      ? to_wgpu_sampler_binding_type(b.sampler_type.value())
+                                                             : WGPUSamplerBindingType_Filtering;
         break;
     case sg::binding_type::acceleration_structure:
         CC_UNREACHABLE("refused before an entry is built");
@@ -78,14 +121,16 @@ namespace
 
 // -- binding group layout --
 
-webgpu_binding_group_layout::webgpu_binding_group_layout(cc::hash128 hash,
+webgpu_binding_group_layout::webgpu_binding_group_layout(webgpu_context& ctx,
+                                                         cc::hash128 hash,
                                                          cc::vector<sg::binding> bindings,
                                                          cc::vector<sg::named_sampler> static_samplers,
-                                                         wgpu_bind_group_layout layout,
-                                                         cc::vector<WGPUSampler> slot_samplers)
+                                                         cc::vector<WGPUBindGroupLayoutEntry> entries,
+                                                         cc::vector<cc::optional<sg::sampler>> slot_sampler_descs)
   : sg::binding_group_layout(hash, cc::move(bindings), cc::move(static_samplers)),
-    _layout(cc::move(layout)),
-    _slot_samplers(cc::move(slot_samplers))
+    _ctx(ctx),
+    _entries(cc::move(entries)),
+    _slot_sampler_descs(cc::move(slot_sampler_descs))
 {
 }
 
@@ -94,7 +139,6 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
     cc::span<sg::binding const> bindings,
     cc::span<sg::named_sampler const> static_samplers)
 {
-    ctx.assert_on_device_thread();
     auto const hash = sg::impl::binding_group_layout_hash(bindings, static_samplers);
 
     for (isize i = 0; i < bindings.size(); ++i)
@@ -114,37 +158,86 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
                                         "a "
                                         "webgpu layout needs before any view exists",
                                         b.name));
+        if (b.type == sg::binding_type::readwrite_texture && b.storage_access == sg::storage_access::read_write
+            && !ctx.supports(sg::feature::readwrite_storage_formats))
+        {
+            auto const format = b.storage_format.value_or(sg::pixel_format::undefined);
+            if (format != sg::pixel_format::r32_float && format != sg::pixel_format::r32_uint
+                && format != sg::pixel_format::r32_sint)
+                return cc::error(cc::format("binding_group_layout: storage texture '{}' is read_write in a format "
+                                            "other "
+                                            "than r32float / r32uint / r32sint, which needs "
+                                            "sg::feature::readwrite_storage_formats (webgpu's texture-formats-tier2), "
+                                            "and this device lacks it; declare it write or read instead",
+                                            b.name));
+        }
+        if (b.type == sg::binding_type::readonly_texture
+            && b.texture_dimension == sg::texture_view_dimension::tex_2d_ms_array)
+            return cc::error(cc::format("binding_group_layout: '{}' is a multisampled array texture, which webgpu does "
+                                        "not have",
+                                        b.name));
         for (isize j = i + 1; j < bindings.size(); ++j)
             if (bindings[j].index == b.index)
                 return cc::error(cc::format("binding_group_layout: '{}' and '{}' are both at @binding({})", b.name,
                                             bindings[j].name, b.index));
     }
 
-    auto slot_samplers = cc::vector<WGPUSampler>::create_filled(bindings.size(), nullptr);
+    for (auto const& s : static_samplers)
+    {
+        auto matched = false;
+        for (auto const& b : bindings)
+            matched = matched || (sg::is_sampler(b.type) && b.name == s.name);
+        if (!matched)
+            return cc::error(cc::format("binding_group_layout: static sampler '{}' names no sampler binding", s.name));
+    }
+
+    auto slot_sampler_descs = cc::vector<cc::optional<sg::sampler>>::create_filled(bindings.size(), cc::nullopt);
     auto entries = cc::vector<WGPUBindGroupLayoutEntry>();
     entries.reserve(bindings.size());
     for (isize i = 0; i < bindings.size(); ++i)
     {
         auto const& b = bindings[i];
-        auto sampler_type = WGPUSamplerBindingType_Filtering;
+        auto sampler_type = cc::optional<WGPUSamplerBindingType>();
         if (sg::is_sampler(b.type))
             for (auto const& s : static_samplers)
                 if (s.name == b.name)
                 {
-                    slot_samplers[i] = ctx._samplers.acquire(s.sampler);
+                    slot_sampler_descs[i] = s.sampler;
                     sampler_type = default_sampler_binding_type(s.sampler);
                     break;
                 }
         entries.push_back(layout_entry_of(b, b.index, sampler_type));
     }
 
-    auto layout = create_layout(ctx.device(), entries, "sg binding group layout");
-    if (!layout)
-        return cc::error("wgpuDeviceCreateBindGroupLayout returned no layout");
-
     return webgpu_binding_group_layout_handle(std::make_shared<webgpu_binding_group_layout>(
-        hash, cc::vector<sg::binding>::create_copy_of(bindings),
-        cc::vector<sg::named_sampler>::create_copy_of(static_samplers), cc::move(layout), cc::move(slot_samplers)));
+        ctx, hash, cc::vector<sg::binding>::create_copy_of(bindings),
+        cc::vector<sg::named_sampler>::create_copy_of(static_samplers), cc::move(entries), cc::move(slot_sampler_descs)));
+}
+
+void webgpu_binding_group_layout::materialize() const
+{
+    if (_layout)
+        return;
+
+    _slot_samplers = cc::vector<WGPUSampler>::create_filled(_slot_sampler_descs.size(), nullptr);
+    for (isize i = 0; i < _slot_sampler_descs.size(); ++i)
+        if (_slot_sampler_descs[i].has_value())
+            _slot_samplers[i] = _ctx._samplers.acquire(_slot_sampler_descs[i].value());
+
+    _layout = create_layout(_ctx.device(), _entries, "sg binding group layout");
+    CC_ASSERT(bool(_layout), "wgpuDeviceCreateBindGroupLayout returned no layout for a layout sg validated");
+}
+
+WGPUBindGroupLayout webgpu_binding_group_layout::raw() const
+{
+    materialize();
+    return _layout.get();
+}
+
+cc::span<WGPUSampler const> webgpu_binding_group_layout::slot_samplers() const
+{
+    materialize();
+    return _slot_samplers;
 }
 
 // -- pipeline layout --
@@ -157,7 +250,6 @@ webgpu_pipeline_layout::webgpu_pipeline_layout(webgpu_context& ctx, cc::hash128 
 cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_context& ctx,
                                                                          sg::pipeline_layout_description const& desc)
 {
-    ctx.assert_on_device_thread();
     if (int(desc.groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
@@ -171,7 +263,7 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     }
 
     // Group 3: the inline constants at binding 0, the register-bound samplers at their index + 1.
-    auto reserved = cc::vector<WGPUBindGroupLayoutEntry>();
+    auto& reserved = layout->_reserved_entries;
     if (desc.inline_constants.has_value())
     {
         auto const& b = desc.inline_constants.value();
@@ -202,30 +294,41 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         auto entry = layout_entry_of(s.binding, binding_index, default_sampler_binding_type(s.sampler));
         entry.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
         reserved.push_back(entry);
-        layout->_reserved_samplers.push_back({.binding = binding_index, .sampler = ctx._samplers.acquire(s.sampler)});
+        layout->_reserved_samplers.push_back({.binding = binding_index, .desc = s.sampler});
     }
 
+    layout->_slot_count = reserved.empty() ? int(layout->_groups.size()) : sg::reserved_binding_group + 1;
+    return webgpu_pipeline_layout_handle(cc::move(layout));
+}
+
+void webgpu_pipeline_layout::materialize() const
+{
+    if (_layout)
+        return;
+
     auto set_layouts = cc::vector<WGPUBindGroupLayout>();
-    for (auto const& g : layout->_groups)
+    for (auto const& g : _groups)
         set_layouts.push_back(g->raw());
 
-    if (!reserved.empty())
+    if (!_reserved_entries.empty())
     {
-        layout->_reserved_layout = create_layout(ctx.device(), reserved, "sg reserved group");
-        layout->_empty_layout = create_layout(ctx.device(), {}, "sg empty group");
+        for (auto& s : _reserved_samplers)
+            s.sampler = _ctx._samplers.acquire(s.desc);
+        _reserved_layout = create_layout(_ctx.device(), _reserved_entries, "sg reserved group");
+        _empty_layout = create_layout(_ctx.device(), {}, "sg empty group");
         auto const empty_desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg empty group"),
-            .layout = layout->_empty_layout.get(),
+            .layout = _empty_layout.get(),
             .entryCount = 0,
             .entries = nullptr,
         };
-        layout->_empty_group = wgpu_bind_group(wgpuDeviceCreateBindGroup(ctx.device(), &empty_desc));
+        _empty_group = wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &empty_desc));
         while (set_layouts.size() < sg::reserved_binding_group)
-            set_layouts.push_back(layout->_empty_layout.get());
-        set_layouts.push_back(layout->_reserved_layout.get());
+            set_layouts.push_back(_empty_layout.get());
+        set_layouts.push_back(_reserved_layout.get());
     }
-    layout->_slot_count = int(set_layouts.size());
+    CC_ASSERT(int(set_layouts.size()) == _slot_count, "the slot count create computed is the one materialized");
 
     auto const pipeline_desc = WGPUPipelineLayoutDescriptor{
         .nextInChain = nullptr,
@@ -234,16 +337,26 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         .bindGroupLayouts = set_layouts.empty() ? nullptr : set_layouts.data(),
         .immediateSize = 0,
     };
-    layout->_layout = wgpu_pipeline_layout(wgpuDeviceCreatePipelineLayout(ctx.device(), &pipeline_desc));
-    if (!layout->_layout)
-        return cc::error("wgpuDeviceCreatePipelineLayout returned no layout");
+    _layout = wgpu_pipeline_layout(wgpuDeviceCreatePipelineLayout(_ctx.device(), &pipeline_desc));
+    CC_ASSERT(bool(_layout), "wgpuDeviceCreatePipelineLayout returned no layout for a layout sg validated");
+}
 
-    return webgpu_pipeline_layout_handle(cc::move(layout));
+WGPUPipelineLayout webgpu_pipeline_layout::raw() const
+{
+    materialize();
+    return _layout.get();
+}
+
+WGPUBindGroup webgpu_pipeline_layout::empty_group() const
+{
+    materialize();
+    return _empty_group.get();
 }
 
 WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page const* page) const
 {
     CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
+    materialize();
 
     auto const build = [&](WGPUBuffer buffer)
     {
@@ -356,6 +469,11 @@ struct resolved_view
             auto const buffer = std::dynamic_pointer_cast<webgpu_buffer const>(bv->buffer);
             CC_ASSERT(buffer != nullptr, "bound buffer is not a webgpu buffer");
             CC_ASSERT(!buffer->is_expired(), "binding_group names an expired buffer");
+            CC_ASSERTF(
+                b.type != sg::binding_type::uniform_buffer || bv->offset_in_bytes % ctx.uniform_offset_alignment() == 0,
+                "binding_group: uniform buffer '{}' is bound at offset {}, which is not a multiple of the "
+                "device's minUniformBufferOffsetAlignment ({})",
+                rv.name, bv->offset_in_bytes, ctx.uniform_offset_alignment());
             auto const size
                 = bv->shape == sg::view_shape::structured ? bv->element_count * bv->stride_in_bytes : bv->size_in_bytes;
             entry.buffer = buffer->raw();

@@ -37,14 +37,19 @@ public:
     void shutdown();
 
     /// Stages `data` for a copy recorded by a list, padded with zeros to `staged_size`, which must be a whole word and at least `data.size()`.
+    /// The span starts at a multiple of `alignment`, a power of two no smaller than a word.
     /// The caller must hold the ring (see acquire_holder) for as long as the copy may still be submitted.
-    [[nodiscard]] webgpu_upload_span stage(cc::span<byte const> data, isize staged_size);
+    [[nodiscard]] webgpu_upload_span stage(cc::span<byte const> data,
+                                           isize staged_size,
+                                           isize alignment = buffer_word_bytes);
 
     /// Stages `data` with each of its rows moved to a multiple of 256 bytes, as a buffer-to-texture copy places them.
+    /// The span starts at a multiple of `block_bytes` as well, which a buffer-to-texture copy requires of its offset.
     [[nodiscard]] webgpu_upload_span stage_rows(cc::span<byte const> data,
                                                 isize row_bytes,
                                                 isize padded_row,
-                                                isize staged_size);
+                                                isize staged_size,
+                                                isize block_bytes);
 
     /// Counts one open list holding spans; paired with release_holder when that list submits or drops.
     void acquire_holder() { ++_holders; }
@@ -56,8 +61,8 @@ public:
     void set_budget(isize bytes);
 
 private:
-    /// Space for `size` bytes at a word boundary, or nullopt when the ring cannot hold them now.
-    [[nodiscard]] cc::optional<isize> reserve(isize size);
+    /// Space for `size` bytes at a multiple of `alignment`, or nullopt when the ring cannot hold them now.
+    [[nodiscard]] cc::optional<isize> reserve(isize size, isize alignment);
 
     /// A dedicated staging buffer for one upload, with the warning.
     [[nodiscard]] webgpu_upload_span stage_outside_ring(cc::span<byte const> padded);

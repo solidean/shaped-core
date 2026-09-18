@@ -81,9 +81,8 @@ void write_texture_rows(webgpu_context& ctx,
             .bytesPerRow = u32(layout.row_bytes),
             .rowsPerImage = u32(n),
         };
-        // The last rows of an edge-sized block format may be partial, so the extent is clamped to the region.
-        auto const height = cc::min(n * block, isize(region.size[1]) - y * block);
-        auto const extent = WGPUExtent3D{u32(region.size[0]), u32(height), 1};
+        // Whole blocks: a region running to the mip's edge ends in a partial block, which the copy still names whole.
+        auto const extent = WGPUExtent3D{copy_extent_of(texture.format(), region.size).width, u32(n * block), 1};
         wgpuQueueWriteTexture(ctx.queue(), &destination, cursor, size_t(n * layout.row_bytes), &data_layout, &extent);
 
         cursor += n * layout.row_bytes;
@@ -109,6 +108,10 @@ void webgpu_stream_system::shutdown()
     for (auto& job : _uploads)
         job.control->completion->push_error(cc::async_error::make_cancelled());
     _uploads = {};
+    for (auto& job : _downloads)
+        if (!job.control->completion->is_ready())
+            job.control->completion->push_error(cc::async_error::make_cancelled());
+    _downloads = {};
     _pump.reset();
 }
 
@@ -184,11 +187,7 @@ void webgpu_stream_system::upload_texture(sg::raw_texture_handle texture,
     write_texture_rows(*_ctx, texture_of(texture), subresource, region, data.span(), 0);
 }
 
-sg::bytes_future webgpu_stream_system::read_buffer(sg::raw_buffer_handle const& buffer,
-                                                   isize offset,
-                                                   isize size,
-                                                   std::shared_ptr<sg::impl::stream_control> control,
-                                                   sg::stream_sink sink)
+sg::bytes_future webgpu_stream_system::read_buffer(sg::raw_buffer_handle const& buffer, isize offset, isize size)
 {
     auto const& src = buffer_of(buffer);
     flush_resource(buffer.get(), false);
@@ -204,34 +203,13 @@ sg::bytes_future webgpu_stream_system::read_buffer(sg::raw_buffer_handle const& 
     auto const raw = commands.get();
     wgpuQueueSubmit(_ctx->queue(), 1, &raw);
 
-    auto completion = control != nullptr ? control->completion : cc::make_async_manual<cc::unit>();
+    auto completion = cc::make_async_manual<cc::unit>();
     readback.completion = completion;
-
-    if (sink)
-    {
-        auto const chunk_bytes = cc::max(_window_bytes, isize(1));
-        readback.deliver = [sink = cc::move(sink), control, skip, size, chunk_bytes](cc::span<byte const> mapped) mutable
-        {
-            for (isize at = 0; at < size; at += chunk_bytes)
-            {
-                auto const n = cc::min(chunk_bytes, size - at);
-                if (!sink(mapped.subspan({.offset = skip + at, .size = n}), at))
-                    return false;
-                control->bytes_done.store(at + n, std::memory_order_relaxed);
-            }
-            return true;
-        };
-        _ctx->_readbacks.start_map(cc::move(readback));
-        return {};
-    }
-
     auto destination = cc::pinned_data<byte>::create_uninitialized(size);
     auto const dst_span = destination.span();
-    readback.deliver = [dst_span, skip, control](cc::span<byte const> mapped)
+    readback.deliver = [dst_span, skip](cc::span<byte const> mapped)
     {
         cc::memcpy(dst_span.data(), mapped.data() + skip, size_t(dst_span.size()));
-        if (control != nullptr)
-            control->bytes_done.store(dst_span.size(), std::memory_order_relaxed);
         return true;
     };
     readback.pin = std::weak_ptr<void const>(destination.pin());
@@ -242,9 +220,7 @@ sg::bytes_future webgpu_stream_system::read_buffer(sg::raw_buffer_handle const& 
 
 sg::bytes_future webgpu_stream_system::read_texture(sg::raw_texture_handle const& texture,
                                                     sg::subresource_index const& subresource,
-                                                    sg::texture_region const& region,
-                                                    std::shared_ptr<sg::impl::stream_control> control,
-                                                    sg::stream_sink sink)
+                                                    sg::texture_region const& region)
 {
     auto const& src = texture_of(texture);
     auto const layout = texel_copy_layout_of(src.format(), region.size);
@@ -262,51 +238,23 @@ sg::bytes_future webgpu_stream_system::read_texture(sg::raw_texture_handle const
         .layout = {.offset = 0, .bytesPerRow = u32(layout.padded_row), .rowsPerImage = u32(layout.rows)},
         .buffer = readback.staging.get(),
     };
-    auto const extent = WGPUExtent3D{u32(region.size[0]), u32(region.size[1]), u32(region.size[2])};
+    auto const extent = copy_extent_of(src.format(), region.size);
     auto encoder = wgpu_command_encoder(wgpuDeviceCreateCommandEncoder(_ctx->device(), nullptr));
     wgpuCommandEncoderCopyTextureToBuffer(encoder.get(), &source, &destination_info, &extent);
     auto commands = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder.get(), nullptr));
     auto const raw = commands.get();
     wgpuQueueSubmit(_ctx->queue(), 1, &raw);
 
-    auto completion = control != nullptr ? control->completion : cc::make_async_manual<cc::unit>();
+    auto completion = cc::make_async_manual<cc::unit>();
     readback.completion = completion;
     auto const row_count = layout.rows * layout.images;
-
-    if (sink)
-    {
-        // A sink sees tightly packed rows, a window's worth of whole rows at a time.
-        auto const rows_per_chunk = cc::max(_window_bytes / cc::max(layout.row_bytes, isize(1)), isize(1));
-        readback.deliver
-            = [sink = cc::move(sink), control, layout, row_count, rows_per_chunk](cc::span<byte const> mapped) mutable
-        {
-            auto packed = cc::vector<byte>();
-            for (isize first = 0; first < row_count; first += rows_per_chunk)
-            {
-                auto const n = cc::min(rows_per_chunk, row_count - first);
-                packed.resize_to_uninitialized(n * layout.row_bytes);
-                for (isize r = 0; r < n; ++r)
-                    cc::memcpy(packed.data() + r * layout.row_bytes, mapped.data() + (first + r) * layout.padded_row,
-                               size_t(layout.row_bytes));
-                if (!sink(packed, first * layout.row_bytes))
-                    return false;
-                control->bytes_done.store((first + n) * layout.row_bytes, std::memory_order_relaxed);
-            }
-            return true;
-        };
-        _ctx->_readbacks.start_map(cc::move(readback));
-        return {};
-    }
-
     auto destination = cc::pinned_data<byte>::create_uninitialized(layout.packed_bytes);
     auto const dst_span = destination.span();
-    readback.deliver = [dst_span, layout, row_count, control](cc::span<byte const> mapped)
+    readback.deliver = [dst_span, layout, row_count](cc::span<byte const> mapped)
     {
         for (isize r = 0; r < row_count; ++r)
             cc::memcpy(dst_span.data() + r * layout.row_bytes, mapped.data() + r * layout.padded_row,
                        size_t(layout.row_bytes));
-        if (control != nullptr)
-            control->bytes_done.store(dst_span.size(), std::memory_order_relaxed);
         return true;
     };
     readback.pin = std::weak_ptr<void const>(destination.pin());
@@ -319,14 +267,14 @@ sg::bytes_future webgpu_stream_system::download_buffer(sg::raw_buffer_handle buf
 {
     if (size == 0)
         return sg::bytes_future(cc::pinned_data<byte const>(), sg::make_ready_completion());
-    return read_buffer(buffer, offset, size, nullptr, {});
+    return read_buffer(buffer, offset, size);
 }
 
 sg::bytes_future webgpu_stream_system::download_texture(sg::raw_texture_handle texture,
                                                         sg::subresource_index const& subresource,
                                                         sg::texture_region const& region)
 {
-    return read_texture(texture, subresource, region, nullptr, {});
+    return read_texture(texture, subresource, region);
 }
 
 // -- the streaming tier --
@@ -372,14 +320,53 @@ sg::stream_upload_handle webgpu_stream_system::stream_to_texture(sg::raw_texture
     return sg::stream_upload_handle(cc::move(control));
 }
 
-// A streaming download needs no window of its own — it is one copy and one map — so its handle settles straight from the map.
+namespace
+{
+/// The destination a download without a sink fills, and the future over it.
+struct download_destination
+{
+    cc::span<byte> span;
+    std::weak_ptr<void const> pin;
+    sg::bytes_future future;
+};
+
+[[nodiscard]] download_destination make_destination(isize size, cc::shared_async<cc::unit> completion)
+{
+    auto data = cc::pinned_data<byte>::create_uninitialized(size);
+    auto out = download_destination{.span = data.span(), .pin = std::weak_ptr<void const>(data.pin())};
+    out.future = sg::bytes_future(cc::pinned_data<byte const>(cc::move(data)), cc::move(completion));
+    return out;
+}
+} // namespace
+
 sg::stream_download_handle webgpu_stream_system::stream_from_buffer(sg::raw_buffer_handle buffer,
                                                                     sg::stream_sink sink,
                                                                     isize offset,
                                                                     isize size)
 {
     auto control = make_control(size);
-    auto future = read_buffer(buffer, offset, size, control, cc::move(sink));
+    auto job = download_job{.control = control,
+                            .buffer = cc::move(buffer),
+                            .offset = offset,
+                            .total = size,
+                            .sequence = _next_sequence++};
+    auto future = sg::bytes_future();
+    if (sink)
+        job.sink = std::make_shared<sg::stream_sink>(cc::move(sink));
+    else
+    {
+        auto destination = make_destination(size, control->completion);
+        job.destination = destination.span;
+        job.pin = destination.pin;
+        future = cc::move(destination.future);
+    }
+    if (size == 0)
+        control->completion->push_value(cc::unit{});
+    else
+    {
+        _downloads.push_back(cc::move(job));
+        ensure_pump();
+    }
     return sg::stream_download_handle(cc::move(control), cc::move(future));
 }
 
@@ -390,8 +377,153 @@ sg::stream_download_handle webgpu_stream_system::stream_from_texture(sg::raw_tex
 {
     auto const layout = texel_copy_layout_of(texture_of(texture).format(), region.size);
     auto control = make_control(layout.packed_bytes);
-    auto future = read_texture(texture, subresource, region, control, cc::move(sink));
+    auto job = download_job{.control = control,
+                            .texture = cc::move(texture),
+                            .subresource = subresource,
+                            .region = region,
+                            .total = layout.rows * layout.images,
+                            .sequence = _next_sequence++};
+    auto future = sg::bytes_future();
+    if (sink)
+        job.sink = std::make_shared<sg::stream_sink>(cc::move(sink));
+    else
+    {
+        auto destination = make_destination(layout.packed_bytes, control->completion);
+        job.destination = destination.span;
+        job.pin = destination.pin;
+        future = cc::move(destination.future);
+    }
+    if (job.total == 0)
+        control->completion->push_value(cc::unit{});
+    else
+    {
+        _downloads.push_back(cc::move(job));
+        ensure_pump();
+    }
     return sg::stream_download_handle(cc::move(control), cc::move(future));
+}
+
+webgpu_readback webgpu_stream_system::copy_download_window(download_job& job, isize budget)
+{
+    auto window = cc::make_async_manual<cc::unit>();
+    auto out = webgpu_readback();
+    auto control = job.control;
+    auto const has_pin = job.sink == nullptr;
+
+    if (job.buffer != nullptr)
+    {
+        auto const& src = buffer_of(job.buffer);
+        flush_uploads_into(job.buffer.get(), false);
+
+        // A window ends on a word, so the next one starts where a copy may; the last one ends where the extent does.
+        auto const at = job.offset + job.issued;
+        auto const window_end = align_up(at + cc::max(budget, isize(1)), buffer_word_bytes);
+        auto const n = cc::min(window_end - at, job.total - job.issued);
+        auto const start = at / buffer_word_bytes * buffer_word_bytes;
+        auto const skip = at - start;
+        auto const words = align_up(skip + n, buffer_word_bytes);
+
+        auto readback = _ctx->_readbacks.acquire(words);
+        auto encoder = wgpu_command_encoder(wgpuDeviceCreateCommandEncoder(_ctx->device(), nullptr));
+        wgpuCommandEncoderCopyBufferToBuffer(encoder.get(), src.raw(), u64(start), readback.staging.get(), 0, u64(words));
+        auto commands = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder.get(), nullptr));
+        auto const raw = commands.get();
+        wgpuQueueSubmit(_ctx->queue(), 1, &raw);
+
+        auto const logical = job.issued;
+        readback.completion = window;
+        if (job.sink)
+            readback.deliver = [sink = job.sink, control, skip, n, logical](cc::span<byte const> mapped)
+            {
+                if (!(*sink)(mapped.subspan({.offset = skip, .size = n}), logical))
+                    return false;
+                control->bytes_done.store(logical + n, std::memory_order_relaxed);
+                return true;
+            };
+        else
+            readback.deliver = [dst = job.destination, control, skip, n, logical](cc::span<byte const> mapped)
+            {
+                cc::memcpy(dst.data() + logical, mapped.data() + skip, size_t(n));
+                control->bytes_done.store(logical + n, std::memory_order_relaxed);
+                return true;
+            };
+        readback.pin = job.pin;
+        readback.has_pin = has_pin;
+        out = cc::move(readback);
+        job.issued += n;
+    }
+    else
+    {
+        auto const& src = texture_of(job.texture);
+        auto const layout = texel_copy_layout_of(src.format(), job.region.size);
+        auto const block = isize(sg::format_block_extent(src.format()));
+        auto const is_3d = src.dimension() == sg::texture_dimension::d3;
+        flush_uploads_into(job.texture.get(), false);
+
+        // Whole block rows, at least one, as many as the window holds.
+        auto const first = job.issued;
+        auto const count = cc::min(cc::max(budget / layout.padded_row, isize(1)), job.total - first);
+
+        auto readback = _ctx->_readbacks.acquire(count * layout.padded_row);
+        auto encoder = wgpu_command_encoder(wgpuDeviceCreateCommandEncoder(_ctx->device(), nullptr));
+        for (auto row = first; row < first + count;)
+        {
+            // One copy per image the band crosses: a 3D region's images are its depth slices.
+            auto const image = row / layout.rows;
+            auto const y = row % layout.rows;
+            auto const n = cc::min(first + count - row, layout.rows - y);
+            auto const source = WGPUTexelCopyTextureInfo{
+                .texture = src.raw(),
+                .mipLevel = u32(job.subresource.mip_level),
+                .origin = {u32(job.region.offset[0]), u32(isize(job.region.offset[1]) + y * block),
+                           is_3d ? u32(isize(job.region.offset[2]) + image) : u32(job.subresource.array_layer)},
+                .aspect = to_wgpu_copy_aspect(src.format(), job.subresource.aspect),
+            };
+            auto const destination_info = WGPUTexelCopyBufferInfo{
+                .layout = {.offset = u64((row - first) * layout.padded_row),
+                           .bytesPerRow = u32(layout.padded_row),
+                           .rowsPerImage = u32(n)},
+                .buffer = readback.staging.get(),
+            };
+            auto const extent = WGPUExtent3D{copy_extent_of(src.format(), job.region.size).width, u32(n * block), 1};
+            wgpuCommandEncoderCopyTextureToBuffer(encoder.get(), &source, &destination_info, &extent);
+            row += n;
+        }
+        auto commands = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder.get(), nullptr));
+        auto const raw = commands.get();
+        wgpuQueueSubmit(_ctx->queue(), 1, &raw);
+
+        readback.completion = window;
+        auto const row_bytes = layout.row_bytes;
+        auto const padded_row = layout.padded_row;
+        if (job.sink)
+            readback.deliver
+                = [sink = job.sink, control, first, count, row_bytes, padded_row](cc::span<byte const> mapped)
+            {
+                // A sink sees tightly packed rows.
+                auto packed = cc::vector<byte>::create_uninitialized(count * row_bytes);
+                for (isize r = 0; r < count; ++r)
+                    cc::memcpy(packed.data() + r * row_bytes, mapped.data() + r * padded_row, size_t(row_bytes));
+                if (!(*sink)(packed, first * row_bytes))
+                    return false;
+                control->bytes_done.store((first + count) * row_bytes, std::memory_order_relaxed);
+                return true;
+            };
+        else
+            readback.deliver
+                = [dst = job.destination, control, first, count, row_bytes, padded_row](cc::span<byte const> mapped)
+            {
+                for (isize r = 0; r < count; ++r)
+                    cc::memcpy(dst.data() + (first + r) * row_bytes, mapped.data() + r * padded_row, size_t(row_bytes));
+                control->bytes_done.store((first + count) * row_bytes, std::memory_order_relaxed);
+                return true;
+            };
+        readback.pin = job.pin;
+        readback.has_pin = has_pin;
+        out = cc::move(readback);
+        job.issued += count;
+    }
+    return out;
 }
 
 void webgpu_stream_system::settle_after_queue(std::shared_ptr<sg::impl::stream_control> control)
@@ -435,40 +567,88 @@ bool webgpu_stream_system::advance_job(isize index, isize& budget, bool& progres
             return true;
         }
 
-        auto const poll = job.source->try_next_chunk();
-        if (poll.status == sg::stream_source_status::not_yet)
-            return false;
-        if (poll.status == sg::stream_source_status::failed)
+        if (!job.pending.has_value())
         {
-            job.control->completion->push_error(cc::async_error::make_error(cc::any_error("the stream source failed")));
-            return true;
-        }
-        if (poll.status == sg::stream_source_status::done)
-        {
-            settle_after_queue(job.control);
-            return true;
+            auto poll = job.source->try_next_chunk();
+            if (poll.status == sg::stream_source_status::not_yet)
+                return false;
+            if (poll.status == sg::stream_source_status::failed)
+            {
+                job.control->completion->push_error(cc::async_error::make_error(cc::any_error("the stream source "
+                                                                                              "failed")));
+                return true;
+            }
+            if (poll.status == sg::stream_source_status::done)
+            {
+                settle_after_queue(job.control);
+                return true;
+            }
+            job.pending = cc::move(poll.chunk);
+            job.pending_done = 0;
         }
 
-        auto const& chunk = poll.chunk;
+        // What the window has left of the chunk: whole words into a buffer, whole rows into a texture, and never nothing.
+        auto const& chunk = job.pending.value();
+        auto const left = chunk.data.size() - job.pending_done;
+        auto n = left;
         if (job.buffer != nullptr)
-            write_buffer(*_ctx, buffer_of(job.buffer), chunk.data.span(), job.offset + chunk.offset);
+        {
+            if (budget < left)
+                n = cc::max(budget / buffer_word_bytes * buffer_word_bytes, cc::min(left, buffer_word_bytes));
+            write_buffer(*_ctx, buffer_of(job.buffer), chunk.data.span().subspan({.offset = job.pending_done, .size = n}),
+                         job.offset + chunk.offset + job.pending_done);
+        }
         else
         {
             auto const& texture = texture_of(job.texture);
             auto const layout = texel_copy_layout_of(texture.format(), job.region.size);
             CC_ASSERT(chunk.offset % layout.row_bytes == 0 && chunk.data.size() % layout.row_bytes == 0,
                       "a texture stream chunk must start and end on a row");
-            write_texture_rows(*_ctx, texture, job.subresource, job.region, chunk.data.span(),
-                               chunk.offset / layout.row_bytes);
+            if (budget < left)
+                n = cc::max(budget / layout.row_bytes, isize(1)) * layout.row_bytes;
+            write_texture_rows(*_ctx, texture, job.subresource, job.region,
+                               chunk.data.span().subspan({.offset = job.pending_done, .size = n}),
+                               (chunk.offset + job.pending_done) / layout.row_bytes);
         }
-        job.control->bytes_done.fetch_add(chunk.data.size(), std::memory_order_relaxed);
-        budget -= cc::max(chunk.data.size(), isize(1));
+        job.pending_done += n;
+        if (job.pending_done == chunk.data.size())
+            job.pending = cc::nullopt;
+
+        job.control->bytes_done.fetch_add(n, std::memory_order_relaxed);
+        budget -= cc::max(n, isize(1));
         progressed = true;
     }
     return false;
 }
 
 void webgpu_stream_system::flush_resource(void const* resource, bool for_list)
+{
+    flush_uploads_into(resource, for_list);
+    if (!for_list)
+        return;
+
+    // A list may write what a stream download is still reading, so every remaining window is copied now, ahead of it.
+    for (auto& job : _downloads)
+    {
+        auto const* const family = job.buffer != nullptr ? static_cast<void const*>(job.buffer.get())
+                                                         : static_cast<void const*>(job.texture.get());
+        if (family != resource || job.issued == job.total)
+            continue;
+        if (!job.control->promoted.load(std::memory_order_relaxed))
+        {
+            auto const claimed = job.buffer != nullptr ? job.buffer->claim_stream_wait_warning(job.sequence)
+                                                       : job.texture->claim_stream_wait_warning(job.sequence);
+            if (claimed)
+                CC_LOG_WARNING("a command list touches a resource a stream is still reading, so the rest of the read "
+                               "was copied ahead of it. Wait on the stream handle before using the resource, or call "
+                               "promote_to_async on it if bringing it forward is what you want");
+        }
+        while (job.issued < job.total)
+            job.copied.push_back(copy_download_window(job, isize(1) << 62));
+    }
+}
+
+void webgpu_stream_system::flush_uploads_into(void const* resource, bool for_list)
 {
     if (_uploads.empty())
         return;
@@ -539,14 +719,82 @@ bool webgpu_stream_system::pump()
             finished[index] = char(1);
     }
 
+    auto removed = false;
     for (auto i = _uploads.size(); i > 0; --i)
         if (finished[i - 1] != char(0))
         {
             _uploads.remove_at(i - 1);
+            removed = true;
+        }
+
+    // Downloads share the window, oldest first, one window in flight each: the next is read only once the last was delivered, so a sink sees its chunks in order.
+    for (isize i = 0; i < _downloads.size();)
+    {
+        auto& job = _downloads[i];
+        if (job.window != nullptr)
+        {
+            if (!job.window->is_ready())
+            {
+                ++i;
+                continue;
+            }
+            if (auto const* error = job.window->try_error(); error != nullptr)
+            {
+                // The window's error is the job's; async errors do not copy, so it is rebuilt.
+                job.control->completion->push_error(
+                    error->is_cancelled() ? cc::async_error::make_cancelled()
+                                          : cc::async_error::make_error(cc::any_error(error->underlying().to_string())));
+                _downloads.remove_at(i);
+                removed = true;
+                continue;
+            }
+            job.window = nullptr;
             progressed = true;
         }
 
+        if (job.issued == job.total && job.copied.empty())
+        {
+            job.control->completion->push_value(cc::unit{});
+            _downloads.remove_at(i);
+            removed = true;
+            continue;
+        }
+        if (job.control->cancelled.load(std::memory_order_relaxed))
+        {
+            job.control->completion->push_error(cc::async_error::make_cancelled());
+            _downloads.remove_at(i);
+            removed = true;
+            continue;
+        }
+        // A copy already on the queue is mapped first; otherwise the window's budget pays for a new one.
+        if (!job.copied.empty())
+        {
+            auto next = cc::move(job.copied.front());
+            job.copied.remove_at(0);
+            budget -= next.mapped_bytes;
+            job.window = next.completion;
+            _ctx->_readbacks.start_map(cc::move(next));
+            progressed = true;
+        }
+        else if (budget > 0)
+        {
+            auto next = copy_download_window(job, budget);
+            budget -= next.mapped_bytes;
+            job.window = next.completion;
+            _ctx->_readbacks.start_map(cc::move(next));
+            progressed = true;
+        }
+        ++i;
+    }
+
+    // The last job leaving can be what a transfers-drained completion waits on, and nothing else would re-check it.
+    if (removed)
+    {
+        progressed = true;
+        _ctx->settle_due_completions();
+    }
+
     // A window cut short by its budget has more to move on the next sweep.
-    return progressed || (budget <= 0 && !_uploads.empty());
+    return progressed || (budget <= 0 && (!_uploads.empty() || !_downloads.empty()));
 }
 } // namespace sg::backend::webgpu

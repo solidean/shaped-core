@@ -52,10 +52,19 @@ WebGPU's own `texture_1d` allows no mips, no arrays and no storage or render use
 
 WebGPU fixes some facts at layout creation that dx12 and vulkan take from the bound view, so the parser reads them from the declaration:
 
-- a **storage texture's** texel format, from `texture_storage_2d<rgba8unorm, read_write>`;
+- a **storage texture's** texel format and access mode, from `texture_storage_2d<rgba8unorm, write>`, into `storage_format` and `storage_access`.
+  Core WebGPU allows `read_write` only for `r32float`, `r32uint` and `r32sint`; any other format is `write` or `read`;
 - a **sampled texture's** sample type, from `texture_2d<f32>`, `texture_depth_2d`, `texture_2d<u32>` and so on.
   An `f32` texture is filterable, so a 32-bit float texture that is only loaded should be bound through an unfilterable layout;
+  `texture_multisampled_2d<f32>` is the exception, reported unfilterable because WebGPU never filters a multisampled texture;
 - a **sampler's** kind, from `sampler` or `sampler_comparison`.
+  Every `sampler` is reported `filtering`, since a declaration parser cannot see which texture it samples.
+  A sampler used with a depth or unfilterable-float texture must be bound through a layout whose binding sets `sampler_type = sg::sampler_binding_type::non_filtering`.
+
+## Module-scope order is free
+
+WGSL lets a module-scope declaration come after its use, and the parser follows it: a `const` may sit below the `@workgroup_size`, `@group` or `array<T, N>` that names it.
+What it evaluates is a lone integer literal or the name of a `const` bound to one; anything larger is refused as an expression sg does not evaluate.
 
 ## What is refused
 

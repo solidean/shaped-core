@@ -189,6 +189,64 @@ ASYNC_INVOCABLE_TEST("sg webgpu - texture copies strip the row padding in both d
     CHECK(cc::memcmp(async_bytes.data(), texels.data(), size_t(texels.size())) == 0);
 }
 
+ASYNC_INVOCABLE_TEST("sg webgpu - a texture upload after an odd-sized buffer upload lands at its block alignment",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+
+    // Four bytes leave the upload ring's head at a word boundary that is not a 16-byte one.
+    // A buffer-to-texture copy must start at a multiple of the texel block's size, so the texture's rows must not follow at that head.
+    auto buffer = ctx.persistent.create_raw_buffer(4, sg::buffer_usage::copy_dst);
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                     .width = 3,
+                                                     .height = 2,
+                                                     .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst});
+    auto texels = cc::vector<float>();
+    for (int i = 0; i < 3 * 2 * 4; ++i)
+        texels.push_back(float(i) + 0.5f);
+    u32 const word = 7;
+
+    auto cmd = ctx.create_command_list();
+    cmd->upload.bytes_to_buffer(buffer, cc::as_bytes(cc::span<u32 const>(&word, 1)), 0);
+    cmd->upload.bytes_to_texture(texture.raw(), cc::as_bytes(cc::span<float const>(texels)));
+    auto const future = cmd->download.bytes_from_texture(texture.raw());
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == texels.size() * isize(sizeof(float)));
+    CHECK(cc::memcmp(bytes.data(), texels.data(), size_t(bytes.size())) == 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a BC mip smaller than a block round-trips",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    if (!wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TextureCompressionBC))
+    {
+        SKIP("this device has no texture-compression-bc");
+        co_return;
+    }
+
+    // Mips 8, 4, 2, 1: the last two are one partial 4x4 block each, whose copy extent WebGPU wants as a whole block.
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bc1_rgba_unorm,
+                                                     .width = 8,
+                                                     .height = 8,
+                                                     .mip_levels = 4,
+                                                     .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst});
+    auto block = cc::vector<byte>();
+    for (int i = 0; i < 8; ++i) // one BC1 block is 8 bytes
+        block.push_back(byte(0x11 * (i + 1)));
+
+    auto cmd = ctx.create_command_list();
+    cmd->upload.bytes_to_texture(texture.raw(), block, sg::subresource_index{.mip_level = 2});
+    auto const future = cmd->download.bytes_from_texture(texture.raw(), sg::subresource_index{.mip_level = 2});
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == block.size());
+    CHECK(cc::memcmp(bytes.data(), block.data(), size_t(block.size())) == 0);
+}
+
 ASYNC_INVOCABLE_TEST("sg webgpu - a headless swapchain rotates and its presented frame stays readable",
                      (webgpu::webgpu_context_handle const& handle))
 {

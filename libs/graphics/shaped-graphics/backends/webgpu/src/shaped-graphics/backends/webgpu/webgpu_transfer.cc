@@ -58,9 +58,9 @@ void webgpu_upload_ring::set_budget(isize bytes)
         _pending_capacity = bytes;
 }
 
-cc::optional<isize> webgpu_upload_ring::reserve(isize size)
+cc::optional<isize> webgpu_upload_ring::reserve(isize size, isize alignment)
 {
-    auto const start = align_up(_head, buffer_word_bytes);
+    auto const start = align_up(_head, alignment);
     if (start + size > _capacity)
         return {};
     _head = start + size;
@@ -101,7 +101,7 @@ webgpu_upload_span webgpu_upload_ring::stage_outside_ring(cc::span<byte const> p
     return span;
 }
 
-webgpu_upload_span webgpu_upload_ring::stage(cc::span<byte const> data, isize staged_size)
+webgpu_upload_span webgpu_upload_ring::stage(cc::span<byte const> data, isize staged_size, isize alignment)
 {
     CC_ASSERT(staged_size % buffer_word_bytes == 0 && staged_size >= data.size(), "a staged upload must be whole "
                                                                                   "words");
@@ -116,7 +116,7 @@ webgpu_upload_span webgpu_upload_ring::stage(cc::span<byte const> data, isize st
     }
 
     // The ring rewinds only once no open list holds it, so a full ring here is full of spans somebody may still copy.
-    auto offset = reserve(staged_size);
+    auto offset = reserve(staged_size, cc::max(alignment, buffer_word_bytes));
     if (!offset.has_value())
         return stage_outside_ring(padded);
 
@@ -130,17 +130,18 @@ webgpu_upload_span webgpu_upload_ring::stage(cc::span<byte const> data, isize st
 webgpu_upload_span webgpu_upload_ring::stage_rows(cc::span<byte const> data,
                                                   isize row_bytes,
                                                   isize padded_row,
-                                                  isize staged_size)
+                                                  isize staged_size,
+                                                  isize block_bytes)
 {
     if (row_bytes == padded_row || data.size() <= row_bytes)
-        return stage(data, align_up(staged_size, buffer_word_bytes));
+        return stage(data, align_up(staged_size, buffer_word_bytes), block_bytes);
 
     auto const words = align_up(staged_size, buffer_word_bytes);
     auto rows = cc::vector<byte>::create_filled(words, byte(0));
     auto const row_count = data.size() / row_bytes;
     for (isize r = 0; r < row_count; ++r)
         cc::memcpy(rows.data() + r * padded_row, data.data() + r * row_bytes, size_t(row_bytes));
-    return stage(rows, words);
+    return stage(rows, words, block_bytes);
 }
 
 // -- readback pool --

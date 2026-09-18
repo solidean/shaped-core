@@ -118,6 +118,37 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a cached compute pipeline builds asynchronousl
     CHECK(all_equal(data, [](u32 i) { return i * 2; }));
 }
 
+ASYNC_INVOCABLE_TEST("sg webgpu - a group and a pipeline dropped between bind and dispatch still dispatch",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    constexpr int count = 64;
+
+    auto const shader = make_shader(sg::shader_stage::compute, k_double, "main", {storage_binding("Output", 0)},
+                                    sg::compute_dimensions{.x = 64});
+    auto buf = ctx.persistent.create_raw_buffer(isize(count) * 4,
+                                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+    auto pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {group_layout}});
+    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
+    auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
+
+    // The list replays what was bound once the dispatch opens its pass, so it has to hold both, not the caller.
+    auto cmd = ctx.create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    group = nullptr;
+    pipeline = nullptr;
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer<u32>(buf, 0, count);
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    CHECK(all_equal(data, [](u32 i) { return i * 2; }));
+}
+
 ASYNC_INVOCABLE_TEST("sg webgpu - inline constants reach group 3 with their own offset per dispatch",
                      (webgpu::webgpu_context_handle const& handle))
 {
@@ -153,7 +184,8 @@ ASYNC_INVOCABLE_TEST("sg webgpu - inline constants reach group 3 with their own 
         u32 add;
     };
 
-    // Three dispatches in one list: two blocks differing, and a third repeating the first, which binds its placement again.
+    // Three dispatches in one list: two blocks differing, and a third rebuilt by partial updates to equal the first.
+    // Only the last block written is deduplicated, so the third is written again rather than reusing the first's placement.
     auto cmd = ctx.create_command_list();
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group_a);

@@ -14,11 +14,12 @@ A native Dawn build would be an additive CMake gate over the same sources.
 ## It never blocks
 
 A browser settles a promise only once the task holding the thread returns, so a loop waiting on a callback has taken the only thread that callback could run on.
-So `ctx.execution()` is `never_block`, both `block_until_` spellings assert, and every internal wait is unreachable.
+So `ctx.execution()` is `never_block`, and every internal wait is unreachable.
 
 - **Completion** arrives through `queue.onSubmittedWorkDone`, registered once per submit and once per epoch advance.
   The callback raises the completed counters and settles the due completion asyncs, so `arm_completion_signal` has nothing to arm.
-- **Threading** is `single_threaded`: everything, callbacks included, runs on the thread that owns the device.
+- **Threading** is `main_thread`: the bound calls and every callback run on main, where the device's realm is.
+  Asyncs move there themselves, layouts make their WebGPU objects on first use, and a handle dropped off main is released there at the next advance.
 - **Pipelines** build through `createComputePipelineAsync` / `createRenderPipelineAsync` for `ctx.cached`, and synchronously for `ctx.uncached`.
 - **Tests** run under node (Dawn, through the pinned `webgpu` npm package) and deno (wgpu), with nexus's executor returning to the JS event loop between steps.
 
@@ -33,7 +34,6 @@ So `ctx.execution()` is `never_block`, both `block_until_` spellings assert, and
 | memory heaps | none | a heap that places nothing: a placed buffer gets its own allocation, silently |
 | binding arrays, staging groups, bindless | none in core | refused; `ctx.supports(sg::feature::binding_arrays)` is false |
 | ray tracing, geometry, tessellation | none | refused; the matching features are false |
-| `clamp_border`, `mirror_clamp_edge` | no such address modes | approximated as clamp-to-edge and mirror-repeat |
 
 Group 3 is sg's reserved group on every backend, which is what lets one pipeline layout fit them all.
 Slots below the caller's groups are filled with empty layouts wherever group 3 exists, since WebGPU numbers groups contiguously.
