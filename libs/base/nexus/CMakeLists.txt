@@ -5,6 +5,7 @@ project(nexus LANGUAGES CXX)
 add_library(nexus
     src/nexus/run.cc
     src/nexus/impl/host_loop.cc
+    src/nexus/impl/watchdog.cc
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
@@ -226,6 +227,7 @@ if(SC_BUILD_TESTS)
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
         tests/test-typed-value-test.cc
+        tests/test-watchdog-test.cc
         tests/bench-barriers-test.cc
         tests/bench-statistics-test.cc
         tests/bench-run-test.cc

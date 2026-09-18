@@ -32,6 +32,7 @@
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
+#include <nexus/impl/watchdog.hh>
 #include <nexus/tests/check.hh>
 #include <nexus/tests/check_divert.hh>
 #include <nexus/tests/entry.hh>
@@ -393,6 +394,7 @@ private:
 /// Publishes `decl` (and its section index) as what this thread is running.
 void publish_running_test(running_test_slot* slot, nx::test_declaration const& decl, int section)
 {
+    nx::impl::watchdog_heartbeat();
     if (slot == nullptr)
         return;
     slot->section.store(section, cc::memory_order_relaxed);
@@ -563,6 +565,7 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     ctx.is_finished.store(true, cc::memory_order_release);
+    nx::impl::watchdog_heartbeat();
 
     if (keep_alive)
         g_leaked_contexts.lock([&](cc::vector<cc::unique_ptr<test_context>>& kept) { kept.push_back(cc::move(owned)); });

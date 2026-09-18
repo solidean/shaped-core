@@ -824,6 +824,8 @@ TSan starts threads through a trampoline the walker cannot get past, and rewrite
   dev.py provokes clean-core's crash handler first and gives it two seconds to write, so the step's **stderr log** holds the running test, plus a stack for every thread in the process.
   In a hang the stack you want is under `other threads`; the faulting one is dev.py's doing and says nothing.
   The log spells that out, because the report announces a fatal fault that never really happened.
+  A process wedged inside a driver call may never run that handler; the nexus watchdog is the in-process net for it.
+  After 60 s with no test starting or finishing, a nexus binary prints `[nexus watchdog]` and every thread's stack itself, well inside the 600 s a `--thorough` run allows.
 - `--merged-xml-report FILE` / `--no-xml-reports` (on `test`) — merge per-binary XML into one file, or skip XML entirely.
   Per-binary XML is on by default and is what `test_diag` reads, so you usually need neither.
 - `--profile FILE`, with `--profile-type` and `--profile-lanes` — record where the run's wall clock went; see [Profiling a run](#profiling-a-run).
