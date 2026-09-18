@@ -306,7 +306,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .pSignalSemaphores = signal_semaphores,
             };
             for (isize i = 0; i < async_wait_groups.size(); ++i)
-                sg::impl::before_forward_wait(async_wait_groups[i]->forward_waits, async_wait_values[i]);
+                before_forward_wait(async_wait_groups[i]->forward_waits, async_wait_values[i]);
 
             VkResult const sr
                 = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });

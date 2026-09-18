@@ -85,17 +85,27 @@ Since it runs in every backend's sweep, the `--thorough`-only vulkan never-block
 ## The workaround in shaped-core
 
 It follows the rule NVIDIA gives for wait-before-signal elsewhere (below): nothing may delay a signaller.
-[forward_waits.hh](../../../libs/graphics/shaped-graphics/src/shaped-graphics/context/impl/forward_waits.hh) holds it, for every backend.
+[vulkan_forward_waits.hh](../../../libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_forward_waits.hh) holds it, in the Vulkan backend.
 
 - Every completion timeline records the highest value any submission waits on and the highest value whose signal has been submitted.
   A timeline where the first is ahead has a pending wait-before-signal, and a process-wide count keeps how many do.
-- `sg::impl::device_driver_barrier` wraps the driver's own `vkCreateDevice` and `vkDestroyDevice`.
+- `sg::backend::vulkan::device_driver_barrier` wraps the driver's own `vkCreateDevice` and `vkDestroyDevice`.
   It waits for the count to reach zero, and while it is up a submission that would wait on an unsignalled value holds itself back until that signal is submitted.
-- Signals come only from the transfer actors, whose waits name only each other's signals and never form a cycle, so both sides always finish.
+- The transfer actors' waits name only each other's signals and never form a cycle, so their signals always come.
+  A streaming upload fed by a caller's `stream_source` is the exception: its signal is queued once the source reports `done`.
+  A device create or destroy therefore waits for any such stream a submitted list is already waiting on, and logs a warning past five seconds.
+  Without the barrier NVIDIA would hang there for good instead.
 
 It deliberately leaves the device lifecycle lock alone: an actor that had to take it could never signal a barrier's way out.
 Only the Vulkan backend reports into it, since a D3D12 wait never holds up a Vulkan device, as the cross-API cases above show.
 The cost is that creating or destroying a device now waits until the async transfers already in flight have submitted their signals.
+
+Two variants were rejected:
+
+- **Never queue a wait-before-signal at all**, holding every such submission back until its signal is submitted.
+  It removes the hazard without a barrier, and stalls every such submission behind the copy actor all the time, to avoid a hazard that lasts only while a device is created.
+- **Track only when an NVIDIA proprietary driver is present.**
+  The hazard is between devices, so the check is process-wide and must follow devices as they come and go, to save one uncontended lock per waiting submission.
 
 ## Known elsewhere
 

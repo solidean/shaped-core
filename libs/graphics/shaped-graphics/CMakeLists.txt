@@ -41,7 +41,6 @@ add_library(shaped-graphics
     src/shaped-graphics/context/context.cc
     src/shaped-graphics/context/impl/completion_waiter.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
-    src/shaped-graphics/context/impl/forward_waits.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/persistent.cc
     src/shaped-graphics/context/transient.cc
@@ -71,7 +70,6 @@ target_sources(shaped-graphics
     src/shaped-graphics/context/context.hh
     src/shaped-graphics/context/impl/completion_waiter.hh
     src/shaped-graphics/context/impl/device_lifecycle.hh
-    src/shaped-graphics/context/impl/forward_waits.hh
     src/shaped-graphics/context/persistent.hh
     src/shaped-graphics/context/transient.hh
     src/shaped-graphics/context/upload.hh

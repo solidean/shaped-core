@@ -5,7 +5,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
-#include <shaped-graphics/context/impl/forward_waits.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// One completion timeline for one resource in one direction.
@@ -40,8 +40,8 @@ struct sg::backend::vulkan::vulkan_completion_group
     /// Touched only by the actor that owns this direction, so it needs no synchronization.
     u64 last_signaled = 0;
 
-    /// Which of this timeline's values are waited on before their signal is queued — see forward_waits.hh.
-    sg::impl::forward_wait_state forward_waits;
+    /// Which of this timeline's values are waited on before their signal is queued — see vulkan_forward_waits.hh.
+    forward_wait_state forward_waits;
 
     [[nodiscard]] u64 reserve() { return next_value.fetch_add(1, cc::memory_order_relaxed) + 1; }
 

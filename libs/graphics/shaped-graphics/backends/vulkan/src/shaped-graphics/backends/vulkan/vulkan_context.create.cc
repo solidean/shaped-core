@@ -10,7 +10,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/context/impl/forward_waits.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
 
 
 namespace sg::backend::vulkan
@@ -533,7 +533,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             vkDestroySemaphore(device, epoch_timeline, nullptr);
         if (device != VK_NULL_HANDLE)
         {
-            sg::impl::device_driver_barrier const barrier;
+            backend::vulkan::device_driver_barrier const barrier;
             vkDestroyDevice(device, nullptr);
         }
         destroy_debug_messenger(instance, messenger);
@@ -672,7 +672,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
 
     auto const created = [&]
     {
-        sg::impl::device_driver_barrier const barrier; // see forward_waits.hh
+        backend::vulkan::device_driver_barrier const barrier; // see vulkan_forward_waits.hh
         return vkCreateDevice(best_device, &device_info, nullptr, &device);
     }();
     if (created != VK_SUCCESS)
