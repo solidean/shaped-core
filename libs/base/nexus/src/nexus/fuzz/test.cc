@@ -5,6 +5,10 @@
 #include <clean-core/math/random.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
+#include <nexus/async-test.hh> // nx::impl::invoking_home_if_any
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/runner.hh>
 #include <nexus/tests/seed.hh>
@@ -18,6 +22,21 @@ namespace
 std::string_view as_sv(cc::string const& s)
 {
     return std::string_view(s.data(), size_t(s.size()));
+}
+
+// Prints a finding and its reproducer; shared by both drivers.
+void report_finding(int seed,
+                    test::fuzz_result const& res,
+                    fuzz_run const& minimized,
+                    cc::string_view test_var,
+                    regression_dialect const& dialect)
+{
+    auto const code = minimized.emit_regression(test_var, dialect);
+    cc::eprintln("\n[fuzz] found a failing run (seed {}, {} operations): {}", seed, res.executed_operations,
+                 as_sv(res.error_message));
+    cc::eprintln("[fuzz] minimal reproducer ({} operations) - paste as a SECTION next to your fuzz SECTION:\n",
+                 int(minimized.operations.size()));
+    cc::eprintln(as_sv(code));
 }
 
 // "'a'", "'a' and 'b'", "'a', 'b' and 'c'"
@@ -183,17 +202,120 @@ bool test::execute_fuzz_test(cc::string_view test_var)
             continue;
 
         auto rng = cc::random(u64(seed));
-        auto minimized = res.failing_run.value().minimize(rng);
-        auto code = minimized.emit_regression(test_var, _dialect);
-
-        cc::eprintln("\n[fuzz] found a failing run (seed {}, {} operations): {}", seed, res.executed_operations,
-                     as_sv(res.error_message));
-        cc::eprintln("[fuzz] minimal reproducer ({} operations) - paste as a SECTION next to your fuzz SECTION:\n",
-                     int(minimized.operations.size()));
-        cc::eprintln(as_sv(code));
+        auto const minimized = res.failing_run.value().minimize(rng);
+        report_finding(seed, res, minimized, test_var, _dialect);
         return false;
     }
 
     return true;
+}
+
+cc::async_scheduler* test::inherited_home() const
+{
+    return _inherit_home ? nx::impl::invoking_home_if_any() : nullptr;
+}
+
+cc::shared_async<test::fuzz_result> test::execute_fuzzer_async(int seed)
+{
+    auto* const home = inherited_home();
+    return impl::place(fuzzer_async(seed, home), home);
+}
+
+cc::shared_async<bool> test::execute_fuzz_test_async(cc::string_view test_var)
+{
+    // Both read here, in the caller's segment: the coroutine is cold and may first run elsewhere, after the caller's view is gone.
+    auto* const home = inherited_home();
+    return impl::place(fuzz_test_async(cc::string(test_var), home), home);
+}
+
+// execute_fuzzer, awaiting async steps; a sync step runs inline exactly as there.
+cc::shared_async<test::fuzz_result> test::fuzzer_async(int seed, cc::async_scheduler* home)
+{
+    if (!_machine)
+        build_machine();
+
+    if (!_setup_ok)
+        co_return fuzz_result{.is_ok = false, .error_message = _setup_error};
+
+    constexpr int max_operations = 100000; // as in execute_fuzzer
+
+    auto rng = cc::random(u64(seed));
+    fuzz_runner runner(*_machine, rng);
+    auto state = _machine->make_initial_state();
+
+    fuzz_run run;
+    run.machine = _machine.get();
+    int executed = 0;
+
+    while (runner.should_continue())
+    {
+        executed_operation exec;
+        if (!runner.create_next_execution(state, exec))
+            break;
+
+        auto res = fuzz_machine::execute_result{};
+        if (_machine->op(exec.operation).is_async)
+            res = co_await cc::async_take(impl::place(_machine->execute_operation_async(state, exec, home), home));
+        else
+            res = _machine->execute_operation(state, exec);
+        run.operations.push_back(exec);
+        ++executed;
+        if (!res.is_ok())
+            co_return fuzz_result{.is_ok = false,
+                                  .executed_operations = executed,
+                                  .failing_run = cc::move(run),
+                                  .error_message = cc::move(res.error)};
+
+        for (auto const& inv : _machine->create_invariant_executions_for(exec))
+        {
+            auto ir = fuzz_machine::execute_result{};
+            if (_machine->op(inv.operation).is_async)
+                ir = co_await cc::async_take(impl::place(_machine->execute_operation_async(state, inv, home), home));
+            else
+                ir = _machine->execute_operation(state, inv);
+            run.operations.push_back(inv);
+            ++executed;
+            if (!ir.is_ok())
+                co_return fuzz_result{.is_ok = false,
+                                      .executed_operations = executed,
+                                      .failing_run = cc::move(run),
+                                      .error_message = cc::move(ir.error)};
+        }
+
+        if (executed >= max_operations)
+            break;
+    }
+
+    co_return fuzz_result{.is_ok = true, .executed_operations = executed};
+}
+
+// execute_fuzz_test, awaiting each program and each shrinking candidate.
+cc::shared_async<bool> test::fuzz_test_async(cc::string test_var, cc::async_scheduler* home)
+{
+    if (!_machine)
+        build_machine();
+
+    if (!_setup_ok)
+    {
+        cc::eprintln("[fuzz] setup error: {}", as_sv(_setup_error));
+        co_return false;
+    }
+
+    auto seeds = nx::test_random();
+    for (auto attempt = 0; attempt < _seed_count; ++attempt)
+    {
+        auto const seed = int(seeds.next_u32() & 0x7fffffff);
+        auto res = co_await cc::async_take(impl::place(fuzzer_async(seed, home), home));
+        if (res.is_ok || !res.failing_run.has_value())
+            continue;
+
+        auto rng = cc::random(u64(seed));
+        auto const minimized
+            = co_await cc::async_take(impl::place(res.failing_run.value().minimize_async(rng, home), home));
+        report_finding(seed, res, minimized, test_var, _dialect);
+        co_return false;
+    }
+
+    co_return true;
 }
 } // namespace nx::fuzz

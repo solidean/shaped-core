@@ -5,6 +5,9 @@
 #include <clean-core/error/exception.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/native.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/tests/check.hh>
 
 
@@ -187,11 +190,26 @@ bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation co
 
 fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_operation const& exec) const
 {
+    CC_ASSERT(!_operations[int(exec.operation)].is_async, "an async op is executed through execute_operation_async");
     auto step = start_step(s, exec);
     return finish_step(s, exec, step);
 }
 
-fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation const& exec) const
+cc::shared_async<fuzz_machine::execute_result> fuzz_machine::execute_operation_async(state& s,
+                                                                                     executed_operation const& exec,
+                                                                                     cc::async_scheduler* home) const
+{
+    auto step = start_step(s, exec, home);
+    if (step.pending != nullptr)
+    {
+        // Held across the await: whatever the op's work reports for this test, from any thread, is the step's.
+        auto const divert = nx::impl::scoped_test_check_divert(*step.async_sink);
+        co_await cc::async_settled(step.pending);
+    }
+    co_return finish_step(s, exec, step);
+}
+
+fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation const& exec, cc::async_scheduler* home) const
 {
     auto const& oi = _operations[int(exec.operation)];
 
@@ -207,7 +225,13 @@ fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation
 
     try
     {
-        step.result = oi.op->invoke(args);
+        if (oi.is_async)
+        {
+            step.async_sink = cc::make_unique<nx::impl::async_check_capture_sink>();
+            step.pending = oi.op->invoke_async(args, home);
+        }
+        else
+            step.result = oi.op->invoke(args);
     }
     catch (nx::impl::captured_assertion const& e)
     {
@@ -230,6 +254,28 @@ fuzz_machine::execute_result fuzz_machine::finish_step(state& s, executed_operat
 {
     if (step.failure.has_value())
         return cc::move(step.failure.value());
+
+    if (step.pending != nullptr)
+    {
+        CC_ASSERT(step.pending->is_ready(), "an async step is finished only once its op has resolved");
+        if (auto const* const err = step.pending->try_error())
+            return fuzz_machine::execute_result{
+                .ok = false,
+                .error = cc::format("async op failed: {}", err->underlying().to_string())};
+
+        auto const failed = step.async_sink->failed.load(cc::memory_order_relaxed);
+        if (failed > 0)
+        {
+            auto first = cc::string();
+            step.async_sink->first_message.lock([&](cc::string& m) { first = cc::move(m); });
+            if (first.empty())
+                return fail("a CHECK/REQUIRE failed");
+            return fuzz_machine::execute_result{.ok = false, .error = cc::format("a CHECK/REQUIRE failed: {}", first)};
+        }
+
+        auto resolved = cc::into_result(cc::move(step.pending));
+        step.result = cc::move(resolved.value());
+    }
 
     if (step.sink.failed > 0)
     {

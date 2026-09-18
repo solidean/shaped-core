@@ -3108,10 +3108,16 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
 
 cc::thread_bound_scheduler* nx::impl::invoking_home()
 {
-    auto* const home = cc::impl::async_tls().home;
-    CC_ASSERT(home != nullptr && home->is_inside_own_body(), "invocation_options::inherit_home needs the invoking body "
-                                                             "to run in a home; give the driver main_thread");
+    auto* const home = invoking_home_if_any();
+    CC_ASSERT(home != nullptr, "invocation_options::inherit_home needs the invoking body to run in a home; give the "
+                               "driver main_thread");
     return home;
+}
+
+cc::thread_bound_scheduler* nx::impl::invoking_home_if_any()
+{
+    auto* const home = cc::impl::async_tls().home;
+    return home != nullptr && home->is_inside_own_body() ? home : nullptr;
 }
 
 u64 nx::test_seed()

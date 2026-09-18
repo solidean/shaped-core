@@ -92,6 +92,24 @@ struct nx::fuzz::test
     /// regression code referring to the handle named `test_var`. Returns true if no failure was found.
     [[nodiscard]] bool execute_fuzz_test(cc::string_view test_var = "test");
 
+    // ---- async execution (ops returning cc::shared_async; see nexus/fuzz/async.hh) ----------------
+
+    /// execute_fuzz_test for a test holding async ops, which the synchronous entry points refuse:
+    /// `CHECK(co_await test->execute_fuzz_test_async());` from an async test.
+    /// Any mix of sync and async ops works, and steps still run one at a time: each async op is awaited before the next step starts.
+    /// While an op is awaited, every check reported for the running test is the step's, from whichever thread reports it.
+    /// That includes work an earlier step started and never awaited.
+    /// Cold: nothing runs until it is awaited.
+    [[nodiscard]] cc::shared_async<bool> execute_fuzz_test_async(cc::string_view test_var = "test");
+
+    /// execute_fuzzer for a test holding async ops.
+    [[nodiscard]] cc::shared_async<fuzz_result> execute_fuzzer_async(int seed);
+
+    /// Run the awaited fuzz where its entry point is called from, when that caller runs in a home — a thread-bound device's thread, say.
+    /// Every sync op and every async op's body then runs there; a coroutine an op awaits for itself follows cc's usual placement.
+    /// A caller in no home is unaffected, so one test body serves homed and unhomed drivers alike.
+    void set_inherit_home(bool inherit) { _inherit_home = inherit; }
+
     // ---- direct evaluation (used by regression code) ---------------------------------------------
 
     template <class... Args>
@@ -120,6 +138,11 @@ private:
     fuzz_operation* op_or_die(cc::string_view name) const;
     void build_machine();
 
+    // The home set_inherit_home asks for, read in the caller's segment; null when there is none to inherit.
+    [[nodiscard]] cc::async_scheduler* inherited_home() const;
+    [[nodiscard]] cc::shared_async<fuzz_result> fuzzer_async(int seed, cc::async_scheduler* home);
+    [[nodiscard]] cc::shared_async<bool> fuzz_test_async(cc::string test_var, cc::async_scheduler* home);
+
     cc::vector<cc::unique_ptr<fuzz_operation>> _operations;
     cc::unique_ptr<fuzz_machine> _machine;
     cc::string _setup_error;
@@ -127,4 +150,5 @@ private:
     cc::string _async_ops_error; // set when any op is async, which the synchronous entry points refuse
     regression_dialect _dialect;
     int _seed_count = 256;
+    bool _inherit_home = false;
 };

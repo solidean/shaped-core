@@ -57,8 +57,15 @@ struct nx::fuzz::fuzz_operation
             op->_is_async = true;
             op->_returns_void = std::is_same_v<value_t, cc::unit>;
             op->_return_type = op->_returns_void ? std::type_index(typeid(void)) : std::type_index(typeid(value_t));
-            op->_async_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in) -> cc::shared_async<typed_value>
-            { return impl::async_op_glue<value_t>::box(impl::invoke_raw(fn, in, sig_t{})); };
+            op->_async_invoker = [fn = cc::forward<F>(fn)](cc::span<typed_value*> in,
+                                                           cc::async_scheduler* home) -> cc::shared_async<typed_value>
+            {
+                auto handle = impl::invoke_raw(fn, in, sig_t{});
+                CC_ASSERT(handle != nullptr, "an async fuzz op must return a valid handle");
+                if (home != nullptr)
+                    (void)handle->try_home_cold(*home); // only a cold body can be placed; a handle already running stays put
+                return impl::async_op_glue<value_t>::box(cc::move(handle));
+            };
         }
         else
         {
@@ -137,10 +144,12 @@ struct nx::fuzz::fuzz_operation
 
     /// Calls an async op, handing back the cold handle that resolves to its boxed value (invalid for a void op).
     /// The handle may still point into `inputs`, so they must outlive it.
-    [[nodiscard]] cc::shared_async<typed_value> invoke_async(cc::span<typed_value*> inputs) const
+    /// A non-null `home` places the op's body there while it is still cold.
+    [[nodiscard]] cc::shared_async<typed_value> invoke_async(cc::span<typed_value*> inputs,
+                                                             cc::async_scheduler* home = nullptr) const
     {
         CC_ASSERT(_is_async, "a synchronous op is called through invoke");
-        return _async_invoker(inputs);
+        return _async_invoker(inputs, home);
     }
 
     [[nodiscard]] bool check_preconditions(cc::span<typed_value*> inputs) const
@@ -195,8 +204,8 @@ private:
     }
 
     cc::string _name;
-    cc::unique_function<typed_value(cc::span<typed_value*>)> _invoker;                         // a synchronous op
-    cc::unique_function<cc::shared_async<typed_value>(cc::span<typed_value*>)> _async_invoker; // an async op
+    cc::unique_function<typed_value(cc::span<typed_value*>)> _invoker; // a synchronous op
+    cc::unique_function<cc::shared_async<typed_value>(cc::span<typed_value*>, cc::async_scheduler*)> _async_invoker; // an async op
     cc::vector<cc::unique_function<bool(cc::span<typed_value*>)>> _preconditions;
 
     cc::vector<std::type_index> _arg_types;

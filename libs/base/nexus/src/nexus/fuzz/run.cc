@@ -6,6 +6,8 @@
 #include <clean-core/platform/native.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/to_string.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/minimizer.hh>
 
@@ -56,12 +58,41 @@ fuzz_run::replay_result fuzz_run::replay() const
     return replay_result{};
 }
 
+cc::shared_async<fuzz_run::replay_result> fuzz_run::replay_async(cc::async_scheduler* home) const
+{
+    auto const& m = *machine;
+    auto s = m.make_initial_state();
+    for (int i = 0; i < int(operations.size()); ++i)
+    {
+        auto const& exec = operations[i];
+        if (!m.preconditions_fulfilled(s, exec))
+            co_return replay_result{.invalid_precondition = true};
+
+        auto ok = true;
+        if (m.op(exec.operation).is_async)
+            ok = (co_await impl::place(m.execute_operation_async(s, exec, home), home)).is_ok();
+        else
+            ok = m.execute_operation(s, exec).is_ok();
+        if (!ok)
+            co_return replay_result{.failing_op = i};
+    }
+    co_return replay_result{};
+}
+
 fuzz_run fuzz_run::minimize(cc::random& rng) const
 {
     auto shrink = impl::minimizer(*this, rng);
     for (auto candidate = shrink.next_candidate(); candidate.has_value(); candidate = shrink.next_candidate())
         shrink.report(candidate.value().replay());
     return shrink.result();
+}
+
+cc::shared_async<fuzz_run> fuzz_run::minimize_async(cc::random& rng, cc::async_scheduler* home) const
+{
+    auto shrink = impl::minimizer(*this, rng);
+    for (auto candidate = shrink.next_candidate(); candidate.has_value(); candidate = shrink.next_candidate())
+        shrink.report(co_await impl::place(candidate.value().replay_async(home), home));
+    co_return shrink.result();
 }
 
 cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialect const& dialect) const
