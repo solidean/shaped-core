@@ -1,6 +1,7 @@
 #include <clean-core/error/exception.hh>
 #include <clean-core/math/random.hh>
 #include <nexus/fuzz/fuzz.hh>
+#include <nexus/fuzz/minimizer.hh>
 #include <nexus/test.hh>
 
 
@@ -67,4 +68,35 @@ TEST("fuzz minimize - seeded gen/test shrinks to 3 operations")
 
     // two distinct gens feeding the failing test call
     CHECK(int(minimized.operations.size()) == 3);
+}
+
+// The minimizer is a state machine so an awaiting driver can replay its candidates; driving it by hand must shrink exactly as minimize() does.
+TEST("fuzz minimize - the hand-driven minimizer matches minimize()")
+{
+    auto t = nx::fuzz::test::create();
+    t->add_op("gen", [](cc::random& r) { return r.uniform(0, 3); });
+    t->add_op("add", [](int a, int b) { return a + b; });
+    t->add_invariant("below-9", [](int i) { return i < 9; });
+
+    auto res = find_failing(*t, 256);
+    REQUIRE(res.failing_run.has_value());
+    auto const& failing = res.failing_run.value();
+
+    auto rng_a = cc::random(11u);
+    auto const via_minimize = failing.minimize(rng_a);
+
+    auto rng_b = cc::random(11u);
+    auto shrink = nx::fuzz::impl::minimizer(failing, rng_b);
+    auto candidates = 0;
+    for (auto candidate = shrink.next_candidate(); candidate.has_value(); candidate = shrink.next_candidate())
+    {
+        ++candidates;
+        shrink.report(candidate.value().replay());
+    }
+    auto const by_hand = shrink.result();
+
+    CHECK(candidates > 0);
+    CHECK(by_hand.emit_regression("t", nx::fuzz::nexus_section_dialect())
+          == via_minimize.emit_regression("t", nx::fuzz::nexus_section_dialect()));
+    CHECK(by_hand.replay().is_failing());
 }

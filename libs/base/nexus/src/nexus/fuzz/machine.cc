@@ -186,48 +186,60 @@ bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation co
 
 fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_operation const& exec) const
 {
+    auto step = start_step(s, exec);
+    return finish_step(s, exec, step);
+}
+
+fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation const& exec) const
+{
     auto const& oi = _operations[int(exec.operation)];
 
-    cc::vector<typed_value> synth;
+    auto step = started_step();
     cc::vector<typed_value*> buf;
-    auto args = assemble_args(s, exec, synth, buf);
+    auto args = assemble_args(s, exec, step.synth, buf);
 
     // Capture CHECK/REQUIRE failures (without aborting or polluting the host test) and reroute a
     // failing CC_ASSERT into an exception (CC_ASSERT would otherwise abort right after the handler).
-    nx::impl::check_capture_sink sink;
-    nx::impl::scoped_check_capture cap(sink);
+    nx::impl::scoped_check_capture cap(step.sink);
     auto handler = cc::impl::scoped_assertion_handler([](cc::impl::assertion_info const& info)
                                                       { throw impl::assertion_failure{info.message}; });
 
-    typed_value result;
     try
     {
-        result = oi.op->invoke(args);
+        step.result = oi.op->invoke(args);
     }
     catch (impl::assertion_failure const& e)
     {
         cc::string msg = "assertion failed: ";
         msg += e.message;
-        return fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
+        step.failure = fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
     catch (std::exception const& e)
     {
-        return fail("uncaught exception: ", e.what());
+        step.failure = fail("uncaught exception: ", e.what());
     }
     catch (...)
     {
-        return fail("uncaught unknown exception");
+        step.failure = fail("uncaught unknown exception");
     }
+    return step;
+}
 
-    if (sink.failed > 0)
+fuzz_machine::execute_result fuzz_machine::finish_step(state& s, executed_operation const& exec, started_step& step) const
+{
+    if (step.failure.has_value())
+        return cc::move(step.failure.value());
+
+    if (step.sink.failed > 0)
     {
-        if (sink.first_message.empty())
+        if (step.sink.first_message.empty())
             return fail("a CHECK/REQUIRE failed");
         cc::string msg = "a CHECK/REQUIRE failed: ";
-        msg += sink.first_message;
+        msg += step.sink.first_message;
         return fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
 
+    auto& result = step.result;
     if (exec.result_must_be_true && (!result.is_valid() || !result.get_bool()))
         return fail("invariant violated");
 

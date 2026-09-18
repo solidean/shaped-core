@@ -2,11 +2,13 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/executed_operation.hh>
 #include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fwd.hh>
+#include <nexus/tests/check.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
@@ -84,9 +86,25 @@ struct nx::fuzz::fuzz_machine
     /// Looks up the interned index of a runtime type, or type_index::invalid if the machine never saw it.
     [[nodiscard]] type_index index_of(std::type_index t) const;
 
-    /// Runs one step against the state.
+    /// A step whose op has been called but whose outcome is not judged yet.
+    /// It owns everything the op may still point into — the synthesized cc::random arguments and the capture sink — so it must outlive the op's work.
+    struct started_step
+    {
+        typed_value result;
+        cc::optional<execute_result> failure; // the op threw or asserted
+        nx::impl::check_capture_sink sink;
+        cc::vector<typed_value> synth;
+    };
+
+    /// Runs one step against the state: start_step then finish_step.
     /// Detects thrown exceptions, captured CHECK/REQUIRE failures, failed CC_ASSERTs and false bool invariants, mapping any of them to a failing result.
     [[nodiscard]] execute_result execute_operation(state& s, executed_operation const& exec) const;
+
+    /// Calls the step's op under the check capture and the rerouted assertion handler.
+    [[nodiscard]] started_step start_step(state& s, executed_operation const& exec) const;
+
+    /// Judges a started step and, if it passed, writes its result into the return slot.
+    [[nodiscard]] execute_result finish_step(state& s, executed_operation const& exec, started_step& step) const;
 
     /// Checks the operation's preconditions against the prospective input slots (no mutation).
     [[nodiscard]] bool preconditions_fulfilled(state const& s, executed_operation const& exec) const;
