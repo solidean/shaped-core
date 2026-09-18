@@ -1007,6 +1007,7 @@ co_await cc::async_all(a, b, c);      // require ALL, park once; then `co_await 
                                       // them in sequence, since one await parks on one dependency
 co_await cc::async_settled(a);        // wait WITHOUT short-circuiting, then read a->try_value()/try_error() (no copy)
 cc::result<int> r = co_await cc::async_as_result(a);   // same, as a value (copies; needs a copyable U)
+auto owned = co_await cc::async_take(cc::move(a));  // await and MOVE the value out (move-only U); other handles see a husk
 co_await cc::async_yield();           // -> async_step_status::yield; makes the node stealable and lets newer local
                                       // work go first. NOT a fairness knob (LIFO deque pops it back), NOT a way to
                                       // wait on something external — that is a manual node
