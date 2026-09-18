@@ -138,14 +138,14 @@ struct sv::distant_disc_payload
 /// to name `lux`.
 struct sv::light_emission
 {
-    /// chromaticity, nominally in [0, 1]; the brightness is `intensity`
+    /// chromaticity, nominally in [0, 1] and must be >= 0; the brightness is `intensity`
     tg::vec3f color = tg::vec3f(1);
 
     /// in `unit`, and must be >= 0
     f32 intensity = 1;
     light_unit unit = light_unit::candela;
 
-    /// stops on top of `intensity`: the light emits `intensity * 2^exposure`
+    /// stops on top of `intensity`: the light emits `intensity * 2^exposure`; must be within +-128
     f32 exposure = 0;
 
     /// area lights only; the others emit from no face at all
@@ -167,7 +167,9 @@ struct sv::light_emission
 ///
 /// **Factories are the only way to build one**, and each leaves it valid: the path and its payload agree, and the unit
 /// is one the path accepts.
-/// The setters assert rather than allow an invalid pair, so a light that exists is a light the renderer can read.
+/// The setters assert rather than allow an invalid pair.
+/// `placement`, `emission` and `shaping` are public, so a direct write can still make a light invalid; `light_gpu::from`
+/// asserts `light_problem`, so no invalid light reaches the renderer whichever way it was built.
 ///
 /// `placement` may move, turn and uniformly scale a light but never shear it, which is what keeps every light one its
 /// path's sampler can handle.
@@ -262,8 +264,10 @@ private:
 namespace sv
 {
 /// What is wrong with `l`, or empty when nothing is: a unit its path does not accept, a cone on a distant light, a face
-/// on anything but an area light, a negative intensity, a light with no extent made visible to the camera.
-/// The setters and `scene_ref::add_light` assert on it; exposed so a caller holding a light from elsewhere can check.
+/// on anything but an area light, a negative intensity or color, an exposure outside +-128 stops, a light with no extent made
+/// visible to the camera.
+/// The setters, `scene_ref::add_light` and `light_gpu::from` assert on it; exposed so a caller holding a light from
+/// elsewhere can check.
 [[nodiscard]] cc::string_view light_problem(light const& l);
 
 /// The light a scene layer with no lights of its own is traced under, unless the layer turns it off.
@@ -313,8 +317,11 @@ struct sv::light_gpu
     f32 cone_scale = 0;      ///< glTF's falloff scale; 0 for an unshaped light
     tg::vec3f normal
         = {}; ///< the placement's -Z: a rect's front face, a spot's axis, the direction a distant light travels
-    f32 cone_offset = 1;        ///< glTF's falloff offset; 1 for an unshaped light
-    f32 cos_angular_radius = 1; ///< distant_disc: cosine of the disc's angular radius
+    f32 cone_offset = 1; ///< glTF's falloff offset; 1 for an unshaped light
+
+    /// distant_disc: `1 - cos` of the disc's angular radius.
+    /// Stored rather than the cosine, since a cosine near 1 rounds away most of a small disc's solid angle.
+    f32 one_minus_cos_angular_radius = 0;
 
     /// RESERVED for light linking, and read by nothing yet: a light will affect an instance when the two masks share a bit.
     /// All ones is "everything", which is what every light does today.

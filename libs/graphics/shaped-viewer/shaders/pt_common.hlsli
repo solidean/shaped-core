@@ -167,8 +167,18 @@ float pt_light_pdf(sv::light light, float dist2, float cos_light)
 // the cone the disc subtends, times the probability of having picked this light.
 float pt_disc_pdf(sv::light light)
 {
-    float solid_angle = 2.0 * PT_PI * (1.0 - light.cos_angular_radius);
-    return pt_light_select_pdf() / max(solid_angle, 1e-12);
+    float solid_angle = 2.0 * PT_PI * light.one_minus_cos_angular_radius;
+    return pt_light_select_pdf() / max(solid_angle, 1e-20);
+}
+
+// Whether the unit `dir` falls inside a distant disc.
+//
+// Compared as 1 - cos, which for unit vectors is half the squared distance between them, rather than as a dot product:
+// a dot product rounds to within a few ulps of 1, which is the whole width of a small disc.
+bool pt_in_disc(sv::light light, float3 dir)
+{
+    float3 off = dir + light.normal; // dir - toward, since the light travels along `normal`
+    return 0.5 * dot(off, off) <= light.one_minus_cos_angular_radius;
 }
 
 // Where a ray crosses a rect light, if it does at all.
@@ -277,11 +287,14 @@ float3 pt_sample_hg(float3 w, float g, float u1, float u2)
     return normalize(t1 * (sin_theta * cos(phi)) + t2 * (sin_theta * sin(phi)) + w * mu);
 }
 
-// A direction drawn uniformly from the cone of half-angle acos(`cos_max`) around the unit `w` (pdf = 1 / solid angle).
-float3 pt_sample_cone(float3 w, float cos_max, float u1, float u2)
+// A direction drawn uniformly from the cone around the unit `w` whose half-angle has `1 - cos` of `one_minus_cos_max`
+// (pdf = 1 / solid angle).
+// Taking 1 - cos rather than the cosine keeps a small cone's width; sin is formed from it for the same reason.
+float3 pt_sample_cone(float3 w, float one_minus_cos_max, float u1, float u2)
 {
-    float cos_theta = 1.0 - u1 * (1.0 - cos_max);
-    float sin_theta = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+    float one_minus_cos = u1 * one_minus_cos_max;
+    float cos_theta = 1.0 - one_minus_cos;
+    float sin_theta = sqrt(max(0.0, one_minus_cos * (2.0 - one_minus_cos)));
     float phi = 2.0 * PT_PI * u2;
 
     float3 up = abs(w.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);

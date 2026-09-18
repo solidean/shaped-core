@@ -27,7 +27,7 @@ sv::viewer_definition            // { vector<view_data> views; layout_tree nodes
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
-sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; background; render_settings; }
+sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
 sv::layer_kind                   // layout | scene_3d | scene_2d | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
                                  //   scene_2d draws nothing (shaped-core has no 2D renderer); ui is not wired yet
@@ -63,8 +63,8 @@ l.color(c) / .exposure(stops) / .face(light_face) / .cone(inner, outer) / .sprea
 l.visible_to_camera(bool = true) / .casts_shadows(bool)   // seen by the camera: off by default, rect or sun only; shadows: on by default
 l.path() -> light_path           // point | area | distant_point | distant_disc — the integrator's branches, not a list of shapes
 l.placement                      // tg::similarity_transform3f; a light points along its -Z (a spot's axis, a rect's front, a sun's travel)
-l.emission                       // light_emission { color, intensity, unit, exposure, face } — a plain aggregate, so designated initializers work
-sv::light_problem(l)             // -> string_view, empty when valid; what the setters and add_light assert on
+l.emission                       // light_emission { color, intensity, unit, exposure, face, visible_to_camera, casts_shadows } — a plain aggregate, so designated initializers work
+sv::light_problem(l)             // -> string_view, empty when valid; what the setters, add_light and light_gpu::from assert on — so a direct field write is caught before the GPU
 sv::light_unit                   // candela | lux | nit | lumen; ONE NIT IS ONE UNIT OF TRACER RADIANCE, the same as OpenPBR emission_luminance
 sv::scene_light                  // { light_id id; light light; } — one light as a layer holds it
 sv::light_gpu::from(light)       // -> light_gpu, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
@@ -541,12 +541,12 @@ sv::tangent_frame_options        // { bool prefer_file = true; frame_generation 
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
 sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
-                                 //   vector<asset_node> nodes; vector<string> issues; }
+                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<string> issues; }
 a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
 a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
 a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
 sv::asset_material               // { string name; material_id material; vector<i32> meshes; } — name is the FILE's, meshes are the slot's
-sv::asset_node                   // { string name; i32 parent; affine_transform3f transform; i32 first_mesh, mesh_count; }
+sv::asset_node                   // { string name; i32 parent; affine_transform3f transform; i32 first_mesh, mesh_count; i32 first_light, light_count; }
 
 // the resolver seam — nothing in the importer opens a file
 sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>(string_view)> — the borrowed, per-call form
@@ -573,6 +573,8 @@ Gotchas:
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
 - **glTF lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
   `id` is the file's name, or `name##i` when empty or shared; `range` is kept but not honoured, and says so in `issues`.
+  Ids are unique within one asset only: placing it twice in a layer asserts on the duplicate unless each placement sits under its own `f.scoped_id(...)`.
+  Unflattened, a light sits at its node's local transform and `asset_node::first_light` / `light_count` say which node placed it.
   A file of nothing but lights imports fine: an asset is empty only with neither meshes nor lights.
 - **EVERY glTF mesh crosses, and `scene` / `default_scene` are ignored.**
   Which arrangement a file called default is a decision about what the caller wanted, and honouring it would drop meshes `find_mesh` is then asked for and cannot answer.

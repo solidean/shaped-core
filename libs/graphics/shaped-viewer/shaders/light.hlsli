@@ -35,7 +35,7 @@ struct light
     float cone_scale;
     float3 normal;   // the light's -Z: a rect's front face, a spot's axis, the direction a distant light travels
     float cone_offset;
-    float cos_angular_radius; // distant_disc: cosine of the disc's angular radius
+    float one_minus_cos_angular_radius; // distant_disc: 1 - cos of the disc's angular radius, precise for a small disc
     uint link_mask;           // RESERVED for light linking, read by nothing yet
     float2 _pad0;
 };

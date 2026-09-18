@@ -123,7 +123,7 @@ float3 pt_estimate_light(sv::bsdf bsdf,
     }
     else // sv::light_path_distant_disc
     {
-        wi = pt_sample_cone(-light.normal, light.cos_angular_radius, pt_rand(rng), pt_rand(rng));
+        wi = pt_sample_cone(-light.normal, light.one_minus_cos_angular_radius, pt_rand(rng), pt_rand(rng));
         shadow_dist = 1e20;
         incoming = light.emission;
         pdf = pt_disc_pdf(light);

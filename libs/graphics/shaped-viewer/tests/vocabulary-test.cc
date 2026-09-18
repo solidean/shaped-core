@@ -690,6 +690,19 @@ TEST("sv - a light's unit, face and cone are checked against its path")
     CHECK_ASSERTS(sun.cone(0_deg_f, 10_deg_f));
     CHECK_ASSERTS(point.spread(10_deg_f));
     CHECK_ASSERTS(point.cone(20_deg_f, 10_deg_f)); // inner beyond outer
+
+    // A negative color would emit negative light, and a NaN exposure would drop every path that sees the light.
+    CHECK_ASSERTS(point.color(tg::vec3f(1, -0.1f, 1)));
+    CHECK_ASSERTS(point.exposure(0.0f / 0.0f));
+    CHECK_ASSERTS(point.exposure(200));
+    CHECK(sv::light_problem(point.exposure(-3)).empty());
+
+    // The emission is a public aggregate, so a direct write skips the setters; the GPU layout is the gate that remains.
+    // Candela on a sun would otherwise be read as lux, silently.
+    auto bypassed = sv::light::sun(tg::vec3f(0, -1, 0));
+    bypassed.emission.unit = sv::light_unit::candela;
+    CHECK(!sv::light_problem(bypassed).empty());
+    CHECK_ASSERTS(sv::light_gpu::from(bypassed));
 }
 
 TEST("sv - two equal lights compare equal, and any difference is seen")
@@ -875,11 +888,21 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
     {
         auto const g = sv::light_gpu::from(sv::light::sun(down, 2_deg_f).lux(10));
         CHECK(g.path == u32(sv::light_path::distant_disc));
-        CHECK(tg::abs(g.cos_angular_radius - tg::cos(1_deg_f)) < 1e-6f);
+        CHECK(tg::abs(g.one_minus_cos_angular_radius - 1.5230484e-4f) < 1e-9f); // 1 - cos(1 deg), taken in double
 
         // pi * sin(r)^2 * L back to the lux it was given.
         auto const sin_r = tg::sin(1_deg_f);
         CHECK(tg::abs(tg::pi<f32> * sin_r * sin_r * g.emission[0] - 10.0f) < 1e-3f);
+
+        // The shader's projected solid angle, pi * (1 - cos) * (1 + cos), has to agree with the pi * sin^2 the lux was
+        // divided by, even for a disc far smaller than the sun — where a stored cosine would round most of it away.
+        for (auto const diameter : {0.53f, 0.1f, 0.02f})
+        {
+            auto const small = sv::light_gpu::from(sv::light::sun(down, tg::angle_f::make_from_degree(diameter)).lux(10));
+            auto const omc = small.one_minus_cos_angular_radius;
+            auto const delivered = tg::pi<f32> * omc * (2.0f - omc) * small.emission[0];
+            CHECK(tg::abs(delivered - 10.0f) < 1e-3f * 10.0f);
+        }
     }
 
     SECTION("a two-sided rect sets its flag, and its flux is shared between both faces")
@@ -908,6 +931,24 @@ TEST("sv - light_gpu::from converts every path to the quantity its estimator rea
         };
         CHECK(falloff(10_deg_f) == 1.0f);
         CHECK(falloff(30_deg_f) == 0.0f);
+    }
+
+    // The width between the two angles is clamped only to keep a hard edge finite.
+    // Clamped too wide, the ramp's slope is capped and a narrow cone never reaches full intensity on its own axis.
+    SECTION("a narrow cone still reaches full intensity on its axis")
+    {
+        auto const on_axis = [](sv::light_gpu const& g)
+        {
+            auto const x = cc::clamp(g.cone_scale + g.cone_offset, 0.0f, 1.0f); // cos = 1
+            return x * x;
+        };
+
+        auto tight = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
+        tight.spread(1_deg_f);
+        CHECK(on_axis(sv::light_gpu::from(tight)) == 1.0f);
+
+        // Inner defaults to 0, so the ramp meets 1 exactly on the axis, up to rounding.
+        CHECK(on_axis(sv::light_gpu::from(sv::light::spot(tg::pos3f(0, 3, 0), down, 2_deg_f).candela(1))) > 0.999f);
     }
 }
 

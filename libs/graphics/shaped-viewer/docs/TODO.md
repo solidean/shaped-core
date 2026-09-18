@@ -355,14 +355,14 @@ importance-samples the continuation — so what is left is coverage of the model
   (`sheen_albedo` charges the layers below it less than the Conty-Estevez lobe actually reflects).
   The probe's `1.06` energy bound is exactly those two, so it is what tightens when the tabulated albedos above land.
 - **The environment cannot produce a sharp reflection.** The background is an order-3 SH probe, so a smooth specular lobe
-  reflects a blur whatever the roughness says; only the analytic area light gives a real highlight.
-  An equirect HDR environment with 2D-CDF importance sampling is the fix, and it needs a Radiance `.hdr` reader in babel first —
-  `babel::image` has PNG and JPEG only.
+  reflects a blur whatever the roughness says; only the analytic lights — rects and suns — give a real highlight.
+  An equirect HDR environment with 2D-CDF importance sampling is the fix; babel already reads it, through `babel::hdr` and `babel::image`.
+  How such a map relates to a sun light is open — see "Designed, not landed" in [lights.md](lights.md).
 - **An emissive mesh lights nothing but the camera.** `emission_luminance` is authored and shaded, but next-event
-  estimation samples the analytic area light alone, so emissive geometry is direct-visibility only and contributes no
+  estimation samples the analytic lights alone, so emissive geometry is direct-visibility only and contributes no
   indirect light.
   What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
-  balanced against the BSDF sampler the way `pt_light_intersect` already balances the rect.
+  balanced against the BSDF sampler the way `pt_rect_intersect` already balances a rect.
 - **A partly-covered surface is expressible now**, through `PtAnyHit` in `shaders/pt_material_hit.hlsli`.
   Reaching it takes two things, and for a while it only had one.
   The hit group needs the any-hit attached, which `material_permutation::can_cut_out` decides — and that is now a

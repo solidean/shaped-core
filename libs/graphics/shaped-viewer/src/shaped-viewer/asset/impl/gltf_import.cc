@@ -692,8 +692,8 @@ struct gltf_importer
         out.lights.push_back({.id = l.name, .light = light, .range = l.range});
     }
 
-    /// Makes every light id unique within the asset: a name that is empty or shared is suffixed with the light's position,
-    /// which keeps what a human reads while giving each its own identity.
+    /// Makes every light id unique within the asset: a name that is empty or shared is suffixed with the light's index in
+    /// `lights`, which keeps what a human reads while giving each its own identity.
     ///
     /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
     /// second looking unique.
@@ -737,8 +737,13 @@ struct gltf_importer
         auto const world = tg::compose(parent_world, local);
 
         auto const slot = i32(out.nodes.size());
-        out.nodes.push_back(
-            {.name = n->name, .parent = parent, .transform = local, .first_mesh = i32(out.meshes.size()), .mesh_count = 0});
+        out.nodes.push_back({.name = n->name,
+                             .parent = parent,
+                             .transform = local,
+                             .first_mesh = i32(out.meshes.size()),
+                             .mesh_count = 0,
+                             .first_light = i32(out.lights.size()),
+                             .light_count = 0});
 
         if (n->mesh != bg::mesh_index::invalid)
             emit_mesh(n->mesh, cfg.flatten_hierarchy ? world : local);
@@ -746,8 +751,9 @@ struct gltf_importer
         if (n->light != bg::light_index::invalid)
             emit_light(n->light, cfg.flatten_hierarchy ? world : local);
 
-        // Counted before the children run, since their meshes belong to them and not to this node.
+        // Counted before the children run, since their meshes and lights belong to them and not to this node.
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
+        out.nodes[slot].light_count = i32(out.lights.size()) - out.nodes[slot].first_light;
 
         for (auto const child : doc.children_of(*n))
             visit(child, slot, world, depth + 1);

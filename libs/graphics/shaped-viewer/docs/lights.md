@@ -110,6 +110,8 @@ Nothing keeps such state yet; the id is taken now because it is one argument whi
 
 Factories are the only way to build a light, and each leaves it valid.
 A setter applies its change to a copy and commits it only once `light_problem` finds nothing, so a setter that asserts leaves the light as it was.
+`placement`, `emission` and `shaping` stay public so `light_emission` works as a designated initializer, which means a direct write can still make a light invalid.
+`light_gpu::from` asserts `light_problem` too, so whichever way a light was built, an invalid one never reaches the tracer.
 `light_problem` is public, for a caller holding a light from elsewhere.
 
 ## On the GPU
@@ -117,6 +119,7 @@ A setter applies its change to a copy and commits it only once `light_problem` f
 `sv::light_gpu` is one tagged 96-byte record per light, mirroring `sv::light` in shaders/light.hlsli.
 Its `emission` is one canonical quantity per path: a point's intensity, a rect's radiance per face, a parallel light's irradiance, a sun's radiance.
 A sun's radiance is its illuminance over `pi * sin(r)^2`, the projected solid angle of a disc of angular radius r, so a surface facing it receives exactly the lux it was given.
+Its size is stored as `1 - cos(r)` rather than as a cosine, which near 1 would round away most of a small disc, and the shader's sampler, density and in-disc test all work in that quantity.
 A cone is stored as the scale and offset of glTF's falloff, which an unshaped light turns into a constant 1, so no path branches on whether it has one.
 The flatten groups them by path with `pt_light_table` — a counting sort over the walk it does anyway — and the frame block carries the count and each path's offset and length.
 A loop over one path's run, like the bounce ray testing every area light, then runs in one branch.
@@ -155,7 +158,8 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
 5. **Import.** Landed.
    babel's glTF reader interprets `KHR_lights_punctual` — its first interpreted extension — and `asset_data` gains a flat, world-placed `lights` list.
    What the importer cannot represent becomes an entry in `asset_data::issues`, and nothing new fails a load.
-   A non-uniformly scaled light takes the closest similarity, and glTF's `range` is stored and ignored, since it is a hint.
+   A light takes only a position and a direction from its node, since the extension says the node's scale does not affect it, and glTF's `range` is stored and ignored, since it is a hint.
+   Unflattened, each `asset_node` names the run of lights it placed, as it does for meshes.
 6. **Non-physical flags.** Landed.
    `visible_to_camera`, off by default and only for a light with an extent, and `casts_shadows`, on by default.
    A light that casts no shadow is ignored by geometry on both sides of the weighting, or the two would disagree about what they integrate.
@@ -168,6 +172,11 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
 - Gobos and IES profiles, as further shaping kinds.
   When a two-dimensional texture sampler is built, it is built once for the environment map and shared.
 - Power-weighted light selection, and the point at which emitters should move into the acceleration structure.
+- **An HDR sky, and the sun inside it.** A captured map carries its own sun, while "a sun is always a light" says the sky holds none.
+  Two rules fit, and which one is decided when the HDR sky lands:
+  - the sun is extracted into a `distant_disc` light and clipped out of the map, keeping the rule as it stands;
+  - the map is an importance-sampled light of its own and no sun light is added.
+    Then it is open whether it stays the separate estimator every hit takes today, beside the picked light, or becomes a fifth path in the pick.
 - A stable id per scene item, which picking will want; it is `stable_id<Tag>` again.
 
 ## Lower-library gaps

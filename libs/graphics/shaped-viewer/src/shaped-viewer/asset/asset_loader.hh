@@ -113,11 +113,12 @@ struct sv::asset_loader_config
     /// what saves building and acquiring a material a caller was going to replace anyway.
     cc::unique_function<material_id(cc::string_view name)> material_override;
 
-    /// true places every mesh in world space and leaves `asset_data::nodes` as a record.
+    /// true places every mesh and light in world space and leaves `asset_data::nodes` as a record.
     ///
     /// Instancing is already free here — geometry is content-hashed, so ten nodes referencing one glTF mesh produce ten
     /// meshes with ten transforms over a single upload.
-    /// false leaves each mesh at its node's LOCAL transform, for a caller composing the tree themselves.
+    /// false leaves each mesh and light at its node's LOCAL transform, for a caller composing the tree themselves; each
+    /// node's `first_mesh` and `first_light` runs say which are its.
     bool flatten_hierarchy = true;
 
     sv::tangent_frame_options frames = {};

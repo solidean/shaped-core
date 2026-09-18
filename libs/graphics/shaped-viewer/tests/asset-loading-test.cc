@@ -849,3 +849,45 @@ TEST("sv::asset_loader - a glTF's punctual lights arrive world-placed, in the un
     CHECK(a.lights[4].id == "light##4");
     CHECK(sv::display_name_of(a.lights[2].id) == "bulb");
 }
+
+// Unflattened, a light sits at its node's local transform, so a caller has to find its node to compose the parents —
+// which is what each node's light run is for.
+TEST("sv::asset_loader - an unflattened light is found through its node and composes to where the file put it")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .flatten_hierarchy = false});
+
+    // The rig is a quarter turn about +y, taking the child's +x offset onto -z.
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_lights_punctual"],
+        "extensions": {"KHR_lights_punctual": {"lights": [{"type": "point", "name": "bulb", "intensity": 10}]}},
+        "nodes": [
+            {"name": "rig", "translation": [0, 5, 0], "rotation": [0, 0.70710678, 0, 0.70710678], "children": [1]},
+            {"name": "socket", "extensions": {"KHR_lights_punctual": {"light": 0}}, "translation": [1, 0, 0]}
+        ]})"));
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "rig.gltf");
+    REQUIRE(asset.has_value());
+    auto const& a = asset.value();
+    REQUIRE(a.lights.size() == 1);
+    REQUIRE(a.nodes.size() == 2);
+
+    // The light is local to its socket, not placed in the world.
+    CHECK((a.lights[0].light.placement.translation() - tg::vec3f(1, 0, 0)).length() < 1e-5f);
+
+    // The rig placed no light, and the socket's run names exactly the one it did.
+    CHECK(a.nodes[0].light_count == 0);
+    auto owner = -1;
+    for (auto i = 0; i < int(a.nodes.size()); ++i)
+        if (a.nodes[i].light_count == 1 && a.nodes[i].first_light == 0)
+            owner = i;
+    REQUIRE(owner == 1);
+
+    // The placement already is the socket's own transform, so composing its parents puts the bulb where a flattened
+    // import would have.
+    auto p = a.lights[0].light.placement.transform(tg::pos3f::zero);
+    for (auto n = a.nodes[owner].parent; n >= 0; n = a.nodes[n].parent)
+        p = a.nodes[n].transform.transform(p);
+    CHECK((p - tg::pos3f(0, 5, -1)).length() < 1e-5f);
+}

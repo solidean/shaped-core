@@ -125,7 +125,7 @@ void PathTraceRayGen()
                     float3 const scattered = pt_sample_hg(dir, medium_g, pt_rand(rng), pt_rand(rng));
 
                     // The phase function is its own pdf, so this is the density at the direction ACTUALLY drawn — which is
-                    // what the area light's other strategy has to be balanced against.
+                    // what a light's other strategy has to be balanced against.
                     // Reading it at forward scattering instead would be right only for an isotropic medium, and silently
                     // wrong for every anisotropic one.
                     prev_pdf = pt_hg_phase(dot(dir, scattered), medium_g);
@@ -223,7 +223,7 @@ void PathTraceRayGen()
                 for (uint i = begin; i < end; ++i)
                 {
                     sv::light light = pt_bindings::Lights[i];
-                    if (dot(dir, -light.normal) < light.cos_angular_radius)
+                    if (!pt_in_disc(light, dir))
                         continue;
 
                     if (b == 0)
@@ -254,14 +254,14 @@ void PathTraceRayGen()
 
             // A surface's own emission reaches the camera directly and contributes nothing indirectly.
             //
-            // Not a double-count guard: next-event estimation samples the analytic area light alone, so an emissive
+            // Not a double-count guard: next-event estimation samples the analytic lights alone, so an emissive
             // MESH is never picked as a light and a deeper bounce has nothing to double-count against.
             // Emissive geometry lighting a scene needs light sampling over emissive triangles, which is a feature
             // this tracer does not have — see the viewer TODO.
             if (b == 0)
                 radiance += throughput * emission;
 
-            // What the hit already estimated toward the area light and the environment, through its own BSDF.
+            // What the hit already estimated toward its picked light and the environment, through its own BSDF.
             radiance += throughput * direct;
 
             // A closure that sampled nothing — fully absorbed, or a lobe that collapsed — ends the path here.

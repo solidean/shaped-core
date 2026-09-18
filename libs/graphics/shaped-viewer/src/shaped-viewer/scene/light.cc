@@ -153,14 +153,12 @@ light& light::lumens(f32 value)
 
 light& light::color(tg::vec3f c)
 {
-    emission.color = c;
-    return *this;
+    return checked(*this, [&](light& l) { l.emission.color = c; });
 }
 
 light& light::exposure(f32 stops)
 {
-    emission.exposure = stops;
-    return *this;
+    return checked(*this, [&](light& l) { l.emission.exposure = stops; });
 }
 
 light& light::face(light_face f)
@@ -252,6 +250,14 @@ cc::string_view light_problem(light const& l)
     if (!(l.emission.intensity >= 0.0f))
         return "a light's intensity must be >= 0";
 
+    auto const c = l.emission.color;
+    if (!(c[0] >= 0.0f && c[1] >= 0.0f && c[2] >= 0.0f))
+        return "a light's color must be >= 0 in every channel";
+
+    // Also false for a NaN, which is the case this exists for.
+    if (!(tg::abs(l.emission.exposure) < 128.0f))
+        return "a light's exposure must be within +-128 stops, where 2^exposure is a finite float";
+
     if (l.emission.face != light_face::front && path != light_path::area)
         return "only an area light has faces to choose between";
 
@@ -278,6 +284,8 @@ light default_fallback_light()
 
 light_gpu light_gpu::from(light const& l)
 {
+    assert_valid(l);
+
     auto out = light_gpu{};
     out.path = u32(l.path());
 
@@ -286,12 +294,16 @@ light_gpu light_gpu::from(light const& l)
     out.normal = l.placement.transform(tg::vec3f(0, 0, -1)).normalized();
 
     // glTF's falloff, `saturate(cos * scale + offset)^2`, stored as the two numbers it needs — 0 and 1 leave a light unshaped.
+    //
+    // The width is clamped only to keep the division finite for a hard edge.
+    // glTF's sample code clamps at 1e-3, which caps the ramp's slope so a cone under ~2.6 degrees never reaches full
+    // intensity; 1e-6 is a hard edge down to ~0.08 degrees.
     if (l.shaping.kind == light_shaping_kind::cone)
     {
         auto const cos_inner = tg::cos(l.shaping.inner);
         auto const cos_outer = tg::cos(l.shaping.outer);
         auto const width = cos_inner - cos_outer;
-        out.cone_scale = 1.0f / (width > 0.001f ? width : 0.001f);
+        out.cone_scale = 1.0f / (width > 1e-6f ? width : 1e-6f);
         out.cone_offset = -cos_outer * out.cone_scale;
     }
 
@@ -346,9 +358,11 @@ light_gpu light_gpu::from(light const& l)
     {
         // A uniform disc of radiance L and angular radius r delivers pi * sin(r)^2 * L to a surface facing it — the
         // projected solid angle of the cap — so that is what the illuminance is divided by.
+        // 1 - cos(r) as 2 sin^2(r / 2), which keeps its precision where the cosine rounds to within a few ulps of 1.
         auto const r = l.angular_radius();
         auto const sin_r = tg::sin(r);
-        out.cos_angular_radius = tg::cos(r);
+        auto const sin_half_r = tg::sin(r / 2.0f);
+        out.one_minus_cos_angular_radius = 2.0f * sin_half_r * sin_half_r;
         intensity /= tg::pi<f32> * sin_r * sin_r;
         break;
     }

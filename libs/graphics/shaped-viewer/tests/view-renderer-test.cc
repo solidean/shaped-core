@@ -45,7 +45,7 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
     v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin
     sv::ensure_scene_3d(v).items.push_back(item);
     // An overhead rect facing down (cross(+x, +z) is -y).
-    // Exercises the light -> area_light_gpu derivation the view_renderer does.
+    // Exercises the light -> light_gpu derivation the view_renderer does.
     sv::ensure_scene_3d(v).lights.push_back(
         {.id = sv::light_id::from_string("key"),
          .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(18.0f)});
