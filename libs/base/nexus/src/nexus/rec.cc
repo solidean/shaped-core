@@ -25,9 +25,8 @@ namespace
 /// One test's events, plus what to do with them when the test ends.
 struct bucket
 {
-    /// Borrowed from the test declaration, which the registry owns for the whole run.
-    /// A copy here would be an allocation per test, on a path every test walks.
-    cc::string_view test_name;
+    /// Owned: a test that builds and runs a registry of its own frees those declarations while the outer run still holds their buckets.
+    cc::string test_name;
     cc::rec::recording pending;
     bool closed = false;
     bool failed = false;
@@ -302,18 +301,18 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
     // Serializing here rather than at the write is the same constraint one step earlier — the bytes outlive the pool,
     // the recording cannot, and a handover reaches this point with nowhere to write yet.
     {
-        cc::vector<cc::pair<cc::string_view, cc::rec::recording>> dumps;
+        cc::vector<cc::pair<cc::string, cc::rec::recording>> dumps;
         g_buckets.lock(
             [&](bucket_table& t)
             {
                 for (auto&& [trace, b] : t.by_trace)
                     if (b.failed)
-                        dumps.push_back({b.test_name, cc::move(b.pending)});
+                        dumps.push_back({cc::move(b.test_name), cc::move(b.pending)});
                 t.by_trace.clear();
             });
 
         for (auto const& [name, r] : dumps)
-            g_pending_dumps.push_back({cc::string(name), cc::rec::serialize(r)});
+            g_pending_dumps.push_back({name, cc::rec::serialize(r)});
     }
 
     // The whole-run capture, under the same constraint and for the same reason: serialize while the pool is still
@@ -388,7 +387,7 @@ void nx::impl::open_test_bucket(cc::rec::trace_id id, cc::string_view test_name)
     if (!g_active || id == cc::rec::trace_id::none)
         return;
 
-    g_buckets.lock([&](bucket_table& t) { t.by_trace[u64(id)] = bucket{.test_name = test_name}; });
+    g_buckets.lock([&](bucket_table& t) { t.by_trace[u64(id)] = bucket{.test_name = cc::string(test_name)}; });
 }
 
 void nx::impl::close_test_bucket(cc::rec::trace_id id, bool failed, bool await_log_verdict)
