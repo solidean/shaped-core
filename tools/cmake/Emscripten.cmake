@@ -57,6 +57,44 @@ if(EMSCRIPTEN)
         add_compile_definitions(CC_WASM_KEEPS_FRAME_STRUCTURE=0)
     endif()
 
+    # Debug info BESIDE the artifact, for resolving a captured stack after the fact.
+    #
+    # A stripped build's stack is still byte offsets into the code section, and those offsets are byte-identical to
+    # what a named build of the same source produces -- measured.
+    # So the names can live outside the binary entirely.
+    #
+    # **The two sidecars are not equally priced, which is why this is not one switch.**
+    # Measured on a small module at -O3, against a 13,249-byte baseline:
+    #
+    #   -gsource-map       13,281 bytes (+0.2%), name section still stripped -- a browser reads it with no tooling
+    #   -gseparate-dwarf   15,278 bytes (+15.3%), name section KEPT -- llvm-symbolizer resolves it, names ship again
+    #
+    # On clean-core-test the DWARF option cost 1.9 MB of a 8.2 MB artifact.
+    # So neither is implied by Release: turning them on there silently would have grown every release artifact to
+    # buy a capability nobody asked for, and the DWARF one would have left it un-stripped as well -- making the
+    # offline path moot for the one build that needs it.
+    #
+    # Nothing checks a sidecar against the stack it resolves, and nothing here can: an offset from another build of
+    # the same source resolves to a plausible, confident, wrong name.
+    # Keeping the sidecar beside the artifact it was built with is what stands in for a build identity.
+    set(SC_WASM_DEBUG_SIDECARS "off" CACHE STRING "WASM debug sidecars: off | source-map | dwarf | both")
+
+    # Lower-cased before it is matched, so OFF -- which is what a bool-shaped cache entry or a habit produces --
+    # means what it obviously means rather than failing configure.
+    string(TOLOWER "${SC_WASM_DEBUG_SIDECARS}" sc_wasm_sidecars)
+    if(NOT sc_wasm_sidecars MATCHES "^(off|source-map|dwarf|both)$")
+        message(FATAL_ERROR "SC_WASM_DEBUG_SIDECARS='${SC_WASM_DEBUG_SIDECARS}': expected off, source-map, dwarf or both")
+    endif()
+
+    if(sc_wasm_sidecars STREQUAL "source-map" OR sc_wasm_sidecars STREQUAL "both")
+        add_compile_options(-gsource-map)
+        add_link_options(-gsource-map)
+    endif()
+    if(sc_wasm_sidecars STREQUAL "dwarf" OR sc_wasm_sidecars STREQUAL "both")
+        add_compile_options(-gseparate-dwarf)
+        add_link_options(-gseparate-dwarf)
+    endif()
+
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they
     # must be enabled. Emscripten disables them by default; -fexceptions is the broadly-compatible JS-based
     # mode. -fwasm-exceptions (native wasm EH, faster, needs a newer runtime) is reserved for later.
