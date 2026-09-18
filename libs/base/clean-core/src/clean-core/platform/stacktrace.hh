@@ -5,12 +5,12 @@
 // cc::stacktrace mirrors std::stacktrace where the C++23 <stacktrace> header is available, and degrades to an empty stub where it is not.
 // WASI libc++ currently ships no <stacktrace>, yet code that captures a trace — the default assert handler, cc::any_error payloads — must still compile and link there.
 //
-// Emscripten ships no <stacktrace> either but is NOT the stub: emscripten_get_callstack() renders the current wasm
-// call stack as text, which is the one thing the stub cannot do, so it gets a backend of its own below.
-// It reports frame TEXT rather than addresses, because that is what the platform hands back — there is no address a
-// cc::symbolizer could resolve afterwards, which is why this is not routed through cc::capture_stack.
-// Names in that text come from the wasm name section, which the wasm presets keep with --profiling-funcs; without it
-// the frames are still there and read as indices rather than names.
+// Emscripten ships no <stacktrace> either but is NOT the stub: it gets a backend of its own below, and that backend
+// is cc::capture_stack plus cc::symbolizer — the same two halves this type is everywhere else.
+// A wasm frame does carry an address, a byte offset into the module's code section, so there is nothing special
+// about the platform at this level; what differs is only where a name comes from.
+// Names come from the wasm name section, which the wasm presets keep with --profiling-funcs; without it the frames
+// are still there and read as offsets rather than names.
 //
 // CC_HAS_STACKTRACE reflects which path is active.
 // Our CMake defines it from a link probe (clean-core/cmake/DetectStacktraceLib.cmake) and that verdict wins:
@@ -34,6 +34,7 @@
 
 #if defined(__EMSCRIPTEN__) && CC_HAS_STACKTRACE
 
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 
@@ -47,18 +48,28 @@ struct stacktrace;
 [[nodiscard]] cc::string to_string(cc::stacktrace const& trace);
 } // namespace cc
 
-/// One frame of an Emscripten trace, which carries its own text because that is all the platform reports.
+/// One frame of an Emscripten trace: the address it was captured at, and what that resolved to.
+///
+/// Rendered at capture time rather than lazily, because on wasm a name is only knowable while the frame text the
+/// capture parsed still exists — see remember_wasm_symbol in platform/impl/wasm_frames.hh.
 /// source_file() and source_line() have no counterpart here and are deliberately absent rather than faked.
 struct cc::stacktrace_entry
 {
     stacktrace_entry() = default;
-    explicit stacktrace_entry(cc::string text) : _text(cc::move(text)) {}
+    stacktrace_entry(cc::u32 address, cc::string text) : _text(cc::move(text)), _address(address) {}
 
     [[nodiscard]] cc::string const& description() const { return _text; }
-    [[nodiscard]] bool operator==(stacktrace_entry const& rhs) const { return _text == rhs._text; }
+
+    /// The byte offset into the module's code section, which is what an offline resolver takes.
+    /// A JS frame instead carries its line, tagged with cc::impl::wasm_js_frame_bit.
+    [[nodiscard]] cc::u32 address() const { return _address; }
+
+    /// By address, since that is the frame's identity; the text is a rendering of it.
+    [[nodiscard]] bool operator==(stacktrace_entry const& rhs) const { return _address == rhs._address; }
 
 private:
     cc::string _text;
+    cc::u32 _address = 0;
 };
 
 /// A snapshot of the wasm call stack, captured through emscripten_get_callstack.
@@ -90,6 +101,15 @@ struct cc::stacktrace
     }
 
 private:
+    /// Renders already-captured addresses into a trace.
+    ///
+    /// **Split from the capture rather than sharing one helper with it**, because a shared helper would be a frame
+    /// BETWEEN the caller and cc::capture_stack, and this type's contract is that a trace begins at the caller.
+    /// Relying on that helper being inlined away is not a contract any compiler offers.
+    /// So each overload captures for itself, in three lines, and everything after the capture lives here — where
+    /// being a real call costs nothing, since the stack has already been read.
+    static stacktrace from_frames(cc::span<void* const> frames, std::size_t max_depth) noexcept;
+
     cc::vector<stacktrace_entry> _frames;
 };
 

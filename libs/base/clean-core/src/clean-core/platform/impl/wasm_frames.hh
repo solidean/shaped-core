@@ -44,6 +44,25 @@ struct wasm_frame;
 /// and hiding that would misreport who called us.
 [[nodiscard]] cc::optional<wasm_frame> parse_wasm_frame(cc::string_view line);
 
+/// Remembers what a captured address was called, so a symbolizer can answer for it later.
+///
+/// **This is the only route to a name in-process on wasm.**
+/// A name exists solely in the engine's frame text, which exists solely at capture time — there is no module to
+/// consult afterwards the way there is everywhere else.
+/// So a capture files what it parsed, and cc::symbolizer reads the file.
+///
+/// The consequence is worth stating plainly: **in-process, only an address this process has captured can be
+/// resolved.** Anything else needs the offline resolver, against the build's own sidecars.
+///
+/// Allocation-free and bounded, because a crash handler captures too: a fixed table of entries over a fixed arena,
+/// and both full means names stop being recorded rather than anything failing.
+/// Best-effort under contention as well — a capture that cannot take the table skips filing rather than waiting,
+/// since a thread frozen holding it would hang the crash report.
+void remember_wasm_symbol(u32 address, cc::string_view name);
+
+/// What `address` was called when it was captured, or empty.
+[[nodiscard]] cc::string_view wasm_symbol_for(u32 address);
+
 /// The bit marking an address as a JS line number rather than a wasm code offset.
 ///
 /// A wasm module cannot reach 2 GiB of code, so the top bit is free, and Emscripten's own helpers already use it

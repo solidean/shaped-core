@@ -6,7 +6,9 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
+#include <clean-core/platform/impl/wasm_frames.hh> // the capture-time name table, the only route to a name here
+#elif defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
 #include <dbghelp.h> // SymFromAddr / SymGetLineFromAddr64, the only route to a name on Windows
 #endif
@@ -15,7 +17,10 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
+// Names come from what a capture filed, so there is symbolization exactly to the extent there were captures.
+constexpr bool has_symbolization = true;
+#elif defined(_WIN32)
 constexpr bool has_symbolization = true;
 
 /// Serializes every DbgHelp call cc::symbolizer makes.
@@ -240,7 +245,32 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
             break;
         }
 
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__)
+    // The address is a code offset into the one module a wasm process has, so the offset into the module IS the
+    // address, and there is no base to subtract.
+    auto const offset = u32(key);
+    if ((offset & cc::impl::wasm_js_frame_bit) != 0)
+    {
+        // A JS frame: the engine gave a line in a script rather than a place in the module, so `module_offset`
+        // would be a lie.
+        // The name is all there is, and the line goes where a line goes.
+        if (out.module.empty())
+        {
+            out.line = i32(offset & ~cc::impl::wasm_js_frame_bit);
+            out.function = cc::impl::wasm_symbol_for(offset);
+        }
+        return out;
+    }
+
+    // Only when no recorded table claimed this address.
+    // A foreign table has already worked out which module the address is in and how far into it, and a wasm
+    // process's own single module is the case where there is none.
+    if (out.module.empty())
+        out.module_offset = u64(offset);
+
+    out.function = cc::impl::wasm_symbol_for(offset);
+    return out;
+#elif defined(_WIN32)
     auto const process = _session != nullptr ? HANDLE(_session) : ::GetCurrentProcess();
     if (is_foreign() && _session == nullptr)
         return out; // the session could not be opened, so the table is all there is

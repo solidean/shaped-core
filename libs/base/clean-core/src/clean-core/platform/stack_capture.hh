@@ -78,6 +78,9 @@ namespace cc
 /// Allocation-free, lock-free and safe from a crash handler, unlike cc::stacktrace.
 ///
 /// `skip` drops that many innermost frames, so a wrapper can leave itself out.
+/// It counts CALLERS rather than reported frames, which is the same thing everywhere but wasm: there a build with
+/// -fexceptions routes a call that might throw through a JS trampoline, and a frame the caller never wrote must
+/// not consume the skip a wrapper asked for.
 ///
 /// `stop_frame` is a STACK ADDRESS, not a return address, and the walk stops once it reaches or passes it.
 /// A threshold rather than an equality on purpose: the exact frame is often absent — a scope may have been inlined

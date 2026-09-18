@@ -67,9 +67,16 @@ constexpr isize frame_text_bytes = 48 * 1024;
 /// The capture's own frames, which a caller never means to see.
 ///
 /// `emscripten_get_callstack` already drops itself and everything inside it, so what remains of ours is
-/// `capture_wasm_text` and `cc::capture_stack`. Both are kept out of line for exactly this reason — the count is
-/// only a constant while neither can be inlined away.
-constexpr isize own_frames = 2;
+/// `capture_wasm_text` and `cc::capture_stack`.
+/// Both are kept out of line for exactly this reason — the count is only a constant while neither can be inlined
+/// away.
+///
+/// **Counted in WASM frames, and the JS frames among them are dropped with them.**
+/// Under -fexceptions a call that might throw goes through a JS `invoke_*` trampoline, and whether one lands on
+/// this particular path depends on what the optimizer knew about the callee — so the number of frames between the
+/// caller and here is not fixed, while the number of OUR OWN functions in it is.
+/// Counting raw frames instead is what left `cc::stacktrace::current` at the top of its own traces.
+constexpr isize own_wasm_frames = 2;
 
 /// Scratch for one capture's text, per thread.
 ///
@@ -128,7 +135,8 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
         return {};
 
     auto result = cc::stack_capture_result();
-    auto remaining_skip = skip + own_frames;
+    auto own_remaining = own_wasm_frames;
+    auto remaining_skip = skip;
 
     auto rest = text;
     while (!rest.empty())
@@ -141,9 +149,22 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
         if (!frame.has_value())
             continue;
 
+        // Our own frames first, by function rather than by frame: a JS trampoline sitting among them belongs to
+        // this path too, and goes with them.
+        if (own_remaining > 0)
+        {
+            if (!frame.value().is_js)
+                --own_remaining;
+            continue;
+        }
+
+        // `skip` counts callers, not reported frames, for the same reason and with the same consequence: a
+        // trampoline the caller never wrote must not consume the skip a wrapper asked for.
+        // Otherwise `skip = 1` drops a JS frame and leaves the wrapper at the top of its own trace.
         if (remaining_skip > 0)
         {
-            --remaining_skip;
+            if (!frame.value().is_js)
+                --remaining_skip;
             continue;
         }
 
@@ -155,8 +176,13 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
 
         // A code offset rather than a pointer, which is what an address IS here: there is nothing to dereference,
         // and a symbolizer resolves it against the module it came from.
-        out[result.count] = reinterpret_cast<void*>(uintptr_t(frame.value().address()));
+        auto const address = frame.value().address();
+        out[result.count] = reinterpret_cast<void*>(uintptr_t(address));
         ++result.count;
+
+        // The name is in hand and will not be later: it exists only in the text this parse just consumed.
+        // Filing it here is what makes cc::symbolizer able to answer at all on this platform.
+        cc::impl::remember_wasm_symbol(address, frame.value().name);
     }
 
     return result;

@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/impl/wasm_frames.hh>
 #include <clean-core/platform/stack_capture.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
@@ -252,7 +253,15 @@ TEST("stack capture - skip drops exactly the innermost frames")
 
     REQUIRE(all.result.count > 3);
 
-    CHECK(skipped.result.count == all.result.count - 2);
+    // `skip` counts CALLERS, and on a platform that interposes frames of its own a caller can cost more than one
+    // reported frame — so two skipped callers remove two frames or more, never fewer.
+    // What must hold exactly is that what remains is a suffix of what was there: skipping drops from the inside
+    // and changes nothing else.
+    auto const dropped = all.result.count - skipped.result.count;
+    CHECK(dropped >= 2);
+    if (CC_WASM_KEEPS_FRAME_STRUCTURE && cc::stack_capture_supports_stop_frame())
+        CHECK(dropped == 2); // no interposed frames on this platform, so a caller is exactly a frame
+
     CHECK(common_suffix(all.frames, skipped.frames) >= skipped.result.count - 1);
 }
 
@@ -428,6 +437,34 @@ TEST("capture_stack - wasm's skew is right, so the caller is the innermost frame
     REQUIRE(deep_result.count >= 4);
     for (auto i = 2; i < shallow_result.count; ++i)
         CHECK(shallow[i] == deep[i + 1]);
+}
+
+TEST("capture_stack - wasm resolves a captured frame to the name it was captured under")
+{
+    if (!CC_WASM_KEEPS_FRAME_STRUCTURE)
+        SKIP("this build keeps no function names, so there is nothing to resolve to");
+
+    void* frames[64];
+    auto const result = wasm_capture_at_depth_1(frames);
+    REQUIRE(result.count > 0);
+
+    // The strongest form of the skew check: not merely that two captures agree, but that the innermost frame is
+    // the function that called cc::capture_stack, by name.
+    // A containment check, because the name arrives as the engine spells it: demangled, qualified and with its
+    // parameter list, `(anonymous namespace)::wasm_capture_at_depth_1(cc::span<void*>)`.
+    auto sym = cc::symbolizer();
+    auto const& innermost = sym.resolve(frames[0]);
+    REQUIRE(innermost.has_function());
+    CHECK(cc::string_view(innermost.function).contains("wasm_capture_at_depth_1"));
+}
+
+TEST("capture_stack - wasm resolves nothing for an address it never captured")
+{
+    // Worth pinning, because it is the platform's real limit rather than a gap to fix.
+    // A name exists only in the frame text a capture parsed, so an address from anywhere else has no name here and
+    // needs the offline resolver instead.
+    auto sym = cc::symbolizer();
+    CHECK(!sym.resolve(reinterpret_cast<void*>(uintptr_t(0x7FFF'FFF0))).has_function());
 }
 
 TEST("capture_stack - wasm is available and prices itself honestly")

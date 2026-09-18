@@ -2,6 +2,7 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/char_predicates.hh>
+#include <clean-core/thread/atomic.hh>
 
 using namespace cc::primitive_defines;
 
@@ -217,4 +218,105 @@ cc::optional<cc::impl::wasm_frame> cc::impl::parse_wasm_frame(cc::string_view li
 
     frame.name = frame.is_js ? name : strip_module_prefix(name, frame.module);
     return frame;
+}
+
+namespace
+{
+// The name table cc::symbolizer reads on wasm.
+//
+// Sized rather than grown: a capture may run inside a crash handler, where allocating is the failure this whole
+// path exists to survive.
+// A program has far fewer distinct frames than this; overflowing costs names for the frames past it and nothing else.
+constexpr isize symbol_slots = 4096; // power of two, so the probe wraps with a mask
+constexpr isize symbol_arena_bytes = 128 * 1024;
+
+struct symbol_slot
+{
+    /// The captured address, or 0 for an empty slot.
+    /// Written LAST and with release ordering, so a reader never sees a slot claimed before its name is there.
+    cc::atomic<u32> address = 0;
+
+    u32 name_offset = 0;
+    u32 name_size = 0;
+};
+
+symbol_slot g_symbols[symbol_slots];
+char g_symbol_arena[symbol_arena_bytes];
+cc::atomic<isize> g_symbol_arena_used = 0;
+
+/// Whoever holds this is mid-insert.
+///
+/// A try rather than a lock: a capture that cannot have it files nothing, which costs a name.
+/// Waiting could cost the whole crash report, since the thread holding it may be the one that died.
+cc::atomic<bool> g_symbol_insert_busy = false;
+
+[[nodiscard]] isize slot_of(u32 address)
+{
+    // Fibonacci hashing, so consecutive code offsets do not land in consecutive slots.
+    auto const mixed = u32(address * 2654435761u);
+    return isize(mixed & u32(symbol_slots - 1));
+}
+} // namespace
+
+void cc::impl::remember_wasm_symbol(u32 address, cc::string_view name)
+{
+    if (address == 0 || name.empty() || name.size() > 0xFFFF)
+        return;
+
+    // Already known, and the common case by far: a stack is captured over and over at the same sites.
+    // Checked without the guard, since a filled slot never changes.
+    for (auto probe = isize(0); probe < 8; ++probe)
+    {
+        auto const& slot = g_symbols[(slot_of(address) + probe) & (symbol_slots - 1)];
+        auto const claimed = slot.address.load(cc::memory_order_acquire);
+        if (claimed == address)
+            return;
+        if (claimed == 0)
+            break;
+    }
+
+    if (g_symbol_insert_busy.exchange(true, cc::memory_order_acquire))
+        return;
+
+    auto const used = g_symbol_arena_used.load(cc::memory_order_relaxed);
+    if (used + name.size() <= symbol_arena_bytes)
+    {
+        for (auto probe = isize(0); probe < 8; ++probe)
+        {
+            auto& slot = g_symbols[(slot_of(address) + probe) & (symbol_slots - 1)];
+            auto const claimed = slot.address.load(cc::memory_order_relaxed);
+            if (claimed == address)
+                break;
+            if (claimed == 0)
+            {
+                cc::memcpy(g_symbol_arena + used, name.data(), size_t(name.size()));
+                slot.name_offset = u32(used);
+                slot.name_size = u32(name.size());
+                g_symbol_arena_used.store(used + name.size(), cc::memory_order_relaxed);
+
+                // Last, so a concurrent reader sees the name whenever it sees the address.
+                slot.address.store(address, cc::memory_order_release);
+                break;
+            }
+        }
+    }
+
+    g_symbol_insert_busy.store(false, cc::memory_order_release);
+}
+
+cc::string_view cc::impl::wasm_symbol_for(u32 address)
+{
+    if (address == 0)
+        return {};
+
+    for (auto probe = isize(0); probe < 8; ++probe)
+    {
+        auto const& slot = g_symbols[(slot_of(address) + probe) & (symbol_slots - 1)];
+        auto const claimed = slot.address.load(cc::memory_order_acquire);
+        if (claimed == 0)
+            return {};
+        if (claimed == address)
+            return cc::string_view(g_symbol_arena + slot.name_offset, isize(slot.name_size));
+    }
+    return {};
 }
