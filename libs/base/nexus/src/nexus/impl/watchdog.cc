@@ -67,9 +67,9 @@ nx::impl::run_watchdog::run_watchdog(double quiet_secs, void (*report)(double qu
                     report(quiet);
                 else
                 {
-                    cc::eprintln("\n[nexus watchdog] no test has started or finished for {} s; every thread's stack "
+                    cc::eprintln("\n[nexus watchdog] no test has started or finished for {:g} s; every thread's stack "
                                  "follows",
-                                 int(quiet));
+                                 quiet);
                     cc::report_all_thread_stacks("[nexus watchdog] no test progress");
                 }
                 quiet = 0.0; // the next report comes after another full budget, not on every poll
