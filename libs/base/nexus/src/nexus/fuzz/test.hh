@@ -112,21 +112,33 @@ struct nx::fuzz::test
 
     // ---- direct evaluation (used by regression code) ---------------------------------------------
 
+    // A synchronous op only: an async one fails the test, naming eval_op_async.
     template <class... Args>
     [[nodiscard]] typed_value eval_op(cc::string_view op, Args&&... args) const
     {
-        return op_or_die(op)->eval(cc::forward<Args>(args)...);
+        return sync_op_or_fail(op)->eval(cc::forward<Args>(args)...);
     }
     template <class T, class... Args>
     [[nodiscard]] T eval_op_to(cc::string_view op, Args&&... args) const
     {
-        return op_or_die(op)->template eval_to<T>(cc::forward<Args>(args)...);
+        return sync_op_or_fail(op)->template eval_to<T>(cc::forward<Args>(args)...);
     }
     template <class... Args>
     [[nodiscard]] bool eval_op_bool(cc::string_view op, Args&&... args) const
     {
-        return op_or_die(op)->eval_bool(cc::forward<Args>(args)...);
+        return sync_op_or_fail(op)->eval_bool(cc::forward<Args>(args)...);
     }
+
+    // An async op only, from an async test: `auto v = co_await test->eval_op_async("load", i0);` moves the boxed value out.
+    // A synchronous op fails the test, naming eval_op.
+    // Placed by set_inherit_home as the fuzz is, so a pasted reproducer runs where the finding did.
+    // Defined in nexus/fuzz/async.hh.
+    template <class... Args>
+    [[nodiscard]] auto eval_op_async(cc::string_view op, Args&&... args) const;
+    template <class T, class... Args>
+    [[nodiscard]] auto eval_op_to_async(cc::string_view op, Args&&... args) const;
+    template <class... Args>
+    [[nodiscard]] auto eval_op_bool_async(cc::string_view op, Args&&... args) const;
 
     test() = default;
     ~test();
@@ -136,6 +148,8 @@ struct nx::fuzz::test
 private:
     fuzz_operation* add(cc::unique_ptr<fuzz_operation> op);
     fuzz_operation* op_or_die(cc::string_view name) const;
+    fuzz_operation* sync_op_or_fail(cc::string_view name) const;
+    fuzz_operation* async_op_or_fail(cc::string_view name) const;
     void build_machine();
 
     // The home set_inherit_home asks for, read in the caller's segment; null when there is none to inherit.

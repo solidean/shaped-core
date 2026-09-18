@@ -25,6 +25,37 @@
 
 #include <type_traits>
 
+namespace nx::fuzz::impl
+{
+// Unboxes a resolved value as T; T must be copyable, as for eval_to.
+template <class T>
+cc::shared_async<T> unbox_async(cc::shared_async<typed_value> boxed)
+{
+    co_return (co_await cc::async_take(cc::move(boxed))).template get<T>();
+}
+} // namespace nx::fuzz::impl
+
+template <class... Args>
+auto nx::fuzz::test::eval_op_async(cc::string_view op, Args&&... args) const
+{
+    auto* const home = inherited_home();
+    return cc::async_take(impl::place(async_op_or_fail(op)->eval_async(home, cc::forward<Args>(args)...), home));
+}
+
+template <class T, class... Args>
+auto nx::fuzz::test::eval_op_to_async(cc::string_view op, Args&&... args) const
+{
+    auto* const home = inherited_home();
+    auto boxed = impl::place(async_op_or_fail(op)->eval_async(home, cc::forward<Args>(args)...), home);
+    return cc::async_take(impl::place(impl::unbox_async<T>(cc::move(boxed)), home));
+}
+
+template <class... Args>
+auto nx::fuzz::test::eval_op_bool_async(cc::string_view op, Args&&... args) const
+{
+    return eval_op_to_async<bool>(op, cc::forward<Args>(args)...);
+}
+
 /// Boxes an async op's value once it resolves.
 /// The value is taken out of the op's node, so a handle the op kept for itself afterwards reads a moved-from value.
 template <class T>

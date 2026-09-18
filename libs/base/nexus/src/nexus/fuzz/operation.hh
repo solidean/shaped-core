@@ -175,6 +175,19 @@ struct nx::fuzz::fuzz_operation
         return invoke(cc::span<typed_value*>(ptrs));
     }
 
+    /// eval for an async op: the arguments are boxed into the returned coroutine's frame, which calls the op and resolves to its boxed value.
+    /// A typed_value argument is referenced directly, so it must outlive the returned handle, as in eval.
+    template <class... Args>
+    [[nodiscard]] cc::shared_async<typed_value> eval_async(cc::async_scheduler* home, Args&&... args) const
+    {
+        cc::vector<typed_value> storage;
+        cc::vector<typed_value*> external; // null means "the next boxed argument in storage"
+        storage.reserve(sizeof...(Args));
+        external.reserve(sizeof...(Args));
+        (eval_arg_async(storage, external, cc::forward<Args>(args)), ...);
+        return eval_async_boxed(cc::move(storage), cc::move(external), home);
+    }
+
     template <class T, class... Args>
     [[nodiscard]] T eval_to(Args&&... args) const
     {
@@ -188,6 +201,26 @@ struct nx::fuzz::fuzz_operation
     }
 
 private:
+    // A coroutine, defined in machine.cc; it builds the argument pointers once the storage sits in its frame.
+    cc::shared_async<typed_value> eval_async_boxed(cc::vector<typed_value> storage,
+                                                   cc::vector<typed_value*> external,
+                                                   cc::async_scheduler* home) const;
+
+    template <class A>
+    static void eval_arg_async(cc::vector<typed_value>& storage, cc::vector<typed_value*>& external, A&& a)
+    {
+        using plain = std::remove_cvref_t<A>;
+        if constexpr (std::is_same_v<plain, typed_value>)
+        {
+            external.push_back(const_cast<typed_value*>(&a));
+        }
+        else
+        {
+            storage.push_back(typed_value::create(std::forward<A>(a)));
+            external.push_back(nullptr);
+        }
+    }
+
     template <class A>
     static void eval_arg(cc::vector<typed_value>& storage, cc::vector<typed_value*>& ptrs, A&& a)
     {

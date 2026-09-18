@@ -156,8 +156,10 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
             // the failing invariant returned false -> assert the negation reproduces
             code += dialect.assert_macro;
             code += "(!";
+            if (oi.is_async)
+                code += "co_await ";
             code += var;
-            code += "->eval_op_bool(\"";
+            code += oi.is_async ? "->eval_op_bool_async(\"" : "->eval_op_bool(\"";
             code += opname;
             code += "\"";
             if (!args.empty())
@@ -175,8 +177,10 @@ cc::string fuzz_run::emit_regression(cc::string_view test_var, regression_dialec
             code += names[i];
             code += " = ";
         }
+        if (oi.is_async)
+            code += "co_await ";
         code += var;
-        code += "->eval_op(\"";
+        code += oi.is_async ? "->eval_op_async(\"" : "->eval_op(\"";
         code += opname;
         code += "\"";
         if (!args.empty())

@@ -209,6 +209,17 @@ cc::shared_async<fuzz_machine::execute_result> fuzz_machine::execute_operation_a
     co_return finish_step(s, exec, step);
 }
 
+cc::shared_async<typed_value> fuzz_operation::eval_async_boxed(cc::vector<typed_value> storage,
+                                                               cc::vector<typed_value*> external,
+                                                               cc::async_scheduler* home) const
+{
+    auto args = cc::vector<typed_value*>();
+    auto next = 0;
+    for (auto* const e : external)
+        args.push_back(e != nullptr ? e : &storage[next++]);
+    co_return co_await cc::async_take(impl::place(invoke_async(args, home), home));
+}
+
 fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation const& exec, cc::async_scheduler* home) const
 {
     auto const& oi = _operations[int(exec.operation)];

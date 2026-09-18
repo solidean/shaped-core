@@ -8,6 +8,9 @@
 #include <nexus/async-test.hh>
 #include <nexus/fuzz/async.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/execute.hh>
+#include <nexus/tests/registry.hh>
+#include <nexus/tests/schedule.hh>
 
 #include <typeindex>
 
@@ -182,12 +185,12 @@ ASYNC_TEST("fuzz async - a CHECK failing on a pool worker fails its step, not th
     t->add_op("check elsewhere",
               [](int a) -> cc::shared_async<cc::unit>
               {
-                  co_await cc::async_run_on(cc::compute_scheduler(),
-                                            [a]
-                                            {
-                                                CHECK(a != 3);
-                                                return cc::unit{};
-                                            });
+                  (void)co_await cc::async_run_on(cc::compute_scheduler(),
+                                                  [a]
+                                                  {
+                                                      CHECK(a != 3);
+                                                      return cc::unit{};
+                                                  });
               });
 
     auto res = co_await cc::async_take(find_failing_async(t.get(), 64));
@@ -267,4 +270,87 @@ ASYNC_TEST("fuzz async - set_inherit_home does nothing for a caller in no home")
     t->cap_seed_count(4);
 
     CHECK(co_await t->execute_fuzz_test_async());
+}
+
+// The reproducer: sync steps stay eval_op, async steps are awaited through eval_op_async.
+
+ASYNC_TEST("fuzz async - the reproducer awaits exactly the async steps")
+{
+    auto t = nx::fuzz::test::create();
+    t->add_value("3", 3);
+    t->add_op("add1 later", [](int a) -> cc::shared_async<int> { co_return a + 1; });
+    t->add_invariant("is-not-7", [](int i) { return i != 7; });
+
+    auto res = co_await cc::async_take(find_failing_async(t.get(), 64));
+    REQUIRE(res.failing_run.has_value());
+    auto rng = cc::random(1u);
+    auto const minimized = co_await cc::async_take(res.failing_run.value().minimize_async(rng, nullptr));
+
+    CHECK(minimized.emit_regression("t", nx::fuzz::nexus_section_dialect())
+          == "SECTION(\"regression\")\n"
+             "{\n"
+             "    auto i0 = t->eval_op(\"3\");\n"
+             "    auto i1 = co_await t->eval_op_async(\"add1 later\", i0);\n"
+             "    auto i2 = co_await t->eval_op_async(\"add1 later\", i1);\n"
+             "    auto i3 = co_await t->eval_op_async(\"add1 later\", i2);\n"
+             "    auto i4 = co_await t->eval_op_async(\"add1 later\", i3);\n"
+             "    CHECK(!t->eval_op_bool(\"is-not-7\", i4));\n"
+             "}\n");
+}
+
+ASYNC_TEST("fuzz async - a pasted reproducer replays the finding")
+{
+    auto t = nx::fuzz::test::create();
+    t->add_value("3", 3);
+    t->add_op("add1 later", [](int a) -> cc::shared_async<int> { co_return a + 1; });
+    t->add_invariant("is-not-7", [](int i) { return i != 7; });
+    t->add_invariant("is-not-7, awaited", [](int i) -> cc::shared_async<bool> { co_return i != 7; });
+
+    SECTION("regression")
+    {
+        auto i0 = t->eval_op("3");
+        auto i1 = co_await t->eval_op_async("add1 later", i0);
+        auto i2 = co_await t->eval_op_async("add1 later", i1);
+        auto i3 = co_await t->eval_op_async("add1 later", i2);
+        auto i4 = co_await t->eval_op_async("add1 later", i3);
+        CHECK(!t->eval_op_bool("is-not-7", i4));
+        CHECK(!co_await t->eval_op_bool_async("is-not-7, awaited", i4));
+    }
+
+    SECTION("a typed value out of an async op")
+    {
+        CHECK(co_await t->eval_op_to_async<int>("add1 later", 41) == 42);
+    }
+}
+
+TEST("fuzz async - eval_op on an async op fails the test, naming eval_op_async", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("inner-wrong-spelling", {},
+                        []
+                        {
+                            auto t = nx::fuzz::test::create();
+                            t->add_op("load", []() -> cc::shared_async<int> { co_return 1; });
+                            (void)t->eval_op("load");
+                        });
+
+    auto sched = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(sched, {});
+    CHECK(exec.count_failed_checks() == 1);
+}
+
+TEST("fuzz async - eval_op_async on a synchronous op fails the test, naming eval_op", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration("inner-wrong-spelling", {},
+                        []
+                        {
+                            auto t = nx::fuzz::test::create();
+                            t->add_op("inc", [](int a) { return a + 1; });
+                            (void)t->eval_op_async("inc", 1);
+                        });
+
+    auto sched = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(sched, {});
+    CHECK(exec.count_failed_checks() == 1);
 }

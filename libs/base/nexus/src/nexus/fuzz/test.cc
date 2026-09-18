@@ -11,6 +11,7 @@
 #include <nexus/async-test.hh> // nx::impl::invoking_home_if_any
 #include <nexus/fuzz/machine.hh>
 #include <nexus/fuzz/runner.hh>
+#include <nexus/tests/check.hh>
 #include <nexus/tests/seed.hh>
 
 #include <string_view> // bridges cc::string into std::ostream
@@ -75,6 +76,23 @@ fuzz_operation* test::op_or_die(cc::string_view name) const
 {
     auto* op = get_operation_by_name(name);
     CC_ASSERT(op != nullptr, "no fuzz operation with the requested name");
+    return op;
+}
+
+// The wrong eval spelling is a mistake in pasted or hand-written test code, so it fails the test rather than asserting, and holds on every preset.
+fuzz_operation* test::sync_op_or_fail(cc::string_view name) const
+{
+    auto* const op = op_or_die(name);
+    if (op->is_async())
+        FAIL(cc::format("'{}' is an async op: co_await test->eval_op_async(...) from an async test", name));
+    return op;
+}
+
+fuzz_operation* test::async_op_or_fail(cc::string_view name) const
+{
+    auto* const op = op_or_die(name);
+    if (!op->is_async())
+        FAIL(cc::format("'{}' is a synchronous op: call test->eval_op(...)", name));
     return op;
 }
 

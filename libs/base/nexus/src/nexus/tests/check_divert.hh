@@ -47,7 +47,7 @@ struct captured_assertion : std::exception
 {
     cc::string message;
 
-    explicit captured_assertion(cc::string m) : message(cc::move(m)) { message.c_str_materialize(); }
+    explicit captured_assertion(cc::string m) : message(cc::move(m)) { (void)message.c_str_materialize(); }
     [[nodiscard]] char const* what() const noexcept override { return message.c_str_if_terminated(); }
 };
 } // namespace nx::impl
