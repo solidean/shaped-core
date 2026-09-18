@@ -22,6 +22,7 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 - **`visibility`** — the set of stages that declared this binding, as a `shader_stages`.
   **Empty means not known**, not "no stage": a hand-written binding that never says is treated as visible everywhere.
 - **`storage_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
+- **`storage_access`** — whether a storage texture is read, written or both, defaulting to both; WebGPU needs it too, and the other two treat every UAV as read-write.
 
 ## Visibility is accumulated, not reflected
 
@@ -36,6 +37,7 @@ Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAG
 **`storage_format` has no HLSL source.**
 `RWTexture2D<float4>` declares a component type and count, not a concrete texel format, and DXIL carries no format for a typed UAV.
 WGSL does declare one (`texture_storage_2d<rgba8unorm, write>`), so that field is filled by the WGSL path and left absent by the DXC one.
+The access mode is the same story: WGSL states it, HLSL's `RWTexture` is always read-write, so the DXC path leaves `storage_access` at its default.
 
 ## A group index binds, a space only numbers
 

@@ -36,28 +36,29 @@ enum class sg::feature
     /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.
     /// WebGPU core has no binding arrays at all, so a bindless renderer asks once rather than finding out at layout creation.
     binding_arrays,
+
+    /// A storage texture may be `read_write` in any storage format, not only r32float / r32uint / r32sint.
+    /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
+    readwrite_storage_formats,
 };
 
-/// Whether a caller may block on this context at all.
+/// Whether the thread driving this context may block at all.
 ///
 /// The rule the whole API is shaped around: **an async call may be converted to a blocking one only where the wait
 /// amortizes over many operations.**
 /// Per-frame yes, per-startup-batch yes, per-object never.
-/// So sg is never-blocking by default everywhere, and the `block_until_` prefix is the complete inventory of the
-/// exceptions — the spellings that admit to waiting, and the ones a target that cannot wait refuses.
-/// There are exactly two, `block_until_epochs_in_flight()` and `block_until_idle()`; libs/graphics/shaped-graphics/docs/concepts/epochs.md has the pair.
+/// sg itself hands a caller no blocking spelling: a frame loop awaits `epochs_in_flight_completion()`, a drain awaits `idle_completion()`.
+/// Whether the caller then blocks on one of those is its own decision, and this is what it asks first.
 ///
 /// A browser cannot wait at all: a promise settles only after the current task's stack unwinds, so a loop waiting on a
 /// callback has taken the only thread that callback could run on.
 /// That is a property of the target rather than a caller's choice, which is why this is reported and not set.
 enum class sg::execution_model
 {
-    /// A caller may block: both `block_until_` spellings work, and a test or a tool can drain the device and read the
-    /// result.
+    /// A caller may block: a tool can `cc::async_blocking_get` a completion, and sg's own internal waits run.
     may_block,
 
-    /// Nothing may block, and both `block_until_` spellings assert.
-    /// Completion is observed through the `*_completion()` asyncs, or by polling across frames.
+    /// Nothing may block: completion is observed by awaiting the `*_completion()` asyncs, or by polling across frames.
     never_block,
 };
 
