@@ -261,8 +261,6 @@ ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const
     CHECK(co_await test->execute_fuzz_test_async());
 
     // The ops start async transfers they do not all await, and a test settles what it started: the context's detached work, then the GPU.
-    // Then the backlog once more, for what the drain's own completions detached.
     co_await cc::async_settled(ctx->backlog.settled());
     (void)co_await ctx->idle_completion();
-    co_await cc::async_settled(ctx->backlog.settled());
 }
