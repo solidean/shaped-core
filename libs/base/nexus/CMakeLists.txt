@@ -100,6 +100,7 @@ target_sources(nexus
     src/nexus/bench/bench.hh
     src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
+    src/nexus/tests/check_divert.hh
     src/nexus/tests/config.hh
     src/nexus/tests/entry.hh
     src/nexus/tests/invoke_tests.hh

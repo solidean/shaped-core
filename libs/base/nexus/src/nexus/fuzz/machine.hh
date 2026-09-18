@@ -9,19 +9,10 @@
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fwd.hh>
 #include <nexus/tests/check.hh>
+#include <nexus/tests/check_divert.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
-
-namespace nx::fuzz::impl
-{
-/// Thrown by the engine's scoped assertion handler so a failing CC_ASSERT inside an operation
-/// unwinds into the per-operation try/catch instead of aborting the process.
-struct assertion_failure
-{
-    cc::string message;
-};
-} // namespace nx::fuzz::impl
 
 /// The runtime model of a fuzz test: types and operations flattened into dense, integer-indexed
 /// tables, plus the execution of a single recorded step against a mutable state.

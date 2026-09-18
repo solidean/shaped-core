@@ -43,3 +43,72 @@ TEST("fuzz async - the synchronous entry points refuse a machine holding an asyn
     CHECK(res.error_message.contains("execute_fuzz_test_async"));
     CHECK(!t->execute_fuzz_test());
 }
+
+// The divert behind async steps: it follows the test rather than the thread, so work on a pool worker is caught too.
+
+ASYNC_TEST("fuzz async - a divert takes a failing CHECK on a pool worker off the test")
+{
+    auto sink = nx::impl::async_check_capture_sink();
+    {
+        auto const divert = nx::impl::scoped_test_check_divert(sink);
+        auto const one = 1;
+        auto const child = cc::make_async_scheduled_on(cc::compute_scheduler(),
+                                                       [one]
+                                                       {
+                                                           CHECK(one == 2);
+                                                           return cc::unit{};
+                                                       });
+        co_await cc::async_settled(child);
+        CHECK(child->has_value()); // diverted too, so it cannot fail this test either way
+    }
+
+    // The failure reached the sink and nowhere else: this test passes.
+    CHECK(sink.failed.load() == 1);
+    CHECK(sink.executed.load() == 2);
+    CHECK(!sink.require_failed.load());
+    sink.first_message.lock([](cc::string& m) { CHECK(m.contains("one == 2")); });
+}
+
+ASYNC_TEST("fuzz async - a divert tallies strands checking at once")
+{
+    auto sink = nx::impl::async_check_capture_sink();
+    {
+        auto const divert = nx::impl::scoped_test_check_divert(sink);
+        auto const strand = [](int v)
+        {
+            return cc::make_async_scheduled_on(cc::compute_scheduler(),
+                                               [v]
+                                               {
+                                                   for (auto i = 0; i < 100; ++i)
+                                                       CHECK(v == i);
+                                                   return cc::unit{};
+                                               });
+        };
+        co_await cc::async_all(strand(3), strand(5));
+    }
+
+    CHECK(sink.executed.load() == 200);
+    CHECK(sink.failed.load() == 198);
+}
+
+#if CC_ASSERT_ENABLED
+ASYNC_TEST("fuzz async - a diverted CC_ASSERT fails the node that asserted, with its message")
+{
+    auto sink = nx::impl::async_check_capture_sink();
+    auto const child = cc::make_async_lazy_on(cc::compute_scheduler(),
+                                              []
+                                              {
+                                                  CC_ASSERT(false, "the divert catches this");
+                                                  return cc::unit{};
+                                              });
+    {
+        auto const divert = nx::impl::scoped_test_check_divert(sink);
+        co_await cc::async_settled(child);
+    }
+
+    REQUIRE(child->has_error());
+    CHECK(child->try_error()->underlying().to_string().contains("the divert catches this"));
+    CHECK(sink.require_failed.load());
+    CHECK(sink.failed.load() == 1);
+}
+#endif

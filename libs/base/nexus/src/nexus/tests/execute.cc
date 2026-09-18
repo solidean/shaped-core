@@ -33,6 +33,7 @@
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/check.hh>
+#include <nexus/tests/check_divert.hh>
 #include <nexus/tests/entry.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/invoke_tests.hh>
@@ -185,6 +186,9 @@ struct nx::impl::test_context
     cc::atomic<int> off_thread_failed_checks = {0};
     cc::mutex<cc::vector<test_error>> off_thread_errors;
     cc::mutex<cc::vector<nx::recorded_metric>> off_thread_metrics;
+
+    // While set, every check reported for this test is tallied here instead — see scoped_test_check_divert.
+    cc::atomic<nx::impl::async_check_capture_sink*> check_divert = {nullptr};
 
     // Set once the test's stats have been finalized, after which nothing more may be recorded here.
     // A check arriving later comes from work that outlived the test, and is reported as an orphan naming it.
@@ -1412,6 +1416,18 @@ nx::impl::scoped_check_capture::~scoped_check_capture()
     g_check_capture = nullptr;
 }
 
+nx::impl::scoped_test_check_divert::scoped_test_check_divert(async_check_capture_sink& sink) : _ctx(current_context())
+{
+    CC_ASSERT(_ctx != nullptr, "a check divert needs a running test");
+    auto* const previous = _ctx->check_divert.exchange(&sink, cc::memory_order_acq_rel);
+    CC_ASSERT(previous == nullptr, "nested check diverts are not supported");
+}
+
+nx::impl::scoped_test_check_divert::~scoped_test_check_divert()
+{
+    _ctx->check_divert.store(nullptr, cc::memory_order_release);
+}
+
 void nx::impl::submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root)
 {
     CC_ASSERT(root != nullptr, "an ASYNC_TEST body must return a valid async");
@@ -1738,6 +1754,29 @@ void nx::impl::report_check_result(check_result result)
     {
         report_orphan_check(cc::move(result), cc::format("\"{}\" had already finished — its async work outlived it",
                                                          ctx.execution->instance.declaration->name));
+        return;
+    }
+
+    // Diverted: a tool such as the fuzz engine is awaiting code expected to fail often, on whichever thread runs it.
+    // Tallied before anything is logged, counted or thrown, so a diverted failure leaves no trace on the test.
+    // A failing CC_ASSERT still has to stop the code that asserted, so it throws — into that code's async node, as its error.
+    if (auto* const divert = ctx.check_divert.load(cc::memory_order_acquire))
+    {
+        divert->executed.fetch_add(1, cc::memory_order_relaxed);
+        if (result.op == cmp_op::skip || result.passed)
+            return;
+        divert->failed.fetch_add(1, cc::memory_order_relaxed);
+        if (result.kind == check_kind::require || result.op == cmp_op::assert_fail)
+            divert->require_failed.store(true, cc::memory_order_relaxed);
+        auto message = cc::format("{} | {}", result.expr, render_expanded(result));
+        divert->first_message.lock(
+            [&](cc::string& first)
+            {
+                if (first.empty())
+                    first = message;
+            });
+        if (result.op == cmp_op::assert_fail)
+            throw captured_assertion(cc::move(message));
         return;
     }
 

@@ -203,13 +203,13 @@ fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation
     // failing CC_ASSERT into an exception (CC_ASSERT would otherwise abort right after the handler).
     nx::impl::scoped_check_capture cap(step.sink);
     auto handler = cc::impl::scoped_assertion_handler([](cc::impl::assertion_info const& info)
-                                                      { throw impl::assertion_failure{info.message}; });
+                                                      { throw nx::impl::captured_assertion(info.message); });
 
     try
     {
         step.result = oi.op->invoke(args);
     }
-    catch (impl::assertion_failure const& e)
+    catch (nx::impl::captured_assertion const& e)
     {
         cc::string msg = "assertion failed: ";
         msg += e.message;
