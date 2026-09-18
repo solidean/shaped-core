@@ -75,6 +75,10 @@ sg::raw_texture_handle make_texture(sg::context_handle const& ctx)
 // Read the texture back through a command list, which is the consumer that has to compose with the transfer.
 cc::shared_async<cc::pinned_data<byte const>> read_back(sg::context_handle const& ctx, sg::raw_texture_handle const& tex)
 {
+    // A helper is an unhomed async: it moves to where the device lives before making bound calls.
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     auto cmd = ctx->create_command_list();
     CC_ASSERT(cmd != nullptr, "command list creation failed");
     auto future = cmd->download.bytes_from_texture(tex);

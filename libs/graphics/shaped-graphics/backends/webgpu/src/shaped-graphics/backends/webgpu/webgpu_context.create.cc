@@ -4,6 +4,8 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 
 namespace sg::backend::webgpu
@@ -12,10 +14,8 @@ namespace
 {
 /// The optional features a context asks for wherever the adapter offers them.
 constexpr WGPUFeatureName k_optional_features[] = {
-    WGPUFeatureName_TimestampQuery,
-    WGPUFeatureName_TextureCompressionBC,
-    WGPUFeatureName_Depth32FloatStencil8,
-    WGPUFeatureName_DepthClipControl,
+    WGPUFeatureName_TimestampQuery,   WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_Depth32FloatStencil8,
+    WGPUFeatureName_DepthClipControl, WGPUFeatureName_TextureFormatsTier1,  WGPUFeatureName_TextureFormatsTier2,
 };
 
 void on_uncaptured_error(WGPUDevice const*, WGPUErrorType type, WGPUStringView message, void* userdata1, void*)
@@ -70,7 +70,8 @@ void finish_creation(webgpu_context& ctx)
     if (wgpuDeviceGetLimits(ctx.device(), &limits) == WGPUStatus_Success && limits.minUniformBufferOffsetAlignment > 0)
         alignment = isize(limits.minUniformBufferOffsetAlignment);
 
-    ctx.set_limits(alignment, wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TimestampQuery) != WGPU_FALSE);
+    ctx.set_limits(alignment, wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TimestampQuery) != WGPU_FALSE,
+                   wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TextureFormatsTier2) != WGPU_FALSE);
 }
 
 struct request_state
@@ -151,12 +152,23 @@ void on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUString
     };
     (void)wgpuAdapterRequestDevice(raw_adapter, &desc, info);
 }
+
+/// The request made from main, for a caller on another thread: the device lives where it was requested.
+[[nodiscard]] cc::shared_async<sg::context_handle> request_on_main(webgpu_config config)
+{
+    co_await cc::async_resume_on_main();
+    auto const requested = sg::request_webgpu_context(config);
+    co_return co_await requested;
+}
 } // namespace
 } // namespace sg::backend::webgpu
 
 cc::shared_async<sg::context_handle> sg::request_webgpu_context(backend::webgpu::webgpu_config const& config)
 {
     namespace webgpu = backend::webgpu;
+
+    if (cc::current_thread_id() != cc::thread_id::main)
+        return webgpu::request_on_main(config);
 
     auto instance = webgpu::wgpu_instance(wgpuCreateInstance(nullptr));
     if (!instance)

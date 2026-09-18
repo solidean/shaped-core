@@ -84,7 +84,7 @@ sg::gpu_timestamp webgpu_command_list::query_record_gpu_timestamp()
     };
     auto const desc
         = WGPUComputePassDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg timestamp"), .timestampWrites = &writes};
-    auto pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(_encoder.get(), &desc));
+    auto pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(encoder(), &desc));
     wgpuComputePassEncoderEnd(pass.get());
 
     // Nanoseconds.
@@ -97,11 +97,10 @@ void webgpu_command_list::finalize_queries()
     {
         auto const bytes = isize(lease->used) * isize(sizeof(u64));
         end_open_pass();
-        wgpuCommandEncoderResolveQuerySet(_encoder.get(), lease->query_set.get(), 0, u32(lease->used),
-                                          lease->resolve.get(), 0);
+        wgpuCommandEncoderResolveQuerySet(encoder(), lease->query_set.get(), 0, u32(lease->used), lease->resolve.get(),
+                                          0);
         auto readback = _ctx._readbacks.acquire(bytes);
-        wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), lease->resolve.get(), 0, readback.staging.get(), 0,
-                                             u64(bytes));
+        wgpuCommandEncoderCopyBufferToBuffer(encoder(), lease->resolve.get(), 0, readback.staging.get(), 0, u64(bytes));
 
         auto destination = cc::pinned_data<byte>::create_uninitialized(bytes);
         auto const dst_span = destination.span();

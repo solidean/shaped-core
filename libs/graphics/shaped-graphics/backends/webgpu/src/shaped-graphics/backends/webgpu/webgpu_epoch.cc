@@ -47,7 +47,7 @@ void webgpu_context::notify_when_queue_done(u64 submission, u64 epoch)
         .userdata1 = request.release(),
         .userdata2 = nullptr,
     };
-    (void)wgpuQueueOnSubmittedWorkDone(_queue.get(), info);
+    (void)wgpuQueueOnSubmittedWorkDone(queue(), info);
 }
 
 void webgpu_context::on_queue_done(u64 submission, u64 epoch)
@@ -64,6 +64,9 @@ void webgpu_context::advance_epoch()
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists == 0, "all command lists opened this epoch must be submitted or dropped before "
                                         "advancing");
+
+    // What other threads dropped since the last advance: their releases and their deferred deletions land in `last`.
+    impl::drain_deferred_to_main();
 
     auto const last = _current_epoch;
     _current_epoch = sg::epoch(u64(last) + 1);
@@ -130,6 +133,14 @@ sg::submission_token webgpu_context::last_issued_submission()
 
 void webgpu_context::schedule_deferred_deletion(webgpu_expiring_resource expiring)
 {
+    // The staging list belongs to the device thread; a resource dropped elsewhere joins it there, at the next advance.
+    if (!is_on_device_thread())
+    {
+        impl::defer_to_main([this, expiring = cc::move(expiring)]() mutable
+                            { schedule_deferred_deletion(cc::move(expiring)); });
+        return;
+    }
+
     // Past shutdown nothing will retire again, and the device is gone, so the only thing left to do is run the finalizers.
     if (_is_shut_down)
     {

@@ -84,7 +84,8 @@ struct sg::backend::webgpu::webgpu_epoch_state
 /// **It never blocks, and cannot**: a browser settles a promise only once the task holding the thread returns.
 /// So `execution()` is `never_block`, every internal wait is unreachable, and completion flows from WebGPU's callbacks into `settle_due_completions` — `arm_completion_signal` has nothing to arm.
 ///
-/// Single-threaded: everything, callbacks included, runs on the thread that owns the device.
+/// `main_thread`: the device lives in the main thread's JS realm, so the bound calls and every callback run there.
+/// Asyncs, layouts and samplers stay free-threaded — asyncs move to main themselves, and layouts create their WebGPU objects on first use.
 ///
 /// What WebGPU lacks is emulated or refused, per libs/graphics/shaped-graphics/backends/webgpu/readme.md.
 /// Inline constants and register-bound samplers live in group 3, 1D textures are 2D, and heaps place nothing.
@@ -117,6 +118,8 @@ public:
             return _queries.is_supported();
         case sg::feature::headless_present:
             return true;
+        case sg::feature::readwrite_storage_formats:
+            return _readwrite_storage_formats;
         case sg::feature::raytracing:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
@@ -133,24 +136,23 @@ public:
         _anchor->on_error = cc::move(callback);
     }
 
-    [[nodiscard]] WGPUDevice device() const { return _device.get(); }
-    [[nodiscard]] WGPUQueue queue() const { return _queue.get(); }
+    /// Every path into the device and the queue passes here, so a call from the wrong thread asserts before WebGPU fails obscurely.
+    [[nodiscard]] WGPUDevice device() const
+    {
+        assert_on_device_thread();
+        return _device.get();
+    }
+    [[nodiscard]] WGPUQueue queue() const
+    {
+        assert_on_device_thread();
+        return _queue.get();
+    }
     [[nodiscard]] WGPUInstance instance() const { return _instance.get(); }
     [[nodiscard]] std::shared_ptr<webgpu_callback_anchor> const& anchor() const { return _anchor; }
 
     /// The adapter's minimum uniform offset alignment, which inline constants are placed at.
     [[nodiscard]] isize uniform_offset_alignment() const { return _uniform_offset_alignment; }
 
-    /// Asserts the caller is on the thread that created the context.
-    /// WebGPU objects exist only in the JS realm of the thread that requested the device, which in a threaded wasm build is the browser main thread.
-    /// A call from a pool worker there finds no device at all, so this names the mistake before WebGPU fails obscurely.
-    void assert_on_device_thread() const
-    {
-        CC_ASSERT(cc::current_thread_id() == _device_thread,
-                  "a webgpu context is used from a thread other than the one that created it; WebGPU objects exist "
-                  "only "
-                  "on that thread, so drive it from there (a test asks for main_thread and singlethreaded)");
-    }
 
     // backend-typed API
 
@@ -418,7 +420,7 @@ public:
     webgpu_query_system _queries;
 
     // Set once at creation.
-    void set_limits(isize uniform_offset_alignment, bool timestamps);
+    void set_limits(isize uniform_offset_alignment, bool timestamps, bool readwrite_storage_formats);
 
 private:
     [[nodiscard]] static webgpu_binding_group_layout_handle as_webgpu_layout(sg::binding_group_layout_handle const& layout);
@@ -430,7 +432,7 @@ private:
     wgpu_queue _queue;
     webgpu_config _config;
     isize _uniform_offset_alignment = 256;
-    cc::thread_id _device_thread = cc::current_thread_id();
+    bool _readwrite_storage_formats = false; // texture-formats-tier2 was granted
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);
@@ -446,11 +448,12 @@ namespace sg
 /// Creates a context on the WebGPU backend: requests an adapter and a device, and settles once both arrived.
 ///
 /// The device is requested with WebGPU's default limits, which is what every portable sg caller already sizes against.
-/// `timestamp-query`, `texture-compression-bc` and `depth32float-stencil8` are requested where the adapter offers them.
+/// `timestamp-query`, `texture-compression-bc`, `depth32float-stencil8`, `depth-clip-control` and `texture-formats-tier1` / `-tier2` are requested where the adapter offers them.
+/// Callable from any thread: off main, the request moves to the main thread first, which is then the context's device thread.
 /// Fails, as the node's error, where there is no WebGPU at all or no adapter.
 [[nodiscard]] cc::shared_async<context_handle> request_webgpu_context(backend::webgpu::webgpu_config const& config = {});
 
-/// Wraps a device someone else already requested.
+/// Wraps a device someone else already requested; called on main, where a main_thread context lives.
 /// Its errors reach take_pending_errors only where the device was requested with this backend's callbacks, which `request_webgpu_context` installs.
 /// A foreign device's uncaptured errors stay with whoever requested it.
 [[nodiscard]] cc::result<context_handle> create_webgpu_context(WGPUDevice device,

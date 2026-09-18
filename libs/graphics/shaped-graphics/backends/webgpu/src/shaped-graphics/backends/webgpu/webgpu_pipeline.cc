@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
 
@@ -409,7 +410,7 @@ WGPURenderPipelineDescriptor const& descriptor_of(raster_pipeline_build const& b
 
 webgpu_raster_pipeline_handle finish_raster_pipeline(raster_pipeline_build& build, wgpu_render_pipeline pipeline)
 {
-    return std::make_shared<webgpu_raster_pipeline>(build.layout, cc::move(pipeline), build.vertex_buffers.size());
+    return std::make_shared<webgpu_raster_pipeline>(build.layout, cc::move(pipeline));
 }
 
 cc::result<sg::raster_pipeline_handle> webgpu_context::try_create_raster_pipeline(sg::raster_pipeline_description const& desc,
@@ -446,6 +447,23 @@ struct pipeline_request
     return finish_raster_pipeline(build, cc::move(p));
 }
 
+template <class Handle, class Start>
+[[nodiscard]] cc::shared_async<Handle> started_on(cc::async_scheduler& home, Start start)
+{
+    co_await cc::async_resume_on(home);
+    auto const inner = start();
+    co_return co_await inner;
+}
+
+/// A build asked for off the device thread, started once a coroutine has moved there: WebGPU exists on that thread only.
+template <class Handle, class Start>
+[[nodiscard]] cc::shared_async<Handle> start_on_device_home(webgpu_context const& ctx, Start start)
+{
+    CC_ASSERT(ctx.device_home() != nullptr, "an async pipeline build was asked for off the device thread, and the "
+                                            "device has no home to move it to");
+    return started_on<Handle>(*ctx.device_home(), cc::move(start));
+}
+
 template <class Build, class Handle, class Raw, class Wrap>
 void settle_pipeline(WGPUCreatePipelineAsyncStatus status, Raw pipeline, WGPUStringView message, void* userdata1)
 {
@@ -469,6 +487,17 @@ cc::shared_async<sg::compute_pipeline_handle> webgpu_context::create_compute_pip
     sg::lifetime_scope scope)
 {
     CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
+    if (!is_on_device_thread())
+        return start_on_device_home<sg::compute_pipeline_handle>(
+            *this,
+            [anchor = _anchor, desc, scope]() -> cc::shared_async<sg::compute_pipeline_handle>
+            {
+                if (anchor->ctx == nullptr)
+                    return cc::make_async_from_error<sg::compute_pipeline_handle>(cc::async_error::make_error(
+                        cc::any_error("the context shut down before the pipeline was built")));
+                return anchor->ctx->create_compute_pipeline_async(desc, scope);
+            });
+
     auto build = prepare_compute_pipeline(*this, desc);
     if (build.has_error())
         return cc::make_async_from_error<sg::compute_pipeline_handle>(
@@ -501,6 +530,17 @@ cc::shared_async<sg::raster_pipeline_handle> webgpu_context::create_raster_pipel
     sg::lifetime_scope scope)
 {
     CC_ASSERT(scope == sg::lifetime_scope::persistent, "pipelines are persistent-only");
+    if (!is_on_device_thread())
+        return start_on_device_home<sg::raster_pipeline_handle>(
+            *this,
+            [anchor = _anchor, desc, scope]() -> cc::shared_async<sg::raster_pipeline_handle>
+            {
+                if (anchor->ctx == nullptr)
+                    return cc::make_async_from_error<sg::raster_pipeline_handle>(cc::async_error::make_error(
+                        cc::any_error("the context shut down before the pipeline was built")));
+                return anchor->ctx->create_raster_pipeline_async(desc, scope);
+            });
+
     auto build = prepare_raster_pipeline(*this, desc);
     if (build.has_error())
         return cc::make_async_from_error<sg::raster_pipeline_handle>(cc::async_error::make_error(cc::move(build.error())));

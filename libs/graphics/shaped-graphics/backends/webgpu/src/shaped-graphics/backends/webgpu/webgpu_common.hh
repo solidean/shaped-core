@@ -2,16 +2,32 @@
 
 // The single include gate for <webgpu/webgpu.h> plus the handle and string helpers every WebGPU TU shares.
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/webgpu/fwd.hh>
 #include <webgpu/webgpu.h>
 
+namespace sg::backend::webgpu::impl
+{
+/// Whether the caller is on the main thread, whose JS realm holds every WebGPU object of this main_thread backend.
+[[nodiscard]] bool is_on_main_thread();
+
+/// Queues `release` to run on the main thread, at the next advance_epoch or shutdown of a webgpu context.
+/// A WebGPU object is released in the realm that made it, so an sg object dropped on a pool worker sends its handles back.
+void defer_to_main(cc::unique_function<void()> release);
+
+/// Runs what defer_to_main queued so far; main only.
+void drain_deferred_to_main();
+} // namespace sg::backend::webgpu::impl
+
 /// An owning reference to one WebGPU object: releases on destruction, adds a reference on copy.
 ///
 /// WebGPU objects are reference counted by the implementation, and a released object stays alive while queued work still uses it.
 /// So dropping a handle is always safe, whatever the GPU is doing, which is why this backend needs no deferred deletion for correctness.
+/// Dropped off the main thread, the release travels back there (impl::defer_to_main), which is what lets sg objects die on any thread.
 template <class T>
 struct sg::backend::webgpu::wgpu_handle
 {
@@ -62,20 +78,27 @@ private:
 
 namespace sg::backend::webgpu
 {
-#define SG_WEBGPU_HANDLE(Type, Name)                     \
-    template <>                                          \
-    inline void wgpu_handle<WGPU##Type>::add_ref() const \
-    {                                                    \
-        if (_raw != nullptr)                             \
-            wgpu##Type##AddRef(_raw);                    \
-    }                                                    \
-    template <>                                          \
-    inline void wgpu_handle<WGPU##Type>::release()       \
-    {                                                    \
-        if (_raw != nullptr)                             \
-            wgpu##Type##Release(_raw);                   \
-        _raw = nullptr;                                  \
-    }                                                    \
+#define SG_WEBGPU_HANDLE(Type, Name)                                                \
+    template <>                                                                     \
+    inline void wgpu_handle<WGPU##Type>::add_ref() const                            \
+    {                                                                               \
+        if (_raw == nullptr)                                                        \
+            return;                                                                 \
+        CC_ASSERT(impl::is_on_main_thread(), "a webgpu handle is copied off main; " \
+                                             "only a release may happen there");    \
+        wgpu##Type##AddRef(_raw);                                                   \
+    }                                                                               \
+    template <>                                                                     \
+    inline void wgpu_handle<WGPU##Type>::release()                                  \
+    {                                                                               \
+        if (_raw == nullptr)                                                        \
+            return;                                                                 \
+        if (impl::is_on_main_thread())                                              \
+            wgpu##Type##Release(_raw);                                              \
+        else                                                                        \
+            impl::defer_to_main([raw = _raw] { wgpu##Type##Release(raw); });        \
+        _raw = nullptr;                                                             \
+    }                                                                               \
     using Name = wgpu_handle<WGPU##Type>
 
 SG_WEBGPU_HANDLE(Instance, wgpu_instance);

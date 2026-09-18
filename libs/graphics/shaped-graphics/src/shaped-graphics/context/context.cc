@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
@@ -117,9 +118,37 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     for (auto format : accepted_shader_formats)
         _accepted_shader_formats.push_back(format);
 
+    if (threading == thread_model::main_thread)
+    {
+        CC_ASSERT(cc::current_thread_id() == cc::thread_id::main, "a main_thread context is created on the main "
+                                                                  "thread");
+        _device_home = &cc::main_thread_scheduler();
+    }
+
     // The scope members only store a back-reference; they don't touch any not-yet-constructed member.
     // Give the built-in cache default in-memory tiers so ctx.cached memoizes out of the box.
     _pipeline_cache->add_default_in_memory_providers();
+}
+
+bool context::is_on_device_thread() const
+{
+    switch (_thread_model)
+    {
+    case thread_model::main_thread:
+        return cc::current_thread_id() == cc::thread_id::main;
+    case thread_model::single_threaded:
+        return cc::current_thread_id() == _creating_thread;
+    case thread_model::multi_threaded:
+        return true;
+    }
+    CC_UNREACHABLE("unknown thread_model");
+}
+
+void context::assert_on_device_thread() const
+{
+    CC_ASSERT(is_on_device_thread(),
+              "this context call is bound by the thread model and was made from another thread; "
+              "only asyncs, layouts and samplers are free-threaded (see docs/concepts/threading.md)");
 }
 
 bool context::accepts_shader_format(shader_format format) const
@@ -375,7 +404,7 @@ cc::shared_async<cc::unit> context::epochs_in_flight_completion(int allowed_in_f
 
 cc::shared_async<cc::unit> context::idle_completion_steps()
 {
-    // Three things, in block_until_idle's order and for its reasons: the GPU first, since an actor delivers a
+    // Three things, in drain_at_shutdown's order and for its reasons: the GPU first, since an actor delivers a
     // download only after the GPU wrote it, then the actors, then the epochs the submission timeline does not cover.
     if (auto const last = last_issued_submission(); last != submission_token::not_submitted)
         co_await submission_completion(last);
@@ -401,20 +430,6 @@ cc::shared_async<cc::unit> context::epochs_in_flight_steps(int allowed_in_flight
         process_completed_epochs();
     }
     co_return;
-}
-
-void context::block_until_epochs_in_flight(int allowed_in_flight)
-{
-    CC_ASSERT(execution() == execution_model::may_block,
-              "block_until_epochs_in_flight() waits, and this context cannot — bound the depth with "
-              "try_advance_epoch() instead");
-    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
-
-    // Retire before waiting: an epoch the GPU already finished still counts as in flight until someone reclaims it,
-    // so a caller that skipped this would park against depth that is no longer there.
-    process_completed_epochs();
-    while (in_flight_epoch_count() > allowed_in_flight)
-        wait_for_next_inflight_epoch(); // retires as it goes, so this terminates
 }
 
 cc::shared_async<compute_pipeline_handle> context::create_compute_pipeline_async(compute_pipeline_description const& desc,
@@ -447,14 +462,6 @@ cc::shared_async<raster_pipeline_handle> context::create_raster_pipeline_async(r
     if (_device_home != nullptr)
         return cc::make_async_scheduled_on<raster_pipeline_handle>(*_device_home, cc::move(build));
     return cc::make_async_scheduled<raster_pipeline_handle>(cc::move(build));
-}
-
-void context::block_until_idle()
-{
-    CC_ASSERT(execution() == execution_model::may_block,
-              "block_until_idle() waits, and this context cannot — read completion off the *_completion() asyncs, or "
-              "poll across frames");
-    drain_at_shutdown();
 }
 
 void context::drain_at_shutdown()

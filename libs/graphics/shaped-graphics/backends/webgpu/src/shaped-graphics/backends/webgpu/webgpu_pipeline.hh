@@ -33,8 +33,8 @@ public:
 class sg::backend::webgpu::webgpu_raster_pipeline final : public sg::raster_pipeline
 {
 public:
-    webgpu_raster_pipeline(webgpu_pipeline_layout_handle layout, wgpu_render_pipeline pipeline, isize vertex_slot_count)
-      : layout(cc::move(layout)), pipeline(cc::move(pipeline)), vertex_slot_count(vertex_slot_count)
+    webgpu_raster_pipeline(webgpu_pipeline_layout_handle layout, wgpu_render_pipeline pipeline)
+      : layout(cc::move(layout)), pipeline(cc::move(pipeline))
     {
     }
 
@@ -42,7 +42,6 @@ public:
 
     webgpu_pipeline_layout_handle layout;
     wgpu_render_pipeline pipeline;
-    isize vertex_slot_count = 0;
 };
 
 namespace sg::backend::webgpu

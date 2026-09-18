@@ -38,6 +38,8 @@ cc::string_view name_of(backend_kind backend)
         return "dx12";
     case backend_kind::vulkan:
         return "vulkan";
+    case backend_kind::webgpu:
+        return "webgpu";
     default:
         return "unknown";
     }

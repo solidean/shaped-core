@@ -64,7 +64,7 @@ cc::result<webgpu_buffer_handle> webgpu_context::create_webgpu_buffer(isize size
         .size = u64(align_up(size_in_bytes, buffer_word_bytes)),
         .mappedAtCreation = WGPU_FALSE,
     };
-    auto buffer = wgpu_buffer(wgpuDeviceCreateBuffer(_device.get(), &desc));
+    auto buffer = wgpu_buffer(wgpuDeviceCreateBuffer(device(), &desc));
 
     // An allocation WebGPU cannot make still hands back an object, invalid, and says so through the error callback.
     // Only a null object is a failure here.
@@ -162,6 +162,13 @@ cc::result<webgpu_texture_handle> webgpu_context::create_webgpu_texture(sg::text
     if (desc.sample_count != 1 && desc.sample_count != 4)
         return cc::error(cc::format("webgpu supports a sample count of 1 or 4, not {}", desc.sample_count));
 
+    // The two optional format features are adapter facts: a device without one refuses the format here rather than with a later validation error.
+    if (sg::is_compressed_format(desc.format) && !wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionBC))
+        return cc::error("a BC-compressed texture needs the texture-compression-bc feature, which this device lacks");
+    if (desc.format == sg::pixel_format::depth32_float_stencil8
+        && !wgpuDeviceHasFeature(device(), WGPUFeatureName_Depth32FloatStencil8))
+        return cc::error("depth32_float_stencil8 needs the depth32float-stencil8 feature, which this device lacks");
+
     // A 1D texture becomes 2D of height 1; a cube is six layers per cube; a 3D texture keeps its depth.
     auto const height = desc.dimension == sg::texture_dimension::d1 ? 1u : u32(desc.height);
     auto layers = u32(desc.array_layers.value_or(1));
@@ -182,7 +189,7 @@ cc::result<webgpu_texture_handle> webgpu_context::create_webgpu_texture(sg::text
         .viewFormatCount = size_t(view_formats.size()),
         .viewFormats = view_formats.empty() ? nullptr : view_formats.data(),
     };
-    auto texture = wgpu_texture(wgpuDeviceCreateTexture(_device.get(), &wgpu_desc));
+    auto texture = wgpu_texture(wgpuDeviceCreateTexture(device(), &wgpu_desc));
     if (!texture)
         return cc::error("wgpuDeviceCreateTexture returned no texture");
 

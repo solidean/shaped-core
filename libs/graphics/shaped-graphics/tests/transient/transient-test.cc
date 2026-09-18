@@ -33,6 +33,10 @@ sg::buffer_usages const copy_both = sg::buffer_usage::copy_src | sg::buffer_usag
 // every byte matched — the round-trip that proves a transient buffer names live, distinct storage.
 cc::shared_async<bool> transient_round_trip(sg::context_handle const& ctx, int seed)
 {
+    // A helper is an unhomed async: it moves to where the device lives before making bound calls.
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
     auto buf = ctx->transient.create_raw_buffer(256, copy_both);
     if (!buf)
         co_return false;

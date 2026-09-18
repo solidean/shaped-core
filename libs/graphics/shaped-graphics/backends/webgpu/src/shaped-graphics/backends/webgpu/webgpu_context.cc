@@ -4,19 +4,50 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/string/format.hh>
-#include <clean-core/thread/thread_bound_scheduler.hh>
+#include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/thread.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 
 namespace sg::backend::webgpu
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.webgpu");
 
+namespace
+{
+[[nodiscard]] cc::mutex<cc::vector<cc::unique_function<void()>>>& deferred_to_main()
+{
+    static cc::mutex<cc::vector<cc::unique_function<void()>>> queue;
+    return queue;
+}
+} // namespace
+
+bool impl::is_on_main_thread()
+{
+    return cc::current_thread_id() == cc::thread_id::main;
+}
+
+void impl::defer_to_main(cc::unique_function<void()> release)
+{
+    deferred_to_main().lock([&](auto& queue) { queue.push_back(cc::move(release)); });
+}
+
+void impl::drain_deferred_to_main()
+{
+    CC_ASSERT(is_on_main_thread(), "deferred webgpu releases are drained on the main thread");
+
+    // Taken out under the lock and run outside it: a release can drop an sg object whose own handles queue more.
+    auto pending = cc::vector<cc::unique_function<void()>>();
+    deferred_to_main().lock([&](auto& queue) { pending = cc::move(queue); });
+    for (auto& release : pending)
+        release();
+}
+
 webgpu_context::webgpu_context(wgpu_instance instance,
                                wgpu_adapter adapter,
                                wgpu_device device,
                                std::shared_ptr<webgpu_callback_anchor> anchor,
                                webgpu_config const& config)
-  : sg::context(sg::backend_kind::webgpu, sg::thread_model::single_threaded, k_accepted_shader_formats),
+  : sg::context(sg::backend_kind::webgpu, sg::thread_model::main_thread, k_accepted_shader_formats),
     _anchor(cc::move(anchor)),
     _instance(cc::move(instance)),
     _adapter(cc::move(adapter)),
@@ -25,11 +56,6 @@ webgpu_context::webgpu_context(wgpu_instance instance,
 {
     _queue = wgpu_queue(wgpuDeviceGetQueue(_device.get()));
     _anchor->ctx = this;
-
-    // A WebGPU device exists only in the JS realm of the thread that requested it, so sg places its device work there.
-    // That is the main thread wherever a device can be requested at all, and it has a home to place work in.
-    if (cc::current_thread_id() == cc::thread_id::main)
-        _device_home = &cc::main_thread_scheduler();
 }
 
 webgpu_context::~webgpu_context()
@@ -37,15 +63,16 @@ webgpu_context::~webgpu_context()
     shutdown();
 }
 
-void webgpu_context::set_limits(isize uniform_offset_alignment, bool timestamps)
+void webgpu_context::set_limits(isize uniform_offset_alignment, bool timestamps, bool readwrite_storage_formats)
 {
     _uniform_offset_alignment = uniform_offset_alignment;
+    _readwrite_storage_formats = readwrite_storage_formats;
     _limits.max_sample_count = 4;
 
     _upload_ring.initialize(*this, _config.upload_ring_bytes);
     _readbacks.initialize(*this);
     _constant_pages.initialize(*this, _config.constant_page_bytes, _uniform_offset_alignment);
-    _samplers.initialize(_device.get());
+    _samplers.initialize(device());
     _streams.initialize(*this, _config.stream_window_bytes);
     _queries.initialize(*this, timestamps);
 }
@@ -61,6 +88,7 @@ void webgpu_context::shutdown()
     release_transient_heap();
     release_cached_pipelines();
     _streams.shutdown();
+    impl::drain_deferred_to_main();
 
     // Close the last epoch so its transient resources expire and their finalizers run below.
     if (_open_command_lists == 0 && _device)

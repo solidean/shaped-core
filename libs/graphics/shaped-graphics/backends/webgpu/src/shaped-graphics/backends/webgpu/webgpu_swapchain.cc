@@ -77,6 +77,7 @@ void webgpu_swapchain::configure_surface(tg::vec2i size)
 
 sg::render_target_view webgpu_swapchain::acquire_backbuffer()
 {
+    _ctx.assert_on_device_thread();
     if (_ctx.is_device_lost())
         throw sg::device_lost_exception(_ctx.device_loss_reason());
 
@@ -95,11 +96,29 @@ sg::render_target_view webgpu_swapchain::acquire_backbuffer()
             configure_surface(_requested_size);
     }
 
+    // What the canvas hands out comes from outside the program, so a failure is an sg::exception rather than an assert.
+    // A stale surface is reconfigured and asked once more, as vulkan rebuilds an out-of-date chain.
+    auto const is_success = [](WGPUSurfaceGetCurrentTextureStatus status)
+    {
+        return status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
+            || status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal;
+    };
     auto surface_texture = WGPUSurfaceTexture{};
     wgpuSurfaceGetCurrentTexture(_surface.get(), &surface_texture);
-    CC_ASSERT(surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal
-                  || surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal,
-              "the canvas surface handed out no texture");
+    if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Outdated
+        || surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Lost)
+    {
+        configure_surface(_configured_size);
+        surface_texture = WGPUSurfaceTexture{};
+        wgpuSurfaceGetCurrentTexture(_surface.get(), &surface_texture);
+    }
+    if (!is_success(surface_texture.status))
+    {
+        if (_ctx.is_device_lost())
+            throw sg::device_lost_exception(_ctx.device_loss_reason());
+        throw sg::exception(
+            cc::format("the canvas surface handed out no texture (status {})", int(surface_texture.status)));
+    }
 
     _surface_texture
         = std::make_shared<webgpu_texture>(_ctx,
@@ -121,6 +140,7 @@ void webgpu_swapchain::record_present_transition(sg::command_list&)
 
 void webgpu_swapchain::present()
 {
+    _ctx.assert_on_device_thread();
     if (!is_windowed())
     {
         _current = (_current + 1) % int(_buffers.size());
