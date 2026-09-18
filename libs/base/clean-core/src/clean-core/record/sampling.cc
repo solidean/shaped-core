@@ -10,6 +10,7 @@
 #include <clean-core/record/impl/system_state.hh>
 #include <clean-core/record/impl/thread_state.hh>
 #include <clean-core/record/impl/writer_tls.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/record/scope.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/writer.hh>
@@ -489,8 +490,20 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
     (void)cfg;
     return;
 #else
-    if (!rec::is_initialized() || !cc::stack_capture_from_context_available())
+    if (!rec::is_initialized())
         return;
+
+    // **Refused rather than degraded**, and said out loud.
+    //
+    // Sampling is not a cost question a knob could settle here: the model is to suspend a thread and walk it from
+    // outside, and a platform with no such operation cannot do a cheaper version of it.
+    // wasm is the case — a worker can be walked by nobody but itself — and a silent return left a caller believing
+    // a profile was being taken.
+    if (!cc::stack_capture_from_context_available())
+    {
+        CC_LOG_WARNING("sampling is unavailable: this platform cannot walk a thread other than the calling one");
+        return;
+    }
 
     rec::stop_sampling();
 
