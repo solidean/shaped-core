@@ -64,7 +64,24 @@ The transfer fuzz makes that window frequent, with async uploads interleaved wit
 It used to run alone under `exclusive()`, so no device lifecycle overlapped it.
 Since it runs in every backend's sweep, the `--thorough`-only vulkan never-block driver creates its device alongside it.
 
+## Known elsewhere
+
+Searched in September 2026: no public report of this trigger — device creation against another device's pending wait, with even a host signal blocked.
+The nearest material:
+
+- NVIDIA's own [guidance on timeline wait-before-signal][driveos], for its Vulkan SC driver, states the rule this breaks.
+  "For each counter value of a timeline semaphore that your application waits upon, the signaler must not be delayed by the waiters."
+  Here the waiter delaying every signaler is the driver's own `vkCreateDevice`.
+- `vkSignalSemaphore` blocking inside `nvoglv64.dll` under multithreaded use, on Windows with driver 466.77, with no NVIDIA reply ([forum][forum-signal]).
+  Possibly the same lock; nothing there confirms it.
+- `vkDestroyDevice` lock-order deadlocks inside the Linux driver, 535.216.01 ([forum, 2025][forum-destroy]).
+  The same family of device-lifecycle locks, with a different trigger.
+
 ## What to check when a new NVIDIA driver lands
 
 Run `run.py`.
 If the host-signal case reports `ok` across several attempts, the driver is fixed.
+
+[driveos]: https://developer.nvidia.com/docs/drive/drive-os/6.0.9/public/drive-os-linux-sdk/common/topics/graphics_content/Semaphore-Wait-Before-Signal-10.html
+[forum-signal]: https://forums.developer.nvidia.com/t/vksignalsemaphore-call-is-blocked-frequently/205461
+[forum-destroy]: https://forums.developer.nvidia.com/t/vkdestroydevice-hang-on-linux-libnvidia-glcore-so-535-216-01/319139
