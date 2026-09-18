@@ -807,3 +807,57 @@ TEST("gltf - detect_container")
     CHECK(babel::gltf::detect_container(cc::string_view("{}").as_bytes()) == babel::gltf::container::gltf);
     CHECK(babel::gltf::detect_container(cc::span<byte const>()) == babel::gltf::container::gltf);
 }
+
+TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
+{
+    // Required as well as used: a reader that implements the extension must accept a file that insists on it.
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_lights_punctual"],
+        "extensionsRequired": ["KHR_lights_punctual"],
+        "extensions": {"KHR_lights_punctual": {"lights": [
+            {"type": "directional", "intensity": 3, "color": [1, 0.5, 0.25], "name": "sun"},
+            {"type": "point", "range": 10},
+            {"type": "spot", "spot": {"innerConeAngle": 0.1, "outerConeAngle": 0.4}},
+            {"type": "area"}
+        ]}},
+        "nodes": [{"extensions": {"KHR_lights_punctual": {"light": 2}}}, {}]})"))
+                         .value();
+
+    REQUIRE(doc.lights.size() == 4);
+
+    CHECK(doc.lights[0].type == babel::gltf::light_type::directional);
+    CHECK(doc.lights[0].intensity == 3);
+    CHECK(doc.lights[0].color == tg::vec3f(1, 0.5f, 0.25f));
+    CHECK(doc.lights[0].name == "sun");
+    CHECK(!doc.lights[0].range.has_value());
+
+    // The extension's defaults, where the file said nothing.
+    CHECK(doc.lights[1].type == babel::gltf::light_type::point);
+    CHECK(doc.lights[1].intensity == 1);
+    CHECK(doc.lights[1].color == tg::vec3f(1, 1, 1));
+    REQUIRE(doc.lights[1].range.has_value());
+    CHECK(doc.lights[1].range.value() == 10);
+    CHECK(doc.lights[1].inner_cone_angle == 0);
+    CHECK(doc.lights[1].outer_cone_angle == 0.78539816f);
+
+    CHECK(doc.lights[2].type == babel::gltf::light_type::spot);
+    CHECK(doc.lights[2].inner_cone_angle == 0.1f);
+    CHECK(doc.lights[2].outer_cone_angle == 0.4f);
+
+    // An unknown type is kept in place, so node indices stay the file's, and the substitution is on the record.
+    CHECK(doc.lights[3].type == babel::gltf::light_type::point);
+    CHECK(count_issues(doc, babel::gltf::issue_kind::malformed) == 1);
+
+    // The implemented extension is not reported as dropped.
+    CHECK(count_issues(doc, babel::gltf::issue_kind::unsupported) == 0);
+
+    REQUIRE(doc.nodes.size() == 2);
+    CHECK(doc.nodes[0].light == babel::gltf::light_index(2));
+    CHECK(doc.find(doc.nodes[0].light) == &doc.lights[2]);
+    CHECK(doc.nodes[1].light == babel::gltf::light_index::invalid);
+
+    // A node naming a light the file does not have is an index error, like any other.
+    CHECK(babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [{"extensions": {"KHR_lights_punctual": {"light": 0}}}]})"))
+              .has_error());
+}

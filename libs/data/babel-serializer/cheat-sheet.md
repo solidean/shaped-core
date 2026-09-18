@@ -104,7 +104,7 @@ doc.has_issues();           // bool
 doc.has_issue_of(babel::gltf::issue_kind::unsupported); // unsupported | unresolved | malformed
 doc.issue_report();         // cc::string, one "kind: message" line per issue; "" when clean
 
-doc.extensions_used;   // cc::vector<cc::string>; extensions_required is always empty (a non-empty one fails the read)
+doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual fails the read
 
 doc.buffers;      // cc::vector<buffer>      — { uri, byte_length, pinned_data<byte const> data, resolved }
 doc.buffer_views; // cc::vector<buffer_view> — { buffer, byte_offset, byte_length, byte_stride (0 = packed), target }
@@ -112,11 +112,14 @@ doc.accessors;    // cc::vector<accessor>    — { buffer_view, byte_offset, com
 doc.attributes;   // cc::vector<attribute>   — every primitive attribute, flattened { semantic, accessor }
 doc.primitives;   // cc::vector<primitive>   — flattened { first_attribute, attribute_count, indices, material, mode }
 doc.meshes; doc.nodes; doc.scenes; doc.materials; doc.textures; doc.images; doc.samplers;
+doc.lights;       // cc::vector<light> — KHR_lights_punctual, the one interpreted extension:
+                  //   { type: directional|point|spot, color, intensity (cd, or lux when directional), optional range, inner/outer_cone_angle, name }
+                  //   node.light names one (light_index); it points down that node's -Z, and the node's scale does not touch it
 doc.default_scene;     // scene_index; the document's `scene`
 ```
 
 Index roles are strong enums (`buffer_index`, `buffer_view_index`, `accessor_index`, `mesh_index`, `node_index`,
-`scene_index`, `material_index`, `texture_index`, `image_index`, `sampler_index`), each with `invalid = -1`:
+`scene_index`, `material_index`, `texture_index`, `image_index`, `sampler_index`, `light_index`), each with `invalid = -1`:
 
 ```cpp
 buffer const* b = doc.find(buffer_index(0));    // one overload per role; nullptr ONLY for `invalid`

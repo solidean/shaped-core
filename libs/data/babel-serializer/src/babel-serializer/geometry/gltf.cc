@@ -23,6 +23,12 @@ constexpr u32 glb_magic = 0x46546C67;      // 'g','l','T','F' little-endian
 constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 
+/// Whether this reader interprets `name` — the one extension a file may require of it.
+[[nodiscard]] bool is_implemented_extension(cc::string_view name)
+{
+    return name == "KHR_lights_punctual";
+}
+
 // JSON member readers.
 // All of them are kind-tolerant by design: a required property is checked explicitly at its use site.
 // Everything else falls back rather than failing, which is what makes exporter junk harmless.
@@ -431,15 +437,17 @@ public:
 
         collect_strings(root["extensionsUsed"], result.extensions_used);
         collect_strings(root["extensionsRequired"], result.extensions_required);
-        if (!result.extensions_required.empty())
-            return cc::error(cc::format("glTF parse error: the file requires extension '{}', which this reader does "
-                                        "not implement",
-                                        result.extensions_required[0]));
+        for (auto const& extension : result.extensions_required)
+            if (!is_implemented_extension(extension))
+                return cc::error(cc::format("glTF parse error: the file requires extension '{}', which this reader "
+                                            "does not implement",
+                                            extension));
 
-        // This reader interprets no extension at all, so every one the file uses is one we drop on the floor.
+        // Every extension but the implemented one is dropped on the floor, and each is on the record.
         for (auto const& extension : result.extensions_used)
-            add_issue(gltf::issue_kind::unsupported,
-                      cc::format("extension '{}' is used by the file but not interpreted", extension));
+            if (!is_implemented_extension(extension))
+                add_issue(gltf::issue_kind::unsupported,
+                          cc::format("extension '{}' is used by the file but not interpreted", extension));
 
         note_unmodelled_array(root, "skins", "skins");
         note_unmodelled_array(root, "animations", "animations");
@@ -449,6 +457,7 @@ public:
         CC_RETURN_IF_ERROR(parse_buffer_views(root));
         CC_RETURN_IF_ERROR(parse_accessors(root));
         CC_RETURN_IF_ERROR(parse_meshes(root));
+        parse_lights(root);
         parse_nodes(root);
         parse_scenes(root);
         parse_materials(root);
@@ -698,6 +707,46 @@ public:
         return cc::unit{};
     }
 
+    /// KHR_lights_punctual's lights, which live in the document's own `extensions` rather than in a top-level array.
+    ///
+    /// A light of an unknown type is kept, as a point, so the indices nodes name stay the file's own; the substitution
+    /// is on the record.
+    void parse_lights(json::ref root)
+    {
+        auto const lights = root["extensions"]["KHR_lights_punctual"]["lights"];
+        if (!lights.is_array())
+            return;
+
+        for (auto i = isize(0); i < lights.size(); ++i)
+        {
+            auto const entry = lights[i];
+            auto l = gltf::light();
+
+            auto const type = entry["type"].as_string();
+            if (type == "directional")
+                l.type = gltf::light_type::directional;
+            else if (type == "point")
+                l.type = gltf::light_type::point;
+            else if (type == "spot")
+                l.type = gltf::light_type::spot;
+            else
+                add_issue(gltf::issue_kind::malformed,
+                          cc::format("light {}: unknown type '{}', read as a point light", i, type));
+
+            l.color = vec3_member(entry, "color", tg::vec3f(1, 1, 1));
+            l.intensity = float_member(entry, "intensity", 1.0f);
+            if (entry["range"].is_number())
+                l.range = f32(entry["range"].as_double());
+
+            auto const spot = entry["spot"];
+            l.inner_cone_angle = float_member(spot, "innerConeAngle", 0.0f);
+            l.outer_cone_angle = float_member(spot, "outerConeAngle", 0.78539816f);
+
+            l.name = string_member(entry, "name");
+            result.lights.push_back(cc::move(l));
+        }
+    }
+
     void parse_nodes(json::ref root)
     {
         auto const nodes = root["nodes"];
@@ -717,6 +766,7 @@ public:
             nod.child_count = i32(result.node_children.size()) - nod.first_child;
 
             nod.mesh = index_member<gltf::mesh_index>(entry, "mesh");
+            nod.light = index_member<gltf::light_index>(entry["extensions"]["KHR_lights_punctual"], "light");
 
             // `matrix` and TRS are mutually exclusive in the spec; whichever the file used is what we keep.
             auto const matrix = entry["matrix"];
@@ -934,6 +984,9 @@ public:
             if (isize(int(nod.mesh)) >= mesh_count)
                 return cc::error(cc::format("glTF parse error: node {} references mesh {}, but the file has {}", i,
                                             isize(int(nod.mesh)), mesh_count));
+            if (isize(int(nod.light)) >= result.lights.size())
+                return cc::error(cc::format("glTF parse error: node {} references light {}, but the file has {}", i,
+                                            isize(int(nod.light)), result.lights.size()));
         }
 
         for (auto const child : result.node_children)
