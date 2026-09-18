@@ -10,6 +10,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/context/impl/forward_waits.hh>
 
 
 namespace sg::backend::vulkan
@@ -531,7 +532,10 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         if (epoch_timeline != VK_NULL_HANDLE)
             vkDestroySemaphore(device, epoch_timeline, nullptr);
         if (device != VK_NULL_HANDLE)
+        {
+            sg::impl::device_driver_barrier const barrier;
             vkDestroyDevice(device, nullptr);
+        }
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
     };
@@ -666,8 +670,13 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .ppEnabledExtensionNames = device_extensions.data(),
     };
 
-    if (VkResult r = vkCreateDevice(best_device, &device_info, nullptr, &device); r != VK_SUCCESS)
-        return vulkan_error(r, "vkCreateDevice failed");
+    auto const created = [&]
+    {
+        sg::impl::device_driver_barrier const barrier; // see forward_waits.hh
+        return vkCreateDevice(best_device, &device_info, nullptr, &device);
+    }();
+    if (created != VK_SUCCESS)
+        return vulkan_error(created, "vkCreateDevice failed");
 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);

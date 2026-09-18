@@ -176,6 +176,7 @@ void vulkan_download_async_system::settle_and_drop(isize index, bool delivered, 
             };
             (void)_ctx->queue_guard().lock(
                 [&](int&) { return vkQueueSubmit(_ctx->download_queue(), 1, &empty_submit, VK_NULL_HANDLE); });
+            sg::impl::note_signal_submitted(job.completion_value.group->forward_waits, signal_value);
         }
         job.ambient.reset();
         if (job.completion)
@@ -411,10 +412,15 @@ bool vulkan_download_async_system::run_one_window()
                 .signalSemaphoreCount = signal_count,
                 .pSignalSemaphores = signals,
             };
+            if (job.upload_wait.is_pending())
+                sg::impl::before_forward_wait(job.upload_wait.group->forward_waits, job.upload_wait.value);
+
             // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
             VkResult const r = _ctx->queue_guard().lock(
                 [&](int&) { return vkQueueSubmit(_ctx->download_queue(), 1, &submit, VK_NULL_HANDLE); });
             CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async download) failed");
+            if (signal_count == 2)
+                sg::impl::note_signal_submitted(job.completion_value.group->forward_waits, job.completion_value.value);
 
             _window_log.note({
                 .window_value = _window_next_value,

@@ -1,6 +1,6 @@
 # NVIDIA: vkCreateDevice deadlocks against a pending wait-before-signal on another device
 
-**Status:** open, not yet filed upstream; not worked around in shaped-core yet.
+**Status:** open, not yet filed upstream; worked around in shaped-core.
 **Affects:** NVIDIA proprietary Vulkan driver on Windows 11, RTX 5070 Ti (driver version word `0x93d58000`).
 **Found by:** `shaped-graphics-test --thorough` wedging about half its relwithdebinfo runs once the transfer fuzz ran in every backend's sweep.
 
@@ -63,6 +63,20 @@ So there is routinely a window in which a queue waits on a value not yet submitt
 The transfer fuzz makes that window frequent, with async uploads interleaved with command lists.
 It used to run alone under `exclusive()`, so no device lifecycle overlapped it.
 Since it runs in every backend's sweep, the `--thorough`-only vulkan never-block driver creates its device alongside it.
+
+## The workaround in shaped-core
+
+It follows the rule NVIDIA gives for wait-before-signal elsewhere (below): nothing may delay a signaller.
+[forward_waits.hh](../../../libs/graphics/shaped-graphics/src/shaped-graphics/context/impl/forward_waits.hh) holds it, for every backend.
+
+- Every completion timeline records the highest value any submission waits on and the highest value whose signal has been submitted.
+  A timeline where the first is ahead has a pending wait-before-signal, and a process-wide count keeps how many do.
+- `sg::impl::device_driver_barrier` wraps the driver's own `vkCreateDevice` and `vkDestroyDevice`.
+  It waits for the count to reach zero, and while it is up a submission that would wait on an unsignalled value holds itself back until that signal is submitted.
+- Signals come only from the transfer actors, whose waits name only each other's signals and never form a cycle, so both sides always finish.
+
+It deliberately leaves the device lifecycle lock alone: an actor that had to take it could never signal a barrier's way out.
+The cost is that creating or destroying a device now waits until the async transfers already in flight have submitted their signals.
 
 ## Known elsewhere
 

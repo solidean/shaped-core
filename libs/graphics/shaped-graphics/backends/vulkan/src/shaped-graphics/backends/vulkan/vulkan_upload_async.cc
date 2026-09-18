@@ -235,6 +235,7 @@ void vulkan_upload_async_system::signal_on_queue(vulkan_group_value const& value
         .pSignalSemaphores = &value.group->timeline,
     };
     (void)_ctx->queue_guard().lock([&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
+    sg::impl::note_signal_submitted(value.group->forward_waits, signal_value);
 }
 
 void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool delivered)
@@ -624,10 +625,15 @@ bool vulkan_upload_async_system::run_one_window()
             .signalSemaphoreCount = signal_count,
             .pSignalSemaphores = signals,
         };
+        if (job.download_wait.is_pending())
+            sg::impl::before_forward_wait(job.download_wait.group->forward_waits, job.download_wait.value);
+
         // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
         VkResult const r = _ctx->queue_guard().lock(
             [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
         CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
+        if (signal_count == 2)
+            sg::impl::note_signal_submitted(job.completion.group->forward_waits, job.completion.value);
 
         _window_log.note({
             .window_value = _window_next_value,
