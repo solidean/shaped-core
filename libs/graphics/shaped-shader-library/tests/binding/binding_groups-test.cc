@@ -129,24 +129,6 @@ constexpr name_of_dimension k_dimensions[] = {
         return "mirror_repeat";
     case sg::sampler_address_mode::clamp_edge:
         return "clamp_edge";
-    case sg::sampler_address_mode::clamp_border:
-        return "clamp_border";
-    case sg::sampler_address_mode::mirror_clamp_edge:
-        return "mirror_clamp_edge";
-    }
-    return "<unknown>";
-}
-
-[[nodiscard]] cc::string_view name_of(sg::sampler_border_color color)
-{
-    switch (color)
-    {
-    case sg::sampler_border_color::transparent_black:
-        return "transparent_black";
-    case sg::sampler_border_color::opaque_black:
-        return "opaque_black";
-    case sg::sampler_border_color::opaque_white:
-        return "opaque_white";
     }
     return "<unknown>";
 }
@@ -213,8 +195,6 @@ constexpr name_of_dimension k_dimensions[] = {
         add("max_lod", cc::to_string(s.max_lod));
     if (s.compare.has_value())
         add("compare", name_of(s.compare.value()));
-    if (s.border_color != defaults.border_color)
-        add("border_color", name_of(s.border_color));
 
     return out;
 }

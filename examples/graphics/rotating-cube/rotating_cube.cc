@@ -1,23 +1,28 @@
-// A rotating cube, drawn through sg's raster path and presented through an sr window.
+// A rotating cube, drawn through sg's raster path and presented through an sr window, an HTML canvas, or nothing at all.
 //
 // It is the smallest program that exercises the whole graphics stack end to end: a device, a shader package
 // compiled at runtime, a raster pipeline with depth, persistent vertex and index buffers, inline constants, a
 // swapchain, and a GPU timestamp around the draw.
-// Whichever backend the build has is the one it runs on — dx12 on Windows, vulkan elsewhere.
+// Whichever backend the build has is the one it runs on — dx12 on Windows, vulkan elsewhere, webgpu on the web.
 //
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
+//
+// **Nothing here blocks**, which is what lets one source serve WebGPU too: a context that reports `never_block`
+// asserts on every wait, so each step is awaited instead — the frame loop included, where awaiting the epoch depth
+// is also what returns the browser its thread.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/window.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -25,10 +30,15 @@
 #include <typed-geometry/scalar/angle.hh>
 #include <cube_shaders.hh>
 
-#if ROTATING_CUBE_BACKEND_DX12
+#if ROTATING_CUBE_BACKEND_WEBGPU
+#include <shaped-graphics/backends/webgpu/webgpu_context.hh>
+#include <shaped-shader-library/compiler/wgsl_compiler.hh>
+#elif ROTATING_CUBE_BACKEND_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #else
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #endif
 
 using namespace cc::primitive_defines;
@@ -49,6 +59,7 @@ struct cube_vertex
     tg::vec3f color;
 };
 
+#if !ROTATING_CUBE_BACKEND_WEBGPU
 static_assert(sizeof(cube_vertex) == sizeof(shaders::vs_input), "cube_vertex is not the stride cube.hlsl states");
 static_assert(offsetof(cube_vertex, position) == offsetof(shaders::vs_input, position), "position moved");
 static_assert(offsetof(cube_vertex, normal) == offsetof(shaders::vs_input, normal), "normal moved");
@@ -57,6 +68,31 @@ static_assert(offsetof(cube_vertex, color) == offsetof(shaders::vs_input, color)
 // The same for the constant block, whose one float4x4 the pass mirrors with HLSL's own packing.
 static_assert(sizeof(tg::mat4f) == sizeof(shaders::cube_constants),
               "the view-projection matrix is not the size cube.hlsl's block states");
+#endif
+
+/// The layout the vertex buffer is read with.
+///
+/// The HLSL package generates it from cube.hlsl's own annotated struct, so the semantics, formats, offsets and stride
+/// are the shader's rather than a second statement of them.
+/// A WGSL package generates no mirror — the shader matches attributes by `@location`, which is an attribute's index
+/// here — so that arm writes the layout out, and the static asserts above are what the other one has instead.
+[[nodiscard]] sg::vertex_input_layout cube_vertex_layout()
+{
+#if ROTATING_CUBE_BACKEND_WEBGPU
+    return {.slots = {{.stride = sizeof(cube_vertex)}},
+            .attributes = {{.semantic = "POSITION",
+                            .format = sg::vertex_attribute_format::vec3f,
+                            .offset = offsetof(cube_vertex, position)},
+                           {.semantic = "NORMAL",
+                            .format = sg::vertex_attribute_format::vec3f,
+                            .offset = offsetof(cube_vertex, normal)},
+                           {.semantic = "COLOR",
+                            .format = sg::vertex_attribute_format::vec3f,
+                            .offset = offsetof(cube_vertex, color)}}};
+#else
+    return sg::vertex_input_layout::create<shaders::vs_input>();
+#endif
+}
 
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
@@ -184,97 +220,122 @@ struct orbit_camera
 }
 
 /// Whatever context this build has a backend for.
-[[nodiscard]] cc::result<sg::context_handle> create_context()
+/// Asynchronous because WebGPU's is: an adapter and a device are two round trips through the browser, and neither may be waited for.
+[[nodiscard]] cc::shared_async<cc::result<sg::context_handle>> create_context()
 {
-#if ROTATING_CUBE_BACKEND_DX12
-    return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); // WARP draws this correctly, only slower
+#if ROTATING_CUBE_BACKEND_WEBGPU
+    auto const requested = co_await cc::async_as_result(sg::request_webgpu_context());
+    if (requested.has_error())
+        co_return cc::error(cc::any_error(cc::format("no webgpu device: {}", requested.error().underlying().to_string())));
+    co_return requested.value();
+#elif ROTATING_CUBE_BACKEND_DX12
+    co_return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); // WARP draws this correctly, only slower
 #else
-    return sg::create_vulkan_context({});
+    co_return sg::create_vulkan_context({});
 #endif
 }
 
-/// Compiles cube.hlsl and builds the pipeline for one target format.
-/// Fails only when the shaders did not compile, which is the one thing worth reporting rather than drawing nothing.
-[[nodiscard]] cc::result<sg::raster_pipeline_handle> build_pipeline(sg::context& ctx, sg::pixel_format color_format)
+/// Compiles the cube's two shaders and builds the pipeline for one target format.
+/// Fails only when they did not compile, which is the one thing worth reporting rather than drawing nothing.
+[[nodiscard]] cc::shared_async<cc::result<sg::raster_pipeline_handle>> build_pipeline(sg::context& ctx,
+                                                                                      sg::pixel_format color_format)
 {
-    auto vs = shaders::cube.vertex.main_vs->acquire(ctx);
-    auto ps = shaders::cube.fragment.main_ps->acquire(ctx);
-    (void)cc::try_async_blocking_get(vs);
-    (void)cc::try_async_blocking_get(ps);
+#if ROTATING_CUBE_BACKEND_WEBGPU
+    auto const vs = shaders::cube_vs.vertex.main_vs->acquire(ctx);
+    auto const ps = shaders::cube_fs.fragment.main_fs->acquire(ctx);
+#else
+    auto const vs = shaders::cube.vertex.main_vs->acquire(ctx);
+    auto const ps = shaders::cube.fragment.main_ps->acquire(ctx);
+#endif
+    // Settled rather than awaited for their values: a compiled shader is read in place, and a failed compile is
+    // something this reports rather than propagates.
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
-    auto const* const compiled_vs = vs->try_value();
-    auto const* const compiled_ps = ps->try_value();
-    if (compiled_vs == nullptr || compiled_ps == nullptr)
+    auto const* const compiled_vs_ptr = vs->try_value();
+    auto const* const compiled_ps_ptr = ps->try_value();
+    if (compiled_vs_ptr == nullptr || compiled_ps_ptr == nullptr)
     {
         // The compiler's diagnostics ride the async's failure channel, so "it did not compile" alone throws away the
         // one thing worth reading.
-        auto const* const error = compiled_vs == nullptr ? vs->try_error() : ps->try_error();
-        return cc::error(cc::any_error(cc::format("cube.hlsl did not compile: {}",
-                                                  error != nullptr ? error->underlying().to_string() : cc::string("the compile never ran"))));
+        auto const* const error = compiled_vs_ptr == nullptr ? vs->try_error() : ps->try_error();
+        co_return cc::error(cc::any_error(cc::format("the cube's shaders did not compile: {}",
+                                                     error != nullptr ? error->underlying().to_string()
+                                                                      : cc::string("the compile never ran"))));
     }
+    auto const& compiled_vs = *compiled_vs_ptr;
+    auto const& compiled_ps = *compiled_ps_ptr;
 
     // The only binding is the vertex stage's 64-byte view-projection block, and it rides as inline constants —
     // so there are no binding groups at all, which is why nothing here builds one.
     auto const* const constants = [&]() -> sg::binding const*
     {
-        for (auto const& b : compiled_vs->bindings)
+        for (auto const& b : compiled_vs.bindings)
             if (b.type == sg::binding_type::uniform_buffer)
                 return &b;
         return nullptr;
     }();
     if (constants == nullptr)
-        return cc::error(cc::any_error("cube.hlsl must declare the cube_constants block"));
+        co_return cc::error(cc::any_error("the cube's vertex shader must declare the cube_constants block"));
 
-    // The build is asynchronous; this example has nothing else to do while it runs, so it waits on the same
-    // scheduler the compiles above went to.
-    auto built = ctx.cached.acquire_raster_pipeline(
+    auto const built = ctx.cached.acquire_raster_pipeline(
         {.layout = ctx.cached.acquire_pipeline_layout({.inline_constants = *constants}),
-         .vertex_shader = *compiled_vs,
-         .fragment_shader = *compiled_ps,
-         .vertex_input = sg::vertex_input_layout::create<shaders::vs_input>(),
+         .vertex_shader = compiled_vs,
+         .fragment_shader = compiled_ps,
+         .vertex_input = cube_vertex_layout(),
          .rasterization = {.cull = sg::cull_mode::back},
          // Both default to OFF, and solid geometry needs both — a cube drawn without them shows whichever face
          // happened to be recorded last.
          .depth_stencil = {.depth_test = true, .depth_write = true},
          .color_targets = {{.format = color_format}},
          .depth_stencil_format = sg::pixel_format::depth32_float});
-    (void)cc::try_async_blocking_get(built);
+    co_await cc::async_settled(built);
 
     auto const* const pipeline = built->try_value();
     if (pipeline == nullptr)
     {
         auto const* const error = built->try_error();
-        return cc::error(cc::any_error(cc::format("the raster pipeline did not build: {}",
-                                                  error != nullptr ? error->underlying().to_string() : cc::string("the build never ran"))));
+        co_return cc::error(cc::any_error(cc::format("the raster pipeline did not build: {}",
+                                                     error != nullptr ? error->underlying().to_string()
+                                                                      : cc::string("the build never ran"))));
     }
-    return *pipeline;
+    co_return *pipeline;
 }
 } // namespace
 
-EXAMPLE("shaped-graphics/rotating-cube")
+ASYNC_EXAMPLE("shaped-graphics/rotating-cube")
 {
     // Read first: it decides whether there is a display in the picture at all.
     auto const capture = sr::capture_request::from_environment();
     if (capture.active && !capture.name.empty())
     {
         cc::eprintln("this example offers no named capture, so it cannot take {}", capture.name);
-        return;
+        co_return;
     }
 
-    auto const color_format = sg::pixel_format::bgra8_unorm; // what write_capture_image reads back, and what a swapchain wants
+    // What write_capture_image_async reads back, and what a swapchain wants.
+    auto const color_format = sg::pixel_format::bgra8_unorm;
     auto const size = capture.active ? capture.size : tg::vec2i(1280, 720);
 
-    auto ctx_result = create_context();
-    if (ctx_result.has_error())
+    // Settled and then read in place: the result is move-only, so awaiting it for its value would copy it.
+    auto const created = create_context();
+    co_await cc::async_settled(created);
+    auto const* const ctx_result = created->try_value();
+    if (ctx_result == nullptr || ctx_result->has_error())
     {
-        cc::eprintln("no graphics device: {}", ctx_result.error().to_string());
-        return;
+        cc::eprintln("no graphics device: {}",
+                     ctx_result != nullptr ? ctx_result->error().to_string() : cc::string("the request never ran"));
+        co_return;
     }
-    auto const ctx = cc::move(ctx_result.value());
+    auto const ctx = ctx_result->value();
 
-    // Both targets are registered and the library picks: `acquire` walks the context's accepted formats and asks
-    // each compiler whether it can produce one, so the example never names a backend's shader format itself.
+    // Every compiler this build has is registered and the library picks: `acquire` walks the context's accepted
+    // formats and asks each compiler whether it can produce one, so the example never names a shader format itself.
     auto lib = slib::shader_library();
+#if ROTATING_CUBE_BACKEND_WEBGPU
+    // WGSL needs no toolchain — WebGPU compiles the source itself — so this one cannot fail to be there.
+    lib.add_compiler(slib::create_wgsl_compiler());
+#else
     auto dxil = slib::create_dxc_compiler();
     auto spirv = slib::create_dxc_spirv_compiler();
     if (dxil.has_value())
@@ -284,17 +345,21 @@ EXAMPLE("shaped-graphics/rotating-cube")
     if (dxil.has_error() && spirv.has_error())
     {
         cc::eprintln("no shader compiler: {}", dxil.error().to_string());
-        return;
+        co_return;
     }
+#endif
     lib.add_package(shaders::package());
 
-    auto pipeline_result = build_pipeline(*ctx, color_format);
-    if (pipeline_result.has_error())
+    auto const building = build_pipeline(*ctx, color_format);
+    co_await cc::async_settled(building);
+    auto const* const pipeline_result = building->try_value();
+    if (pipeline_result == nullptr || pipeline_result->has_error())
     {
-        cc::eprintln("{}", pipeline_result.error().to_string());
-        return;
+        cc::eprintln("{}", pipeline_result != nullptr ? pipeline_result->error().to_string()
+                                                      : cc::string("the pipeline build never ran"));
+        co_return;
     }
-    auto const pipeline = cc::move(pipeline_result.value());
+    auto const pipeline = pipeline_result->value();
 
     // Persistent, uploaded once: the mesh never changes, and this is what most real geometry looks like.
     auto const mesh = build_cube_mesh();
@@ -308,9 +373,9 @@ EXAMPLE("shaped-graphics/rotating-cube")
         ctx->submit_command_list(cc::move(cmd));
     }
 
-    // A window and a swapchain, or a texture to render into — the frame below does not care which.
+    // A window, an HTML canvas, or a texture to render into — the frame below does not care which.
     // The window system is only brought up when there is something to show, so a capture runs where there is no
-    // window backend compiled in at all.
+    // window backend compiled in at all, and the web has no window system to bring up in the first place.
     cc::unique_ptr<sr::window_system> wsys;
     cc::unique_ptr<sr::window> win;
     sg::swapchain_handle swapchain;
@@ -324,21 +389,29 @@ EXAMPLE("shaped-graphics/rotating-cube")
     }
     else
     {
-        auto created = sr::window_system::try_create({});
-        if (created.has_error())
+        auto window = sg::native_window();
+#ifdef __EMSCRIPTEN__
+        // The page owns the canvas, so there is nothing to create: the chain is built over the element this selector
+        // names, at the size the example asks for.
+        window = {.platform = sg::window_platform::web_canvas, .handle = (void*)"#canvas", .client_size = size};
+#else
+        auto created_window = sr::window_system::try_create({});
+        if (created_window.has_error())
         {
-            cc::eprintln("no window backend: {}", created.error().to_string());
+            cc::eprintln("no window backend: {}", created_window.error().to_string());
             cc::eprintln("run with --capture to render this example headless instead");
-            return;
+            co_return;
         }
-        wsys = cc::move(created.value());
+        wsys = cc::move(created_window.value());
         win = wsys->create_window({.title = cc::string("sg — rotating cube"), .width = size[0], .height = size[1]});
+        window = win->native_window();
+#endif
 
-        auto chain = ctx->try_create_swapchain({.window = win->native_window(), .format = color_format});
+        auto chain = ctx->try_create_swapchain({.window = window, .format = color_format});
         if (chain.has_error())
         {
             cc::eprintln("no swapchain: {}", chain.error().to_string());
-            return;
+            co_return;
         }
         swapchain = cc::move(chain.value());
     }
@@ -356,7 +429,7 @@ EXAMPLE("shaped-graphics/rotating-cube")
         auto const dt = float(time - last_time);
         last_time = time;
 
-        if (!capture.active)
+        if (!capture.active && wsys != nullptr)
         {
             wsys->poll_events();
             if (win->is_close_requested() || wsys->is_quit_requested())
@@ -423,7 +496,10 @@ EXAMPLE("shaped-graphics/rotating-cube")
             ctx->submit_command_list_and_present(*swapchain, cc::move(cmd));
 
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2);
+
+        // Bounds how far ahead of the GPU the loop may run, and is also the frame's one suspension point: on the web
+        // this is where the thread goes back to the browser, so the canvas is composited and input is delivered.
+        co_await ctx->epochs_in_flight_completion(2);
         ++frames;
 
         // Timestamps are read after the submit, and only when both landed — an unsupported backend hands back
@@ -438,9 +514,12 @@ EXAMPLE("shaped-graphics/rotating-cube")
 
         if (capture.active && frames >= capture.accumulate_frames)
         {
-            auto const written = sr::write_capture_image(*ctx, capture_target, capture.output_path);
-            if (written.has_error())
-                cc::eprintln("capture failed: {}", written.error().to_string());
+            auto const writing = sr::write_capture_image_async(*ctx, capture_target, capture.output_path);
+            co_await cc::async_settled(writing);
+            auto const* const written = writing->try_value();
+            if (written == nullptr || written->has_error())
+                cc::eprintln("capture failed: {}",
+                             written != nullptr ? written->error().to_string() : cc::string("the readback never landed"));
             break;
         }
         if (capture.active && capture.clock_seconds() - capture_start > capture.timeout_seconds)
@@ -451,5 +530,6 @@ EXAMPLE("shaped-graphics/rotating-cube")
     }
 
     ctx->advance_epoch();
-    ctx->block_until_idle(); // the last frames are still in flight
+    co_await ctx->idle_completion(); // the last frames are still in flight
+    ctx->shutdown();
 }

@@ -17,12 +17,15 @@ enum class sg::backend_kind
     webgl,
 };
 
-/// The threading guarantees a backend's context provides.
-/// Coarse for now, and expected to gain nuance — e.g. whether concurrent command-list recording is allowed.
+/// How a context may be used across threads — a contract on the caller, whatever the application's own threading.
+///
+/// Every model leaves the free-threaded surface free: anything returning an async, layouts and samplers may be called from any thread.
+/// The model binds the rest — resource creation, command lists, submission, presentation and epochs.
 /// See libs/graphics/shaped-graphics/docs/concepts/threading.md.
 enum class sg::thread_model
 {
-    single_threaded, ///< every context operation must be externally synchronized to one thread at a time
+    main_thread, ///< the bound calls are made on the main thread only (webgpu, whose device lives in the main thread's realm)
+    single_threaded, ///< the bound calls are made on the thread that created the context only; any thread may create one
     multi_threaded,  ///< resource / command-list ops (create / submit / drop) are safe to call concurrently;
                      ///< epoch management (advance, waits) and shutdown must be externally synchronized
 };

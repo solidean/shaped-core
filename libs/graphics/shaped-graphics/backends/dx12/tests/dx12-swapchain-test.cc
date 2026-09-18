@@ -153,12 +153,14 @@ ASYNC_INVOCABLE_TEST("sg dx12 - swapchain auto-resizes to its window", (dx12::dx
         }
         ctx->submit_command_list_and_present(*sc, cc::move(cmd));
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(sc->buffer_count());
     };
 
     frame(tg::vec2i(win.client_w, win.client_h), tg::vec4f(0, 0, 1, 1)); // initial size
-    frame(win.resize_client(320, 240), tg::vec4f(1, 0, 0, 1));           // grow — the chain follows
-    frame(win.resize_client(128, 96), tg::vec4f(0, 1, 0, 1));            // shrink — and again
+    co_await ctx->epochs_in_flight_completion(sc->buffer_count());
+    frame(win.resize_client(320, 240), tg::vec4f(1, 0, 0, 1)); // grow — the chain follows
+    co_await ctx->epochs_in_flight_completion(sc->buffer_count());
+    frame(win.resize_client(128, 96), tg::vec4f(0, 1, 0, 1)); // shrink — and again
+    co_await ctx->epochs_in_flight_completion(sc->buffer_count());
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();

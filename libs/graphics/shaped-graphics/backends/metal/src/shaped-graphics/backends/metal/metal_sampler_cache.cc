@@ -28,8 +28,6 @@ namespace
         return MTL::SamplerAddressModeMirrorRepeat;
     case sg::sampler_address_mode::clamp_edge:
         return MTL::SamplerAddressModeClampToEdge;
-    case sg::sampler_address_mode::clamp_border:
-        return MTL::SamplerAddressModeClampToBorderColor;
     }
     return MTL::SamplerAddressModeRepeat;
 }
@@ -58,19 +56,6 @@ namespace
     return MTL::CompareFunctionNever;
 }
 
-[[nodiscard]] MTL::SamplerBorderColor border_color_of(sg::sampler_border_color c)
-{
-    switch (c)
-    {
-    case sg::sampler_border_color::transparent_black:
-        return MTL::SamplerBorderColorTransparentBlack;
-    case sg::sampler_border_color::opaque_black:
-        return MTL::SamplerBorderColorOpaqueBlack;
-    case sg::sampler_border_color::opaque_white:
-        return MTL::SamplerBorderColorOpaqueWhite;
-    }
-    return MTL::SamplerBorderColorTransparentBlack;
-}
 } // namespace
 
 MTL::SamplerState* metal_sampler_cache::acquire(MTL::Device* device, sg::sampler const& s)
@@ -100,7 +85,6 @@ MTL::SamplerState* metal_sampler_cache::acquire(MTL::Device* device, sg::sampler
             // `lodBias` is S4.6 over [-16, 15.999] — a bias outside that is a caller's number rather than a format
             // Metal will round, so it is clamped rather than passed through.
             descriptor->setLodBias(cc::clamp(s.mip_lod_bias, -16.0f, 15.999f));
-            descriptor->setBorderColor(border_color_of(s.border_color));
             if (s.compare.has_value())
                 descriptor->setCompareFunction(compare_function_of(s.compare.value()));
 

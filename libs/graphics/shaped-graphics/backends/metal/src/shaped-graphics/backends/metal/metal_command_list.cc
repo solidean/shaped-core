@@ -526,7 +526,7 @@ sg::bytes_future metal_command_list::download_bytes_from_buffer(raw_buffer_handl
     // **No readback actor here**, where the other two backends have one: MTL4CommitFeedback already calls us at the
     // one moment this needs, so a thread of its own would buy nothing.
     // `block_until_transfers_drained` is what waits on the outstanding ones, which is the hook sg provides for exactly
-    // this — an epoch deferral would not do, since block_until_idle drains without advancing and an open epoch's
+    // this — an epoch deferral would not do, since a drain waits without advancing and an open epoch's
     // payload never runs.
     //
     // **The copy-out holds the destination**, sharing its owner rather than borrowing a span into it.

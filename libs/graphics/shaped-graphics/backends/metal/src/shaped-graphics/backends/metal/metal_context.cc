@@ -6,6 +6,7 @@
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
+#include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
 
 #include <thread>
@@ -59,7 +60,7 @@ void metal_context::resize_ring(metal_staging_ring& ring, isize bytes, cc::strin
         return;
 
     // Everything that holds a reservation has to have run before the storage behind it goes.
-    block_until_idle();
+    drain_at_shutdown();
 
     auto const previous = ring.capacity();
     _residency.remove(ring.buffer());
@@ -117,6 +118,14 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::timestamp_query:
         // Probed rather than assumed: the answer is whether the device handed out a counter heap at bring-up.
         return _queries.supports_timestamps();
+    case sg::feature::binding_arrays:
+        // An argument buffer holds an array at one `[[id(n)]]` like any other binding, which is what
+        // `metal_staging_binding_group` and the bindless tier are built on.
+        return true;
+    case sg::feature::readwrite_storage_formats:
+        // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
+        // tier directly instead of leaving it to be inferred from the family.
+        return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
@@ -444,7 +453,11 @@ void metal_context::shutdown()
 
     // Close the final epoch and drain, so every deferred release runs while the device is still alive.
     advance_epoch();
-    block_until_idle();
+    drain_at_shutdown();
+
+    // The waiter may be parked on both timelines, so it is joined before they go.
+    if (_completion_waiter != nullptr)
+        _completion_waiter->stop();
 
     // Fails every completion still outstanding, so nothing parks on a timeline that is about to go.
     stop_completion_signals();
@@ -557,7 +570,20 @@ sg::submission_token metal_context::last_issued_submission()
     return _epochs.last_issued_submission();
 }
 
-void metal_context::wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
+void metal_context::arm_completion_signal(u64 submission, u64 epoch)
+{
+    if (_completion_waiter == nullptr)
+        _completion_waiter = std::make_unique<sg::impl::completion_waiter>(sg::impl::completion_waiter::hooks{
+            .park = [this](u64 s, u64 e, u64 generation) { park_for_completion_signal(s, e, generation); },
+            .wake = [this](u64 generation) { wake_completion_signal(generation); },
+            .settle = [this] { settle_due_completions(); },
+            .open_epoch = [this] { return u64(current_epoch()); },
+            .is_device_lost = [this] { return is_device_lost(); },
+        });
+    _completion_waiter->arm(submission, epoch);
+}
+
+void metal_context::park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
 {
     // **Two GPU timelines and a host wake, and Metal cannot wait on several at once.**
     // Vulkan parks one `vkWaitSemaphores` with WAIT_ANY over all three; `MTL::SharedEvent::waitUntilSignaledValue`

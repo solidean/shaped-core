@@ -1,6 +1,7 @@
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh> // sg::create_vulkan_context
@@ -43,4 +44,32 @@ ASYNC_TEST("sg vulkan backend")
     }
 }
 
+// The whole sweep again under a browser's rules; see the dx12 never-block driver.
+// Under --thorough only: the dx12 one already proves the property by default on a software adapter, and a vulkan device here is a hardware one.
+ASYNC_TEST("sg vulkan never-block backend")
+{
+    if (!nx::is_thorough())
+        SKIP("the dx12 never-block driver covers the default run on WARP; this one runs under --thorough");
+
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .enable_sync_validation = true, .execution = sg::execution_model::never_block});
+    if (ctx.has_error())
+        SKIP("no vulkan device");
+    else
+    {
+        co_await nx::async_invoke_tests_in_sequence("vulkan-never-block", ctx.value());
+
+        // Nothing here can wait, so what the tests left running is awaited before the context goes.
+        co_await cc::async_settled(ctx.value()->backlog.settled());
+        co_await cc::async_settled(ctx.value()->idle_completion());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 static bool const sg_vulkan_registered = sg_test::register_backend("sg vulkan backend", "vulkan");
+static bool const sg_vulkan_never_block_registered
+    = sg_test::register_backend("sg vulkan never-block backend", "vulkan-never-block");
+static bool const sg_vulkan_factory_registered
+    = sg_test::register_context_factory("vulkan", [] { return sg::create_vulkan_context({}); });

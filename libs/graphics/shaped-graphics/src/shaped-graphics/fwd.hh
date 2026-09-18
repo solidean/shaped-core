@@ -211,7 +211,6 @@ struct depth_stencil_target;
 // Texture samplers (see binding/sampler.hh) — value types, no handle.
 enum class sampler_filter;
 enum class sampler_address_mode;
-enum class sampler_border_color;
 enum class compare_op;
 struct sampler;
 
@@ -222,6 +221,7 @@ enum class shader_stage;
 enum class shader_format;
 enum class texture_sample_type;
 enum class sampler_binding_type;
+enum class storage_access;
 struct binding;
 struct compiler_info;
 struct compute_dimensions;

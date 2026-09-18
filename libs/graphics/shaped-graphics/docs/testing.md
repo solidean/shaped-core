@@ -65,13 +65,17 @@ It becomes runnable against each backend by two pieces working together:
   So a test that stands up a `slib::shader_library` or counts routine init runs carries the tag itself, and a driver that also held it would be refused.
   **A test awaits the GPU rather than blocking on it.**
   A readback awaits its own result: `auto const data = co_await future.data();`.
-  `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained, as `block_until_idle()` was.
+  `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.
+  `co_await ctx->routines.idle_completion()` is for one that needs every registered routine up.
   A blocking wait in a library's tests is a `blocking-wait` lint finding, allowed by file in that library's `.shaped-lint.yml` where the wait is the point.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.
   Nexus's orphan check exempts an alias-reachable invocable for exactly this case, so the suite stays green while the backend grows.
-  The disabled comes off once no seam aborts, and both backends now sweep.
+  The disabled comes off once no seam aborts, and every backend now sweeps.
+  **The whole sweep runs a second time under a browser's rules**, through a `never_block` driver per native backend: any sg call that would wait on the caller's thread asserts there.
+  The dx12 one runs on WARP in every default run, and the vulkan one only under `--thorough`.
+  So on Linux the default run exercises `never_block` only on wasm, through the webgpu driver, which is never-block by nature.
 - **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
   So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 

@@ -4,6 +4,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
@@ -15,6 +16,7 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
+#include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/entry.hh>
@@ -135,213 +137,28 @@ cc::string_view directory_of(cc::string_view path)
     }
     return {};
 }
-} // namespace
-
-int nx::run(int argc, char** argv)
+/// Everything the report after a run needs from before it.
+struct run_reporting
 {
-    // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
-    cc::mark_current_thread_as_main();
+    nx::test_registry const* registry = nullptr;
+    bool is_entry_run = false;
+    bool has_benchmarks = false;
+    nx::bench::load_sample benchmark_load_before;
+    bool benchmark_pinned = false;
+    cc::unique_ptr<cc::process_cpu_sampler> cpu_sampler;
+};
 
-    // Record the command line so nx::test_args can answer from anywhere, including a library deep in a
-    // call stack that has no argv of its own.
-    nx::impl::set_process_args(argc, argv);
-
-    // Install a crash handler so a fatal fault in a test prints the offending test and a
-    // stacktrace instead of a bare non-zero exit code.
-    cc::install_crash_handler();
-    cc::add_crash_context_hook(&nx::impl::report_running_test);
-
-    // Get the static test registry
-    auto& registry = get_static_test_registry();
-
-    // Run NX_TEST_SETUP callbacks: they define aliases (with full registry access) and must run before any
-    // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
-    nx::run_setup_callbacks(registry);
-
-    // A binary whose defaults are ambiguous is broken whatever it was asked, so a test run fails on it too — which is
-    // the run CI makes, where a bare run that only a user would notice is not.
-    if (auto const problems = impl::check_default_entries(registry); !problems.empty())
-    {
-        cc::eprint("{}", problems);
-        return 1;
-    }
-
-    // Name first: an app or command named by the first token, a nexus selector, a test named exactly, the default, or
-    // the overview.
-    auto tokens = cc::vector<cc::string_view>();
-    for (auto i = 1; i < argc; ++i)
-        tokens.push_back(cc::string_view(argv[i]));
-    auto const route = impl::route_command_line(registry, tokens);
-
-    if (route.kind == impl::entry_route_kind::overview)
-    {
-        cc::print("{}", impl::render_overview(registry, suite_name()));
-        return 0;
-    }
-    if (route.kind == impl::entry_route_kind::error)
-    {
-        cc::eprintln("{}\n", route.message);
-        cc::eprint("{}", impl::render_overview(registry, suite_name()));
-        return 1;
-    }
-
-    auto const is_entry_run = route.kind == impl::entry_route_kind::entry;
-
-    // An app or command gets the defaults of a real run and its own command line; nexus parses none of that line.
-    auto config = is_entry_run ? test_schedule_config::create_from_args(1, argv)
-                               : test_schedule_config::create_from_args(argc, argv);
-    if (is_entry_run)
-    {
-        config.selected_bucket = route.entry->test_config.bucket;
-        config.allow_cross_bucket_naming = false;
-        config.filters = {route.entry->name};
-        config.test_args = route.entry_args;
-    }
-
-    // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,
-    // and the PARSE is what says it was asked for.
-    // Scanning argv instead would claim a --help that belongs to the test — one carried by --test-args, or
-    // sitting past a bare --.
-    // The "Compatible with Catch2" line it carries is what makes C++ TestMate recognize this binary at all.
-    if (config.help_requested)
-    {
-        cc::println(test_schedule_config::cli_help_text());
-        return 0;
-    }
-
-    // A command line that did not parse stops here: the parse already reported what was wrong, and running
-    // the subset it managed to understand is the one outcome a mistyped flag must never produce.
-    if (config.parse_failed)
-        return 1;
-
-    // Settle name-vs-file matching once, before anything queries a filter: the listing below and the schedule must agree.
-    // Aliases are registered by then, so a filter naming one counts as a name match and suppresses the file fallback.
-    config.resolve_filter_mode(registry);
-
-    // Handle Catch2 XML discovery mode for TestMate integration
-    if (config.is_catch2_xml_discovery)
-    {
-        cc::print(write_catch2_discovery_xml(registry));
-        return 0;
-    }
-
-    // JSON test listing: the query `dev.py test` uses to pre-select which binaries actually contain a matching test.
-    // It reports every registered test plus its eligibility under the parsed args, and never runs anything.
-    // It always succeeds, even when nothing is eligible — the caller decides what an empty match means.
-    if (!config.list_tests_json_file.empty())
-    {
-        auto const json = write_test_listing_json(suite_name(), config, registry);
-        if (config.list_tests_json_file == "-")
-            cc::print(json);
-        else if (auto const written = write_report_file(config.list_tests_json_file, json); !written.has_value())
-        {
-            cc::eprintln("Error: could not write test listing JSON file: {}: {}", config.list_tests_json_file,
-                         written.error().to_string());
-            return 1;
-        }
-        return 0;
-    }
-
-    // Create schedule from config and registry
-    auto schedule = test_schedule::create(config, registry);
-
-    // The entry's name is a substring filter like any other, so a sibling whose name contains it is dropped here.
-    if (is_entry_run)
-        schedule.instances.remove_all_where([&](test_instance const& i) { return i.declaration != route.entry; });
-
-    // Check if any tests were scheduled
-    if (schedule.instances.empty())
-    {
-        // A pgo-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
-        // --pgo-benchmarks across every test binary, and most contain no PGO benchmarks.
-        if (config.selected_bucket == nx::config::test_bucket::pgo_benchmark)
-        {
-            cc::println("No PGO benchmarks in this binary");
-            return 0;
-        }
-
-        // Same for benchmarks: `dev.py benchmark` probes every binary to resolve a name, and most carry none.
-        if (config.selected_bucket == nx::config::test_bucket::benchmark)
-        {
-            cc::println("No benchmarks in this binary");
-            return 0;
-        }
-
-        // Same for examples: `dev.py example` probes every binary to resolve a name, and most carry none.
-        if (config.selected_bucket == nx::config::test_bucket::example)
-        {
-            cc::println("No examples in this binary");
-            return 0;
-        }
-
-        cc::eprintln("Error: The current schedule did not select any tests");
-        for (int i = 0; i < argc; ++i)
-            cc::eprintln("  arg[{}] = `{}'", i, argv[i]);
-        return 1;
-    }
-
-    // First, so it is there whatever the run does next, and a failure anywhere below can be reproduced from the log.
-    // Not under the Catch2 XML reporter, whose stdout is the report, and not for an example, which is one program run
-    // whose transcript is its documentation.
-    if (config.shuffle && !config.report_catch2_xml_results && !is_entry_run
-        && config.selected_bucket != nx::config::test_bucket::example)
-        cc::println("nexus: run seed {} (reproduce with --seed {})", config.seed, config.seed);
-
-    if (config.verbose)
-    {
-        schedule.print();
-        cc::println();
-    }
-
-    // A benchmark number is a statement about a machine, so the machine goes first — and it is meant to be copied
-    // along with the result rather than read once.
-    // Keyed on what was SCHEDULED rather than on which bucket was swept: naming a benchmark exactly pulls it in
-    // across the bucket rule, and that run wants the machine described just as much as a sweep does.
-    auto has_benchmarks = false;
-    for (auto const& instance : schedule.instances)
-        if (instance.declaration != nullptr
-            && instance.declaration->test_config.bucket == nx::config::test_bucket::benchmark)
-            has_benchmarks = true;
-
-    auto benchmark_load_before = nx::bench::load_sample{};
-    auto benchmark_pinned = false;
-    if (has_benchmarks)
-    {
-        auto const& sys = nx::bench::describe_system();
-        cc::println("host  {} {}  |  {}  |  {} logical cores  |  build {}  CC_ASSERT={}{}", sys.os, sys.arch, sys.cpu,
-                    sys.logical_cores, sys.build, sys.assertions_enabled ? "on" : "off",
-                    sys.is_provisional ? "  (system info provisional)" : "");
-
-        if (config.benchmark_pin)
-        {
-            benchmark_pinned = nx::bench::try_pin_to_core(0);
-            cc::println("pin   requested, {}", benchmark_pinned ? "achieved on core 0" : "REFUSED by the platform");
-        }
-
-        // The counters backend prints its own one-time notice when the PMU is unreachable, naming the grant script
-        // to run — so nothing is said here rather than saying it twice and worse.
-
-        // The first reading is what the second is a delta against, so this one only primes the OS counters.
-        benchmark_load_before = nx::bench::sample_load();
-    }
-
-    // Stand the recorder up for the WHOLE run, never per test.
-    // Per-test attribution rides the ambient chain instead, so a test that records nothing costs nothing, and a test
-    // asking what it recorded gets an answer without anyone parsing history back to the start of the process.
-    if (!config.no_recording)
-    {
-        nx::impl::begin_run_recording();
-
-        // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
-        // what happened BEFORE the interesting sample as much as the sample itself.
-        nx::impl::begin_run_capture(config.benchmark_rec_file);
-    }
-
-    // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
-    auto cpu_sampler = cc::process_cpu_sampler();
-
-    // Execute the scheduled tests
-    auto execution = execute_tests(schedule, config);
+/// Writes every report a run asked for and returns the process's exit code.
+int report_run(nx::test_schedule_config const& config,
+               run_reporting& reporting,
+               nx::test_schedule_execution const& execution)
+{
+    auto const& registry = *reporting.registry;
+    auto const is_entry_run = reporting.is_entry_run;
+    auto const has_benchmarks = reporting.has_benchmarks;
+    auto const& benchmark_load_before = reporting.benchmark_load_before;
+    auto const benchmark_pinned = reporting.benchmark_pinned;
+    auto& cpu_sampler = *reporting.cpu_sampler;
 
     auto resources = nx::test_run_resources{};
     if (auto const load = cpu_sampler.sample(); load.has_value())
@@ -364,8 +181,9 @@ int nx::run(int argc, char** argv)
     if (!config.junit_xml_file.empty())
     {
         auto const written = write_report_file(
-            config.junit_xml_file, write_junit_xml(suite_name(), execution, resources,
-                                                   config.shuffle ? cc::optional<u64>(config.seed) : cc::nullopt));
+            config.junit_xml_file,
+            write_junit_xml(suite_name(), execution, resources,
+                            config.shuffle ? cc::optional<decltype(config.seed)>(config.seed) : cc::nullopt));
         if (!written.has_value())
             cc::eprintln("Error: could not write JUnit XML file: {}: {}", config.junit_xml_file,
                          written.error().to_string());
@@ -568,4 +386,242 @@ int nx::run(int argc, char** argv)
     if (auto const described = reports_resources ? describe_resources(resources) : cc::string(); !described.empty())
         cc::println("{}", described);
     return 0;
+}
+} // namespace
+
+
+int nx::run(int argc, char** argv)
+{
+    // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
+    cc::mark_current_thread_as_main();
+
+    // Record the command line so nx::test_args can answer from anywhere, including a library deep in a
+    // call stack that has no argv of its own.
+    nx::impl::set_process_args(argc, argv);
+
+    // Install a crash handler so a fatal fault in a test prints the offending test and a
+    // stacktrace instead of a bare non-zero exit code.
+    cc::install_crash_handler();
+    cc::add_crash_context_hook(&nx::impl::report_running_test);
+
+    // Get the static test registry
+    auto& registry = get_static_test_registry();
+
+    // Run NX_TEST_SETUP callbacks: they define aliases (with full registry access) and must run before any
+    // listing or scheduling, so aliases are visible even when we only list/discover tests and never run them.
+    nx::run_setup_callbacks(registry);
+
+    // A binary whose defaults are ambiguous is broken whatever it was asked, so a test run fails on it too — which is
+    // the run CI makes, where a bare run that only a user would notice is not.
+    if (auto const problems = impl::check_default_entries(registry); !problems.empty())
+    {
+        cc::eprint("{}", problems);
+        return 1;
+    }
+
+    // Name first: an app or command named by the first token, a nexus selector, a test named exactly, the default, or
+    // the overview.
+    auto tokens = cc::vector<cc::string_view>();
+    for (auto i = 1; i < argc; ++i)
+        tokens.push_back(cc::string_view(argv[i]));
+    auto const route = impl::route_command_line(registry, tokens);
+
+    if (route.kind == impl::entry_route_kind::overview)
+    {
+        cc::print("{}", impl::render_overview(registry, suite_name()));
+        return 0;
+    }
+    if (route.kind == impl::entry_route_kind::error)
+    {
+        cc::eprintln("{}\n", route.message);
+        cc::eprint("{}", impl::render_overview(registry, suite_name()));
+        return 1;
+    }
+
+    auto const is_entry_run = route.kind == impl::entry_route_kind::entry;
+
+    // An app or command gets the defaults of a real run and its own command line; nexus parses none of that line.
+    auto config = is_entry_run ? test_schedule_config::create_from_args(1, argv)
+                               : test_schedule_config::create_from_args(argc, argv);
+    if (is_entry_run)
+    {
+        config.selected_bucket = route.entry->test_config.bucket;
+        config.allow_cross_bucket_naming = false;
+        config.filters = {route.entry->name};
+        config.test_args = route.entry_args;
+    }
+
+    // Help is generated from the same declaration the parse uses, so it cannot describe a flag nexus lacks,
+    // and the PARSE is what says it was asked for.
+    // Scanning argv instead would claim a --help that belongs to the test — one carried by --test-args, or
+    // sitting past a bare --.
+    // The "Compatible with Catch2" line it carries is what makes C++ TestMate recognize this binary at all.
+    if (config.help_requested)
+    {
+        cc::println(test_schedule_config::cli_help_text());
+        return 0;
+    }
+
+    // A command line that did not parse stops here: the parse already reported what was wrong, and running
+    // the subset it managed to understand is the one outcome a mistyped flag must never produce.
+    if (config.parse_failed)
+        return 1;
+
+    // Settle name-vs-file matching once, before anything queries a filter: the listing below and the schedule must agree.
+    // Aliases are registered by then, so a filter naming one counts as a name match and suppresses the file fallback.
+    config.resolve_filter_mode(registry);
+
+    // Handle Catch2 XML discovery mode for TestMate integration
+    if (config.is_catch2_xml_discovery)
+    {
+        cc::print(write_catch2_discovery_xml(registry));
+        return 0;
+    }
+
+    // JSON test listing: the query `dev.py test` uses to pre-select which binaries actually contain a matching test.
+    // It reports every registered test plus its eligibility under the parsed args, and never runs anything.
+    // It always succeeds, even when nothing is eligible — the caller decides what an empty match means.
+    if (!config.list_tests_json_file.empty())
+    {
+        auto const json = write_test_listing_json(suite_name(), config, registry);
+        if (config.list_tests_json_file == "-")
+            cc::print(json);
+        else if (auto const written = write_report_file(config.list_tests_json_file, json); !written.has_value())
+        {
+            cc::eprintln("Error: could not write test listing JSON file: {}: {}", config.list_tests_json_file,
+                         written.error().to_string());
+            return 1;
+        }
+        return 0;
+    }
+
+    // Create schedule from config and registry
+    auto schedule = test_schedule::create(config, registry);
+
+    // The entry's name is a substring filter like any other, so a sibling whose name contains it is dropped here.
+    if (is_entry_run)
+        schedule.instances.remove_all_where([&](test_instance const& i) { return i.declaration != route.entry; });
+
+    // Check if any tests were scheduled
+    if (schedule.instances.empty())
+    {
+        // A pgo-benchmark sweep over a binary that has none is not an error: `dev.py pgo` runs
+        // --pgo-benchmarks across every test binary, and most contain no PGO benchmarks.
+        if (config.selected_bucket == nx::config::test_bucket::pgo_benchmark)
+        {
+            cc::println("No PGO benchmarks in this binary");
+            return 0;
+        }
+
+        // Same for benchmarks: `dev.py benchmark` probes every binary to resolve a name, and most carry none.
+        if (config.selected_bucket == nx::config::test_bucket::benchmark)
+        {
+            cc::println("No benchmarks in this binary");
+            return 0;
+        }
+
+        // Same for examples: `dev.py example` probes every binary to resolve a name, and most carry none.
+        if (config.selected_bucket == nx::config::test_bucket::example)
+        {
+            cc::println("No examples in this binary");
+            return 0;
+        }
+
+        cc::eprintln("Error: The current schedule did not select any tests");
+        for (int i = 0; i < argc; ++i)
+            cc::eprintln("  arg[{}] = `{}'", i, argv[i]);
+        return 1;
+    }
+
+    // First, so it is there whatever the run does next, and a failure anywhere below can be reproduced from the log.
+    // Not under the Catch2 XML reporter, whose stdout is the report, and not for an example, which is one program run
+    // whose transcript is its documentation.
+    if (config.shuffle && !config.report_catch2_xml_results && !is_entry_run
+        && config.selected_bucket != nx::config::test_bucket::example)
+        cc::println("nexus: run seed {} (reproduce with --seed {})", config.seed, config.seed);
+
+    if (config.verbose)
+    {
+        schedule.print();
+        cc::println();
+    }
+
+    // A benchmark number is a statement about a machine, so the machine goes first — and it is meant to be copied
+    // along with the result rather than read once.
+    // Keyed on what was SCHEDULED rather than on which bucket was swept: naming a benchmark exactly pulls it in
+    // across the bucket rule, and that run wants the machine described just as much as a sweep does.
+    auto has_benchmarks = false;
+    for (auto const& instance : schedule.instances)
+        if (instance.declaration != nullptr
+            && instance.declaration->test_config.bucket == nx::config::test_bucket::benchmark)
+            has_benchmarks = true;
+
+    auto benchmark_load_before = nx::bench::load_sample{};
+    auto benchmark_pinned = false;
+    if (has_benchmarks)
+    {
+        auto const& sys = nx::bench::describe_system();
+        cc::println("host  {} {}  |  {}  |  {} logical cores  |  build {}  CC_ASSERT={}{}", sys.os, sys.arch, sys.cpu,
+                    sys.logical_cores, sys.build, sys.assertions_enabled ? "on" : "off",
+                    sys.is_provisional ? "  (system info provisional)" : "");
+
+        if (config.benchmark_pin)
+        {
+            benchmark_pinned = nx::bench::try_pin_to_core(0);
+            cc::println("pin   requested, {}", benchmark_pinned ? "achieved on core 0" : "REFUSED by the platform");
+        }
+
+        // The counters backend prints its own one-time notice when the PMU is unreachable, naming the grant script
+        // to run — so nothing is said here rather than saying it twice and worse.
+
+        // The first reading is what the second is a delta against, so this one only primes the OS counters.
+        benchmark_load_before = nx::bench::sample_load();
+    }
+
+    // Stand the recorder up for the WHOLE run, never per test.
+    // Per-test attribution rides the ambient chain instead, so a test that records nothing costs nothing, and a test
+    // asking what it recorded gets an answer without anyone parsing history back to the start of the process.
+    if (!config.no_recording)
+    {
+        nx::impl::begin_run_recording();
+
+        // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
+        // what happened BEFORE the interesting sample as much as the sample itself.
+        nx::impl::begin_run_capture(config.benchmark_rec_file);
+    }
+
+    // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
+    auto reporting = run_reporting{.registry = &registry,
+                                   .is_entry_run = is_entry_run,
+                                   .has_benchmarks = has_benchmarks,
+                                   .benchmark_load_before = benchmark_load_before,
+                                   .benchmark_pinned = benchmark_pinned,
+                                   .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
+
+    // A host that owns the thread gets the run in steps, and the report once the last one finishes.
+    // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.
+    if (impl::has_host_event_loop())
+    {
+        struct hosted_run
+        {
+            test_schedule schedule;
+            test_schedule_config config;
+            run_reporting reporting;
+            cc::unique_ptr<impl::test_run> run;
+        };
+        auto* const hosted
+            = new hosted_run{.schedule = cc::move(schedule), .config = config, .reporting = cc::move(reporting)};
+        hosted->run = cc::make_unique<impl::test_run>(hosted->schedule, hosted->config);
+        impl::run_in_host_loop([hosted] { return hosted->run->step(); },
+                               [hosted]
+                               {
+                                   auto const code
+                                       = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
+                                   delete hosted;
+                                   return code;
+                               });
+        return 0; // not reached: the host loop ends the process
+    }
+
+    return report_run(config, reporting, execute_tests(schedule, config));
 }

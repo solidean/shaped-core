@@ -13,6 +13,10 @@ enum class sg::window_platform : sg::u8
     xcb,     ///< `display` is an xcb_connection_t*, `window_id` an xcb_window_t
     wayland, ///< `display` is a wl_display*, `handle` a wl_surface*
     cocoa,   ///< `handle` is a CAMetalLayer*, and there is no separate connection
+
+    /// `handle` is a `char const*` CSS selector naming an HTML canvas, e.g. "#canvas".
+    /// Read only while the swapchain is created, so it need not outlive that call; `client_size` is required.
+    web_canvas,
 };
 
 namespace sg
@@ -20,7 +24,7 @@ namespace sg
 /// How many `window_platform` values there are.
 /// A backend indexing a per-platform table sizes it from this rather than from a literal, so adding an arm is a
 /// compile-time fact everywhere rather than a silent out-of-bounds write.
-inline constexpr int window_platform_count = int(window_platform::cocoa) + 1;
+inline constexpr int window_platform_count = int(window_platform::web_canvas) + 1;
 } // namespace sg
 
 /// An OS window, named in the terms its windowing system uses.
@@ -58,8 +62,8 @@ struct sg::native_window
 
     /// Client-area size in pixels.
     ///
-    /// **Required on wayland**, where a surface has no size of its own: the application is the authority and the
-    /// compositor takes whatever size the swapchain is built at.
+    /// **Required on wayland and on a web canvas**, where a surface has no size of its own: the application is the authority and the
+    /// compositor or page takes whatever size the swapchain is built at.
     /// A wayland chain built without it comes up 1x1.
     /// Ignored on win32 and X11, whose surfaces report their own extent — a backend asks the surface there.
     ///
@@ -80,6 +84,7 @@ struct sg::native_window
         case window_platform::wayland:
             return display != nullptr && handle != nullptr;
         case window_platform::cocoa:
+        case window_platform::web_canvas:
             return handle != nullptr;
         }
         return false;

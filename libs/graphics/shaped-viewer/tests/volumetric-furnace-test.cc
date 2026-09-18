@@ -210,7 +210,7 @@ image_stats trace_furnace(sg::context& ctx,
 
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
-        ctx.block_until_idle();
+        (void)cc::async_blocking_get(ctx.idle_completion());
 
         if (!ready)
         {
@@ -226,7 +226,7 @@ image_stats trace_furnace(sg::context& ctx,
             continue;
 
         // An epoch advance drains the GPU but not the readback actor, so this is the only completion guarantee.
-        ctx.block_until_idle();
+        (void)cc::async_blocking_get(ctx.idle_completion());
         auto const delivered = readback.try_get_data();
         REQUIRE(delivered.has_value());
 
@@ -257,7 +257,7 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
 {
     // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
     //
-    // The binary dies through `__fastfail` inside `ctx.block_until_idle()`, after a trivial dispatch whose
+    // The binary dies through `__fastfail` inside the idle drain, after a trivial dispatch whose
     // command list also recorded an inline readback.
     // Not an assertion and not a lost device: both were instrumented and neither fires, and a fastfail bypasses the SEH
     // filter and the SIGABRT handler nexus installs — which is why it arrived as an exit code with no output at all.

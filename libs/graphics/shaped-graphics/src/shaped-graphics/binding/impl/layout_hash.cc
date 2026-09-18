@@ -22,7 +22,6 @@ void add_sampler(cc::byte_stream_builder& b, sampler const& s)
     b.add_pod(s.min_lod);
     b.add_pod(s.max_lod);
     b.add_optional(s.compare);
-    b.add_pod(s.border_color);
 }
 
 void add_binding(cc::byte_stream_builder& b, binding const& bnd)
@@ -39,6 +38,7 @@ void add_binding(cc::byte_stream_builder& b, binding const& bnd)
     // and this hash is what a persistent pipeline cache keys on across processes.
     b.add_pod(bnd.visibility.bits);
     b.add_optional(bnd.storage_format);
+    b.add_pod(bnd.storage_access);
     b.add_optional(bnd.sample_type);
     b.add_optional(bnd.sampler_type);
 }

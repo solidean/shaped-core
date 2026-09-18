@@ -434,7 +434,7 @@ rules:
 
   # Blocking waits kept in tests, each where the wait or a scheduler the test drives is what is under test.
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the blocking getters, the pool's drive and the pump registry are these files' subject
     files:
       - tests/thread/async-test.cc
@@ -443,20 +443,20 @@ rules:
       - tests/thread/thread_pump-test.cc
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the test drives a scheduler of its own
     files:
       - tests/thread/async-coroutine-test.cc
       - tests/thread/async-mutex-test.cc
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a thread-bound ambient scope is what is checked, and it cannot span a co_await
     files:
       - tests/thread/async-ambient-test.cc
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: the wait runs inside a recording capture callback, which is synchronous
     files:
       - tests/record/record-async-scope-test.cc

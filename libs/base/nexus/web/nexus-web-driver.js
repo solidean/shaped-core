@@ -94,7 +94,8 @@
   function runModule(M, label, sub) {
     return new Promise(function (resolve) {
       var name = M.cwrap('nx_web_test_name', 'string', ['number']);
-      var run = M.cwrap('nx_web_run_test', 'number', ['number']);
+      var start = M.cwrap('nx_web_start_test', null, ['number']);
+      var poll = M.cwrap('nx_web_poll_test', 'number', []);
       var lastChecks = M.cwrap('nx_web_last_checks', 'number', []);
       var lastMs = M.cwrap('nx_web_last_duration_ms', 'number', []);
       var lastReport = M.cwrap('nx_web_last_report', 'string', []);
@@ -108,10 +109,19 @@
           return;
         }
         var tname = name(i);
-        var ok = run(i) === 1;
-        var c = lastChecks();
-        var d = lastMs();
-        var report = ok ? '' : lastReport();
+        start(i);
+        finish(tname);
+      }
+
+      // A test that waits on the page's event loop comes back unfinished; it is polled again once the loop has run.
+      function finish(tname) {
+        var result = poll();
+        if (result === -1) { setTimeout(function () { finish(tname); }, 1); return; }
+        // -2: the module had no test running, so there are no stats to read.
+        var ok = result === 1;
+        var c = result === -2 ? 0 : lastChecks();
+        var d = result === -2 ? 0 : lastMs();
+        var report = ok ? '' : result === -2 ? 'no test was running at index ' + i : lastReport();
 
         lp += ok ? 1 : 0; lf += ok ? 0 : 1; lc += c; lms += d;
         passed += ok ? 1 : 0; failed += ok ? 0 : 1; checks += c; ms += d; done += 1;
@@ -150,7 +160,7 @@
 
     // Phase 2: run each loaded module's tests, grouped under a header. Phase 3: final summary.
     chain.then(function () {
-      el('subtitle').textContent = total + ' tests across ' + loaded.length + ' module(s) — one per animation frame';
+      el('subtitle').textContent = total + ' tests across ' + loaded.length + ' module(s)';
       var seq = Promise.resolve();
       loaded.forEach(function (L) {
         seq = seq.then(function () {

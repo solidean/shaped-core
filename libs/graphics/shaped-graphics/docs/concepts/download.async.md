@@ -13,7 +13,7 @@ It is the right tool for **bulk readback** — asset baking, screenshots, GPU→
 For a small must-be-back-now readback tied to a specific list's output, use [inline download](download.inline.md).
 
 **Fire-and-return-a-future.** The call returns a `bytes_future`; the copy runs later, on a queue the caller never sees.
-Depend on `future.completion()` to chain off it, poll `future.is_ready()` / `future.try_get_bytes()`, or block once with `ctx.block_until_idle()`.
+Depend on `future.completion()` to chain off it, poll `future.is_ready()` / `future.try_get_bytes()`, or await `ctx.idle_completion()` for every download at once.
 The returned `pinned_data` keeps the bytes alive on its own, so it stays valid past the future's lifetime.
 A zero-size read yields an already-ready, empty future.
 

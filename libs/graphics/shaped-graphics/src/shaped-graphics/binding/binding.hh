@@ -40,6 +40,17 @@ enum class sg::texture_sample_type
     uint,               ///< unsigned integer texels, never filtered
 };
 
+/// What a storage texture binding lets the shader do with its texels.
+/// WebGPU requires it on the layout entry and core WebGPU allows `read_write` only for r32float, r32uint and r32sint,
+/// so a storage texture of any other format is `write` (or `read`) there.
+/// dx12 and vulkan do not ask: a UAV is always read-write to them.
+enum class sg::storage_access
+{
+    read,       ///< the shader only loads texels
+    write,      ///< the shader only stores texels
+    read_write, ///< both — the default, and what HLSL's RWTexture always declares
+};
+
 /// What kind of sampler a sampler binding expects.
 /// WebGPU requires it on the layout, before any sampler is bound, so it cannot be derived from the bound `sg::sampler`.
 enum class sg::sampler_binding_type
@@ -171,6 +182,10 @@ struct sg::binding
     /// A WebGPU storage-texture layout entry requires it, and a layout is built before any view exists — so it
     /// cannot be taken from the bound view the way dx12 and vulkan take it.
     cc::optional<pixel_format> storage_format;
+
+    /// For `readwrite_texture` bindings: whether the shader reads, writes or both.
+    /// See storage_access; ignored for every other kind.
+    sg::storage_access storage_access = sg::storage_access::read_write;
 
     /// For `readonly_texture` bindings: how the texels are read.
     /// See texture_sample_type.

@@ -1,6 +1,7 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
@@ -66,7 +67,7 @@ TEST("sg metal - an MTLLogState handler is not the validation channel")
     device->release();
 }
 
-TEST("sg metal - a commit's feedback handler runs")
+ASYNC_TEST("sg metal - a commit's feedback handler runs")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -94,7 +95,7 @@ TEST("sg metal - a commit's feedback handler runs")
     ctx->queue()->commit(buffers, 1, options);
     options->release();
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     // Draining the GPU says nothing about the handler, which runs on a dispatch queue of Metal's choosing — so wait on
     // the condition rather than assuming the drain covered it.
@@ -107,7 +108,7 @@ TEST("sg metal - a commit's feedback handler runs")
     allocator->release();
 }
 
-TEST("sg metal - a clean run leaves the deferred error channel empty")
+ASYNC_TEST("sg metal - a clean run leaves the deferred error channel empty")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -115,7 +116,7 @@ TEST("sg metal - a clean run leaves the deferred error channel empty")
 
     (void)ctx->submit_command_list(ctx->create_command_list());
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     CHECK(ctx->take_pending_errors().empty());
     CHECK(!ctx->is_device_lost());

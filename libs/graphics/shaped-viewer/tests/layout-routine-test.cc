@@ -35,7 +35,7 @@ namespace
 }
 } // namespace
 
-INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::context_handle const& ctx_h))
 {
     // Deliberately the narrowest case: prewarm registers the routine and one tick brings it up, so a failure here is
     // the shader package, the group layout or the inline-constants block rather than anything about a draw.
@@ -52,7 +52,7 @@ INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (sg::co
     // Without that the tick below initializes nothing and the check proves nothing.
     sv::layout_routine::evict(*ctx_h, sg::pixel_format::bgra8_unorm);
     sv::layout_routine::prewarm(*ctx_h, sg::pixel_format::bgra8_unorm);
-    auto const tick = ctx_h->routines.tick_until_idle();
+    auto const tick = co_await ctx_h->routines.idle_completion();
     CHECK(tick.initialized >= 1);
     CHECK(tick.is_idle());
 }
@@ -121,7 +121,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe 
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
     {
@@ -164,7 +164,7 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
     // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
-    (void)ctx.routines.tick_until_idle();
+    (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
     {

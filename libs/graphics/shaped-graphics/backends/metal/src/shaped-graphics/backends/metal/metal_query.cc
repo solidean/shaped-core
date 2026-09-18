@@ -17,15 +17,14 @@ cc::result<cc::unit> metal_query_system::create(metal_context& ctx)
     _ctx = &ctx;
     _tick_to_seconds = k_tick_to_seconds;
 
-    // The probe is a real heap rather than a capability query, because there is no capability query: a device either
-    // hands one out or reports why it cannot.
-    // It goes straight onto the free list, so the probe is also the first lease.
-    auto probe = create_heap();
-    _supports_timestamps = probe != nullptr;
-    if (probe != nullptr)
-        _free_list.lock([&](cc::vector<cc::unique_ptr<metal_counter_heap_lease>>& free)
-                        { free.push_back(cc::move(probe)); });
-
+    // Not probed with a real heap, for the reason `sg::feature::raytracing` is not probed either: a timestamp counter
+    // heap is core to Metal 4, so every device above this backend's floor has one.
+    //
+    // **Probing would cost a heap per context**, and heaps are a device-wide resource with a limit the tier-2 suite
+    // reaches on its own — every context paying for a capability most never use is what exhausts it.
+    // So the first heap is made when the first timestamp is recorded, and a device that refuses one then hands the
+    // caller an invalid timestamp, which is the answer an unsupported backend gives anyway.
+    _supports_timestamps = true;
     return cc::unit{};
 }
 

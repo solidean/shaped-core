@@ -41,7 +41,7 @@ private:
 /// on that node rather than as a future that never completes.
 class sg::bytes_future
 {
-    // The blocking read is kept off the future's own public API — ctx.block_until_idle() is the one place that waits.
+    // The blocking read is kept off the future's own public API: a caller awaits instead.
     friend class context;
     // the typed wrapper forwards its blocking wait to the underlying bytes_future.
     template <class>
@@ -70,8 +70,8 @@ public:
     [[nodiscard]] bool is_valid() const { return _completion != nullptr; }
 
     /// Non-blocking poll: whether the transfer has settled, with bytes or with an error.
-    /// A download settles only once its readback actor copy has run, and neither this nor an epoch advance forces
-    /// that — ctx.block_until_idle() does.
+    /// A download settles only once its readback actor copy has run, and neither this nor an epoch advance forces that.
+    /// Awaiting `bytes()` or `ctx.idle_completion()` waits for it.
     [[nodiscard]] bool is_ready() const { return _completion != nullptr && _completion->is_ready(); }
 
     /// The node completing when this transfer settles: `cc::unit` on success, an `async_error` when cancelled or failed.
@@ -124,7 +124,7 @@ class sg::data_future
 {
     static_assert(std::is_trivially_copyable_v<T>, "data_future element type must be trivially copyable");
 
-    // The blocking read is kept off the future's own public API — ctx.block_until_idle() is the one place that waits.
+    // The blocking read is kept off the future's own public API: a caller awaits instead.
     friend class context;
 
 public:

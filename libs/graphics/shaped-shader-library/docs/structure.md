@@ -57,9 +57,12 @@ src/shaped-shader-library/
                                                 vertex attribute format it has (`bool` has none)
     impl/hlsl_sampler_state.hh/.cc [done]       a `#pragma sc static` attribute -> sg::sampler, over sg's own
                                                 field and enumerator names
+    wgsl_declarations.hh/.cc      [done]        parse_wgsl_declarations: a WGSL module's one entry point and
+                                                its bindings, read from module-scope declarations alone
   compiler/
     shader_compiler.hh            [done]        the seam: one edge, language -> format
     dxc_compiler.hh/.cc           [done]        hlsl -> dxil via ssc::dxc; only when SLIB_HAS_DXC
+    wgsl_compiler.hh/.cc          [done]        wgsl -> wgsl: the source handed on, reflected by the above
   impl/
     reload_watcher.hh/.cc         [done]        cc::threaded_actor; parks on the mailbox and lets the
                                                 filesystem wake it, else polls; stages + drives recompiles
@@ -89,8 +92,12 @@ direct lookup for `(package language, requested format)`.
 
 The shape the seam is built for, and what is still `[planned]`:
 
-- **more compilers** — HLSL→SPIR-V, Slang, GLSL, WGSL.
+- **more compilers** — Slang, GLSL.
   Each is another edge; nothing else changes.
+  HLSL→SPIR-V and WGSL have landed that way: `create_dxc_spirv_compiler` and `create_wgsl_compiler`.
+- **sgl, the shaped graphics language** — our own shading language, cross-compiled inside the codebase, so it runs on wasm and edits live.
+  It emits HLSL for dx12 and vulkan, where DXC stays the optimizer, since sgl is a transpiler rather than an optimizing compiler; and WGSL and MSL for WebGPU and Metal, which optimize internally.
+  It is what reaches the backends [portable HLSL](portable-hlsl.md) does not, without DXC, Tint or naga on wasm; hand-written WGSL is the interim.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.
   Call sites do not change: `acquire(ctx)` already asks "reach a format this context accepts", which is a path query either way.
@@ -141,11 +148,3 @@ The notification wakes the actor's mailbox, so a watched watcher has no interval
 - **Package-level include paths.** A package cannot declare extra search roots beyond the three slib already searches.
 - **A shared-include package.** A mount with no `SHADERS` entries already works via `lib.mount`, but there is no CMake-level way to declare "this target publishes an include-only shader library".
 - **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.
-
-- **A WGSL declaration parser**, to land with or before a WebGPU backend.
-  `sg::shader_format::wgsl` exists and `shader_asset::acquire(ctx)` already picks a compiler by what the context accepts, so nothing structural is missing — what is missing is reflection.
-  A `sg::compiled_shader` carries the bindings a pipeline layout is built from, and for HLSL those come out of DXC.
-  WGSL has no equivalent, so slib would have to read the module itself.
-  Module-scope `var` declarations give the bindings with their group and binding indices, and the single entry point per module gives the stage each one is visible from.
-  That is a declaration parser, not a language front end — it never needs to look inside a function body.
-  It is also what makes `sg::binding::visibility` fillable on that backend, which a WebGPU bind group layout requires and cannot infer.

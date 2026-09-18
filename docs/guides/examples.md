@@ -309,6 +309,23 @@ endif()
 
 Every CI leg builds all targets, wasm and cross-compile legs included, so an ungated graphical example breaks builds that could never have run it.
 
+## A page, for an example that runs on the web
+
+`examples/graphics/rotating-cube` also builds `graphics-rotating-cube-example-web` under the Emscripten WebGPU presets.
+It produces one `build/wasm-emscripten-webgpu-release/web/rotating-cube.html` — `web/` under the preset's build directory — with the wasm embedded, opened from disk with no server.
+
+```bash
+uv run dev.py build -t graphics-rotating-cube-example-web --preset emscripten-webgpu-release
+```
+
+It is a second link of the same sources rather than a wrapper around the example binary, because that binary is built for node — `NODERAWFS` alone keeps a browser from loading it.
+Three link options carry the difference: `SINGLE_FILE=1` embeds the wasm as a data URI, so `file://` needs no fetch;
+a `--pre-js` sets `Module['arguments']`, since nexus runs whatever its command line names and a page has none;
+and `--shell-file` supplies the page itself instead of emcc's default shell.
+
+Take the pattern where an example is worth showing to someone who will not build it.
+It is not automatic: an example that needs a window system, or a backend with no web arm, has nothing to put on a page.
+
 ## Related
 
 * [building-and-testing.md](building-and-testing.md) — the `dev.py` reference this command sits in.

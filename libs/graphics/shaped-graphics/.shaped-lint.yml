@@ -71,25 +71,13 @@ rules:
     reason: "TODO: migrate to cc::atomic — these predate it, and until then the single-threaded build still pays for the atomics (routine/reload_generation.cc shows the target shape)"
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle, block_until_epochs_in_flight]
-    reason: "metal settles a download's completion from the MTL4CommitFeedback handler, on a queue Apple owns — and cc::async's single-threaded scheduler refuses to wait on a node pushed from a thread it does not drive, aborting with 'parked on an external push'. Awaiting works in a threaded build and kills the SC_THREADS=OFF one, so these block instead. Revisit with the same work that unpins the tier-1 sweep there, which is the same defect: see docs/TODO.md"
-    files:
-      - backends/metal/tests/*.cc
-
-  - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: block_until_idle's own guarantees are tested here
-    files:
-      - tests/context/context-test.cc
-
-  - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a fuzz step is a synchronous call the fuzzer sequences
     files:
       - tests/transfer/transfer-fuzz-test.cc
 
   - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
+    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a helper returning a finished pipeline, which its synchronous callers read at once
     files:
       - backends/dx12/tests/dx12-cached-pso-test.cc

@@ -25,7 +25,6 @@ inline void add_sampler(cc::byte_stream_builder& b, sg::sampler const& s)
     b.add_pod(s.min_lod);
     b.add_pod(s.max_lod);
     b.add_optional(s.compare);
-    b.add_pod(s.border_color);
 }
 
 /// Appends the `component_count` selectors of `z` that are actually read.

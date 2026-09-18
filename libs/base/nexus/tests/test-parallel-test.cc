@@ -449,6 +449,12 @@ TEST("parallel - a failing check names what ran beside it", no_scheduler)
 
 TEST("parallel - tests under -jN really do overlap", no_scheduler)
 {
+#ifdef __EMSCRIPTEN__
+    // A Web Worker starts only once the thread that asked for it returns to the browser's event loop, and the bodies
+    // below spin on that thread — so the second worker cannot come up while the first test is waiting for it.
+    // The overlap this asserts is real on every other platform, and unreachable in a page by construction.
+    SKIP("a wasm worker cannot start while the main thread spins");
+#else
     // Every test waits for a second one to join it, with a bounded fallback so a machine that refuses to overlap fails the CHECK instead of hanging.
     cc::atomic<int> live = {0};
     cc::atomic<int> peak = {0};
@@ -475,6 +481,7 @@ TEST("parallel - tests under -jN really do overlap", no_scheduler)
 
     CHECK(exec.count_failed_tests() == 0);
     CHECK(peak.load(cc::memory_order_acquire) >= 2);
+#endif
 }
 #endif
 

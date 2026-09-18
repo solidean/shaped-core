@@ -7,9 +7,3 @@ rules:
   - kind: allow-include
     value: <memory>
     reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md
-
-  - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for, block_until_idle]
-    reason: a manual window test runs a real frame loop, which is where a wait belongs
-    files:
-      - tests/imgui-manual-test.cc

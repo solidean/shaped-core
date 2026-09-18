@@ -14,8 +14,8 @@ bool swapchain_description::is_valid() const
 {
     if (is_windowed() && !window.is_valid())
         return false;
-    if (is_windowed() && window.platform == window_platform::wayland
-        && (window.client_size[0] <= 0 || window.client_size[1] <= 0))
+    auto const sizeless = window.platform == window_platform::wayland || window.platform == window_platform::web_canvas;
+    if (is_windowed() && sizeless && (window.client_size[0] <= 0 || window.client_size[1] <= 0))
         return false;
     if (!is_windowed() && (headless_extent.value()[0] <= 0 || headless_extent.value()[1] <= 0))
         return false;
@@ -32,11 +32,12 @@ void swapchain_description::assert_valid() const
     // A handle is required exactly when the chain is windowed, which is what headless_extent decides.
     CC_ASSERT(!is_windowed() || window.is_valid(), "a windowed swapchain requires a window (set headless_extent to "
                                                    "present without one)");
-    // Only wayland: a wl_surface has no size of its own, so a chain built without one comes up at the 1x1
-    // minImageExtent rather than at the window's size, and nothing downstream can tell.
-    CC_ASSERT(!is_windowed() || window.platform != window_platform::wayland
-                  || (window.client_size[0] > 0 && window.client_size[1] > 0),
-              "a wayland swapchain requires native_window::client_size — its surface has no size of its own");
+    // Wayland and a web canvas: neither surface has a size of its own, so a chain built without one comes up at a
+    // minimum extent rather than at the window's size, and nothing downstream can tell.
+    CC_ASSERT(
+        !is_windowed() || (window.platform != window_platform::wayland && window.platform != window_platform::web_canvas)
+            || (window.client_size[0] > 0 && window.client_size[1] > 0),
+        "a wayland or web canvas swapchain requires native_window::client_size — its surface has no size of its own");
     if (!is_windowed())
         CC_ASSERT(headless_extent.value()[0] > 0 && headless_extent.value()[1] > 0, "headless_extent must be positive "
                                                                                     "in both dimensions");

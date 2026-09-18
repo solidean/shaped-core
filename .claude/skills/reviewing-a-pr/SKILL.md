@@ -196,6 +196,7 @@ Name it with `title` as usual, and hand it over the same way.
 6. **Write the entries**, as below.
    `uv run review.py generate pr-<n>` writes the generated `015-changes` and `990-coverage` first, and
    `uv run review.py changes pr-<n>` lists the ledger, which is what `discharges:` is written from.
+   An entry that accounts for one area takes its ids from `uv run review.py changes pr-<n> --path <prefix> --ids`, which prints them bare for pasting.
 
    Read [tools/review/docs/entry-types/_index.md](../../../tools/review/docs/entry-types/_index.md) and open the types that apply.
    Six anchor a review with a changeset: **orientation** at `010`, **feature-tour** at `012`, **design-critique** at `014`, **glossary** at `018`, the findings between, and **verdict** at `980`.

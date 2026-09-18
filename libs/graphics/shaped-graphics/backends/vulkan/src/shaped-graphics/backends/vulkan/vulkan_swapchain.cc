@@ -121,6 +121,8 @@ namespace
         // which MoltenVK does not implement.
         // So this is a permanent refusal rather than a missing arm.
         return cc::error("the vulkan backend cannot present to a CAMetalLayer");
+    case sg::window_platform::web_canvas:
+        return cc::error("vulkan cannot present to a web canvas; that is the webgpu backend's");
     }
     return cc::error("unhandled window platform");
 }

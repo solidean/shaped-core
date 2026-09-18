@@ -234,6 +234,22 @@ One word cannot tear, and a declaration outlives the run, so a racing reader see
 What it reports is a snapshot, not a fact: a slot may change while the table is walked, so a name means "was running around now".
 That is the right resolution for the question it answers, and no lock could sharpen it without changing what is being measured.
 
+## On a host event loop: a stepped, serial run
+
+Under WebAssembly the host's event loop owns the thread (`impl::has_host_event_loop()`), and a run there goes through the stepped `nx::impl::test_run`.
+**Every graph phase runs serially there, one node at a time, so `--jobs` and `own_pool(n)` are ignored.**
+Native runs never take this path.
+
+Each step drives what it can and returns, because a WebGPU callback, a timer or a fetch completion only runs once the thread is back with the browser.
+Only the event loop can call the runner again, so a stalled step is followed by a 1 ms timer rather than a wake-up from the completion that unblocks it.
+Waking on that completion would mean registering on every source that can make a step progress: pool completions, cross-thread pushes, the main home, every thread pump.
+Missing one is a hang nothing reports, and the timer is the one wake-up that cannot be lost.
+
+The executor is resumable rather than suspended by the engine.
+JSPI (wasm suspending on a JS promise) is a newer engine feature and needs a link flag on every test binary.
+Asyncify (a compiler transform that unwinds and rewinds the stack) costs code size and speed in every function that might suspend.
+Both would let code block again, which sg's `never_block` exists to forbid.
+
 ## Not here yet: a bare-pool mode
 
 Phases being sequential means a run with several scheduler modes cannot overlap them.

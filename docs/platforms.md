@@ -42,7 +42,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
-| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | No CI — emdawnwebgpu; `emscripten-webgpu-*` presets, and `emscripten-threads-webgpu-*` for both |
+| WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | CI on `emscripten-threads-webgpu-relwithdebinfo` — emdawnwebgpu, and sg's webgpu backend; `emscripten-webgpu-*` presets for WebGPU alone |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
 | Consoles | — | vendor toolchains | 3 | planned |
 
@@ -142,12 +142,12 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
-`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12` or `vulkan`.
+`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan` or `webgpu`.
 
-`auto` takes dx12 wherever one exists, which on Windows means the vulkan arm is never reached by default.
-So the setting exists to reach it: building `rotating-cube` both ways is how one HLSL source is shown to really serve both backends.
+`auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
+So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
 
-**Every graphical example reads it**, not only the one that supports both backends — a setting the rest ignore is a setting that lies.
+**Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:
 
 - **A backend that was not built is a configure error**, for every example.

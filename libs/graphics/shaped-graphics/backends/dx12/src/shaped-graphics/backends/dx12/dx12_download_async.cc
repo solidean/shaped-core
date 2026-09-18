@@ -43,7 +43,7 @@ struct download_mem_job
     ///
     /// It has to live HERE and not only on the active_download, because this actor is two-stage: a read leaves _active
     /// the moment its last chunk is PACKED, while its bytes are delivered later, when the window it landed in drains.
-    /// A token that died with the active_download would let block_until_idle() return before any memcpy had run.
+    /// A token that died with the active_download would let ctx.idle_completion() settle before any memcpy had run.
     sg::impl::transfer_drain::token drain;
 };
 

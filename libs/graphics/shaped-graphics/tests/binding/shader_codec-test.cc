@@ -49,7 +49,8 @@ sg::compiled_shader make_shader()
                                .type = sg::binding_type::readwrite_texture,
                                .texture_dimension = sg::texture_view_dimension::tex_2d,
                                .visibility = sg::shader_stages(sg::shader_stage::compute),
-                               .storage_format = sg::pixel_format::rgba8_unorm});
+                               .storage_format = sg::pixel_format::rgba8_unorm,
+                               .storage_access = sg::storage_access::write});
     shader.bindings.push_back({.name = "Shadow",
                                .space = 0,
                                .index = 4,
@@ -86,7 +87,7 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
             return false;
         // A field left out here is a field the encoder may silently drop, which is what this comparison is for.
         if (x.texture_dimension != y.texture_dimension || x.storage_format != y.storage_format
-            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type)
+            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type || x.storage_access != y.storage_access)
             return false;
         if (x.visibility != y.visibility)
             return false;

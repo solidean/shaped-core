@@ -4,7 +4,8 @@
 
 `sg::context`, `sg::command_list` and `sg::raw_buffer` are **abstract interfaces**.
 A *backend* is a self-contained static library under [`backends/`](../../backends/) that subclasses them directly and drives a real graphics API.
-`sg::backend::dx12::dx12_context : public sg::context` is the shape; dx12 and vulkan exist today, and a cpu reference, a capture layer or a remote context would be backends too.
+`sg::backend::dx12::dx12_context : public sg::context` is the shape.
+dx12, vulkan and webgpu exist today, and a cpu reference, a capture layer or a remote context would be backends too.
 
 The dependency arrow points **one way**: backends depend on `sg`, never the reverse.
 The core cannot name a backend, so there is no `sg::create_context(backend_kind)`.

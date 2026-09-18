@@ -309,7 +309,7 @@ private:
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///
     /// **Run when the commit completes, not when the epoch retires.**
-    /// `ctx.block_until_idle()` drains the GPU without advancing, and an open epoch's payload never runs — so a
+    /// A drain waits for the GPU without advancing, and an open epoch's payload never runs — so a
     /// deferral onto the epoch would leave every download in an unadvanced frame unsettled forever.
     cc::vector<pending_download> _pending_downloads;
 

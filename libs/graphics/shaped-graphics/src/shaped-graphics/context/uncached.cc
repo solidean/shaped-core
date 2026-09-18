@@ -96,6 +96,29 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     return _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
 }
 
+cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
+    compute_pipeline_description const& desc)
+{
+    return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
+}
+
+cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
+    raster_pipeline_description const& desc)
+{
+    compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
+        return cc::make_async_from_error<raster_pipeline_handle>(
+            cc::async_error::make_error(cc::any_error(cc::move(conflict.value()))));
+
+    return _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
+}
+
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)
 {
     auto r = try_create_raytracing_pipeline(desc);

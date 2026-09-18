@@ -27,6 +27,7 @@
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/binding/compiled_shader.hh> // sg::shader_format, which k_accepted_shader_formats names
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/fwd.hh>
 
 #include <atomic>
@@ -236,8 +237,12 @@ private:
     void block_until_transfers_drained() override;
     [[nodiscard]] bool are_transfers_drained() const override;
     [[nodiscard]] submission_token last_issued_submission() override;
-    void wait_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation) override;
-    void wake_completion_signal(u64 generation) override;
+
+    /// Metal cannot wait on several timelines at once, so the waiter parks on a condition every source raises.
+    /// `arm_completion_signal` builds one on first use, the way dx12 and vulkan do.
+    void arm_completion_signal(u64 submission, u64 epoch) override;
+    void park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation);
+    void wake_completion_signal(u64 generation);
 
     [[nodiscard]] cc::result<swapchain_handle> try_create_swapchain(swapchain_description const& desc) override;
 
@@ -367,6 +372,9 @@ private:
 
     /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.
     ///
+    /// Parks on the GPU timelines and settles what they reach; built on the first arm.
+    std::unique_ptr<sg::impl::completion_waiter> _completion_waiter;
+
     /// **A real mutex and condition even with SC_THREADS off.**
     /// `MTL::SharedEvent::notifyListener` runs its block on a dispatch queue Apple owns, which that flag does not
     /// reach — the same hole `callback_mutex` exists for.

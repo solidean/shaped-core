@@ -1,16 +1,15 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/result.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/fwd.hh> // sg::context_handle
 
 namespace sg_test
 {
 struct backend_entry;
-} // namespace sg_test
-
-namespace sg_test
-{
-struct backend_entry;
+struct context_factory;
 } // namespace sg_test
 
 // Backends compiled into the sg API test binary (shaped-graphics-test).
@@ -24,6 +23,13 @@ struct sg_test::backend_entry
     cc::string invoke; ///< the nx::invoke_tests group it dispatches under, e.g. "dx12-warp"
 };
 
+// A way to make a fresh context of one backend, for a test or benchmark that needs its own rather than the driver's.
+struct sg_test::context_factory
+{
+    cc::string backend; ///< e.g. "dx12"
+    cc::unique_function<cc::result<sg::context_handle>()> create;
+};
+
 namespace sg_test
 {
 
@@ -34,6 +40,17 @@ cc::vector<backend_entry>& backends();
 inline bool register_backend(cc::string driver, cc::string invoke)
 {
     backends().push_back(backend_entry{.driver = cc::move(driver), .invoke = cc::move(invoke)});
+    return true;
+}
+
+// The registered context factories, one per backend compiled in.
+// Defined in backends.cc.
+cc::vector<context_factory>& context_factories();
+
+// Appends a factory; returns true so it can seed a static-init bool.
+inline bool register_context_factory(cc::string backend, cc::unique_function<cc::result<sg::context_handle>()> create)
+{
+    context_factories().push_back(context_factory{.backend = cc::move(backend), .create = cc::move(create)});
     return true;
 }
 } // namespace sg_test

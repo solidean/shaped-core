@@ -5,37 +5,28 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/query/gpu_timestamp.hh>
-
-#include <thread>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg
 {
 struct context::completion_signals
 {
-#if CC_HAS_THREADS
-    std::thread waiter;
-#else
-    cc::thread_pump_registration pump;
-#endif
-    bool is_started = false;
     bool is_stopped = false;   // under the pending lock; set once, by stop_completion_signals or a lost device
-    bool is_torn_down = false; // stop_completion_signals has joined the waiter; only the shutting-down thread reads it
+    bool is_torn_down = false; // stop_completion_signals has run; only the shutting-down thread reads it
 
-    // Strictly increasing under the lock, because a vulkan timeline rejects a host signal that does not raise it.
-    cc::mutex<u64> wake_generation = cc::mutex<u64>(0);
-
-    // The targets the waiter last armed, zero where none; under the pending lock.
-    // A new target at or past one of these needs no wake, since the waiter passes through it on the way.
+    // The targets last handed to arm_completion_signal, zero where none; under the pending lock.
     u64 armed_submission = 0;
     u64 armed_epoch = 0;
 
-    // Read without the lock by the pump and by a drain reaching zero, which must stay cheap with nothing outstanding.
+    // Read without the lock by a drain reaching zero, which must stay cheap with nothing outstanding.
     cc::atomic<bool> has_pending = false;
 };
 
@@ -127,9 +118,37 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     for (auto format : accepted_shader_formats)
         _accepted_shader_formats.push_back(format);
 
+    if (threading == thread_model::main_thread)
+    {
+        CC_ASSERT(cc::current_thread_id() == cc::thread_id::main, "a main_thread context is created on the main "
+                                                                  "thread");
+        _device_home = &cc::main_thread_scheduler();
+    }
+
     // The scope members only store a back-reference; they don't touch any not-yet-constructed member.
     // Give the built-in cache default in-memory tiers so ctx.cached memoizes out of the box.
     _pipeline_cache->add_default_in_memory_providers();
+}
+
+bool context::is_on_device_thread() const
+{
+    switch (_thread_model)
+    {
+    case thread_model::main_thread:
+        return cc::current_thread_id() == cc::thread_id::main;
+    case thread_model::single_threaded:
+        return cc::current_thread_id() == _creating_thread;
+    case thread_model::multi_threaded:
+        return true;
+    }
+    CC_UNREACHABLE("unknown thread_model");
+}
+
+void context::assert_on_device_thread() const
+{
+    CC_ASSERT(is_on_device_thread(),
+              "this context call is bound by the thread model and was made from another thread; "
+              "only asyncs, layouts and samplers are free-threaded (see docs/concepts/threading.md)");
 }
 
 bool context::accepts_shader_format(shader_format format) const
@@ -211,14 +230,13 @@ cc::shared_async<cc::unit const> context::completion_for(u64 target, completion_
     {
         cc::shared_async<cc::unit const> node;
         bool is_new = false;
-        bool needs_wake = false;
     };
     auto const m = _pending_completions.lock(
         [&](cc::vector<pending_completion>& pending) -> minted
         {
             if (is_device_lost())
                 return {.node = make_failed_completion(device_loss_reason())};
-            if (_completion_signals != nullptr && _completion_signals->is_stopped)
+            if (_completion_signals->is_stopped)
                 return {.node = make_failed_completion("the context shut down before this completion settled")};
 
             for (auto const& p : pending)
@@ -227,62 +245,35 @@ cc::shared_async<cc::unit const> context::completion_for(u64 target, completion_
 
             auto fresh = cc::make_async_manual<cc::unit>();
             pending.push_back({.target = target, .kind = kind, .node = fresh});
-            ensure_completion_signals(pending);
-            auto& s = *_completion_signals;
-            s.has_pending.store(true, cc::memory_order_release);
-
-            auto const armed = kind == completion_kind::epoch      ? s.armed_epoch
-                             : kind == completion_kind::submission ? s.armed_submission
-                                                                   : 0;
-            auto const needs_wake = kind != completion_kind::transfers_drained
-                                 && target != u64(submission_token::not_submitted) && (armed == 0 || target < armed);
-            return {.node = fresh, .is_new = true, .needs_wake = needs_wake};
+            _completion_signals->has_pending.store(true, cc::memory_order_release);
+            rearm_completion_signal(pending);
+            return {.node = fresh, .is_new = true};
         });
 
+    // The condition may have come true between the caller's check and the mint, and a drain reaching zero or a fence
+    // passing in that window found nothing to settle — so look once more now that the node is where they look.
     if (m.is_new)
-    {
-        if (m.needs_wake)
-            wake_completion_signals();
-        // The condition may have come true between the caller's check and the mint, and a drain reaching zero or a fence
-        // passing in that window found nothing to settle — so look once more now that the node is where they look.
         settle_due_completions();
-    }
     return m.node;
 }
 
-void context::ensure_completion_signals(cc::vector<pending_completion> const& pending)
+void context::rearm_completion_signal(cc::vector<pending_completion> const& pending)
 {
-    (void)pending; // proof the caller holds the lock
+    auto t = completion_targets();
+    for (auto const& p : pending)
+    {
+        if (p.kind == completion_kind::epoch)
+            t.epoch = t.epoch == 0 ? p.target : cc::min(t.epoch, p.target);
+        else if (p.kind == completion_kind::submission && p.target != u64(submission_token::not_submitted))
+            t.submission = t.submission == 0 ? p.target : cc::min(t.submission, p.target);
+    }
+
     auto& s = *_completion_signals;
-    if (s.is_started)
+    if (t.submission == s.armed_submission && t.epoch == s.armed_epoch)
         return;
-    s.is_started = true;
-
-#if CC_HAS_THREADS
-    s.waiter = std::thread([this] { run_completion_signal_waiter(); });
-#else
-    // No thread to park on the GPU, so whoever sweeps the pumps does it — only once nothing else could progress.
-    s.pump = cc::register_thread_pump([this] { return pump_completion_signals(); });
-#endif
-}
-
-void context::wake_completion_signals()
-{
-#if !CC_HAS_THREADS
-    // Nothing parks on a wake without threads: the pump's GPU wait is the only one, and a raised wake would end it at once
-    // on every sweep from then on.
-    return;
-#else
-    auto* const s = _completion_signals.get();
-    if (s == nullptr)
-        return;
-    s->wake_generation.lock(
-        [&](u64& generation)
-        {
-            ++generation;
-            wake_completion_signal(generation);
-        });
-#endif
+    s.armed_submission = t.submission;
+    s.armed_epoch = t.epoch;
+    arm_completion_signal(t.submission, t.epoch);
 }
 
 void context::settle_due_completions()
@@ -324,6 +315,8 @@ void context::settle_due_completions()
                 pending.remove_at_unordered(i - 1);
             }
             signals->has_pending.store(!pending.empty(), cc::memory_order_release);
+            if (!out.empty() && !signals->is_stopped)
+                rearm_completion_signal(pending);
             return out;
         });
 
@@ -335,80 +328,6 @@ void context::settle_due_completions()
             node->push_value(cc::unit{});
 }
 
-void context::run_completion_signal_waiter()
-{
-    auto& s = *_completion_signals;
-    while (true)
-    {
-        // The generation is read before the targets, so a wake that adds a target after this line is never missed.
-        auto const generation = s.wake_generation.lock([](u64& g) { return g; });
-        auto const [stop, targets] = _pending_completions.lock(
-            [&](cc::vector<pending_completion>& pending) -> cc::pair<bool, completion_targets>
-            {
-                auto t = completion_targets();
-                for (auto const& p : pending)
-                {
-                    if (p.kind == completion_kind::epoch)
-                        t.epoch = t.epoch == 0 ? p.target : cc::min(t.epoch, p.target);
-                    else if (p.kind == completion_kind::submission && p.target != u64(submission_token::not_submitted))
-                        t.submission = t.submission == 0 ? p.target : cc::min(t.submission, p.target);
-                }
-                s.armed_submission = t.submission;
-                s.armed_epoch = t.epoch;
-                return {s.is_stopped, t};
-            });
-        if (stop)
-            return;
-
-        wait_for_completion_signal(targets.submission, targets.epoch, generation);
-        settle_due_completions();
-
-        // A lost device settles everything as an error above, and its signals may never fire again.
-        if (is_device_lost())
-        {
-            _pending_completions.lock([&](cc::vector<pending_completion>&) { s.is_stopped = true; });
-            settle_due_completions();
-            return;
-        }
-    }
-}
-
-bool context::pump_completion_signals()
-{
-    auto& s = *_completion_signals;
-    if (!s.has_pending.load(cc::memory_order_acquire))
-        return false;
-
-    // Only what the GPU has been handed can signal: the open epoch closes on an advance, and the thread that would
-    // advance is the one sweeping here, so parking on it would never return.
-    auto const open_epoch = u64(current_epoch());
-    auto const targets = _pending_completions.lock(
-        [&](cc::vector<pending_completion>& pending)
-        {
-            auto t = completion_targets();
-            for (auto const& p : pending)
-            {
-                if (p.kind == completion_kind::epoch && p.target < open_epoch)
-                    t.epoch = t.epoch == 0 ? p.target : cc::min(t.epoch, p.target);
-                else if (p.kind == completion_kind::submission && p.target != u64(submission_token::not_submitted))
-                    t.submission = t.submission == 0 ? p.target : cc::min(t.submission, p.target);
-            }
-            return t;
-        });
-
-    settle_due_completions();
-    if (targets.submission == 0 && targets.epoch == 0)
-        return false; // nothing the GPU could signal: drains settle from their actors, open epochs after an advance
-
-    // A GPU target may itself wait on a copy only a sibling actor signals, so every sibling runs before this parks.
-    if (cc::thread_pump_all())
-        return true;
-
-    wait_for_completion_signal(targets.submission, targets.epoch, 0);
-    settle_due_completions();
-    return true;
-}
-
 void context::stop_completion_signals()
 {
     auto* const s = _completion_signals.get();
@@ -417,13 +336,6 @@ void context::stop_completion_signals()
     s->is_torn_down = true;
 
     _pending_completions.lock([&](cc::vector<pending_completion>&) { s->is_stopped = true; });
-    wake_completion_signals();
-#if CC_HAS_THREADS
-    if (s->waiter.joinable())
-        s->waiter.join();
-#else
-    s->pump.reset();
-#endif
 
     // What is due settles as a value; everything else fails rather than parking its dependents for the process's lifetime.
     settle_due_completions();
@@ -468,9 +380,31 @@ cc::shared_async<cc::unit const> context::transfers_drained_completion()
     return completion_for(0, completion_kind::transfers_drained);
 }
 
+namespace
+{
+/// `node`, homed to the device's home where the context has one, since its steps retire epochs and so touch the device.
+[[nodiscard]] cc::shared_async<cc::unit> on_device_home(context const& ctx, cc::shared_async<cc::unit> node)
+{
+    if (auto* const home = ctx.device_home())
+        (void)node->try_home_cold(*home);
+    return node;
+}
+} // namespace
+
 cc::shared_async<cc::unit> context::idle_completion()
 {
-    // Three things, in block_until_idle's order and for its reasons: the GPU first, since an actor delivers a
+    return on_device_home(*this, idle_completion_steps());
+}
+
+cc::shared_async<cc::unit> context::epochs_in_flight_completion(int allowed_in_flight)
+{
+    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
+    return on_device_home(*this, epochs_in_flight_steps(allowed_in_flight));
+}
+
+cc::shared_async<cc::unit> context::idle_completion_steps()
+{
+    // Three things, in drain_at_shutdown's order and for its reasons: the GPU first, since an actor delivers a
     // download only after the GPU wrote it, then the actors, then the epochs the submission timeline does not cover.
     if (auto const last = last_issued_submission(); last != submission_token::not_submitted)
         co_await submission_completion(last);
@@ -486,26 +420,52 @@ cc::shared_async<cc::unit> context::idle_completion()
     co_return;
 }
 
-void context::block_until_epochs_in_flight(int allowed_in_flight)
+cc::shared_async<cc::unit> context::epochs_in_flight_steps(int allowed_in_flight)
 {
-    CC_ASSERT(execution() == execution_model::may_block,
-              "block_until_epochs_in_flight() waits, and this context cannot — bound the depth with "
-              "try_advance_epoch() instead");
-    CC_ASSERT(allowed_in_flight >= 0, "allowed_in_flight must be non-negative");
-
-    // Retire before waiting: an epoch the GPU already finished still counts as in flight until someone reclaims it,
-    // so a caller that skipped this would park against depth that is no longer there.
+    // After a retire, the oldest epoch still in flight is the one past the newest the GPU finished.
     process_completed_epochs();
     while (in_flight_epoch_count() > allowed_in_flight)
-        wait_for_next_inflight_epoch(); // retires as it goes, so this terminates
+    {
+        co_await epoch_completion(epoch(u64(completed_epoch()) + 1));
+        process_completed_epochs();
+    }
+    co_return;
 }
 
-void context::block_until_idle()
+cc::shared_async<compute_pipeline_handle> context::create_compute_pipeline_async(compute_pipeline_description const& desc,
+                                                                                 lifetime_scope scope)
 {
-    CC_ASSERT(execution() == execution_model::may_block,
-              "block_until_idle() waits, and this context cannot — read completion off the *_completion() asyncs, or "
-              "poll across frames");
+    auto build = [this, d = compute_pipeline_description(desc),
+                  scope](cc::async_context<compute_pipeline_handle>& actx) -> cc::async_step_status
+    {
+        auto res = try_create_compute_pipeline(d, scope);
+        if (res.has_error())
+            return actx.error(cc::move(res.error()));
+        return actx.success(cc::move(res.value()));
+    };
+    if (_device_home != nullptr)
+        return cc::make_async_scheduled_on<compute_pipeline_handle>(*_device_home, cc::move(build));
+    return cc::make_async_scheduled<compute_pipeline_handle>(cc::move(build));
+}
 
+cc::shared_async<raster_pipeline_handle> context::create_raster_pipeline_async(raster_pipeline_description const& desc,
+                                                                               lifetime_scope scope)
+{
+    auto build = [this, d = raster_pipeline_description(desc),
+                  scope](cc::async_context<raster_pipeline_handle>& actx) -> cc::async_step_status
+    {
+        auto res = try_create_raster_pipeline(d, scope);
+        if (res.has_error())
+            return actx.error(cc::move(res.error()));
+        return actx.success(cc::move(res.value()));
+    };
+    if (_device_home != nullptr)
+        return cc::make_async_scheduled_on<raster_pipeline_handle>(*_device_home, cc::move(build));
+    return cc::make_async_scheduled<raster_pipeline_handle>(cc::move(build));
+}
+
+void context::drain_at_shutdown()
+{
     // Three things, in this order, and the order is the point.
     // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first
     // would let a copy land behind us.
@@ -515,7 +475,9 @@ void context::block_until_idle()
     // And the epoch fence last, which the submission timeline does NOT cover: an epoch signals after the work it
     // gates, so everything submitted can be done while the epoch that owns it has not retired — and its command
     // allocators, its staged deletions and its finalizers would still be outstanding.
-    block_until_epochs_in_flight(0);
+    process_completed_epochs();
+    while (in_flight_epoch_count() > 0)
+        wait_for_next_inflight_epoch(); // retires as it goes, so this terminates
 }
 
 

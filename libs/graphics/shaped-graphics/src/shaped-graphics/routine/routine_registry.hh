@@ -37,6 +37,34 @@ struct routine_key
 
     [[nodiscard]] friend u64 hash(routine_key const& k) { return cc::make_hash(u64(k.type), k.params_hash); }
 };
+
+/// What routine_registry::idle_completion parks on between ticks: a phase settling, or a phase asking for the next window.
+/// One per idle_completion, re-armed before every tick; a fire with nothing armed is dropped, since the next tick sees its cause anyway.
+struct routine_progress_signal
+{
+    cc::mutex<cc::shared_async<cc::unit>> armed;
+
+    /// A fresh node for the waiter to await, replacing whatever was armed.
+    [[nodiscard]] cc::shared_async<cc::unit> arm()
+    {
+        auto node = cc::make_async_manual<cc::unit>();
+        armed.lock([&](cc::shared_async<cc::unit>& a) { a = node; });
+        return node;
+    }
+
+    void fire()
+    {
+        auto const node = armed.lock(
+            [](cc::shared_async<cc::unit>& a)
+            {
+                auto out = cc::move(a);
+                a = {};
+                return out;
+            });
+        if (node != nullptr)
+            node->push_value(cc::unit{});
+    }
+};
 } // namespace impl
 
 } // namespace sg
@@ -110,11 +138,18 @@ public:
     /// One list is shared by every routine initialized in the same tick, so their GPU init work batches.
     ///
     /// Routines register themselves on first acquire or prewarm; this is what actually brings them up.
+    ///
+    /// **On a context that cannot block, a tick also leaves as soon as nothing progresses within it**, budget or not.
+    /// What a phase waits on there — a pipeline, a readback — can only arrive once the tick has returned, so staying would spin until the budget ran out, or forever without one.
     routine_tick_result tick(routine_tick_options const& options = {});
 
-    /// tick() until nothing is pending — the spelling a test, a tool or a loading screen wants.
+    /// tick() until nothing is pending, awaiting progress between ticks — the spelling a test, a tool or a loading screen wants.
+    ///
+    /// Between two ticks it parks until a running phase settles or a parked one asks for a command list, so it never spins a context that cannot block.
+    /// It settles once nothing is pending, which a phase that never settles means never — a failed routine is not pending.
+    /// Cold, and homed to the device's home where the context has one, since every tick records on the device.
     /// Unbounded by construction, so never on a frame path.
-    routine_tick_result tick_until_idle();
+    [[nodiscard]] cc::shared_async<routine_tick_result> idle_completion();
 
     /// Where `routine` stands, folding in everything it depends on.
     ///
@@ -165,6 +200,12 @@ private:
     /// Stop handing the list out, before the tick submits it.
     /// A phase that resumes after this parks on the next window rather than recording into a submitted list.
     void close_window();
+
+    /// The phases still running in any registered routine.
+    [[nodiscard]] cc::vector<cc::shared_async<cc::unit>> in_flight_phases();
+
+    /// The coroutine behind idle_completion, before it is homed.
+    [[nodiscard]] cc::shared_async<routine_tick_result> idle_completion_steps();
 
     /// Every registered instance, as shared owners, so the tick can drive them without holding the map lock.
     /// Taking a snapshot matters: a routine's initialization may register another one, which would otherwise
@@ -252,6 +293,10 @@ private:
     // clear() drops these first, so a cycle that slipped past the check does not outlive the registry.
     cc::mutex<edge_map> _edges;
 
+    // Fired by next_window, so a phase parked on a window wakes whoever waits between ticks.
+    // One slot, so of two concurrent idle_completion waiters only the later one hears a window request.
+    cc::mutex<std::shared_ptr<impl::routine_progress_signal>> _progress;
+
     // One window at a time, and one mutex around it: every routine initialized in a tick records into the same list,
     // from whichever worker its coroutine happens to be on.
     cc::mutex<window_state> _window;
@@ -260,6 +305,9 @@ private:
     // An application that never ticks gets a renderer where nothing is ever ready, and nothing else would say so:
     // every acquire reads pending, every draw is skipped, and the screen is empty with no error anywhere.
     cc::atomic<u64> _ticks = 0;
+
+    // Where a thread-bound context's init phases start, so they resume on the ticking thread; null otherwise.
+    std::unique_ptr<cc::singlethreaded_scheduler> _phase_scheduler;
     cc::atomic<u64> _pending_acquires = 0;
     cc::atomic<bool> _warned_never_ticked = false;
 };

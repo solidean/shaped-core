@@ -1,6 +1,7 @@
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>           // sg::create_dx12_context
@@ -74,5 +75,37 @@ ASYNC_TEST("sg dx12 hardware backend")
     }
 }
 
+// The whole sweep again under a browser's rules: the context reports never_block, so any sg call that would wait on the calling thread asserts, and so does any test that reaches for one.
+// It proves the non-blocking spellings suffice on the dev box, long before a backend that genuinely cannot wait exists.
+//
+// On WARP whatever hardware the host has, since what it proves is about sg rather than the device.
+// A third hardware context overlapping the other two is exactly the device-lifecycle overlap the NVIDIA driver deadlocks on (docs/bugs-external/nvidia-raytracing-device-lifecycle-cross-api-deadlock).
+ASYNC_TEST("sg dx12 never-block backend")
+{
+    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true,
+                                        .adapter = sg::backend::dx12::dx12_adapter::warp,
+                                        .execution = sg::execution_model::never_block});
+    if (ctx.has_error())
+        SKIP("no dx12 device");
+    else
+    {
+        co_await nx::async_invoke_tests_in_sequence("dx12-never-block", ctx.value());
+
+        // Nothing here can wait, so what the tests left running is awaited before the context goes.
+        co_await cc::async_settled(ctx.value()->backlog.settled());
+        co_await cc::async_settled(ctx.value()->idle_completion());
+
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
+    }
+}
+
 static bool const sg_dx12_warp_registered = sg_test::register_backend("sg dx12 warp backend", "dx12-warp");
 static bool const sg_dx12_hw_registered = sg_test::register_backend("sg dx12 hardware backend", "dx12-hw");
+static bool const sg_dx12_never_block_registered
+    = sg_test::register_backend("sg dx12 never-block backend", "dx12-never-block");
+static bool const sg_dx12_factory_registered = sg_test::register_context_factory(
+    "dx12",
+    [] { return sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp}); });

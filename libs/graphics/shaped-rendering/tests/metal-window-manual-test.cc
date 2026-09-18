@@ -56,7 +56,7 @@ ASYNC_TEST("sr - metal presents to a window (manual)", nx::config::manual, main_
 
         co_await ctx->idle_completion();
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(2);
+        co_await ctx->epochs_in_flight_completion(2);
     }
 
     CHECK(!ctx->is_device_lost());

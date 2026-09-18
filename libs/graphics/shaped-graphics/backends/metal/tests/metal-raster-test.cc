@@ -3,6 +3,7 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
@@ -117,7 +118,7 @@ TEST("sg metal - pipelines build concurrently from several contexts")
     CHECK(built.load(std::memory_order_acquire) == thread_count);
 }
 
-TEST("sg metal - a rendering scope clears and draws")
+ASYNC_TEST("sg metal - a rendering scope clears and draws")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -147,7 +148,7 @@ TEST("sg metal - a rendering scope clears and draws")
     auto future = cmd->download.bytes_from_texture(target.raw());
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -173,7 +174,7 @@ TEST("sg metal - a rendering scope clears and draws")
                             int(u8(bytes.value()[3]))));
 }
 
-TEST("sg metal - an empty rendering scope opens and closes")
+ASYNC_TEST("sg metal - an empty rendering scope opens and closes")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -196,7 +197,7 @@ TEST("sg metal - an empty rendering scope opens and closes")
         (void)scope;
     }
     ctx->submit_command_list(cc::move(cmd));
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     CHECK(!ctx->is_device_lost());
 }
@@ -224,8 +225,8 @@ namespace
 }
 
 /// The depth texels of a 4×4 `depth32_float` target, read back.
-[[nodiscard]] cc::vector<float> draw_depth_only(mtl::metal_context_handle const& ctx,
-                                                sg::depth_stencil_state const& depth_stencil)
+[[nodiscard]] cc::shared_async<cc::vector<float>> draw_depth_only(mtl::metal_context_handle ctx,
+                                                                  sg::depth_stencil_state depth_stencil)
 {
     constexpr auto k_size = 4;
     auto const depth = ctx->persistent.create_texture_2d({
@@ -248,7 +249,7 @@ namespace
     }
     auto future = cmd->download.bytes_from_texture(depth.raw());
     ctx->submit_command_list(cc::move(cmd));
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     auto const bytes = future.try_get_bytes();
     CC_ASSERT(bytes.has_value(), "the depth readback never landed");
@@ -257,11 +258,11 @@ namespace
     auto const* const texels = reinterpret_cast<float const*>(bytes.value().data());
     for (auto i = 0; i < k_size * k_size; ++i)
         out.push_back(texels[i]);
-    return out;
+    co_return out;
 }
 } // namespace
 
-TEST("sg metal - a depth-only pass writes depth")
+ASYNC_TEST("sg metal - a depth-only pass writes depth")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -270,7 +271,7 @@ TEST("sg metal - a depth-only pass writes depth")
     // A pipeline with no fragment stage is a depth-only pass, and Metal runs one from the vertex stage alone.
     // Turning rasterization off because there is no fragment function discards every primitive before the depth test,
     // so the pass writes nothing and this reads back the clear.
-    auto const depth = draw_depth_only(ctx, {.depth_test = true, .depth_write = true});
+    auto const depth = co_await draw_depth_only(ctx, {.depth_test = true, .depth_write = true});
 
     REQUIRE(depth.size() == 16);
     auto wrong = 0;
@@ -280,7 +281,7 @@ TEST("sg metal - a depth-only pass writes depth")
     CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were not written; first is {}", wrong, depth[0]));
 }
 
-TEST("sg metal - depth is not written with the test off")
+ASYNC_TEST("sg metal - depth is not written with the test off")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -289,7 +290,7 @@ TEST("sg metal - depth is not written with the test off")
     // `depth_write` alone is not a licence to write depth through a pass that declared it is not testing it — dx12 and
     // vulkan both write nothing here, and mapping a disabled test to `CompareFunctionAlways` while keeping the write
     // makes metal the odd one out.
-    auto const depth = draw_depth_only(ctx, {.depth_test = false, .depth_write = true});
+    auto const depth = co_await draw_depth_only(ctx, {.depth_test = false, .depth_write = true});
 
     REQUIRE(depth.size() == 16);
     auto wrong = 0;
@@ -299,7 +300,7 @@ TEST("sg metal - depth is not written with the test off")
     CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were written; first is {}", wrong, depth[0]));
 }
 
-TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
+ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -366,7 +367,7 @@ TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
     auto masked_future = cmd->download.bytes_from_texture(masked_out.raw());
     auto drawn_future = cmd->download.bytes_from_texture(drawn.raw());
     ctx->submit_command_list(cc::move(cmd));
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     auto const masked_bytes = masked_future.try_get_bytes();
     auto const drawn_bytes = drawn_future.try_get_bytes();

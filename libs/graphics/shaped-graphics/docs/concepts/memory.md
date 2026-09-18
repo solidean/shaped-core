@@ -60,7 +60,9 @@ It is desired because a one-epoch-sized heap serves any pipelining depth, which 
 A request larger than the budget falls back to a dedicated (committed) allocation.
 The budget defaults to 128 MiB and covers everything the bump heap backs, set with `ctx.transient.set_budget`.
 That setter is deferred: it records a pending budget and returns without touching the GPU.
-The **next** `advance_epoch` applies it by draining in-flight work and resizing the heap, so the change is predictable and never mid-epoch.
+The **next** `advance_epoch` applies it by dropping the heap, and the next transient allocation creates one at the new size, so the change is predictable and never mid-epoch.
+Nothing waits: every buffer placed in the old heap holds a handle to it, and its release is epoch-deferred, so the old heap lives exactly as long as the GPU work that reads it.
+For an epoch or two both heaps exist; a caller for whom that matters lets the in-flight epochs retire before setting the budget.
 
 > This bump-reset-and-alias scheme is specific to buffers, whose transient contents are only ever GPU-touched.
 > Transient **descriptors** are different: they are written by the CPU at group creation, so a slot cannot be reused until the epoch that wrote it retires.

@@ -479,6 +479,18 @@ A symbol in a library's exported `FILE_SET` — a backend header included — is
 An unused-looking member there wants its *correctness* checked rather than its existence questioned.
 Say which of the two you are claiming, because they get answered differently.
 
+**It binds a design review too, where "nobody uses it" tempts a deletion that makes a new backend cheaper.**
+The WebGPU backend design found `sg::bound_sampler` — a register-bound static sampler on a pipeline layout — constructed by no library or example, only by three tests.
+WebGPU has no static samplers, so the review recommended deleting the spelling rather than emulating it in the reserved group.
+The maintainer's answer, verbatim:
+
+```raw
+let's go with B. so we support it fully. the feature is simply not used _yet_. and we dont expect to write WGSL by hand for long.
+```
+
+A feature with no callers in a young library is usually a feature whose callers have not been written.
+Deleting it is the option to offer, not the one to recommend on that evidence alone.
+
 ### Drive-by cleanups are welcome where the PR already is
 
 The libraries are in flux, so cleanups get postponed by prioritization rather than by policy — fringe and niche APIs carry debt on purpose.
@@ -672,6 +684,14 @@ Grep for the connecting call, not for the member.
 The same draft told the author to call `impl::notify_transfer_drained(*ctx)` from a commit feedback handler that captures no context on purpose, because it can run after shutdown.
 It told them to push a cancellation into a completion hidden inside a `cc::unique_function`, and to assert against a raster pipeline layout with no accessor.
 Every mechanism was right and every fix was unbuildable as written.
+
+**So is the price of an option you did not recommend.**
+The WebGPU backend design needed a wasm test to wait for a WebGPU callback, and priced "make nexus's executor resumable" as much larger than linking JSPI into test binaries.
+It called the change "much larger" and one that "changes nexus on every platform to serve one", and rejected it on that.
+The maintainer asked whether an async run driven by the browser loop would not simply work.
+It would: every test is already an async node, and the blocking lives in three drivers, of which a no-threads build reaches only `drive_serially`.
+Its "no progress" branch is exactly where a return to the host goes.
+The executor had not been read when the option was priced, and the inflated price is what made the recommended option look cheap.
 
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.

@@ -18,22 +18,12 @@ enum class sg::sampler_filter
 };
 
 /// How texture coordinates outside [0, 1) are resolved, per axis.
+/// Border and mirror-once addressing are absent on purpose: WebGPU has neither, so no portable sampler can use them.
 enum class sg::sampler_address_mode
 {
-    repeat,            ///< wrap (Vk REPEAT / D3D WRAP)
-    mirror_repeat,     ///< wrap, mirroring every other tile (Vk MIRRORED_REPEAT / D3D MIRROR)
-    clamp_edge,        ///< clamp to the edge texel (Vk CLAMP_TO_EDGE / D3D CLAMP)
-    clamp_border,      ///< return `border_color` outside (Vk CLAMP_TO_BORDER / D3D BORDER)
-    mirror_clamp_edge, ///< mirror once, then clamp (Vk MIRROR_CLAMP_TO_EDGE / D3D MIRROR_ONCE)
-};
-
-/// The fixed border color used by `clamp_border` addressing.
-/// The portable set — the three every backend supports as a static sampler; an arbitrary float4 border is deferred.
-enum class sg::sampler_border_color
-{
-    transparent_black, ///< (0, 0, 0, 0)
-    opaque_black,      ///< (0, 0, 0, 1)
-    opaque_white,      ///< (1, 1, 1, 1)
+    repeat,        ///< wrap (Vk REPEAT / D3D WRAP)
+    mirror_repeat, ///< wrap, mirroring every other tile (Vk MIRRORED_REPEAT / D3D MIRROR)
+    clamp_edge,    ///< clamp to the edge texel (Vk CLAMP_TO_EDGE / D3D CLAMP)
 };
 
 /// Comparison function for a comparison ("shadow") sampler — compares the fetched texel against the
@@ -73,9 +63,6 @@ struct sg::sampler
 
     /// Set for a comparison ("shadow") sampler — the filters then apply to the comparison result.
     cc::optional<compare_op> compare = {};
-
-    /// Border texel returned by `clamp_border` addressing; ignored by the other address modes.
-    sampler_border_color border_color = sampler_border_color::transparent_black;
 
     [[nodiscard]] bool operator==(sampler const&) const = default;
 };

@@ -134,9 +134,12 @@ src/shaped-graphics/
 backends/                                       # each subclasses the abstract sg types directly
   dx12/                           [in progress] sg::backend::dx12 + sg::create_dx12_context (Windows): real device/cmd-list/buffer/texture
     tests/                                      own *-test binary for dx12-specific tests (WARP + hardware)
-  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): real across the surface
-  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): real across the surface; presents windowed and headless; records GPU timestamps
-  webgpu/                         [planned]     tier 2
+  vulkan/                         [in progress] sg::backend::vulkan + sg::create_vulkan_context (native desktop): the whole surface, ray tracing included
+  metal/                          [in progress] sg::backend::metal + sg::create_metal_context (Apple, Metal 4): the whole surface, ray tracing included;
+                                                presents windowed and headless; records GPU timestamps
+  webgpu/                         [in progress] sg::backend::webgpu + sg::request_webgpu_context (wasm, emdawnwebgpu): the whole surface but ray tracing;
+                                                never blocks. See backends/webgpu/readme.md
+    tests/                                      shaped-graphics-webgpu-test over hand-written WGSL
   opengl/                         [planned]     legacy compat
   webgl/                          [planned]     legacy compat
 ```
@@ -144,15 +147,16 @@ backends/                                       # each subclasses the abstract s
 ## Backend tiers
 
 - **Tier 1 (now):** dx12, vulkan.
-  Both are real across the surface, including ray tracing.
-- **Tier 2 (soon):** metal, webgpu.
-  metal is real across the surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
+  Both are real across the surface.
+- **Tier 2:** metal and webgpu are both real; webgpu is the one missing ray tracing.
+  metal covers the whole surface on Metal 4 (macOS / iOS 26, Apple silicon), presenting windowed and headless and recording GPU timestamps.
   It refuses below its floor rather than degrading, realizes the epochs on a pair of MTLSharedEvents, and runs the whole tier-1 sweep unconditionally.
   `SC_THREADS=OFF` is refused on Apple targets, because metal takes command-buffer completion on a thread the flag cannot remove.
   See [platforms.md](../../../../docs/platforms.md#threading-sc_threads).
+  webgpu runs on wasm and never blocks; what WebGPU lacks is emulated or refused, and [backends/webgpu/readme.md](../backends/webgpu/readme.md) has the table.
 - **Legacy compat (planned):** opengl, webgl.
 
-A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop).
+A backend is built only where its platform allows it — the gates are platform-only (dx12 → Windows, vulkan → native desktop, webgpu → Emscripten with `SC_WASM_WEBGPU`).
 dx12 links the Windows-SDK D3D12 libs (`d3d12 dxgi dxguid`), always present on the Windows path.
 vulkan gates on `find_package(Vulkan)` and links `Vulkan::Vulkan`, so it builds wherever a Vulkan SDK is installed.
 
@@ -259,6 +263,6 @@ See [concepts/epochs.md](concepts/epochs.md).
 4. textures + views                                        [in progress]  resource, creation, views and host↔device copies done (dx12 real, vulkan minimal); texel buffer views remain
 5. pipelines + shaders                                     [in progress]  compute + raster bind paths dx12-real, DXC compiler in place (vulkan pending)
 6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
-7. tier 2 backends (metal, webgpu)                         [planned]
+7. tier 2 backends (metal, webgpu)                         [in progress]  webgpu real on wasm but ray tracing; metal planned
 8. legacy backends (opengl, webgl)                         [planned]
 ```

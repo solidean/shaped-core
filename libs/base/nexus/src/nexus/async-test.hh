@@ -39,6 +39,7 @@
 #include <clean-core/common/utility.hh> // cc::unit
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/typed_value.hh>
@@ -47,11 +48,21 @@
 #include <typeindex>
 #include <utility> // std::index_sequence
 
-/// Options for nx::async_invoke_tests_in_parallel.
-struct nx::parallel_invocation_options
+/// Options for nx::async_invoke_tests_in_sequence and nx::async_invoke_tests_in_parallel.
+struct nx::invocation_options
 {
     /// How many children may run at once; 0 bounds them only by the scheduler.
+    /// Ignored by a sequential invocation, which runs one at a time anyway.
     isize max_concurrent = 0;
+
+    /// Home every child where the invoking body is homed, rather than letting each child's own asks place it.
+    ///
+    /// A child that asks for nothing otherwise runs wherever the phase's scheduler puts it, which is a pool worker even under a `main_thread` driver.
+    /// That is right for a child that is thread-agnostic and wrong for one driving a resource bound to one thread — a WebGPU device in a threaded wasm build.
+    /// The driver must be homed when it invokes, which `main_thread` does; a child's own `main_thread` still wins.
+    /// Only the child's body is placed: its helper coroutines are unhomed asyncs, which go to compute like any homed body's.
+    /// A helper that must touch the pinned subject hops there itself, and one that does not surfaces on its first line rather than after a suspend.
+    bool inherit_home = false;
 };
 
 namespace nx::impl
@@ -67,20 +78,26 @@ cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
                                                             cc::vector<std::type_index> signature,
                                                             cc::vector<typed_value> boxes,
                                                             bool in_parallel,
-                                                            isize max_concurrent);
+                                                            isize max_concurrent,
+                                                            cc::thread_bound_scheduler* home);
+
+// The home the calling body runs in, for invocation_options::inherit_home; asserts there is one.
+[[nodiscard]] cc::thread_bound_scheduler* invoking_home();
 
 template <class... Args>
 cc::shared_async<invocation_result> async_invoke_tests_boxed(cc::string_view name,
                                                              bool in_parallel,
-                                                             isize max_concurrent,
+                                                             invocation_options const& options,
                                                              Args... args)
 {
+    // Read now, in the invoking body's segment: the invocation's own coroutine is cold and may first run elsewhere.
+    auto* const home = options.inherit_home ? invoking_home() : nullptr;
     static_assert(sizeof...(Args) >= 1, "an async invocation needs at least one argument (the join key)");
     auto boxes = cc::vector<typed_value>();
     boxes.reserve(sizeof...(Args));
     (boxes.push_back(typed_value::create(cc::move(args))), ...);
     return async_invoke_tests_impl(cc::string(name), cc::arg_types_of(cc::signature<void(Args...)>{}), cc::move(boxes),
-                                   in_parallel, max_concurrent);
+                                   in_parallel, options.max_concurrent, home);
 }
 
 template <class... A, std::size_t... I>
@@ -199,7 +216,16 @@ namespace nx
 template <class... Args>
 [[nodiscard]] cc::shared_async<invocation_result> async_invoke_tests_in_sequence(cc::string_view name, Args... args)
 {
-    return impl::async_invoke_tests_boxed(name, false, 0, cc::move(args)...);
+    return impl::async_invoke_tests_boxed(name, false, invocation_options{}, cc::move(args)...);
+}
+
+/// The same, placed by `options`; see invocation_options::inherit_home.
+template <class... Args>
+[[nodiscard]] cc::shared_async<invocation_result> async_invoke_tests_in_sequence(cc::string_view name,
+                                                                                 invocation_options options,
+                                                                                 Args... args)
+{
+    return impl::async_invoke_tests_boxed(name, false, options, cc::move(args)...);
 }
 
 /// Start every invocable matching `args...`, then await them all.
@@ -211,16 +237,16 @@ template <class... Args>
 template <class... Args>
 [[nodiscard]] cc::shared_async<invocation_result> async_invoke_tests_in_parallel(cc::string_view name, Args... args)
 {
-    return impl::async_invoke_tests_boxed(name, true, 0, cc::move(args)...);
+    return impl::async_invoke_tests_boxed(name, true, invocation_options{}, cc::move(args)...);
 }
 
-/// The same, with at most `options.max_concurrent` children running at once.
+/// The same, with at most `options.max_concurrent` children running at once, placed by `options`.
 template <class... Args>
 [[nodiscard]] cc::shared_async<invocation_result> async_invoke_tests_in_parallel(cc::string_view name,
-                                                                                 parallel_invocation_options options,
+                                                                                 invocation_options options,
                                                                                  Args... args)
 {
-    return impl::async_invoke_tests_boxed(name, true, options.max_concurrent, cc::move(args)...);
+    return impl::async_invoke_tests_boxed(name, true, options, cc::move(args)...);
 }
 } // namespace nx
 

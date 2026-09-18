@@ -47,6 +47,14 @@ public:
 
     [[nodiscard]] cc::result<raster_pipeline_handle> try_create_raster_pipeline(raster_pipeline_description const& desc);
 
+    /// The same builds as asyncs, validated as the synchronous forms are, with a failure as the node's error.
+    /// What ctx.cached awaits.
+    /// A backend whose API compiles pipelines asynchronously finishes one without occupying a thread, and every other backend runs its synchronous build where the node is scheduled.
+    [[nodiscard]] cc::shared_async<compute_pipeline_handle> create_compute_pipeline_async(
+        compute_pipeline_description const& desc);
+    [[nodiscard]] cc::shared_async<raster_pipeline_handle> create_raster_pipeline_async(
+        raster_pipeline_description const& desc);
+
     /// Builds a raytracing_pipeline (a DXR state object) from a description.
     /// Blocking backend state-object creation — prefer ctx.cached.acquire_raytracing_pipeline for an async, deduplicated build.
     /// Throws sg::pipeline_creation_exception on failure.

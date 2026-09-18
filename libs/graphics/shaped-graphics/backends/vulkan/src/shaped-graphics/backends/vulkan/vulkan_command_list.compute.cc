@@ -15,6 +15,7 @@ namespace sg::backend::vulkan
 {
 void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeline)
 {
+    keep_bound(pipeline.weak_from_this().lock());
     auto const* vp = dynamic_cast<vulkan_compute_pipeline const*>(&pipeline);
     CC_ASSERT(vp != nullptr, "compute_pipeline is not a vulkan compute_pipeline");
 
@@ -36,6 +37,7 @@ void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
 
 void vulkan_command_list::compute_bind_group(int group_index, sg::binding_group const& group)
 {
+    keep_bound(group.weak_from_this().lock());
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before binding groups");
     CC_ASSERT(group_index >= 0 && group_index < int(_bound_groups.size()), "binding-group slot out of range for the "
                                                                            "bound pipeline layout");

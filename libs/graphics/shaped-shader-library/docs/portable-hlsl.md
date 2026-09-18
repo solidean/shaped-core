@@ -2,8 +2,11 @@
 
 The design for a blessed way to write one `.hlsl` that compiles correctly for every backend.
 
-Today's targets are dx12 (DXIL) and vulkan (SPIR-V), both through DXC.
-Metal and WebGPU are intended, and reuse the same two arms — metal-shaderconverter consumes DXIL, Tint consumes SPIR-V — so a third arm is not automatically a third spelling.
+**Status: the dx12 / vulkan scope only, and deferred beyond it until further notice.**
+Its targets are dx12 (DXIL) and vulkan (SPIR-V), both through DXC, and there it is enough.
+Reaching Metal and WebGPU through it would mean DXC plus metal-shaderconverter or Tint / naga at runtime, large dependencies that cannot be shipped to wasm.
+It would also mean non-trivial HLSL rewrites to emulate what those targets lack.
+Those backends are served by sgl instead, the shading language of our own that slib's [structure](structure.md) roadmap carries; until it lands, WebGPU shaders are WGSL written by hand.
 
 Three things diverge between the targets, and each has an answer of its own:
 

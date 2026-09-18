@@ -39,6 +39,7 @@ add_library(shaped-graphics
     src/shaped-graphics/routine/render_routine.cc
     src/shaped-graphics/routine/routine_registry.cc
     src/shaped-graphics/context/context.cc
+    src/shaped-graphics/context/impl/completion_waiter.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/persistent.cc
@@ -67,6 +68,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/types.hh
     src/shaped-graphics/exceptions.hh
     src/shaped-graphics/context/context.hh
+    src/shaped-graphics/context/impl/completion_waiter.hh
     src/shaped-graphics/context/impl/device_lifecycle.hh
     src/shaped-graphics/context/persistent.hh
     src/shaped-graphics/context/transient.hh
@@ -205,6 +207,13 @@ if(NOT EMSCRIPTEN)
     endif()
 endif()
 
+# The WebGPU backend builds over emdawnwebgpu, which only the Emscripten WebGPU presets bring.
+if(EMSCRIPTEN AND SC_WASM_WEBGPU)
+    add_subdirectory(backends/webgpu)
+    list(APPEND _sg_backends shaped-graphics-webgpu)
+    list(APPEND _sg_test_drivers webgpu)
+endif()
+
 # Test executable. Tests are organized by topic under tests/<topic>/. Pure/abstract-surface tests (value
 # types, no GPU) compile unconditionally; the backend-agnostic sg *API* tests are context_handle
 # INVOCABLE_TESTs run against every available backend and are gated on a registered driver being present
@@ -283,6 +292,9 @@ if(SC_BUILD_TESTS)
             # initializes — so it cannot be done from the entry driver the way the other backends' config flags are.
             target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_METAL)
         endif()
+        if(EMSCRIPTEN AND SC_WASM_WEBGPU)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/webgpu-entry.cc)
+        endif()
     endif()
 
     target_link_libraries(shaped-graphics-test
@@ -311,7 +323,11 @@ if(SC_BUILD_TESTS)
             SHADERS
                 double_values.hlsl:compute:main
                 pattern_fill.hlsl:compute:main
+                ping_pong.hlsl:compute:main
         )
+
+        # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
+        target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
         # suite, so they need only the shader package this block already gated: the end-to-end test

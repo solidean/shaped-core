@@ -1,6 +1,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <imgui/imgui.h>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
@@ -79,7 +80,7 @@ void draw_guide(sr::imgui_context const& imgui, sr::window_system const& wsys, f
 }
 } // namespace
 
-TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-window-system"))
+ASYNC_TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-window-system"), main_thread)
 {
     auto const wsys = sr::window_system::create();
     auto const win = wsys->create_window({.title = "shaped-rendering — close this window to end the test", //
@@ -138,12 +139,12 @@ TEST("sr - imgui window (manual)", nx::config::manual, exclusive("sr-window-syst
         // The #0b0d12 brand ground, so the central dockspace matches the theme's window backgrounds.
         sr::render_imgui(imgui, *ctx, *sc, tg::vec4f(0.043f, 0.051f, 0.071f, 1.0f));
         ctx->advance_epoch();
-        ctx->block_until_epochs_in_flight(sc->buffer_count());
+        co_await ctx->epochs_in_flight_completion(sc->buffer_count());
     }
 
     // Drain before the swapchain and the window go away: the last frames are still in flight.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
     cc::println("close requested — shutting down");
 }
 

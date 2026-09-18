@@ -16,8 +16,8 @@
 ///
 /// A context owns one of these, reached via ctx.cached; the acquire_* methods take the owning context so the cache stays a plain member.
 ///
-/// Threading: the async pipeline build calls a backend create from a pool worker, which is only safe where the backend permits concurrent pipeline creation (dx12 device creates are free-threaded).
-/// With a single_threaded thread_model, install no pool and drive the node inline on the main thread via cc::async_blocking_get.
+/// Free-threaded: layout acquisition deduplicates under the cache's lock, and a pipeline build runs on the context's device_home() where it has one.
+/// Without one it runs wherever its node is scheduled, which the multi_threaded backends allow, their pipeline creates being free-threaded.
 
 class sg::pipeline_cache
 {

@@ -14,6 +14,8 @@ add_library(shaped-shader-library
     src/shaped-shader-library/filesystem/impl/path.cc
     src/shaped-shader-library/filesystem/impl/watch_registry.cc
     src/shaped-shader-library/binding/binding_groups.cc
+    src/shaped-shader-library/binding/wgsl_declarations.cc
+    src/shaped-shader-library/compiler/wgsl_compiler.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
     src/shaped-shader-library/binding/impl/hlsl_value_types.cc
@@ -41,6 +43,8 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/filesystem/real_filesystem.hh
     src/shaped-shader-library/filesystem/mount_table.hh
     src/shaped-shader-library/binding/binding_groups.hh
+    src/shaped-shader-library/binding/wgsl_declarations.hh
+    src/shaped-shader-library/compiler/wgsl_compiler.hh
     src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh
@@ -109,7 +113,9 @@ if(SC_BUILD_TESTS)
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc
+        tests/wgsl_compiler-test.cc
         tests/binding/binding_groups-test.cc
+        tests/binding/wgsl_declarations-test.cc
     )
     sc_nexus_binary(shaped-shader-library-test KINDS tests)
 

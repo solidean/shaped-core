@@ -1,6 +1,7 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
@@ -62,7 +63,7 @@ TEST("sg metal - copy usage needs no metal bit")
           == (MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite));
 }
 
-TEST("sg metal - a texture round-trips through inline transfer")
+ASYNC_TEST("sg metal - a texture round-trips through inline transfer")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -85,7 +86,7 @@ TEST("sg metal - a texture round-trips through inline transfer")
     auto future = cmd->download.bytes_from_texture(texture.raw());
     ctx->submit_command_list(cc::move(cmd));
 
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     auto const bytes = future.try_get_bytes();
     REQUIRE(bytes.has_value());
@@ -147,7 +148,7 @@ TEST("sg metal - a one-face view of a cube is a 2D texture")
     CHECK(whole == static_cast<mtl::metal_texture const&>(*texture).texture());
 }
 
-TEST("sg metal - a cached view is evicted with its texture")
+ASYNC_TEST("sg metal - a cached view is evicted with its texture")
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -176,7 +177,7 @@ TEST("sg metal - a cached view is evicted with its texture")
 
     // The eviction rides the texture's finalizer, which runs where its MTLTexture is released: at epoch retire.
     ctx->advance_epoch();
-    ctx->block_until_idle();
+    co_await ctx->idle_completion();
 
     CHECK(ctx->texture_views().debug_entry_count() == before);
 }

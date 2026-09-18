@@ -218,8 +218,7 @@ BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
 # ---------------------------------------------------------------------------------------------------
 
 SAMPLER_FILTERS = ("nearest", "linear")
-SAMPLER_ADDRESS_MODES = ("repeat", "mirror_repeat", "clamp_edge", "clamp_border", "mirror_clamp_edge")
-SAMPLER_BORDER_COLORS = ("transparent_black", "opaque_black", "opaque_white")
+SAMPLER_ADDRESS_MODES = ("repeat", "mirror_repeat", "clamp_edge")
 COMPARE_OPS = ("never", "less", "equal", "less_equal", "greater", "not_equal", "greater_equal", "always")
 
 # key -> (the sg::sampler fields it sets, the enumerator set its values come from).
@@ -233,11 +232,17 @@ SAMPLER_ENUM_KEYS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "address_u": (("address_u",), SAMPLER_ADDRESS_MODES),
     "address_v": (("address_v",), SAMPLER_ADDRESS_MODES),
     "address_w": (("address_w",), SAMPLER_ADDRESS_MODES),
-    "border_color": (("border_color",), SAMPLER_BORDER_COLORS),
     "compare": (("compare",), COMPARE_OPS),
 }
 
 SAMPLER_FLOAT_KEYS = ("mip_lod_bias", "min_lod", "max_lod")
+
+# Border and mirror-once addressing, which D3D and Vulkan have and WebGPU does not.
+# Named so a shader asking for one hears why, rather than that the word is unknown.
+# Keep in step with k_unportable_address_modes in impl/hlsl_sampler_state.cc, the messages included.
+UNPORTABLE_ADDRESS_MODES = ("clamp_border", "mirror_clamp_edge")
+UNPORTABLE_ADDRESS_REASON = ": sg has no border or mirror-once addressing, because WebGPU has neither"
+BORDER_COLOR_REASON = ": sg has no border addressing, because WebGPU has none"
 
 # The register space an inline-constants block occupies, reserved for it across every package.
 #
@@ -399,7 +404,9 @@ def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
 
             for value in values:
                 if value not in allowed:
-                    raise BindingError(f"{attribute.location}: '{value}' is not a value of '{key}'")
+                    unportable = key.startswith("address") and value in UNPORTABLE_ADDRESS_MODES
+                    reason = UNPORTABLE_ADDRESS_REASON if unportable else ""
+                    raise BindingError(f"{attribute.location}: '{value}' is not a value of '{key}'{reason}")
 
             spread = values * 3 if len(targets) == 3 and len(values) == 1 else values
             for target, value in zip(targets, spread):
@@ -409,6 +416,9 @@ def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
         # The key first, then its arity -- the order hlsl_sampler_state.cc dispatches in.
         # Checking arity first reported "'bogus' takes exactly one value" for a key that is not a field at all,
         # which is a different sentence from the C++ half's for the same input.
+        if key == "border_color":
+            raise BindingError(
+                f"{attribute.location}: 'border_color' is not a field of sg::sampler{BORDER_COLOR_REASON}")
         if key not in SAMPLER_FLOAT_KEYS and key != "max_anisotropy":
             raise BindingError(f"{attribute.location}: '{key}' is not a field of sg::sampler")
 
