@@ -228,14 +228,9 @@ void metal_transfer_system::commit(MTL4::CommandQueue* queue,
       // find every lifetime this transfer extended already given back.
       //
       // Reaching zero is what `are_transfers_drained` reports, so the completion machinery has to be told.
-      // Routed through the sink because this runs on Apple's queue, possibly after shutdown — and only with threads,
-      // since the singlethreaded pump polls `settle_due_completions` itself.
+      // Routed through the sink because this runs on Apple's queue, possibly after shutdown.
       if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
-      {
-#if CC_HAS_THREADS
           sink->notify_drained();
-#endif
-      }
     });
 
     MTL4::CommandBuffer const* const buffers[] = {command_buffer};
@@ -513,11 +508,7 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
       ctx->epochs().return_allocator_from_callback(allocator);
 
       if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
-      {
-#if CC_HAS_THREADS
           sink->notify_drained();
-#endif
-      }
     });
 
     MTL4::CommandBuffer const* const buffers[] = {command_buffer};

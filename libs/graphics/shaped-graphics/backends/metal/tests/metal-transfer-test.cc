@@ -318,7 +318,6 @@ TEST("sg metal - concurrent submits on one buffer see each other's writes")
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-#if CC_HAS_THREADS
     // Submission is thread-safe, and what makes a token mean anything is that its order is the order the queue
     // signalled in: out-of-order signals move the shared event backwards and break is_submission_complete.
     //
@@ -360,8 +359,4 @@ TEST("sg metal - concurrent submits on one buffer see each other's writes")
         if (values[i] != u32(i + 1))
             ++wrong;
     CHECK(wrong == 0).context(cc::format("{} of {} slots did not carry their thread's write", wrong, k_threads));
-
-#else
-    SKIP("a single-threaded build has no concurrent submits to order");
-#endif
 }

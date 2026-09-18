@@ -270,14 +270,9 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
               downloads->clear();
 
               // Reaching zero is what `are_transfers_drained` reports, so the completion machinery has to be told.
-              // Routed through the sink because this runs on Apple's queue, possibly after shutdown — and only with
-              // threads, since the singlethreaded pump polls `settle_due_completions` itself.
+              // Routed through the sink because this runs on Apple's queue, possibly after shutdown.
               if (has_downloads && pending_counter->fetch_sub(1, std::memory_order_acq_rel) == 1)
-              {
-#if CC_HAS_THREADS
                   sink->notify_drained();
-#endif
-              }
             });
 
             MTL4::CommandBuffer const* const buffers[] = {buffer};

@@ -44,13 +44,32 @@ set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan)
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set
 # it. Forcing single-threaded on a native host is what makes that mode developable without a wasm build.
 #
-# ON is an assertion, not a wish: a platform that cannot honor it fails configure (Emscripten.cmake) rather
-# than quietly building single-threaded. So this is never a lie, whichever way it is set.
+# Neither setting is a wish: a target that cannot honor the value it is given fails configure rather than
+# quietly building the other one. ON is refused where there are no threads (Emscripten.cmake), and OFF is
+# refused on Apple targets just below. So this is never a lie, whichever way it is set.
 #
 # No API appears or disappears with it — the threaded types fall back to running on the calling thread (see
 # cc::threaded_actor, cc::async_thread_pool). It does change struct layout (node_allocation's slab header),
 # so it is a whole-build switch: never set it per-target. Must precede include(Emscripten) below.
 option(SC_THREADS "Build with OS thread support; OFF forces a single-threaded build" ON)
+
+# Apple targets cannot honor OFF, so they refuse it instead of building something that is not single-threaded.
+#
+# Metal reports a command buffer's completion by calling back on a dispatch queue Apple owns, and that thread does not
+# go away because this option is off — so an unthreaded Apple build would run sg's completion work on a second thread
+# in a build that has compiled its locks out. There is no pollable substitute: MTL4 exposes command-buffer errors
+# through that callback and nowhere else.
+#
+# Keyed on the TARGET rather than the host, which is the whole point: a Mac cross-compiling to wasm is not an Apple
+# target, and unthreaded is precisely the mode that build ships in.
+if(APPLE AND NOT SC_THREADS)
+    message(FATAL_ERROR
+        "SC_THREADS=OFF is not supported on Apple targets.\n"
+        "The metal backend receives command-buffer completion on a dispatch queue Apple owns, which this option "
+        "cannot remove, so a single-threaded Apple build would not actually be single-threaded.\n"
+        "To exercise the unthreaded mode on a Mac, build a non-Apple target: the emscripten-* presets are "
+        "single-threaded and configure fine from a macOS host.")
+endif()
 
 # Back cc::default_memory_resource with mimalloc; OFF uses the global operator new instead.
 #

@@ -180,13 +180,16 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `raw_buffer::add_finalizer` puts them in a protected member and names the contract — released storage *and* a retired epoch — but nothing in sg core ever calls them.
   A backend that reclaims the GPU object and forgets the finalizers looks completely correct until a test asserts on one, which is what `sg - async upload to a dropped buffer still releases it` does.
   They run inside the epoch's deferred callback, after the Metal object is released: a finalizer reclaiming the memory a placed resource sits on must never observe a live handle into it.
-- **A Metal callback is a real thread even in a build with no threads.**
-  `SC_THREADS=OFF` compiles `cc::mutex`'s lock away, which is correct for state only sg's own code touches.
-  Every commit's `MTL4CommitFeedback` handler runs on a dispatch queue Apple owns, and that flag does not reach it.
-  The residency set catches it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
-  `callback_mutex` in `metal_common.hh` is `cc::mutex`'s shape with a lock that is always real.
-  Three pieces of state hold one — the residency set, the transfer system's pending map, the feedback sink's context pointer — and everything else keeps `cc::mutex`.
-  `cc::atomic` has the same shape and the same hole, being a plain value with threads off, so the two counters a commit handler decrements are `std::atomic` and say why.
+- **A Metal callback is a real thread, and it is why this backend refuses `SC_THREADS=OFF`.**
+  Every commit's `MTL4CommitFeedback` handler runs on a dispatch queue Apple owns, and no build flag of ours reaches it.
+  `SC_THREADS=OFF` used to compile `cc::mutex`'s lock away underneath that.
+  The residency set caught it immediately and fatally: `residency sets do not support concurrent write operations`, aborting the singlethreaded suite on the first async upload.
+  The rule is now at configure time instead: an Apple target refuses `SC_THREADS=OFF` outright, per [docs/platforms.md](../../../../../docs/platforms.md#threading-sc_threads).
+  So a build where `cc::mutex` is hollow and a Metal thread is live cannot be produced at all.
+  `callback_mutex` in `metal_common.hh` predates that rule.
+  It is `cc::mutex`'s shape with a lock that is always real, held by the residency set, the transfer system's pending map and the feedback sink's context pointer.
+  Two commit-handler counters are `std::atomic` for the same reason.
+  Both are redundant now rather than wrong, since `cc::mutex` and `cc::atomic` are already real in every build this backend compiles in; collapsing them back is a simplification nobody has taken yet.
 - **An async texture transfer needs no layout settling, where dx12 needs a whole command list for it.**
   A D3D12 copy queue cannot run layout barriers, so dx12 submits a direct-queue fixup before it stamps the job.
   Metal textures have no layout at all, so the off-frame path is the buffer path with a footprint: same queue, same two waits, `staging_layout_of` in place of a byte count.
@@ -394,8 +397,8 @@ The whole binary runs with API validation armed, so a violation anywhere in it e
 It was disabled and written synchronously until the review caught it, which meant nothing ran the sweep — the suite was green only for tests named one at a time.
 Turning it on immediately found the cross-list ordering defect above, which no single test could reach, and that is the argument for enabling a sweep before it is comfortable rather than after.
 
-One thing is still pinned rather than disabling it again, in [docs/TODO.md](../../docs/TODO.md):
-the whole sweep under `SC_THREADS=OFF`, where the driver registers disabled because metal settles completions from a queue `cc::async`'s single-threaded scheduler will not wait on.
+The driver is unconditional now.
+It was gated on `CC_HAS_THREADS` while an unthreaded Apple build was still possible; refusing that build at configure time removed the gate rather than the coverage.
 
 One API test still runs against metal by being named exactly, which is what the per-invocable aliases are for:
 

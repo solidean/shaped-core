@@ -1,6 +1,5 @@
 #include "sg_backends.hh"
 
-#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -22,14 +21,6 @@
 // So this driver's oracle is process-wide, and coarser than the other two backends'.
 
 // No exclusion tags, for the reason dx12-entry.cc gives.
-// **Threaded builds only.**
-// With SC_THREADS=OFF the sweep aborts before any test reports, with "parked on an external push".
-// Two things have to change for it to run, and neither is in any one test, so the pin is at the preset rather than per
-// test; see libs/graphics/shaped-graphics/docs/TODO.md for what each was measured to be worth.
-// nexus drives a parallel test batch without sweeping the pump registry, and metal settles its completions from the
-// MTL4CommitFeedback handler — a thread Apple owns, pushing into a build whose own locks have been compiled out.
-#if CC_HAS_THREADS
-
 ASYNC_TEST("sg metal backend")
 {
     auto ctx = sg::create_metal_context({});
@@ -45,17 +36,5 @@ ASYNC_TEST("sg metal backend")
                                 ctx.value()->device_loss_reason()));
     }
 }
-
-#else // !CC_HAS_THREADS
-
-// Registered but disabled, rather than absent: the registration is what makes every tier-1 invocable reachable by
-// name, and nexus's orphan check exempts an alias-reachable invocable for exactly this case.
-// Removing the driver instead orphans the whole tier-1 suite in this build.
-TEST("sg metal backend", nx::config::disabled)
-{
-    SKIP("the metal sweep needs threads — see libs/graphics/shaped-graphics/docs/TODO.md");
-}
-
-#endif // CC_HAS_THREADS
 
 static bool const sg_metal_registered = sg_test::register_backend("sg metal backend", "metal");

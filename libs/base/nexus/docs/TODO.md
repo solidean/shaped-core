@@ -10,3 +10,12 @@ The shape of what exists is in [parallel-execution](parallel-execution.md) and t
 - **A first `APP` / `COMMAND` consumer.**
   Nothing outside nexus's own wiring tests declares one yet, and no binary is registered `KINDS tool`.
   `tools/shaped-linter` is the case the design was built for: a `-core` library, a `main.cc` and a `-test` binary that collapse into one nexus binary with a `COMMAND("lint", default_entry)`.
+
+- **The parallel batch drive never sweeps the pump registry, so an unthreaded graph cannot complete on it.**
+  `tests/execute.cc` drives a batch with `cc::async_blocking_get_on`, which neither sweeps nor parks.
+  `drive_serially`, in the same file, does both — and its comment states exactly why a drive that skips them cannot complete a graph waiting on a semantic thread that has no thread of its own.
+  So the two paths disagree, and the parallel one is wrong.
+  Any unthreaded component driven by a registered pump hits this: clean-net's reactor, and sg's own `pump_completion_signals`.
+  Found from the metal side, where patching the batch path took a sweep from aborting before the first test to running all 293.
+  That case has since been settled another way, but the nexus bug is unchanged.
+  Giving the batch path `drive_serially`'s loop is the fix.

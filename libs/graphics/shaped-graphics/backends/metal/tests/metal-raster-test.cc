@@ -1,7 +1,6 @@
 #include "metal-test-common.hh"
 #include "triangle.metallib.h"
 
-#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
@@ -72,12 +71,6 @@ TEST("sg metal - a raster pipeline builds from a metal library")
     CHECK(pipeline.value()->depth_stencil_state() != nullptr);
 }
 
-// Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF) compiles cc::mutex with no mutex member and no
-// locking at all, because nothing in such a build is supposed to contend.
-// The eight std::threads below are real either way, so there they would race against the backend's own unlocked state
-// by construction — proving nothing about the driver lock this test exists for, and segfaulting on the way.
-#if CC_HAS_THREADS
-
 TEST("sg metal - pipelines build concurrently from several contexts")
 {
     auto const probe = mtl::test::make_context();
@@ -123,8 +116,6 @@ TEST("sg metal - pipelines build concurrently from several contexts")
 
     CHECK(built.load(std::memory_order_acquire) == thread_count);
 }
-
-#endif // CC_HAS_THREADS
 
 TEST("sg metal - a rendering scope clears and draws")
 {

@@ -147,32 +147,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
   rather than leaving a deferral to a milestone that has already arrived.
 
-- **The metal tier-1 sweep does not run with `SC_THREADS=OFF`.**
-  `tests/backends/metal-entry.cc` gates its driver on `CC_HAS_THREADS` and registers a disabled one otherwise, so the
-  tier-1 invocables stay alias-reachable and un-orphaned.
-  Without it the binary aborts before any test reports, with "parked on an external push".
-
-  **The immediate cause is in nexus rather than in this backend.**
-  `execute.cc` drives a parallel test batch with `cc::async_blocking_get_on`, which neither sweeps the pump registry nor parks.
-  `drive_serially`, in the same file, does both — and its comment says why a drive that skips them cannot complete an unthreaded graph.
-  Giving the batch path that same loop takes the sweep from aborting before the first test to running all 293.
-
-  **Behind it sits a question this backend has to answer.**
-  `SC_THREADS=OFF` compiles cc's locks and atomics out, and Apple's `MTL4CommitFeedback` queue does not go away with them.
-  So every node metal settles from a completion handler is a cross-thread push into a build that has no synchronization left.
-  `callback_mutex` covers the backend's own state; the async nodes it pushes are not covered by anything.
-  Measured, with the nexus path patched: deferring the download pushes to a registered pump passes 291 of 293, and a direct push passes all 293.
-  That says the race is not reliably observable, not that it is absent.
-  The two that fail under deferral both read a download straight after `co_await idle_completion()`, whose contract is delivery.
-  So a deferral covering only downloads breaks that guarantee, and covering every completion is the shape of the real fix.
-  A pump reporting outstanding GPU work is needed either way, so that an unthreaded blocking drive keeps sweeping instead of declaring the graph deadlocked; without one the sweep segfaults.
-  It is a property of the backend's completion routing rather than of any one test, which is why the pin is at the
-  preset.
-  **The tier-2 suite pays the same toll in a smaller way**: its tests block on `block_until_idle` rather than awaiting
-  `idle_completion()`, and `.shaped-lint.yml` allows that by name.
-  Converting them to await was tried and reverted — it works in a threaded build and aborts the `SC_THREADS=OFF` one
-  at the first download, on the same drive.
-  So one piece of work closes both.
+- **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**
+  `.shaped-lint.yml` allows that by name.
+  Converting them was tried and reverted while `SC_THREADS=OFF` was still buildable on macOS, since it aborted there at the first download.
+  That build no longer exists: `SC_THREADS=OFF` is refused on Apple targets, per [docs/platforms.md](../../../../docs/platforms.md#threading-sc_threads).
+  So the conversion is unblocked whenever someone wants it.
 
 - **No metal shader toolchain exists.**
   `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.

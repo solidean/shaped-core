@@ -97,11 +97,20 @@ Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to n
 ## Threading (`SC_THREADS`)
 
 `SC_THREADS` (default `ON`) is the repo-wide threading knob; it reaches C++ as clean-core's `CC_HAS_THREADS`, 0 or 1.
-`OFF` builds without OS threads — what WASM is today, and what the `singlethreaded-*` presets reproduce **on a native host**.
+`OFF` builds without OS threads — what WASM is today, and what the `singlethreaded-*` presets reproduce **on a native host** (Windows and Linux; see the Apple refusal below).
 That is what makes the mode debuggable with the normal toolchain instead of only under Node.
 
-`ON` is an assertion rather than a preference: a platform that cannot honor it fails configure, as wasm does today, rather than quietly demoting.
+Neither value is a preference: a target that cannot honor the one it is given fails configure rather than quietly building the other.
+`ON` is refused where there are no threads, as wasm does today.
 So the flag never describes a build it did not get.
+
+**`OFF` is refused on Apple targets**, which is the other half of that rule.
+Metal reports a command buffer's completion by calling back on a dispatch queue Apple owns, and that thread does not go away because the flag is off.
+An unthreaded Apple build would therefore run sg's completion work on a second thread, in a build that has compiled its locks out.
+MTL4 offers no pollable substitute: command-buffer errors reach us through that callback and nowhere else.
+
+The refusal is keyed on the **target**, not the host, and that distinction is the point.
+A Mac cross-compiling to wasm is not an Apple target, so the `emscripten-*` presets stay single-threaded and configure fine from macOS — which is how a Mac exercises the unthreaded mode.
 
 No API appears or disappears with it.
 Threaded types fall back to running on the calling thread: `cc::threaded_actor` runs on whoever pumps it, and sg drains its copy actors before any wait.
@@ -111,6 +120,7 @@ See [shaped-graphics threading](../libs/graphics/shaped-graphics/docs/concepts/t
 It does change struct layout — node_allocation's slab header — so it is a whole-build switch, never per-target.
 
 `uv run dev.py check` runs a RelWithDebInfo single-threaded preset alongside the others, so both threading modes stay exercised at precommit.
+On macOS there is no such preset to run, for the reason above, and that leg is simply absent.
 
 ## Default allocator (`SC_MIMALLOC`)
 
