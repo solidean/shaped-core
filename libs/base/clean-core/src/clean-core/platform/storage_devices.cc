@@ -219,11 +219,21 @@ namespace
 {
 cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
 {
+    // getfsstat into a buffer of our own, never getmntinfo.
+    // getmntinfo hands back a buffer libc owns and reallocates on every call, so two threads querying at once free
+    // each other's array mid-loop — and the stat() below keeps this loop running long enough for that to land.
+    // The race is inside libc, which is why neither ASan nor TSan ever reported it.
+    auto const capacity = ::getfsstat(nullptr, 0, MNT_NOWAIT);
+    if (capacity <= 0)
+        return cc::error(storage_failed("getfsstat"));
+
+    // A mount can appear between the two calls; the second reports how many it actually wrote, which is what we read.
     // `struct` is load-bearing: statfs names both a type and a function, and the bare tag resolves to the function.
-    struct statfs* mounts = nullptr;
-    auto const count = ::getmntinfo(&mounts, MNT_NOWAIT);
+    auto buffer = cc::vector<struct statfs>::create_defaulted(capacity);
+    auto const count = ::getfsstat(buffer.data(), int(buffer.size() * isize(sizeof(struct statfs))), MNT_NOWAIT);
     if (count <= 0)
-        return cc::error(storage_failed("getmntinfo"));
+        return cc::error(storage_failed("getfsstat"));
+    auto const* const mounts = buffer.data();
 
     auto out = cc::vector<cc::mount_point>();
     auto seen = cc::vector<u64>();

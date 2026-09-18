@@ -217,6 +217,31 @@ def _dx12_runtime_check() -> tuple[str, bool | None, str]:
                          f"dx12 compiles in, but creating a context will fail")
 
 
+def _metal_check() -> tuple[str, bool | None, str]:
+    """Whether the metal backend builds and runs here.
+
+    Two separate facts, and the message keeps them apart because they fail for different reasons.
+    Building needs an Apple platform with the macOS 26 SDK; running additionally needs the host OS to be 26 or newer and
+    the GPU to be in the Metal 4 family, which the backend refuses below by name.
+
+    Only the OS half is cheap to read from here — the GPU family needs a device — so a host that clears it is reported
+    as built rather than as working, and `create_metal_context` remains the authority.
+    """
+    label = "sg backend metal"
+    if platform.system() != "Darwin":
+        return (label, None, "not built — Apple platforms only")
+
+    release = platform.mac_ver()[0]
+    major = int(release.split(".")[0]) if release and release.split(".")[0].isdigit() else 0
+    if major == 0:
+        return (label, None, f"built, but the macOS version could not be read ({release!r})")
+    if major < 26:
+        return (label, None,
+                f"built, but macOS {release} is below the Metal 4 floor of 26 — creating a context will fail")
+
+    return (label, True, f"built; macOS {release} clears the Metal 4 floor (the GPU family is checked at creation)")
+
+
 def _surface_check(cxx: str | None) -> tuple[str, bool | None, str]:
     """Which windowing systems a Vulkan swapchain can present to, mirroring the backend's own header probes.
 
@@ -226,7 +251,9 @@ def _surface_check(cxx: str | None) -> tuple[str, bool | None, str]:
     if platform.system() == "Windows":
         return (label, True, "win32 (VK_USE_PLATFORM_WIN32_KHR is unconditional there)")
     if not _is_unix_windowed():
-        return (label, None, "no windowed surface on this platform — sg has no metal backend yet")
+        # On macOS the metal backend is the windowed path, and it presents through a CAMetalLayer rather than a Vulkan
+        # surface — so this row is about vulkan alone, and its answer there is simply "not the backend you want".
+        return (label, None, "no windowed vulkan surface on this platform; metal is the windowed backend here")
     if cxx is None:
         return (label, None, "no compiler resolved, so the header probe could not run")
 
@@ -307,7 +334,8 @@ def _backend_rollup(
     else:
         out.append(("sg backend vulkan", None, "built, but " + vk_runtime[2]))
 
-    out.append(("sg backend metal/webgpu", None, "intended tiers, no backend in sg yet"))
+    out.append(_metal_check())
+    out.append(("sg backend webgpu", None, "an intended tier, no backend in sg yet"))
     return out
 
 

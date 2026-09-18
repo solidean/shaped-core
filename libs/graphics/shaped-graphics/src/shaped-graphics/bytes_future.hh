@@ -108,6 +108,13 @@ namespace sg
 {
     return cc::make_async_from_value(cc::unit{});
 }
+
+/// A completion node that is already settled as cancelled — for a download a backend could not even start.
+/// The same channel a dropped recording list settles on, so a caller needs no second way to ask.
+[[nodiscard]] inline cc::shared_async<cc::unit> make_cancelled_completion()
+{
+    return cc::make_async_from_error<cc::unit>(cc::async_error::make_cancelled());
+}
 } // namespace sg
 
 /// Strongly-typed view of a bytes_future for a trivially-copyable element type.

@@ -49,6 +49,17 @@ So this converts most mistakes from "the image is black" into "this named test f
 A listener nobody has seen fire is indistinguishable from one that is not connected, and "no validation errors" is a claim about the backend only once you know the wiring works.
 Provoke a real violation in a test and check the callback saw it — a zero-size `vkCreateBuffer` is a pure diagnostic with nothing to clean up.
 
+**Your API may not have a callback at all, and the advice still holds — the mechanism changes.**
+Metal has none: its validation messages go to stderr via NSLog and to nothing else.
+`MTLLogState` is the obvious candidate and is not it, which took a measurement rather than a reading — a handler on one sees zero of a violation the layer is loudly reporting on the same line.
+What Metal has instead is an environment switch, `MTL_DEBUG_LAYER=1` plus `MTL_DEBUG_LAYER_ERROR_MODE=assert`, which turns a violation into an abort.
+So the gate there is the process dying rather than a test failing, armed from `main` because the framework reads those variables before any code of yours runs.
+
+Two things generalize from that.
+**Attribution is worth trading away to keep the gate**, since the alternative is the 680-unnoticed-messages outcome rather than a tidier report.
+And **a gate that ends the process cannot live in the suite**, so the proof becomes a `nx::config::disabled` test run by name, where the abort is the pass and a clean finish is the failure.
+See [backends/metal/readme.md](../backends/metal/readme.md).
+
 ### 3. Turn "no device" into SKIP, not into a passing test
 
 A suite that silently passes when it found no device gets more dangerous the more it covers.
@@ -166,13 +177,34 @@ Recorded as each is met, because this is what the next backend most wants to kno
   **A frame that transitions its resources before the scope opens never pays this**, which is worth saying in the
   backend's own docs rather than leaving as a surprise.
 
+- **A per-commit error channel maps onto sg's deferred errors, and is worth looking for.**
+  `sg::device_error` and `ctx.take_pending_errors()` exist for failures that arrive after the call that caused them, and were written with WebGPU's promises in mind.
+  Metal's `MTL4CommitFeedback` turns out to be exactly that shape, so the backend gets a real error channel out of a surface that was already there.
+  The catch is lifetime: such a handler runs on a queue you do not control, at a time that can be after `shutdown` returned.
+  Capture a detachable sink rather than the context, and detach it in shutdown.
+
+- **A shader stage on one API can be the whole program on another.**
+  DXR's raygen shader is an entry point the driver enters and schedules around; Metal has no ray-tracing pipeline at
+  all, so the raygen shader *is* the compute kernel and the miss and closest-hit shaders are functions it chooses to
+  call through a table.
+  The C++ surface maps — one compute pipeline per raygen, sg's index spaces onto Metal's function tables — but the
+  shaders do not, and that is a difference worth stating in the backend's own docs rather than leaving a caller to
+  find.
+  **Check what the target language can express before deciding a table is one object**: MSL's
+  `visible_function_table<T>` is typed by the function signature, so miss, closest-hit and callable functions cannot
+  share a table however convenient one would be.
+
 - **An acceleration structure is an object here and an address there.**
   DXR names a structure by the GPU address of its storage buffer, so dx12's `blas`/`tlas` subclasses hold nothing but
   a typed handle to that buffer.
   Vulkan needs a `VkAccelerationStructureKHR` created over the buffer, with a device address of its own — so the
   subclass owns an object, and the ownership question ("what frees this, and when") appears where dx12 has none.
-  The sg-level policy is untouched: result persistent, scratch transient, and the AS access bits illegal on non-AS
-  buffers.
+  Metal goes further and has no buffer at any point: `MTL::AccelerationStructure` derives from `MTL::Resource` and is
+  named by a `gpuResourceID()`, so the third backend is what showed that "one storage buffer per structure" had been a
+  D3D12 fact wearing a portable name.
+  The sg-level policy is untouched: scratch transient, and the AS access bits illegal on non-AS buffers.
+  **A resource kind your hazard tracking cannot name is the thing to look for early** — here it meant a third declare
+  path beside buffers and textures, which was cheap only because the tracker was already resource-kind agnostic.
 
 - **`used_cached_pipeline()` looked like an sg-surface gap and was not.**
   dx12 answers it precisely because D3D12 fails PSO creation on a blob it cannot use, while Vulkan silently starts
@@ -224,6 +256,15 @@ Recorded as each is met, because this is what the next backend most wants to kno
   cache it was built with and serializes on request.
   It is not the idiomatic Vulkan shape, and it is the honest one for the contract sg states.
 
+- **And a third API has no per-pipeline blob at all.**
+  Metal 4's equivalent is `MTL4Archive`, which a *compiler* is configured with and which accumulates every pipeline it
+  builds — one store per compiler, where sg's surface is one blob per pipeline.
+  So the mapping vulkan found is not available: there is nothing to serialize out of a single pipeline, and
+  `cached_pipeline_data()` returns empty rather than a fabricated blob.
+  **That is a design question about where the archive lives, not a missing call**, and the honest interim is an empty
+  blob plus a `used_cached_pipeline()` of false, pinned by a test so the gap reads as deliberate.
+  See [TODO](TODO.md).
+
 - **Objects a descriptor merely names want a per-context cache, not per-group ownership.**
   A dx12 sampler descriptor leaves no object behind, and D3D12 creates a view straight into a heap.
   Vulkan needs a VkSampler and a VkImageView that outlive every group holding them, and giving each group its own
@@ -231,6 +272,35 @@ Recorded as each is met, because this is what the next backend most wants to kno
   Caching them per context makes the lifetime trivial and a re-minted group free.
   Key the cache on sg's own identity for the value — `sg::impl::sampler_hash`, `hash(raw_texture_view)` — rather than
   on one the backend invents, or the cache answers a different question than the layout identity does.
+
+- **Nothing in sg core ever runs a resource's finalizers — the backend does.**
+  `raw_buffer::add_finalizer` and its texture twin put the callbacks in a protected member and state the contract
+  precisely: they run once the GPU storage is released *and* the owning epoch has retired.
+  Neither the base class nor any scope calls them, so a backend that reclaims its GPU object and forgets them is
+  silently wrong everywhere it matters — a caller reclaiming the memory a placed resource sits on never gets it back.
+  Nothing reports it either: the whole suite passes except the one tier-1 test that asserts a finalizer ran, and that
+  test looks like it is about something else (an async upload to a dropped buffer).
+  Run them inside the same deferred callback that releases the storage, **after** the release, and take care that the
+  early-out for a resource with no GPU object does not skip them.
+
+- **Two queues need a wait in every direction, including the one that looks redundant.**
+  An off-frame transfer queue and the frame's queue share no timeline, so both hazard directions need an explicit
+  stamp: a command list defers behind the resource's in-flight transfers, and a transfer defers behind the last list
+  that named the resource.
+  The third is a transfer waiting on the *same resource's previous transfer*, which the reference backends get for
+  free from a single actor serializing their copy queue and which an API committing each transfer separately does not.
+  Submission order does not order the copies inside two command buffers, so an async download reads back bytes the
+  async upload before it never finished writing.
+
+- **A driver callback is a real thread even in a build with `SC_THREADS=OFF`.**
+  `cc::mutex` compiles its lock away without threads, which is exactly right for state only sg's own code touches.
+  A graphics API's completion callbacks are not that: they run on a thread the driver owns, and no build flag of ours
+  reaches them.
+  So any backend state a callback writes needs a lock that is real unconditionally, and the singlethreaded preset is
+  where the missing one surfaces — as a driver-side abort rather than as a data race you could reason about.
+  `cc::atomic` has the same hole for the same reason: it is a plain value without threads, so a counter a callback
+  decrements has to be a `std::atomic` with a comment saying why, or the next reader converts it back.
+  Audit by asking which members a completion handler touches, not by where the races look likely.
 
 - **Keep translation logic device-free, and it becomes testable everywhere.**
   Barrier translation and access tracking are pure logic with no device in them, so their tests run on any machine rather than only where a device exists.
@@ -300,6 +370,22 @@ is part of finishing the milestone rather than a chore left behind.
 
 The context's own answer is worth making stricter than the extension list: it is true only once the entry points have
 resolved too, so a driver advertising an extension it does not implement reports false rather than crashing later.
+
+## An object the API hands back may be owned by a scope you closed
+
+Metal's is an autorelease pool, and the shape generalizes to any API whose factory returns something it still owns.
+
+`renderCommandEncoder` hands back an *autoreleased* object.
+A backend that opens a pool for the duration of `begin_rendering` — which it should, or every temporary accumulates —
+and stores that encoder for `end_rendering` has stored a pointer the pool frees on the way out.
+
+**The freed object is usually still readable**, so this does not fail where it happens.
+It failed in the scope's destructor, several frames of C++ later, as a bare segfault with no validation message and a
+stack that named only `objc_msgSend`.
+A sanitizer run named the destructor in one go, after probes through the creating function had found nothing — which is
+the lesson worth keeping more than the retain itself.
+
+Retain what you store, and check the ownership convention for every factory whose result outlives its call.
 
 ## The pointer-into-a-growing-vector trap
 

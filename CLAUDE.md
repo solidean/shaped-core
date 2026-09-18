@@ -86,7 +86,8 @@ One-liner per library:
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan cover the whole surface; webgpu covers it but ray tracing, on wasm over emdawnwebgpu, and never blocks.
-  metal and opengl/webgl are intended tiers with no backend yet.
+  **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
+  opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
   Namespace `sg`. Depends on clean-core + typed-geometry.
   Early stage — see [docs/graphics.md](docs/graphics.md).
@@ -220,6 +221,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
   OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
+  **OFF is refused on Apple targets**: metal takes command-buffer completion on a dispatch queue Apple owns, which the flag cannot remove, so that build would not be single-threaded.
+  The refusal is keyed on the target, so a Mac building the `emscripten-*` presets still gets the unthreaded mode — and there is no macOS `singlethreaded-*` preset.
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
 * `SC_MIMALLOC` (default ON) picks what backs `cc::default_memory_resource` → clean-core's `CC_HAS_MIMALLOC`.
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.

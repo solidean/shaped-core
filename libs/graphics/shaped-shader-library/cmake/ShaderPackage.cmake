@@ -149,10 +149,7 @@ function(sc_add_shader_package)
     if(SC_HAS_DXC_COMPILER AND DXC_RUNTIME_DLLS)
         get_target_property(_type ${PKG_TARGET} TYPE)
         if(_type STREQUAL "EXECUTABLE")
-            add_custom_command(TARGET ${PKG_TARGET} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DXC_RUNTIME_DLLS} $<TARGET_FILE_DIR:${PKG_TARGET}>
-                COMMAND_EXPAND_LISTS
-            )
+            sc_stage_runtime_dlls(${PKG_TARGET} TAG ${PKG_TARGET}-dxc DLLS ${DXC_RUNTIME_DLLS})
         endif()
     endif()
 

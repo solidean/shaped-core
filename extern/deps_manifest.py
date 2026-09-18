@@ -53,6 +53,9 @@ class Upstream:
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
+    # Host keys (`windows` / `linux` / `macos`) this upstream has no release for at all.
+    # Distinct from a missing per-OS key, which stays an error: that means nobody has looked, and this means somebody did.
+    unavailable_on: list[str] = field(default_factory=list)
     license_files: list[str] = field(default_factory=list)
     # Verbatim license text, for an upstream that ships no file of its own — sqlite's amalgamation is the only one.
     license_text: str = ""
@@ -76,6 +79,15 @@ class Upstream:
     @property
     def is_fetched(self) -> bool:
         return self.install == "fetched"
+
+    @property
+    def is_available(self) -> bool:
+        """Whether this upstream has a release for the host at all.
+
+        False means the manifest says so deliberately — see `unavailable_on`.
+        Such an upstream carries no pin and no asset here, so every field that would name one is empty.
+        """
+        return host_os_key() not in self.unavailable_on
 
     @property
     def install_dir(self) -> Path:
@@ -174,11 +186,19 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
     # dependency has not been ported here, and a bare key from another platform would fetch the wrong archive.
     suffix = host_os_key()
 
+    # An upstream the manifest says has no release here resolves to empty per-OS values rather than raising.
+    # Without this an absent key was indistinguishable from an un-ported one, so DXC — which ships no macOS build — took
+    # down every consumer of the whole manifest set on a Mac, `deps list` and `deps licenses` included.
+    unavailable = [str(x) for x in entry.get("unavailable_on", [])]
+    host_unavailable = suffix in unavailable
+
     def per_os(key: str, *, required: bool) -> str:
         host_key = f"{key}_{suffix}"
         if host_key in entry:
             return need(host_key)
         if any(k.startswith(f"{key}_") for k in entry):
+            if host_unavailable:
+                return ""
             raise ValueError(f"{path}: upstream {entry.get('name', '?')!r} declares per-OS `{key}` but none for {suffix}")
         return need(key) if required else str(entry.get(key, ""))
 
@@ -198,6 +218,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         year=str(entry.get("year", "")),
         asset=per_os("asset", required=False),
         tag_pattern=entry.get("tag_pattern", ""),
+        unavailable_on=unavailable,
         license_files=list(entry.get("license_files", [])),
         license_text=entry.get("license_text", ""),
         used_by=entry.get("used_by", ""),

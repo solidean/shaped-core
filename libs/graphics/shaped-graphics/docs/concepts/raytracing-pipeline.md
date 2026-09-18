@@ -62,6 +62,34 @@ In dx12 it binds the state object with `SetPipelineState1` and binds groups thro
 It then runs the same **declare-hazards → flush → op** rhythm as `compute_dispatch`, at `pipeline_stage_flag::raytracing`.
 A bound `tlas` surfaces as `accel_read` and the shader-table buffer is declared `shader_read`, before `ID3D12GraphicsCommandList4::DispatchRays`.
 
+## metal maps it onto a compute pipeline, because a raygen shader is the kernel
+
+There is no MTL4 ray-tracing pipeline, and this is the sharpest fork in the whole surface.
+DXR hands the driver a set of shaders and lets it schedule them.
+Metal dispatches an ordinary compute kernel that calls `intersector` itself, with function tables supplying what traversal and the kernel call back into.
+So a raygen shader is not something a pipeline dispatches there — it **is** the kernel.
+
+- A `raytracing_pipeline` builds **one MTL4 compute pipeline per registered raygen shader**, dynamically linked with every hit, miss and callable function.
+- A `raytracing_shader_table` becomes **four** Metal tables rather than one buffer of records.
+  MSL's `visible_function_table<T>` is typed by the function signature, so miss, closest-hit and callable functions cannot share a table.
+  Each of sg's index spaces therefore gets one, and the indices are used verbatim.
+- One sg hit group splits across both kinds: `intersection` and `any_hit` run during traversal and go in the intersection function table, while `closest_hit` is a visible function the kernel calls.
+  **Metal runs exactly one function during traversal**, so a *procedural* group may carry an intersection function or an any-hit but not both, and metal refuses the pair rather than dropping one.
+  Fold the any-hit's decision into the intersection function, which is where it already decides what the ray hit.
+- **Two of DXR's three hit-index contributions map, and the ray contribution does not.**
+  The instance's `InstanceContributionToHitGroupIndex` is the instance descriptor's `intersectionFunctionTableOffset`.
+  The geometry contribution is each geometry descriptor's own offset, which metal sets to its geometry index.
+  `RayContributionToHitGroupIndex` has no counterpart.
+  That is DXR's per-`TraceRay` term, which lets one scene serve a primary ray and a shadow ray from different records.
+  An MSL kernel names the table it calls, so the equivalent here is a second table or a second raygen.
+  A shader ported from HLSL that varies the ray contribution selects a different function on metal than on dx12.
+- `dispatch_rays` selects that raygen's pipeline state, binds the tables through `sg::reserved_binding_group`, and calls `dispatchThreads`.
+- `max_recursion_depth` becomes Metal's `maxCallStackDepth`, which sizes the stack for indirect calls and defaults to 1.
+  Recursion itself is supported — a visible function may trace and may call back through a table — so the field is honoured rather than capped.
+  What cannot recurse is traversal: an intersection or any-hit function cannot take an acceleration structure at all.
+
+[backends/metal/readme.md](../../backends/metal/readme.md) carries the `[[id(n)]]` assignments and the rest.
+
 ## See also
 
 - [acceleration-structures](acceleration-structures.md) — building the `blas`/`tlas` a trace runs against.

@@ -493,6 +493,81 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
+// A streamed texture's rows are rows of BLOCKS, and its extent is slice-major.
+//
+// Both of those are invisible on an uncompressed 2D texture, where a block is one texel and there is one slice — so
+// every texture stream test above passes on a backend that conflates them.
+// A BC1 texture fills only its top quarter, and a 3D texture overruns its own height.
+
+ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // 16x16 BC1 is 4x4 blocks of 8 bytes: 32 bytes per block row, four block rows, one slice.
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::bc1_rgba_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    isize const block_row_bytes = 4 * 8;
+    auto const src = pattern(block_row_bytes * 4, 71);
+
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0)
+        .context(cc::format("{} of {} bytes differ; a backend counting block rows as texel rows fills the top quarter",
+                            mismatches, src.size()));
+}
+
+ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streams slice by slice", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d3;
+    desc.width = 8;
+    desc.height = 8;
+    desc.depth = 4;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto const src = pattern(8 * 8 * 4 * 4, 73);
+
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+    CHECK(stream.is_complete());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0)
+        .context(cc::format("{} of {} bytes differ; a backend that never advances z writes every slice over the first",
+                            mismatches, src.size()));
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
@@ -561,6 +636,52 @@ ASYNC_INVOCABLE_TEST("sg stream - a sink that refuses fails the transfer", (sg::
     CHECK(calls == 1);
 }
 
+// A streamed read observes an async upload that is still in flight.
+//
+// The two are different queues on some backends, with no relationship of their own, so the read has to be told —
+// otherwise it copies out bytes the upload has not written yet, which reads as zeroes rather than as an error.
+//
+// **This states the contract rather than forcing the race.** A quiet machine lands the upload first whatever the
+// backend does; what actually caught the missing wait was the concurrent tier-1 sweep, and no amount of flooding from
+// inside one test reproduces it on demand.
+ASYNC_INVOCABLE_TEST("sg stream - a read waits on a pending async upload", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    constexpr isize size = 64 * 1024;
+    auto buf = c.persistent.create_raw_buffer(size, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    auto mismatches = 0;
+    for (auto iteration = 0; iteration < 16; ++iteration)
+    {
+        auto const src = pattern(size, 31 + iteration);
+        c.upload.bytes_to_buffer(buf, cc::make_pinned_data(src));
+
+        auto got = cc::vector<byte>();
+        for (isize i = 0; i < size; ++i)
+            got.push_back(byte(0));
+
+        auto stream = c.stream.to_sink_from_buffer(
+            buf,
+            [&](cc::span<byte const> bytes, isize offset)
+            {
+                for (isize i = 0; i < isize(bytes.size()); ++i)
+                    got[offset + i] = bytes[i];
+                return true;
+            },
+            0, size);
+
+        REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+        for (isize i = 0; i < size; ++i)
+            if (got[i] != src[i])
+                ++mismatches;
+    }
+
+    CHECK(mismatches == 0);
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed rows", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);
@@ -614,6 +735,73 @@ ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed r
     CHECK(rows_seen == 32);
     CHECK(got[0] == src[0]);
     CHECK(got[src.size() - 1] == src[src.size() - 1]);
+}
+
+// Two streams and one command list that touches both of their resources — the shape a queue-wide wait deadlocks on.
+//
+// A backend that orders a stream behind a command list by parking its whole streaming queue closes a cycle here:
+// list L waits for stream J2 (it touches Y), stream J1 parks the streaming queue on L (it was admitted after L), and
+// J2's remaining chunks queue behind that park.
+// J2 never finishes, so L never runs, so J1 never starts.
+// It needs three resources and a stream that spans several batches, which is why no single-stream test reaches it.
+//
+// On metal the park does not hang forever: something breaks the tie after about four seconds and the two then run in
+// the wrong order, which is what the copy-window check below catches — a hundredfold slowdown and stale bytes rather
+// than a clean stop.
+ASYNC_INVOCABLE_TEST("sg stream - two streams and a list that touches both do not deadlock",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    constexpr isize size = 64 * 1024;
+    auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+    auto x = c.persistent.create_raw_buffer(size, usage);
+    auto y = c.persistent.create_raw_buffer(size, usage);
+    REQUIRE(x != nullptr);
+    REQUIRE(y != nullptr);
+
+    auto const into_y = pattern(size, 37);
+    auto const into_x = pattern(size, 41);
+
+    // J2 first, in small chunks so it spans many cycles: one chunk per job per cycle is what makes it several
+    // batches rather than one.
+    auto j2 = c.stream.from_source_to_buffer(y, std::make_unique<chunked_source>(cc::span<byte const>(into_y), 4096));
+    REQUIRE(j2.is_valid());
+    j2.promote_to_async(); // the wait below is the point of the test, so it is not also a warning
+
+    // L touches both, so it waits on J2 and stamps X with its own submission.
+    auto l = c.create_command_list();
+    REQUIRE(l != nullptr);
+    l->copy.buffer_data_region<u32>({.src = y, .dst = y, .count = 8, .src_offset = 0, .dst_offset = 16});
+    l->copy.buffer_data_region<u32>({.src = x, .dst = x, .count = 8, .src_offset = 0, .dst_offset = 16});
+    c.submit_command_list(cc::move(l));
+
+    // J1 is admitted after L, so its direct-queue dependency is L — the park that closes the cycle.
+    auto j1 = c.stream.bytes_to_buffer(x, cc::make_pinned_data(into_x));
+    REQUIRE(j1.is_valid());
+
+    REQUIRE((co_await cc::async_as_result(j2.completion())).has_value());
+    REQUIRE((co_await cc::async_as_result(j1.completion())).has_value());
+    CHECK(j1.is_complete());
+    CHECK(j2.is_complete());
+
+    // And both landed, so nothing was skipped to break the cycle.
+    auto const back_y = c.download.bytes_from_buffer(y, 0, size);
+    auto const bytes_y = co_await back_y.bytes();
+    CHECK(bytes_y[size - 1] == into_y[size - 1]);
+
+    auto const back_x = c.download.bytes_from_buffer(x, 0, size);
+    auto const bytes_x = co_await back_x.bytes();
+    CHECK(bytes_x[size - 1] == into_x[size - 1]);
+
+    // L copied X[0,32) over X[64,96) BEFORE J1 streamed, so J1's bytes are what is there — if the two ran in the
+    // other order, that window would hold J1's own first 32 bytes instead.
+    auto mismatches = 0;
+    for (isize i = 64; i < 96; ++i)
+        if (bytes_x[i] != into_x[i])
+            ++mismatches;
+    CHECK(mismatches == 0).context(cc::format("{} of 32 bytes in L's copy window differ", mismatches));
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - promote_to_async makes a later writer wait on a download",

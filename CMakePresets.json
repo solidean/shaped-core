@@ -331,16 +331,6 @@
             }
         },
         {
-            "name": "macos-arm-llvm-singlethreaded",
-            "displayName": "Single-threaded Clang (macOS ARM)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
-            "inherits": "macos-arm-llvm-base",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_THREADS": "OFF"
-            }
-        },
-        {
             "name": "x64-windows-clang-ninja-debug-nopch",
             "displayName": "Debug Clang, no PCH (Ninja, Windows)",
             "description": "Debug with precompiled headers off. The `test` check's debug leg, so every commit is parsed once without the /FI a PCH forces.",
@@ -848,10 +838,6 @@
         {
             "name": "singlethreaded-linux-clang",
             "configurePreset": "x64-linux-clang-ninja-singlethreaded"
-        },
-        {
-            "name": "singlethreaded-macos-arm-llvm",
-            "configurePreset": "macos-arm-llvm-singlethreaded"
         },
         {
             "name": "debug-nopch-clang",

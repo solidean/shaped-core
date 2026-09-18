@@ -161,13 +161,7 @@ if(SC_BUILD_TESTS)
         # Stage SDL3.dll next to the test binary so it starts.
         # SDL3::SDL3 is a real (not imported) shared target, so $<TARGET_RUNTIME_DLLS> reaches it through sr's PRIVATE link — no hand-listed DLL variable, unlike the DXC wiring.
         # The expression is empty off Windows.
-        if(WIN32)
-            add_custom_command(TARGET shaped-rendering-test POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_RUNTIME_DLLS:shaped-rendering-test> $<TARGET_FILE_DIR:shaped-rendering-test>
-                COMMAND_EXPAND_LISTS
-            )
-        endif()
+        sc_stage_runtime_dlls(shaped-rendering-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-rendering-test>")
     endif()
 
     # The GPU tests run on the dx12 contexts tests/dx12-entry.cc brings up, and compile their shaders through DXC, so they need both the dx12 backend and a compiler.
@@ -181,6 +175,13 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
+    endif()
+
+    # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
+    # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.
+    if(APPLE AND SC_HAS_SDL3 AND TARGET shaped-graphics-metal)
+        target_sources(shaped-rendering-test PRIVATE tests/metal-window-manual-test.cc)
+        target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-metal)
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

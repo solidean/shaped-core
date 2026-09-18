@@ -256,6 +256,12 @@ def main() -> int:
 
     up = deps_manifest.one(DEST)
 
+    # The host has no release at all — macOS today, which the manifest says outright via `unavailable_on`.
+    # Asked rather than inferred from the platform, so the script and the pin cannot disagree about what exists.
+    if not up.is_available:
+        print(f"dxc: upstream publishes no {deps_manifest.host_os_key()} build — skipping (DXC stays unavailable)")
+        return 0
+
     if not args.force and already_installed(up.pin_hash):
         print(f"dxc {up.tag} already installed at {INSTALL.as_posix()} — nothing to do")
         return 0

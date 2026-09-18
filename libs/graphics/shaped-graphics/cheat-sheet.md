@@ -272,7 +272,7 @@ cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_fut
 cmd.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — inline read one texture (sub)region back (needs copy_src), tightly packed; ready once the submitted list runs
 cmd.ensure_layout(tex, layout, range={})                      // void — leave `tex` in `layout` when this list submits; saves the NEXT consumer a transition. no buffer overload (no layout)
 cmd.prepare_for_async(tex, direction, range={})               // void — ensure_layout with the layout the BACKEND picks for ctx.upload/download/stream. sg::async_direction::{upload,download,both}
-                                                              //   skip it and the transfer submits a one-transition list itself and WARNS once per texture. general on both backends today (see docs/TODO.md)
+                                                              //   skip it and the transfer submits a one-transition list itself and WARNS once per texture. general on all three backends today (see docs/TODO.md)
 sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
 cmd.copy.buffer_bytes_region({.src, .dst, .size_in_bytes, .src_offset_in_bytes=0, .dst_offset_in_bytes=0}) // void — device→device buffer copy (src needs copy_src, dst needs copy_dst); size 0 = no-op
@@ -285,7 +285,7 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 //   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
-// both backends real.
+// all three backends real.
 
 // GPU queries (cmd.query scope). See docs/concepts/queries.md.
 cmd.query.is_supported()               // bool — backend/device supports GPU timestamps? (both, where the queue family times)
@@ -293,7 +293,7 @@ cmd.query.record_gpu_timestamp()       // -> sg::gpu_timestamp — record a poin
 // resolved + read back at submit (one batched readback per 4096-slot query heap; more records lease more heaps).
 
 // raster rendering scope (cmd.raster scope). Bind color / depth-stencil targets + apply per-target begin-ops,
-// then bind a raster_pipeline and draw. Both backends real (dx12 on WARP).
+// then bind a raster_pipeline and draw. dx12, vulkan and metal all real (dx12 on WARP).
 auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1))},       // -> sg::rendering_scope (RAII)
                                   .depth_stencil_target=dsv.cleared(1.0f)});              //   end_rendering() at scope exit
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
@@ -555,8 +555,9 @@ sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge   — no bord
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
 // two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
-// both backends: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
-//   layout's immutable samplers. A pipeline-level static sampler (one on no group) is dx12 only so far.
+// per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
+//   layout's immutable samplers, metal writes them into the group's argument buffer at their binding index.
+//   A pipeline-level static sampler (one on no group) is dx12 only so far.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -600,7 +601,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
 
-## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (both backends real)
+## bind path — group layout / pipeline layout / pipeline / group + compute dispatch  (all three backends real)
 
 ```cpp
 #include <shaped-graphics/binding/binding_group_layout.hh>   // + pipeline_layout.hh / compute_pipeline.hh / binding_group.hh
@@ -739,13 +740,14 @@ cmd.raytracing.is_supported()                    // bool — backend/device supp
 cmd.raytracing.build_blas(span<blas_triangles const>, flags=fast_trace)  // -> blas_handle
 cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace)  // -> blas_handle  (a blas is triangles OR aabbs)
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
-// blas/tlas: storage() -> raw_buffer_handle; size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
+// blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
-//   both backends real (dx12 on WARP).
+// NO storage(): a built structure is a buffer on DXR and a resource of its own on Metal, so the base holds no handle to it.
+//   dx12, vulkan and metal all real (dx12 on WARP).
 tlas.as_view()  // -> tlas_view — bind the TLAS as HLSL RaytracingAccelerationStructure (inline RayQuery, or a full TraceRay pipeline)
 ```
 
-## raytracing pipeline + shader table + dispatch_rays  (both backends real; see docs/concepts/raytracing-pipeline.md)
+## raytracing pipeline + shader table + dispatch_rays  (real on all three backends; see docs/concepts/raytracing-pipeline.md)
 
 ```cpp
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>

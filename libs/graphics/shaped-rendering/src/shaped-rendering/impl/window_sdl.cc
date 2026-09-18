@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_metal.h>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/profiling.hh>
@@ -132,6 +133,10 @@ window::~window()
         return;
 
     _system->unregister_window(this);
+
+    // Before the window, which is the order SDL_Metal_DestroyView documents for a view created after SDL_CreateWindow.
+    if (_metal_view != nullptr)
+        SDL_Metal_DestroyView(static_cast<SDL_MetalView>(_metal_view));
     SDL_DestroyWindow(as_sdl(_native_window));
 }
 
@@ -164,6 +169,14 @@ sg::native_window window::native_window() const
         win.platform = sg::window_platform::wayland;
         win.display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
         win.handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    }
+    else if (driver == "cocoa")
+    {
+        // The layer, not the NSView SDL hands back: metal presents into a CAMetalLayer, and taking it here is what
+        // keeps Objective-C out of sg entirely.
+        win.platform = sg::window_platform::cocoa;
+        if (_metal_view != nullptr)
+            win.handle = SDL_Metal_GetLayer(static_cast<SDL_MetalView>(_metal_view));
     }
     return win;
 }
@@ -462,6 +475,13 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     if (!desc.is_focusable)
         flags |= SDL_WINDOW_NOT_FOCUSABLE;
 
+    // Cocoa's only presentation surface is a CAMetalLayer, and SDL_Metal_CreateView refuses a window that was not asked
+    // for one at creation.
+    // Every window gets it rather than only the ones a swapchain will use, because sr learns that after the fact.
+    auto const is_cocoa = cc::string_view(SDL_GetCurrentVideoDriver()) == "cocoa";
+    if (is_cocoa)
+        flags |= SDL_WINDOW_METAL;
+
     auto title = cc::string::create_copy_c_str_materialized(desc.title);
     auto* const sdl_window = SDL_CreateWindow(title.c_str_materialize(), desc.width, desc.height, flags);
     if (sdl_window == nullptr)
@@ -476,6 +496,15 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     auto const props = SDL_GetWindowProperties(sdl_window);
     if (props == 0)
         return cc::error(last_sdl_error());
+
+    // Created here rather than on demand, because native_window() is const and the layer has to outlive every
+    // swapchain built on it.
+    if (is_cocoa)
+    {
+        win->_metal_view = SDL_Metal_CreateView(sdl_window);
+        if (win->_metal_view == nullptr)
+            return cc::error(last_sdl_error());
+    }
 
     // The size and position SDL actually gave us, which a window manager may have clamped or placed itself.
     // Queried now so the getters are meaningful before the first poll_events.

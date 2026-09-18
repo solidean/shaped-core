@@ -112,10 +112,11 @@ DEFAULT_RELEASE_PRESETS: dict[str, str] = {
 
 # Single-threaded sibling of each default preset (SC_THREADS=OFF -> CC_HAS_THREADS 0), run by the `test` check.
 # Deliberately one preset rather than a matrix: threading is a compile-time axis, and the check's test tail is already the slow part.
+# Darwin is absent because SC_THREADS=OFF is refused on Apple targets (root CMakeLists), so there is no such preset to run.
+# A Mac reaches the unthreaded mode through the emscripten-* presets, which target wasm rather than Apple.
 DEFAULT_SINGLETHREADED_PRESETS: dict[str, str] = {
     "Windows": "singlethreaded-clang",
     "Linux": "singlethreaded-linux-clang",
-    "Darwin": "singlethreaded-macos-arm-llvm",
 }
 
 # Sanitizer (ASan+UBSan) preset per platform, run by the `test` check.
