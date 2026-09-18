@@ -57,12 +57,6 @@ rules:
 
   - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
-    reason: a fuzz step is a synchronous call the fuzzer sequences
-    files:
-      - tests/transfer/transfer-fuzz-test.cc
-
-  - kind: allow-blocking-wait
-    value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a helper returning a finished pipeline, which its synchronous callers read at once
     files:
       - backends/dx12/tests/dx12-cached-pso-test.cc
