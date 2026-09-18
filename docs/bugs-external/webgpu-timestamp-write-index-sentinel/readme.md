@@ -42,7 +42,7 @@ So there are two separate things here, and neither is ours:
 ## Reproducing
 
 ```bash
-uv run run.py                       # node and deno, whichever are on PATH
+uv run run.py                       # node and deno, whichever are found (node falls back to emsdk's own)
 uv run run.py --node-modules DIR    # where the `webgpu` package lives, if not shaped-core's tools/dev/js
 ```
 

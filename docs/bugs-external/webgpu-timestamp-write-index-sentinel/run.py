@@ -41,9 +41,25 @@ def run(label: str, argv: list[str], env: dict[str, str]) -> tuple[str, str]:
     return "skip", out.strip()
 
 
+def find_node() -> str | None:
+    """node on PATH, else the one emsdk bundles, found the way dev.py finds it: SC_EMSDK_PATH, then EMSDK."""
+    on_path = shutil.which("node")
+    if on_path:
+        return on_path
+    for var in ("SC_EMSDK_PATH", "EMSDK"):
+        root = os.environ.get(var)
+        if not root:
+            continue
+        for pattern in ("node/*/bin/node.exe", "node/*/bin/node", "node/*/node.exe", "node/*/node"):
+            hits = sorted(Path(root).glob(pattern))
+            if hits:
+                return str(hits[-1])
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--node", default=shutil.which("node"))
+    ap.add_argument("--node", default=find_node())
     ap.add_argument("--deno", default=shutil.which("deno"))
     ap.add_argument("--node-modules", default=None, help="a node_modules directory holding the `webgpu` package")
     args = ap.parse_args()

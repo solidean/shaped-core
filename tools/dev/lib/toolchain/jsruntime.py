@@ -58,7 +58,12 @@ class JsRuntime:
             # --unstable-detect-cjs because Emscripten's pthread builds emit a top-level require("node:worker_threads")
             # into a `.js`, which Deno reads as ESM and rejects before the module runs at all.
             # Single-threaded output emits no require and does not need it, but the flag is harmless there.
-            return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs"]
+            #
+            # --no-code-cache because Deno reuses a CommonJS script's cached compile after a rebuild that keeps the file's length.
+            # The run then fails with a SyntaxError on a fragment of an identifier, and a relink that only reorders functions is enough.
+            # Every deno launch pays an uncached compile for it, about 0.2 s for the 280 KB threaded rotating-cube loader.
+            # See docs/bugs-external/deno-code-cache-stale-same-length-source.
+            return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs", "--no-code-cache"]
         # Node has no navigator.gpu of its own; the preload installs one backed by Dawn, and loads Dawn only when a
         # module first asks for it, so the many artifacts that never touch a GPU pay nothing.
         # Deno needs none: its WebGPU is built in.
