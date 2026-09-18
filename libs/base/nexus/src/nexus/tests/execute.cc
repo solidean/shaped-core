@@ -1760,7 +1760,9 @@ void nx::impl::report_check_result(check_result result)
     // Diverted: a tool such as the fuzz engine is awaiting code expected to fail often, on whichever thread runs it.
     // Tallied before anything is logged, counted or thrown, so a diverted failure leaves no trace on the test.
     // A failing CC_ASSERT still has to stop the code that asserted, so it throws — into that code's async node, as its error.
-    if (auto* const divert = ctx.check_divert.load(cc::memory_order_acquire))
+    // Outside a poll nothing would catch that throw, and the assert aborts the process next; it is reported as usual instead, so the abort is explained.
+    auto* const divert = ctx.check_divert.load(cc::memory_order_acquire);
+    if (divert != nullptr && (result.op != cmp_op::assert_fail || cc::async_is_polling()))
     {
         divert->executed.fetch_add(1, cc::memory_order_relaxed);
         if (result.op == cmp_op::skip || result.passed)

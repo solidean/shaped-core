@@ -25,7 +25,9 @@ struct async_check_capture_sink
 // Diverts every check reported for the RUNNING TEST into `sink` until destroyed, from whichever thread reports it.
 // Where scoped_check_capture follows one thread, this follows the test, so it reaches work that hops threads.
 // It is per test rather than per strand: anything else reporting for this test meanwhile is diverted too.
-// A diverted CC_ASSERT throws captured_assertion instead of aborting, and nothing diverted is logged or counts against the test.
+// A diverted CC_ASSERT throws captured_assertion into the async node that asserted, instead of aborting.
+// Outside any poll nothing would catch it, so such an assert is reported as usual, and the process aborts.
+// Nothing diverted is logged or counts against the test.
 // Must be constructed inside a running test; one at a time per test.
 struct scoped_test_check_divert
 {
