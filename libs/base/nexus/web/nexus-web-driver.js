@@ -116,11 +116,12 @@
       // A test that waits on the page's event loop comes back unfinished; it is polled again once the loop has run.
       function finish(tname) {
         var result = poll();
-        if (result < 0) { setTimeout(function () { finish(tname); }, 1); return; }
+        if (result === -1) { setTimeout(function () { finish(tname); }, 1); return; }
+        // -2: the module had no test running, so there are no stats to read.
         var ok = result === 1;
-        var c = lastChecks();
-        var d = lastMs();
-        var report = ok ? '' : lastReport();
+        var c = result === -2 ? 0 : lastChecks();
+        var d = result === -2 ? 0 : lastMs();
+        var report = ok ? '' : result === -2 ? 'no test was running at index ' + i : lastReport();
 
         lp += ok ? 1 : 0; lf += ok ? 0 : 1; lc += c; lms += d;
         passed += ok ? 1 : 0; failed += ok ? 0 : 1; checks += c; ms += d; done += 1;

@@ -60,7 +60,8 @@ struct nx::invocation_options
     /// A child that asks for nothing otherwise runs wherever the phase's scheduler puts it, which is a pool worker even under a `main_thread` driver.
     /// That is right for a child that is thread-agnostic and wrong for one driving a resource bound to one thread — a WebGPU device in a threaded wasm build.
     /// The driver must be homed when it invokes, which `main_thread` does; a child's own `main_thread` still wins.
-    /// Only the child's body is placed: work it starts itself follows the ordinary rules of whatever it awaits.
+    /// Only the child's body is placed: its helper coroutines are unhomed asyncs, which go to compute like any homed body's.
+    /// A helper that must touch the pinned subject hops there itself, and one that does not surfaces on its first line rather than after a suspend.
     bool inherit_home = false;
 };
 

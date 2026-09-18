@@ -1051,18 +1051,12 @@ void start_async_pass(async_test_state& state)
 
         // main_thread means what cc::make_async_lazy_on_main means: every segment on main, until the body hops away itself.
         // An inherited home is the invocation's ask, and applies only to a child that asked for nothing itself.
-        //
-        // It also drives the child's own cold dependencies inline, where `main_thread` leaves them to the home's default.
-        // A child inherits a home because its subject is pinned to that thread, and the helper coroutines it awaits
-        // touch the same subject; the default would send exactly those to compute.
         auto const inherited = !decl.test_config.main_thread && state.inherited_home != nullptr;
         auto* const home = inherited ? state.inherited_home
                                      : (decl.test_config.main_thread ? &cc::main_thread_scheduler() : nullptr);
         if (home != nullptr)
         {
-            auto const options = inherited ? cc::async_home_options{.inline_deps = cc::async_inline_deps::any}
-                                           : cc::async_home_options{};
-            auto const homed = body->try_home_cold(*home, options);
+            auto const homed = body->try_home_cold(*home);
             CC_ASSERT(homed, "a cold coroutine always takes a home");
         }
         body->schedule();

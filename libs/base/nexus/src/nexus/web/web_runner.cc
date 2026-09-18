@@ -1,6 +1,6 @@
 // Browser test-runner ABI: each Emscripten `*-test-web` module exports this tiny C interface.
 // The page in web/nexus-web-driver.js enumerates the module's tests and runs them one after another, rendering a live results table.
-// Running a single instance per call mirrors the CLI runner, but hands pacing and rendering to JavaScript.
+// A test spans one nx_web_start_test and as many nx_web_poll_test calls as it takes, so pacing and rendering stay with JavaScript.
 //
 // The whole file is Emscripten-only, and empty elsewhere.
 // cmake/NexusWebRunner.cmake compiles it directly into each runner rather than via libnexus.
@@ -48,7 +48,7 @@ cc::unique_ptr<web_test>& active_test()
     return active;
 }
 
-// Stats from the most recently finished test, read back through the getters below.
+// Stats from the most recently finished test, read back through the getters below; nx_web_start_test clears them.
 int g_last_checks = 0;
 int g_last_failed_checks = 0;
 double g_last_duration_ms = 0.0;
@@ -103,6 +103,10 @@ extern "C"
     {
         auto& active = active_test();
         active = nullptr;
+        g_last_checks = 0;
+        g_last_failed_checks = 0;
+        g_last_duration_ms = 0.0;
+        g_report_buffer.clear();
 
         auto const& instances = web_schedule().instances;
         if (i < 0 || i >= int(instances.size()))
@@ -114,11 +118,12 @@ extern "C"
     }
 
     // -1 while the started test is still running, then 1 if it passed and 0 otherwise, with its stats recorded.
+    // -2 when no test is running: none was started, the index was out of range, or its result was already returned.
     EMSCRIPTEN_KEEPALIVE int nx_web_poll_test()
     {
         auto& active = active_test();
         if (active == nullptr)
-            return 0;
+            return -2;
         if (!active->run->step())
             return -1;
 
