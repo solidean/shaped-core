@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_async.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_format.hh> // append_block_row_copies
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -326,24 +327,20 @@ bool vulkan_download_async_system::run_one_window()
                 // for the validation layer to disagree with, and it reads submit-call order rather than GPU order.
                 auto const range = sg::subresource_range(job.subresource);
 
-                auto const first_row = done / job.row_bytes;
-                auto const row_count = chunk / job.row_bytes;
-                auto const copy = VkBufferImageCopy{
-                    .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
-                    .bufferRowLength = 0,
-                    .bufferImageHeight = 0,
-                    .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
+                // Which block rows of the region this window covers, split per depth slice it crosses.
+                auto copies = cc::vector<VkBufferImageCopy>();
+                append_block_row_copies(copies, texture->format(),
+                                        {.aspectMask = vk_aspect_mask_from(range, texture->format()),
                                          .mipLevel = u32(job.subresource.mip_level),
                                          .baseArrayLayer = u32(job.subresource.array_layer),
                                          .layerCount = 1},
-                    .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
-                    .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
-                };
+                                        job.region, done / job.row_bytes, chunk / job.row_bytes,
+                                        VkDeviceSize(isize(slot) * _window_bytes));
                 // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
                 // and one layout for both directions is what keeps a transfer of the other direction from
                 // moving it — see vulkan_context::async_ready_layout.
-                vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_GENERAL, _staging, 1,
-                                       &copy);
+                vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_GENERAL, _staging,
+                                       u32(copies.size()), copies.data());
             }
             else
             {
@@ -682,21 +679,10 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
 
 namespace
 {
-/// Bytes per row of `region`, the granularity a texture readback's chunks fall on.
-[[nodiscard]] isize region_row_bytes(sg::pixel_format format, sg::texture_region const& region)
-{
-    int const block_extent = sg::format_block_extent(format);
-    int const block_size = sg::format_block_size(format);
-    isize const blocks_x = (region.size[0] + block_extent - 1) / block_extent;
-    return blocks_x * isize(block_size);
-}
-
 /// The tightly-packed size of `region`, which is what a readback delivers.
 [[nodiscard]] isize region_size_bytes(sg::pixel_format format, sg::texture_region const& region)
 {
-    int const block_extent = sg::format_block_extent(format);
-    isize const blocks_y = (region.size[1] + block_extent - 1) / block_extent;
-    return region_row_bytes(format, region) * blocks_y * isize(region.size[2]);
+    return region_row_bytes(format, region) * region_block_rows(format, region) * isize(region.size[2]);
 }
 
 void validate_texture_source(std::shared_ptr<vulkan_texture const> const& src)

@@ -75,9 +75,17 @@ them while the tracker would say otherwise.
 
 Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first.
 
+**An async upload can claim it too**, and on a fresh texture it usually does: whoever enqueues first wins.
+Its first window then runs the transition on the transfer queue, straight to the async-ready layout rather than the
+resting one, and the claim records that layout for the whole image.
+A list after it transitions out from there through its ordinary entry barriers, and a list that lost the claim to the
+upload waits on the upload's value, since the transition it would have run is the transfer's.
+A transfer that leaves without copying — cancelled, failed, handed nothing — still runs the transition it claimed.
+So creating a texture and streaming into it costs no direct-queue submit on Vulkan either.
+
 **While the claim is owed, the tracked layout reads as `undefined`**, whatever the texture was seeded to start in.
-What reads it is the async fixup below, and telling it the truth is what makes it submit the list that claims the
-transition instead of copying from an image nothing has transitioned yet.
+What reads it is the async fixup below, and telling it the truth is what makes a download of a fresh texture submit the
+list that claims the transition instead of copying from an image nothing has transitioned yet.
 
 dx12 needs none of this and ignores the field for the transition's purposes.
 A D3D12 resource is created in `COMMON`, which *is* `general`, so its tracker's default is already true of the resource;
@@ -108,24 +116,33 @@ They may not be reasoned about from outside, and a caller never has to.
 This is the contract a backend implements rather than a description of what one does.
 Where an implementation reads something the model does not define — a check taken during recording, say — that is a defect in the implementation whether or not it currently misbehaves.
 
-## The transfer queue never changes a layout — the direct queue settles it first
+## The transfer queue never moves a layout — the direct queue settles it first
 
 An async or streaming transfer runs on a queue that cannot settle a texture's layout for itself.
 A D3D12 copy queue **cannot run layout barriers at all**, so a copy there requires the resource in `COMMON`.
-Vulkan's transfer queue can run them, and doing so is still wrong for a different reason: the validation layer tracks
-image layouts in `vkQueueSubmit` **call** order and models no semaphore, so a transfer submit landing after a direct
-submit reads as a mismatch even when the GPU ordering is right.
+Vulkan's transfer queue can run them, and moving a layout there is still wrong for a different reason: the validation
+layer tracks image layouts in `vkQueueSubmit` **call** order, so a transfer submit landing after a direct submit that
+moved the image reads as a mismatch even when the GPU ordering is right.
 Correct and unverifiable is still unshippable, since a layer message fails a test.
 
-So the **direct queue** settles it, before the transfer is enqueued.
+**The exception is the one-time transition out of `UNDEFINED`**, above.
+A barrier whose old layout is `UNDEFINED` is valid whatever the layer believes the image is in, so it has nothing to
+disagree with in any submit order.
+`sg stream - a list reads a fresh streamed texture it was submitted ahead of` pins it: its list reaches
+`vkQueueSubmit` before the transfer does, deterministically on a singlethreaded build, and the layer reports it the
+moment the barrier is missing.
+
+So for a texture a list has already used, the **direct queue** settles the layout before the transfer is enqueued.
 `ctx.prepare_texture_for_async` compares the texture's current layout against what the transfer needs, and on a
 mismatch submits a throwaway command list holding one transition.
-The transfer then emits **no image barrier at all**, and has no layout claim for the layer to disagree with.
+The transfer then emits no layout-moving barrier, and has no layout claim for the layer to disagree with.
 
 **It warns, once per texture.**
-The caller could have avoided the submit by recording `cmd.prepare_for_async` on a list they were already building, or
-by creating the texture with `initial_layout` set, and the message names both.
-There is no opt-out on purpose: doing either is both the fix and the thing the warning asks for.
+It fires only where a command list moved the texture out of the async-ready layout, since a fresh texture's upload takes
+its transition on the transfer queue and dx12 creates one in `COMMON`.
+The caller could have avoided the submit by recording `cmd.prepare_for_async` at the end of that list, or of a later one
+they already submit, and the message says so.
+There is no opt-out on purpose: doing that is both the fix and the thing the warning asks for.
 
 The fixup runs **before** a transfer job's stamps rather than after.
 It is an ordinary command list, so its submit waits on the texture's pending-transfer values — and a value stamped for

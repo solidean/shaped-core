@@ -130,6 +130,31 @@ public:
         return true;
     }
 
+    /// Claims the one-time transition for an async upload, whose copy then runs it on the transfer queue — UNDEFINED
+    /// straight to `layout`, the async-ready one, rather than to the resting layout.
+    ///
+    /// `_current` records `layout` for the whole image, so every later list's entry barrier starts from what the
+    /// transfer left behind.
+    /// `upload_value` is that transfer's value on the texture's upload timeline: a list that lost the claim to it runs
+    /// no transition of its own, so it has to wait on the one the transfer runs — see `initial_transition_upload_value`.
+    [[nodiscard]] bool claim_initial_transition_for_upload(sg::texture_layout layout, u64 upload_value)
+    {
+        if (!claim_initial_transition())
+            return false;
+
+        _current.for_each_in(sg::subresource_range::whole(_current.extent()),
+                             [layout](sg::resource_access_state& state)
+                             {
+                                 state.curr_layout = layout;
+                                 state.prev_layout = layout;
+                             });
+        _initial_transition_upload_value = upload_value;
+        return true;
+    }
+
+    /// The upload value whose transfer runs the initial transition, or 0 when a command list ran it or none has.
+    [[nodiscard]] u64 initial_transition_upload_value() const { return _initial_transition_upload_value; }
+
     /// Whether the image is still in the layout vkCreateImage left it in.
     [[nodiscard]] bool needs_initial_transition() const { return _needs_initial_transition; }
 
@@ -360,9 +385,10 @@ private:
         return false;
     }
 
-    cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
-    sg::subresource_partition _current;     // the between-lists state, as of the last submitted list
-    sg::texture_layout _resting_layout;     // what _current was seeded to, and what the initial transition targets
-    bool _needs_initial_transition = true;  // the image is still UNDEFINED; whoever claims it fixes that
-    int _active_slot_count = 0;             // how many open lists are using this texture
+    cc::small_vector<slot_state, 4> _slots;   // indexed by command_list_slot
+    sg::subresource_partition _current;       // the between-lists state, as of the last submitted list
+    sg::texture_layout _resting_layout;       // what _current was seeded to, and what the initial transition targets
+    bool _needs_initial_transition = true;    // the image is still UNDEFINED; whoever claims it fixes that
+    u64 _initial_transition_upload_value = 0; // the upload whose transfer runs it, when an upload claimed it
+    int _active_slot_count = 0;               // how many open lists are using this texture
 };

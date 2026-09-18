@@ -198,7 +198,15 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             for (auto const& texture : cmd->_tentative_initial_transitions)
             {
                 if (!texture->claim_initial_transition())
-                    continue; // someone got there first, and their transition carries it
+                {
+                    // Someone got there first, and their transition carries it.
+                    // When that was an async upload the transition runs on the transfer queue, so this list waits on
+                    // it — the pending-transfer waits above were read before the lock and may have missed a claim made
+                    // since.
+                    if (auto const value = texture->initial_transition_upload_value(); value != 0)
+                        add_async_wait(texture->_upload_group, value);
+                    continue;
+                }
 
                 // UNDEFINED as the source is the discard: there are no contents to keep, which is what makes this
                 // cheap.

@@ -177,14 +177,18 @@ Not invariants — v1 shortcuts:
 
 The shape is dx12's; two things differ and both concern textures.
 
-- **The transfer queue emits no image barrier at all.**
-  The texture is put in the layout the copy needs by the *direct* queue, before the transfer is enqueued, and the
-  semaphore that orders this submit after that one also makes its writes visible here.
-  Vulkan's transfer queue *could* run the barrier itself, and doing so was wrong for a reason the GPU has no part in:
-  the validation layer tracks image layouts in `vkQueueSubmit` **call** order and models no semaphore, so it reported a
-  mismatch a correct program could not avoid.
-  A transfer that claims no layout has nothing for it to disagree with.
-  See [barriers](barriers.md#the-transfer-queue-never-changes-a-layout--the-direct-queue-settles-it-first).
+- **The transfer queue never moves a layout.**
+  A texture a list has used is put in the layout the copy needs by the *direct* queue, before the transfer is enqueued,
+  and the semaphore that orders this submit after that one also makes its writes visible here.
+  Moving the layout on the transfer queue instead is wrong for a reason the GPU has no part in: the validation layer
+  tracks image layouts in `vkQueueSubmit` **call** order, so it reported a mismatch a correct program could not avoid.
+  A transfer that moves no layout has nothing for it to disagree with.
+  See [barriers](barriers.md#the-transfer-queue-never-moves-a-layout--the-direct-queue-settles-it-first).
+- **A fresh texture's first upload takes its one-time transition out of `UNDEFINED` on the transfer queue**, ahead of its
+  first copy — the one barrier the layer cannot disagree with, since `UNDEFINED` is a valid old layout whatever it
+  believes the image is in.
+  So creating a texture and uploading into it costs no direct-queue submit.
+  See [barriers](barriers.md#a-texture-starts-in-a-real-layout-and-gets-there-once).
 - **A texture takes the same per-resource stamps a buffer does**, in both directions, so an async texture transfer is ordered
   against command lists exactly as an async buffer transfer is.
 

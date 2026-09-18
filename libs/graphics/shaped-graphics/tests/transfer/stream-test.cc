@@ -472,7 +472,6 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     desc.height = 64;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
-    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     isize const row_bytes = 64 * 4;
@@ -511,6 +510,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows"
     desc.width = 16;
     desc.height = 16;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::general; // the async-ready layout, so no fixup submit is owed
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 
@@ -546,6 +546,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streams slice by slice", (sg::con
     desc.height = 8;
     desc.depth = 4;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::general; // the async-ready layout, so no fixup submit is owed
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 
@@ -566,6 +567,122 @@ ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streams slice by slice", (sg::con
     CHECK(mismatches == 0)
         .context(cc::format("{} of {} bytes differ; a backend that never advances z writes every slice over the first",
                             mismatches, src.size()));
+}
+
+// A texture created and streamed into straight away, with a command list reading it submitted before the transfer
+// queue has run anything.
+//
+// The list's submit is the first submit to name the texture, while the stream is still only enqueued, so this is the
+// order in which a layout claim made by the transfer could be seen late.
+ASYNC_INVOCABLE_TEST("sg stream - a list reads a fresh streamed texture it was submitted ahead of",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::general;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto const src = pattern(16 * 16 * 4, 79);
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    stream.promote_to_async(); // the list below waits on purpose
+
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto back = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0);
+
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+}
+
+// The same with a resting layout that is not the async-ready one: the transfer leaves the image async-ready, and the
+// list after it moves it on from there rather than from where the texture would have rested.
+ASYNC_INVOCABLE_TEST("sg stream - a fresh texture resting elsewhere is streamed and then read by a list",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::shader_readonly;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto const src = pattern(16 * 16 * 4, 83);
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto back = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    auto mismatches = 0;
+    for (isize i = 0; i < src.size(); ++i)
+        if (bytes[i] != src[i])
+            ++mismatches;
+    CHECK(mismatches == 0);
+}
+
+// A stream that claims a fresh texture's one-time transition and then never copies still runs it.
+// Otherwise the texture would be recorded as async-ready while the image stayed where vkCreateImage left it, and the
+// next list's barrier would name a layout it was never in.
+ASYNC_INVOCABLE_TEST("sg stream - a failed stream into a fresh texture still leaves it usable",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto stream = c.stream.from_source_to_texture(tex, std::make_unique<failing_source>());
+    CHECK(!(co_await cc::async_as_result(stream.completion())).has_value());
+
+    // A failed stream settles its handle once its completion value is queued, not once it lands, so the list below may
+    // still wait on it — which is what carries the transition the stream claimed, and so intended here.
+    stream.promote_to_async();
+
+    // Written by a list after the failure, then read back: both need the image out of UNDEFINED.
+    auto const src = pattern(16 * 16 * 4, 89);
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(tex, cc::span<byte const>(src));
+    auto back = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(bytes[0] == src[0]);
+    CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))
@@ -694,7 +811,6 @@ ASYNC_INVOCABLE_TEST("sg stream - a texture sink receives whole tightly-packed r
     desc.height = 32;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
-    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     isize const row_bytes = 32 * 4;

@@ -55,9 +55,9 @@ cc::optional<submission_token> context::prepare_texture_for_async(raw_texture_ha
 
     if (texture->claim_async_fixup_warning())
         CC_LOG_WARNING("an async transfer found a texture in a layout its transfer queue cannot use, so a command "
-                       "list holding one transition was submitted for it. Record cmd.prepare_for_async on a list you "
-                       "are already building, or create the texture with texture_description::initial_layout set, to "
-                       "avoid the submit");
+                       "list holding one transition was submitted for it. A command list moved it there; record "
+                       "cmd.prepare_for_async at the end of that list, or of a later one you already submit, to avoid "
+                       "the submit");
 
     auto cmd = create_command_list();
     cmd->ensure_layout(texture, required, range);

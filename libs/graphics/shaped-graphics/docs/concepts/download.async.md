@@ -183,7 +183,7 @@ The vulkan backend is still a stub, but the constraint is load-bearing for its d
 
 As on the [upload](upload.async.md#vulkan-implementation) side: the transfer queue emits **no image barrier at all**.
 The texture is put in the layout the copy needs by the *direct* queue, before the readback is enqueued — see
-[barriers](barriers.md#the-transfer-queue-never-changes-a-layout--the-direct-queue-settles-it-first) — and the
+[barriers](barriers.md#the-transfer-queue-never-moves-a-layout--the-direct-queue-settles-it-first) — and the
 semaphore that orders this submit after that one also makes its writes visible here.
 A transfer that claims no layout has none for the validation layer to disagree with, and that layer reads submit-call
 order rather than GPU order.

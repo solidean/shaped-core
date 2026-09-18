@@ -46,6 +46,11 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     std::weak_ptr<vulkan_buffer const> buffer_target;
     std::weak_ptr<vulkan_texture const> texture_target;
     bool is_texture = false;
+
+    /// This job claimed the texture's one-time transition out of UNDEFINED at enqueue, so its first window carries
+    /// that barrier ahead of the copy — to the async-ready layout, not the resting one; cleared once recorded.
+    bool owes_initial_transition = false;
+
     isize dst_offset = 0;              // buffer copies
     sg::subresource_index subresource; // texture copies
     sg::texture_region region;         // texture copies
@@ -280,6 +285,14 @@ private:
 
     /// Settles `job`'s stream control now, without waiting for a copy — for a cancelled or failed transfer.
     static void settle_now(vulkan_async_upload_job& job, bool delivered);
+
+    /// Records the one-time UNDEFINED -> async-ready transition of `texture`'s whole image into `cmd`, ahead of a copy.
+    void record_initial_transition(VkCommandBuffer cmd, vulkan_texture const& texture) const;
+
+    /// Runs `job`'s claimed initial transition on a window of its own, when the job leaves without ever recording one:
+    /// cancelled, failed, or given nothing to copy.
+    /// Queued ahead of the job's completion signal, since a list that lost the claim waits on that value for it.
+    void run_owed_initial_transition(vulkan_async_upload_job& job);
 
     /// Signals `value` with an empty submit on the upload queue.
     ///

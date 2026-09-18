@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh> // cc::min
 #include <shaped-graphics/backends/vulkan/vulkan_format.hh>
 
 namespace sg::backend::vulkan
@@ -196,5 +197,56 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
     // Unconditional rather than usage-gated — a buffer's usages say how a shader reads it, not whether it may be bound
     // at all, and there is no cost to the bit on a buffer nothing binds.
     return flags | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+}
+
+isize region_row_bytes(sg::pixel_format format, sg::texture_region const& region)
+{
+    int const block_extent = sg::format_block_extent(format);
+    int const block_size = sg::format_block_size(format);
+    isize const blocks_x = (region.size[0] + block_extent - 1) / block_extent;
+    return blocks_x * isize(block_size);
+}
+
+isize region_block_rows(sg::pixel_format format, sg::texture_region const& region)
+{
+    int const block_extent = sg::format_block_extent(format);
+    return (region.size[1] + block_extent - 1) / block_extent;
+}
+
+void append_block_row_copies(cc::vector<VkBufferImageCopy>& out,
+                             sg::pixel_format format,
+                             VkImageSubresourceLayers const& subresource,
+                             sg::texture_region const& region,
+                             isize first_row,
+                             isize row_count,
+                             VkDeviceSize buffer_offset)
+{
+    isize const block_extent = sg::format_block_extent(format);
+    isize const rows_per_slice = region_block_rows(format, region);
+    isize const row_bytes = region_row_bytes(format, region);
+    CC_ASSERT(rows_per_slice > 0, "a texture region with no rows has nothing to copy");
+
+    auto row = first_row;
+    auto const end = first_row + row_count;
+    while (row < end)
+    {
+        auto const slice = row / rows_per_slice;
+        auto const y = row % rows_per_slice;
+        auto const n = cc::min(end - row, rows_per_slice - y);
+
+        // In texels, and clamped to the region: a block row past the region's last texel row is partial.
+        auto const texel_y = y * block_extent;
+        auto const texel_rows = cc::min(n * block_extent, isize(region.size[1]) - texel_y);
+
+        out.push_back(VkBufferImageCopy{
+            .bufferOffset = buffer_offset + VkDeviceSize((row - first_row) * row_bytes),
+            .bufferRowLength = 0, // tightly packed to imageExtent
+            .bufferImageHeight = 0,
+            .imageSubresource = subresource,
+            .imageOffset = {region.offset[0], region.offset[1] + int(texel_y), region.offset[2] + int(slice)},
+            .imageExtent = {u32(region.size[0]), u32(texel_rows), 1},
+        });
+        row += n;
+    }
 }
 } // namespace sg::backend::vulkan

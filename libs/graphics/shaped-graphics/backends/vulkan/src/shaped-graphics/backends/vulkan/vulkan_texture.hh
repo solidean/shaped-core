@@ -100,6 +100,22 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.claim_initial_transition(); });
     }
 
+    /// Claims the one-time transition for the async upload at `upload_value` on `_upload_group`, whose first window
+    /// then runs it on the transfer queue, straight to `layout`; false if someone already has.
+    /// Thread-safe.
+    [[nodiscard]] bool claim_initial_transition_for_upload(sg::texture_layout layout, u64 upload_value) const
+    {
+        return _access.lock([&](vulkan_texture_access& a)
+                            { return a.claim_initial_transition_for_upload(layout, upload_value); });
+    }
+
+    /// The value on `_upload_group` whose transfer runs the initial transition, or 0 when a command list ran it.
+    /// A list that lost the claim waits on it, since the transition it would have run is the transfer's instead.
+    [[nodiscard]] u64 initial_transition_upload_value() const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.initial_transition_upload_value(); });
+    }
+
     /// Whether the image is still in the layout vkCreateImage left it in.
     /// A hint at record time: another list may claim the transition before this one submits, which is why the set it
     /// feeds is tentative and claim_initial_transition is what decides.
