@@ -67,6 +67,23 @@ ASYNC_INVOCABLE_TEST("sg stream - an upload round-trips once the handle settles"
     CHECK(bytes[4095] == src[4095]);
 }
 
+ASYNC_INVOCABLE_TEST("sg stream - idle_completion settles once a stream finishes, with nothing else to wake it",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    auto const src = pattern(4096);
+    auto buf = c.persistent.create_raw_buffer(4096, sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+
+    // No submit, no readback and no advance follow: the stream finishing is the only event there is.
+    // A drain that re-checks only when the GPU or a readback reports would leave this waiting for good.
+    auto stream = c.stream.bytes_to_buffer(buf, cc::make_pinned_data(src));
+    co_await c.idle_completion();
+    CHECK((co_await cc::async_as_result(stream.completion())).has_value());
+}
+
 ASYNC_INVOCABLE_TEST("sg stream - a download round-trips through its future", (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

@@ -85,16 +85,18 @@ void completion_waiter::arm(u64 submission, u64 epoch)
 void completion_waiter::stop()
 {
     auto& s = *_state;
+    // Started is what decides the join, not who stopped it: a waiter that saw its device lost stops itself and still has to be joined.
     auto const was_running = s.armed.lock(
         [&](state::armed_targets& a)
         {
-            if (a.is_stopped)
-                return false;
-            a.is_stopped = true;
+            if (!a.is_stopped)
+            {
+                a.is_stopped = true;
 #if CC_HAS_THREADS
-            if (a.is_started)
-                s.h.wake(++a.generation);
+                if (a.is_started)
+                    s.h.wake(++a.generation);
 #endif
+            }
             return a.is_started;
         });
     if (!was_running)

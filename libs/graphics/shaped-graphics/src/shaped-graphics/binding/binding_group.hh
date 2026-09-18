@@ -132,7 +132,7 @@ namespace sg::impl
 ///
 /// Abstract: a backend subclasses it and owns the native allocation (dx12 descriptor-heap range,
 /// vulkan VkDescriptorSet). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-class sg::binding_group
+class sg::binding_group : public std::enable_shared_from_this<binding_group>
 {
 public:
     virtual ~binding_group();

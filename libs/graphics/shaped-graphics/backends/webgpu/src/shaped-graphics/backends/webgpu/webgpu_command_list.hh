@@ -31,6 +31,11 @@ public:
     /// Finishes the encoder into a command buffer; the list records nothing afterwards.
     [[nodiscard]] wgpu_command_buffer finish();
 
+    /// Every recording path reaches WebGPU through these, so recording from another thread asserts rather than failing inside WebGPU.
+    [[nodiscard]] WGPUCommandEncoder encoder() const;
+    [[nodiscard]] WGPUComputePassEncoder compute_pass() const;
+    [[nodiscard]] WGPURenderPassEncoder render_pass() const;
+
     webgpu_context& _ctx;
     bool _consumed = false;
     wgpu_command_encoder _encoder;
@@ -71,12 +76,13 @@ public:
     void touch_group(sg::binding_group const& group);
 
     // What bind_* set up, replayed whenever a pass opens.
+    // The pipelines and groups are owning references, since a caller may drop its handle before the replay.
     struct bound_state
     {
         webgpu_pipeline_layout const* layout = nullptr;
-        WGPUComputePipeline compute_pipeline = nullptr;
-        WGPURenderPipeline render_pipeline = nullptr;
-        cc::fixed_vector<WGPUBindGroup, sg::max_binding_groups> groups;
+        wgpu_compute_pipeline compute_pipeline;
+        wgpu_render_pipeline render_pipeline;
+        cc::fixed_vector<wgpu_bind_group, sg::max_binding_groups> groups;
 
         // The inline constants block as the caller last set it, and the placement it was last bound at.
         cc::vector<byte> constants;

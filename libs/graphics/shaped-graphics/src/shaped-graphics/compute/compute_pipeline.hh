@@ -23,7 +23,7 @@ struct sg::compute_pipeline_description
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 pipeline state + root signature,
 /// vulkan VkPipeline + VkPipelineLayout). See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-class sg::compute_pipeline
+class sg::compute_pipeline : public std::enable_shared_from_this<compute_pipeline>
 {
 public:
     virtual ~compute_pipeline();

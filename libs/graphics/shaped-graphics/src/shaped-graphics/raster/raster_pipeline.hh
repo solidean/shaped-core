@@ -75,7 +75,7 @@ struct sg::raster_pipeline_description
 ///
 /// Abstract: a backend subclasses it and owns the native object (dx12 pipeline state + root signature,
 /// vulkan VkPipeline + VkPipelineLayout).
-class sg::raster_pipeline
+class sg::raster_pipeline : public std::enable_shared_from_this<raster_pipeline>
 {
 public:
     virtual ~raster_pipeline();

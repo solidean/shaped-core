@@ -9,6 +9,24 @@
 
 namespace sg::backend::webgpu
 {
+WGPUCommandEncoder webgpu_command_list::encoder() const
+{
+    _ctx.assert_on_device_thread();
+    return _encoder.get();
+}
+
+WGPUComputePassEncoder webgpu_command_list::compute_pass() const
+{
+    _ctx.assert_on_device_thread();
+    return _compute_pass.get();
+}
+
+WGPURenderPassEncoder webgpu_command_list::render_pass() const
+{
+    _ctx.assert_on_device_thread();
+    return _render_pass.get();
+}
+
 webgpu_command_list::webgpu_command_list(webgpu_context& ctx, sg::epoch created_in, wgpu_command_encoder encoder)
   : sg::command_list(ctx, created_in), _ctx(ctx), _encoder(cc::move(encoder))
 {
@@ -30,7 +48,7 @@ cc::result<std::unique_ptr<webgpu_command_list>> webgpu_context::create_webgpu_c
         return cc::error(cc::format("the device was lost: {}", device_loss_reason()));
 
     auto const desc = WGPUCommandEncoderDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg command list")};
-    auto encoder = wgpu_command_encoder(wgpuDeviceCreateCommandEncoder(_device.get(), &desc));
+    auto encoder = wgpu_command_encoder(wgpuDeviceCreateCommandEncoder(device(), &desc));
     if (!encoder)
         return cc::error("wgpuDeviceCreateCommandEncoder returned no encoder");
 
@@ -42,13 +60,13 @@ void webgpu_command_list::end_open_pass()
 {
     if (_compute_pass)
     {
-        wgpuComputePassEncoderEnd(_compute_pass.get());
+        wgpuComputePassEncoderEnd(compute_pass());
         _compute_pass = {};
         _compute.needs_full_apply = true;
     }
     if (_render_pass)
     {
-        wgpuRenderPassEncoderEnd(_render_pass.get());
+        wgpuRenderPassEncoderEnd(render_pass());
         _render_pass = {};
         _raster.needs_full_apply = true;
     }
@@ -59,7 +77,7 @@ wgpu_command_buffer webgpu_command_list::finish()
     CC_ASSERT(!_in_rendering_scope, "a rendering scope is still open at submit");
     end_open_pass();
     auto const desc = WGPUCommandBufferDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg command list")};
-    auto buffer = wgpu_command_buffer(wgpuCommandEncoderFinish(_encoder.get(), &desc));
+    auto buffer = wgpu_command_buffer(wgpuCommandEncoderFinish(encoder(), &desc));
     _encoder = {};
     return buffer;
 }
@@ -78,13 +96,13 @@ sg::submission_token webgpu_context::submit_webgpu_command_list(std::unique_ptr<
     // Every write this list's commands read is queued ahead of the submit: its ring spans at record time, its constant pages here.
     _constant_pages.flush_and_return(cmd->_constant_pages);
 
-    // A stream still filling a resource this list reads is brought forward, so the list sees all of it.
-    if (_streams.has_queued_writes())
+    // A stream still filling a resource this list reads is brought forward, so the list sees all of it; one still reading it is copied first, so the list cannot overtake the read.
+    if (_streams.has_pending_streams())
         for (auto const* resource : cmd->_touched)
             _streams.flush_resource(resource, true);
 
     auto const raw = buffer.get();
-    wgpuQueueSubmit(_queue.get(), 1, &raw);
+    wgpuQueueSubmit(queue(), 1, &raw);
 
     auto const token = sg::submission_token(_next_submission++);
     notify_when_queue_done(u64(token), 0);
@@ -216,7 +234,7 @@ void webgpu_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,
     auto const words = word_span(dst, offset_in_bytes, data.size(), true);
     auto const span = stage_upload(data, words);
     end_open_pass();
-    wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), span.buffer, u64(span.offset), dst.raw(), u64(offset_in_bytes),
+    wgpuCommandEncoderCopyBufferToBuffer(encoder(), span.buffer, u64(span.offset), dst.raw(), u64(offset_in_bytes),
                                          u64(words));
     if (span.overflow)
         _keep_alive.push_back(std::make_shared<wgpu_buffer>(span.overflow));
@@ -239,7 +257,8 @@ void webgpu_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
         _holds_upload_ring = true;
         _ctx._upload_ring.acquire_holder();
     }
-    auto const span = _ctx._upload_ring.stage_rows(pixels, layout.row_bytes, layout.padded_row, layout.staged_bytes);
+    auto const span = _ctx._upload_ring.stage_rows(pixels, layout.row_bytes, layout.padded_row, layout.staged_bytes,
+                                                   isize(sg::format_block_size(dst.format())));
 
     auto const source = WGPUTexelCopyBufferInfo{
         .layout = {.offset = u64(span.offset), .bytesPerRow = u32(layout.padded_row), .rowsPerImage = u32(layout.rows)},
@@ -252,10 +271,10 @@ void webgpu_command_list::upload_bytes_to_texture(sg::raw_texture_handle texture
                    dst.dimension() == sg::texture_dimension::d3 ? u32(region.offset[2]) : u32(subresource.array_layer)},
         .aspect = to_wgpu_copy_aspect(dst.format(), subresource.aspect),
     };
-    auto const extent = WGPUExtent3D{u32(region.size[0]), u32(region.size[1]), u32(region.size[2])};
+    auto const extent = copy_extent_of(dst.format(), region.size);
 
     end_open_pass();
-    wgpuCommandEncoderCopyBufferToTexture(_encoder.get(), &source, &destination, &extent);
+    wgpuCommandEncoderCopyBufferToTexture(encoder(), &source, &destination, &extent);
     if (span.overflow)
         _keep_alive.push_back(std::make_shared<wgpu_buffer>(span.overflow));
     touch(texture);
@@ -295,7 +314,7 @@ sg::bytes_future webgpu_command_list::download_bytes_from_buffer(sg::raw_buffer_
 
     auto readback = _ctx._readbacks.acquire(words);
     end_open_pass();
-    wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), src.raw(), u64(start), readback.staging.get(), 0, u64(words));
+    wgpuCommandEncoderCopyBufferToBuffer(encoder(), src.raw(), u64(start), readback.staging.get(), 0, u64(words));
     touch(buffer);
 
     auto destination = cc::pinned_data<byte>::create_uninitialized(size_in_bytes);
@@ -330,10 +349,10 @@ sg::bytes_future webgpu_command_list::download_bytes_from_texture(sg::raw_textur
         .layout = {.offset = 0, .bytesPerRow = u32(layout.padded_row), .rowsPerImage = u32(layout.rows)},
         .buffer = readback.staging.get(),
     };
-    auto const extent = WGPUExtent3D{u32(region.size[0]), u32(region.size[1]), u32(region.size[2])};
+    auto const extent = copy_extent_of(src.format(), region.size);
 
     end_open_pass();
-    wgpuCommandEncoderCopyTextureToBuffer(_encoder.get(), &source, &destination, &extent);
+    wgpuCommandEncoderCopyTextureToBuffer(encoder(), &source, &destination, &extent);
     touch(texture);
 
     auto out = cc::pinned_data<byte>::create_uninitialized(layout.packed_bytes);
@@ -385,14 +404,12 @@ void webgpu_command_list::copy_buffer_region(sg::raw_buffer_handle src,
             .mappedAtCreation = WGPU_FALSE,
         };
         auto temp = std::make_shared<wgpu_buffer>(wgpuDeviceCreateBuffer(_ctx.device(), &desc));
-        wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), s.raw(), u64(src_offset_in_bytes), temp->get(), 0,
-                                             u64(words));
-        wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), temp->get(), 0, d.raw(), u64(dst_offset_in_bytes),
-                                             u64(words));
+        wgpuCommandEncoderCopyBufferToBuffer(encoder(), s.raw(), u64(src_offset_in_bytes), temp->get(), 0, u64(words));
+        wgpuCommandEncoderCopyBufferToBuffer(encoder(), temp->get(), 0, d.raw(), u64(dst_offset_in_bytes), u64(words));
         _keep_alive.push_back(temp);
     }
     else
-        wgpuCommandEncoderCopyBufferToBuffer(_encoder.get(), s.raw(), u64(src_offset_in_bytes), d.raw(),
+        wgpuCommandEncoderCopyBufferToBuffer(encoder(), s.raw(), u64(src_offset_in_bytes), d.raw(),
                                              u64(dst_offset_in_bytes), u64(words));
     touch(src);
     touch(dst);

@@ -55,7 +55,7 @@ struct sg::raytracing_pipeline_description
 
 /// A ready-to-trace ray-tracing pipeline, built from a raytracing_pipeline_description and held via raytracing_pipeline_handle.
 /// Bind it with cmd.raytracing.bind_pipeline, and dispatch it via cmd.raytracing.dispatch_rays through a raytracing_shader_table.
-class sg::raytracing_pipeline
+class sg::raytracing_pipeline : public std::enable_shared_from_this<raytracing_pipeline>
 {
 public:
     virtual ~raytracing_pipeline();

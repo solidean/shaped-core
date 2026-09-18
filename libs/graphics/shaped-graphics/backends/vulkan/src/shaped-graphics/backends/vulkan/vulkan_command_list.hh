@@ -115,6 +115,15 @@ public:
     vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_groups;
 
+    /// What was bound, held until the list is consumed: a group or pipeline dropped between its bind and the draw that reads it must still be there.
+    cc::vector<std::shared_ptr<void const>> _bound_keep_alive;
+
+    void keep_bound(std::shared_ptr<void const> object)
+    {
+        if (object != nullptr && (_bound_keep_alive.empty() || _bound_keep_alive.back() != object))
+            _bound_keep_alive.push_back(cc::move(object));
+    }
+
     // Array bindings are not auto-tracked, so their accesses arrive as explicit declarations and wait here.
     cc::vector<vulkan_array_buffer_declare> _pending_array_buffer_declares;
     cc::vector<vulkan_array_texture_declare> _pending_array_texture_declares;

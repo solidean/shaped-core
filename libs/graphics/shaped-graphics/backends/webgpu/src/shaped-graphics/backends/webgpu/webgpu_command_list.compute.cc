@@ -17,7 +17,7 @@ void rebind_layout(webgpu_command_list::bound_state& state, webgpu_pipeline_layo
         state.layout = layout;
         state.groups.clear();
         for (isize i = 0; i < layout->groups().size(); ++i)
-            state.groups.push_back(nullptr);
+            state.groups.push_back({});
         state.constants = cc::vector<byte>::create_filled(layout->inline_constants_bytes(), byte(0));
         state.constants_dirty = layout->inline_constants_bytes() > 0;
         state.constants_page = nullptr;
@@ -43,7 +43,7 @@ void bind_group_into(webgpu_command_list::bound_state& state,
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
                "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",
                pinned.value_or(0), group_index);
-    state.groups[group_index] = wg->raw();
+    state.groups[group_index] = wg->_group;
     state.needs_full_apply = true;
 }
 
@@ -87,25 +87,25 @@ void webgpu_command_list::open_compute_pass()
         return;
     auto const desc
         = WGPUComputePassDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg compute"), .timestampWrites = nullptr};
-    _compute_pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(_encoder.get(), &desc));
+    _compute_pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(encoder(), &desc));
     _compute.needs_full_apply = true;
 }
 
 void webgpu_command_list::apply_compute_state()
 {
     auto& s = _compute;
-    CC_ASSERT(s.compute_pipeline != nullptr, "bind a compute pipeline before dispatching");
+    CC_ASSERT(bool(s.compute_pipeline), "bind a compute pipeline before dispatching");
 
     // Placed before the early-out: a changed block always marks the state dirty, so this only ever places once.
     place_constants(s);
     if (!s.needs_full_apply)
         return;
 
-    auto const pass = _compute_pass.get();
-    wgpuComputePassEncoderSetPipeline(pass, s.compute_pipeline);
+    auto const pass = compute_pass();
+    wgpuComputePassEncoderSetPipeline(pass, s.compute_pipeline.get());
     for (isize i = 0; i < s.groups.size(); ++i)
-        if (s.groups[i] != nullptr)
-            wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.groups[i], 0, nullptr);
+        if (s.groups[i])
+            wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.groups[i].get(), 0, nullptr);
     if (s.layout->has_reserved_group())
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
@@ -124,7 +124,7 @@ void webgpu_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
     auto const* wp = dynamic_cast<webgpu_compute_pipeline const*>(&pipeline);
     CC_ASSERT(wp != nullptr, "compute_pipeline is not a webgpu compute_pipeline");
     rebind_layout(_compute, wp->layout.get());
-    _compute.compute_pipeline = wp->pipeline.get();
+    _compute.compute_pipeline = wp->pipeline;
     _keep_alive.push_back(wp->layout);
 }
 
@@ -164,10 +164,14 @@ void webgpu_command_list::compute_declare_array_texture_access(cc::string_view,
 void webgpu_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    // The device is requested with the default limits, so this is exactly its maxComputeWorkgroupsPerDimension.
+    constexpr int max_groups_per_dimension = 65535;
+    CC_ASSERTF(x <= max_groups_per_dimension && y <= max_groups_per_dimension && z <= max_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds webgpu's {} per dimension", x, y, z, max_groups_per_dimension);
     CC_ASSERT(!_in_rendering_scope, "dispatch must not be recorded inside a rendering scope; close the scope first");
     open_compute_pass();
     apply_compute_state();
-    wgpuComputePassEncoderDispatchWorkgroups(_compute_pass.get(), u32(x), u32(y), u32(z));
+    wgpuComputePassEncoderDispatchWorkgroups(compute_pass(), u32(x), u32(y), u32(z));
 }
 
 // -- raster state helpers shared with webgpu_command_list.raster.cc --
@@ -191,7 +195,7 @@ void webgpu_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     auto const* wp = dynamic_cast<webgpu_raster_pipeline const*>(&pipeline);
     CC_ASSERT(wp != nullptr, "raster_pipeline is not a webgpu raster_pipeline");
     rebind_layout(_raster, wp->layout.get());
-    _raster.render_pipeline = wp->pipeline.get();
+    _raster.render_pipeline = wp->pipeline;
     _keep_alive.push_back(wp->layout);
 }
 } // namespace sg::backend::webgpu

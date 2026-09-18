@@ -100,6 +100,40 @@ ASYNC_INVOCABLE_TEST("sg vulkan - compute dispatch writes a structured buffer",
     CHECK(ok);
 }
 
+// The list reads what was bound when it records the dispatch, so it holds the group and the pipeline, not the caller.
+// Uncached on purpose: a cached pipeline would stay alive in the cache whatever the caller dropped.
+ASYNC_INVOCABLE_TEST("sg vulkan - a group and a pipeline dropped between bind and dispatch still dispatch",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    constexpr int count = 256;
+
+    sg::compiled_shader const shader = make_double_shader();
+    auto buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
+                                                sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto group_layout = ctx.uncached.create_binding_group_layout(shader.bindings);
+    auto pipeline_layout = ctx.uncached.create_pipeline_layout({.groups = {group_layout}});
+    auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
+    sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
+    auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));
+
+    auto cmd = ctx.create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    group = nullptr;
+    pipeline = nullptr;
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer<u32>(buf, 0, count);
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    auto ok = true;
+    for (int i = 0; i < count; ++i)
+        ok &= data[i] == u32(i) * 2;
+    CHECK(ok);
+}
+
 // The same dispatch with a TRANSIENT output buffer and TRANSIENT binding group each epoch, on a deliberately tiny
 // descriptor heap so 40 iterations wrap its transient region many times over.
 //
@@ -157,7 +191,7 @@ ASYNC_TEST("sg vulkan - transient binding groups and buffers recycle across epoc
                 all_ok = false;
 
         ctx.advance_epoch();
-        ctx.block_until_epochs_in_flight(2); // keep at most 2 epochs in flight, so the rings reclaim older windows
+        co_await ctx.epochs_in_flight_completion(2); // keep at most 2 epochs in flight, so the rings reclaim older windows
     }
     CHECK(all_ok); // one check for 40 epochs: a per-epoch check would bury the failure that matters
 }

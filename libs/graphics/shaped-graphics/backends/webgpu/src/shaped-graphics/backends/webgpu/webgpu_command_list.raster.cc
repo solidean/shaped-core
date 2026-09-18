@@ -124,9 +124,9 @@ void webgpu_command_list::open_render_pass(bool reopen)
         .occlusionQuerySet = nullptr,
         .timestampWrites = nullptr,
     };
-    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(_encoder.get(), &desc));
+    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(encoder(), &desc));
 
-    auto const pass = _render_pass.get();
+    auto const pass = render_pass();
     wgpuRenderPassEncoderSetViewport(pass, _viewport.x, _viewport.y, _viewport.width, _viewport.height,
                                      _viewport.min_depth, _viewport.max_depth);
     auto const x0 = _scissor.min[0] < 0 ? 0 : _scissor.min[0];
@@ -162,7 +162,7 @@ void webgpu_command_list::raster_end_rendering()
 void webgpu_command_list::apply_raster_state()
 {
     auto& s = _raster;
-    CC_ASSERT(s.render_pipeline != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(bool(s.render_pipeline), "bind a raster pipeline before drawing");
     if (!_render_pass)
         open_render_pass(true);
 
@@ -170,11 +170,11 @@ void webgpu_command_list::apply_raster_state()
     if (!s.needs_full_apply)
         return;
 
-    auto const pass = _render_pass.get();
-    wgpuRenderPassEncoderSetPipeline(pass, s.render_pipeline);
+    auto const pass = render_pass();
+    wgpuRenderPassEncoderSetPipeline(pass, s.render_pipeline.get());
     for (isize i = 0; i < s.groups.size(); ++i)
-        if (s.groups[i] != nullptr)
-            wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.groups[i], 0, nullptr);
+        if (s.groups[i])
+            wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.groups[i].get(), 0, nullptr);
     if (s.layout->has_reserved_group())
     {
         for (auto i = s.groups.size(); i < sg::reserved_binding_group; ++i)
@@ -187,6 +187,16 @@ void webgpu_command_list::apply_raster_state()
     }
     s.needs_full_apply = false;
 }
+
+namespace
+{
+/// A vertex or index view's byte count as WebGPU takes it: -1 is sg's "to the end of the buffer".
+[[nodiscard]] u64 to_wgpu_range_size(isize size_in_bytes)
+{
+    CC_ASSERT(size_in_bytes >= -1, "a buffer view's size must be -1 (to the end) or non-negative");
+    return size_in_bytes < 0 ? WGPU_WHOLE_SIZE : u64(size_in_bytes);
+}
+} // namespace
 
 void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views)
 {
@@ -202,10 +212,11 @@ void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
         CC_ASSERT(buffer != nullptr, "vertex buffer is not a webgpu buffer");
         touch(v.buffer);
         auto& binding = _vertex_buffers[first_slot + i];
-        binding = {.buffer = buffer->raw(), .offset = u64(v.offset_in_bytes), .size = u64(v.size_in_bytes)};
-        if (_render_pass && binding.size > 0)
-            wgpuRenderPassEncoderSetVertexBuffer(_render_pass.get(), u32(first_slot + i), binding.buffer,
-                                                 binding.offset, binding.size);
+        binding
+            = {.buffer = buffer->raw(), .offset = u64(v.offset_in_bytes), .size = to_wgpu_range_size(v.size_in_bytes)};
+        if (_render_pass)
+            wgpuRenderPassEncoderSetVertexBuffer(render_pass(), u32(first_slot + i), binding.buffer, binding.offset,
+                                                 binding.size);
     }
 }
 
@@ -218,9 +229,9 @@ void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& 
     _index_buffer = buffer->raw();
     _index_format = view.format == sg::index_format::uint16 ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
     _index_offset = u64(view.offset_in_bytes);
-    _index_size = u64(view.size_in_bytes);
+    _index_size = to_wgpu_range_size(view.size_in_bytes);
     if (_render_pass)
-        wgpuRenderPassEncoderSetIndexBuffer(_render_pass.get(), _index_buffer, _index_format, _index_offset, _index_size);
+        wgpuRenderPassEncoderSetIndexBuffer(render_pass(), _index_buffer, _index_format, _index_offset, _index_size);
 }
 
 void webgpu_command_list::raster_set_viewport(sg::viewport const& vp)
@@ -228,8 +239,8 @@ void webgpu_command_list::raster_set_viewport(sg::viewport const& vp)
     CC_ASSERT(_in_rendering_scope, "set_viewport is only valid inside a rendering scope");
     _viewport = {vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
     if (_render_pass)
-        wgpuRenderPassEncoderSetViewport(_render_pass.get(), _viewport.x, _viewport.y, _viewport.width,
-                                         _viewport.height, _viewport.min_depth, _viewport.max_depth);
+        wgpuRenderPassEncoderSetViewport(render_pass(), _viewport.x, _viewport.y, _viewport.width, _viewport.height,
+                                         _viewport.min_depth, _viewport.max_depth);
 }
 
 void webgpu_command_list::raster_set_scissor(tg::aabb2i const& rect)
@@ -242,7 +253,7 @@ void webgpu_command_list::raster_set_scissor(tg::aabb2i const& rect)
         auto const y0 = rect.min[1] < 0 ? 0 : rect.min[1];
         auto const x1 = rect.max[0] > _target_size[0] ? _target_size[0] : rect.max[0];
         auto const y1 = rect.max[1] > _target_size[1] ? _target_size[1] : rect.max[1];
-        wgpuRenderPassEncoderSetScissorRect(_render_pass.get(), u32(x0), u32(y0), u32(x1 > x0 ? x1 - x0 : 0),
+        wgpuRenderPassEncoderSetScissorRect(render_pass(), u32(x0), u32(y0), u32(x1 > x0 ? x1 - x0 : 0),
                                             u32(y1 > y0 ? y1 - y0 : 0));
     }
 }
@@ -252,7 +263,7 @@ void webgpu_command_list::raster_set_stencil_reference(u32 reference)
     CC_ASSERT(_in_rendering_scope, "set_stencil_reference is only valid inside a rendering scope");
     _stencil_reference = reference;
     if (_render_pass)
-        wgpuRenderPassEncoderSetStencilReference(_render_pass.get(), reference);
+        wgpuRenderPassEncoderSetStencilReference(render_pass(), reference);
 }
 
 void webgpu_command_list::raster_set_blend_constants(tg::vec4f constants)
@@ -260,14 +271,14 @@ void webgpu_command_list::raster_set_blend_constants(tg::vec4f constants)
     CC_ASSERT(_in_rendering_scope, "set_blend_constants is only valid inside a rendering scope");
     _blend_constants = WGPUColor{constants[0], constants[1], constants[2], constants[3]};
     if (_render_pass)
-        wgpuRenderPassEncoderSetBlendConstant(_render_pass.get(), &_blend_constants);
+        wgpuRenderPassEncoderSetBlendConstant(render_pass(), &_blend_constants);
 }
 
 void webgpu_command_list::raster_draw(sg::draw_config const& config)
 {
     CC_ASSERT(_in_rendering_scope, "draw is only valid inside a rendering scope");
     apply_raster_state();
-    wgpuRenderPassEncoderDraw(_render_pass.get(), u32(config.vertex_range.size), u32(config.instance_range.size),
+    wgpuRenderPassEncoderDraw(render_pass(), u32(config.vertex_range.size), u32(config.instance_range.size),
                               u32(config.vertex_range.offset), u32(config.instance_range.offset));
 }
 
@@ -276,7 +287,7 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     CC_ASSERT(_in_rendering_scope, "draw_indexed is only valid inside a rendering scope");
     CC_ASSERT(_index_buffer != nullptr, "draw_indexed needs a bound index buffer");
     apply_raster_state();
-    wgpuRenderPassEncoderDrawIndexed(_render_pass.get(), u32(config.index_range.size), u32(config.instance_range.size),
+    wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,
                                      u32(config.instance_range.offset));
 }
