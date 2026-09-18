@@ -6,7 +6,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Transfer.** Still open:
   - **device→device texture copy** — `cmd.copy` does buffer regions only;
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
-    The ring blocks on in-flight epochs first, but with nothing in flight it asserts.
+    On dx12 and vulkan the ring blocks on in-flight epochs first, but with nothing in flight it asserts; webgpu stages the overflow in a one-off buffer and warns.
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
   - **an async transfer does not order against an in-flight *stream* of the same resource.**
     Command lists do: their access tracking reads the stream stamps alongside the async ones, waits, and warns once per stream.
@@ -118,7 +118,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   clean-core has migrated to [`cc::atomic`](../../../base/clean-core/src/clean-core/thread/atomic.hh), and `<atomic>` is no longer blessed to call into directly.
   See [blessed-stdlib-headers.md](../../../base/clean-core/docs/blessed-stdlib-headers.md).
   The migration is mechanical, since with threads `cc::atomic` **is** `std::atomic`.
-  It becomes load-bearing when WebGPU-on-wasm lands: that build has no threads, and every one of those atomics would keep its interlock for a concurrency that cannot happen.
+  It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
   - **reflection-driven validation** of a view's `T` and access class against the shader;
@@ -168,15 +168,19 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   The phases are a separate question: they are coroutines and can hold no lock at all across a suspend.
   What excludes them from an `execute` today is that they run only inside a tick, which is a frame-boundary call.
   See [render_routine.hh](../src/shaped-graphics/routine/render_routine.hh) and [render-routines.md](render-routines.md#threading).
-- **Thread model nuance:** `sg::thread_model` is coarse (`single_threaded` / `multi_threaded`). Grow
-  it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
+- **Free-threaded resource creation.** Asyncs, layouts and samplers are free-threaded on every backend, and resource creation is still bound.
+  Nothing forces that: a `main_thread` or `single_threaded` backend could record a buffer's or texture's description and make the object on first use, as webgpu's layouts do.
+  An initial upload would then have to queue too.
+  What it buys is concurrent scene loading against a thread-bound context without funnelling every create through its thread.
   See [concepts/threading.md](concepts/threading.md).
+- **Thread model nuance:** `sg::thread_model` says which thread may make the bound calls.
+  Grow it as needed — e.g. whether concurrent command-list recording is allowed, or per-queue guarantees.
 - **Swapchain / presentation.** See [concepts/presentation.md](concepts/presentation.md).
-  Both backends are real, windowed and headless.
+  dx12 and vulkan are real, windowed and headless; webgpu presents headless and to a canvas.
   Still open:
   - a **cocoa arm on `sg::window_platform`**, for the metal backend that would consume it — see shaped-rendering's [TODO](../../shaped-rendering/docs/TODO.md);
   - **deeper HDR** — metadata and tone-mapping beyond the colorspace set.
-    Including whether the request was *granted*: `enable_hdr` is best-effort on both backends and `is_hdr_enabled()`
+    Including whether the request was *granted*: `enable_hdr` is best-effort on dx12 and vulkan, and webgpu's canvas has no HDR arm yet, and `is_hdr_enabled()`
     reports what was asked for, so nothing tells a caller which colorspace it actually got;
   - **exclusive fullscreen** and **multi-window**;
   - letting a windowed renderer thread the swapchain's back-buffer count into `advance_epoch`;
@@ -232,17 +236,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
-  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express, and `clamp_border` / `mirror_clamp_edge` approximate.
+  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express.
   - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
     Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
   - **A native Dawn build**, an additive CMake gate over the same sources.
 
-- **Frame loops still throttle by blocking.**
-  The never-block work is done: no sg call blocks per *object* any more, and `ctx.execution()` is how a context says it cannot block at all.
-  What is left is smaller and more specific than "migrate the frame loops": **no frame loop in the tree uses `try_advance_epoch` yet.**
-  Every one of them — `sv::viewer`, both examples, every window test — throttles with `block_until_epochs_in_flight`.
-  That is allowed under the amortization rule, and it still asserts on a `never_block` context.
-  So the per-frame back-pressure call is the one thing a webgpu frame loop hits on its first frame, and `try_advance_epoch` or `epochs_in_flight_completion` is the spelling that already exists for it.
+- **`sv::viewer` still throttles by blocking, because its frame API is synchronous.**
+  sg itself has no blocking spelling any more: frame loops await `epochs_in_flight_completion`, drains await `idle_completion`, and `ctx.execution()` is how a context says it cannot block at all.
+  The rotating-cube and cube-editor examples and the sg, sr and sv window tests all await.
+  `sv::viewer`'s pull loop (`is_running`, `end_frame`, its destructor) cannot, so it blocks on those completions with `cc::async_blocking_get`.
+  That is a marked workaround, and it asserts on a `never_block` context; an async frame loop for `sv::viewer` is what retires it.
+  The dxc end-to-end window tests block the same way, being synchronous throughout.
+  No frame loop in the tree uses `try_advance_epoch` yet.
   The completion-signal seam is callback-shaped now (`arm_completion_signal`), and a never-block tier-1 driver on dx12 and vulkan proves the suite gets by without waiting.
   Two gaps that driver leaves:
   - **dx12's and vulkan's own caller-thread waits** — inline ring back-pressure, a ring budget change, the transient descriptor ring, swapchain acquire — still wait under a `never_block` config.

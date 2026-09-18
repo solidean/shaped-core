@@ -35,7 +35,7 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert the `llvm@22` formula) |
 | [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
-| [ci-wasm-emscripten-threads-webgpu.yml](../../.github/workflows/ci-wasm-emscripten-threads-webgpu.yml) | `ubuntu-24.04` | `emscripten-threads-webgpu-relwithdebinfo`, node 22; GPU tests SKIP without an adapter, and the job prints how many did |
+| [ci-wasm-emscripten-threads-webgpu.yml](../../.github/workflows/ci-wasm-emscripten-threads-webgpu.yml) | `ubuntu-24.04` | `emscripten-threads-webgpu-relwithdebinfo`, emsdk's bundled node; GPU tests SKIP without an adapter, and the job prints how many did |
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
 

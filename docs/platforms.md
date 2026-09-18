@@ -137,7 +137,7 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 `auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
 So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
 
-**Every graphical example reads it**, not only the one that supports both backends — a setting the rest ignore is a setting that lies.
+**Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:
 
 - **A backend that was not built is a configure error**, for every example.

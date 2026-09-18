@@ -94,7 +94,6 @@ One-liner per library:
   Namespace `ssc::dxc`. Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
-* **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
   Namespace `slib`. Depends on shaped-graphics, plus shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).

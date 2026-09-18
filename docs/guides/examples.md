@@ -312,7 +312,7 @@ Every CI leg builds all targets, wasm and cross-compile legs included, so an ung
 ## A page, for an example that runs on the web
 
 `examples/graphics/rotating-cube` also builds `graphics-rotating-cube-example-web` under the Emscripten WebGPU presets.
-It produces one `build/web/rotating-cube.html` with the wasm embedded, opened from disk with no server.
+It produces one `build/wasm-emscripten-webgpu-release/web/rotating-cube.html` — `web/` under the preset's build directory — with the wasm embedded, opened from disk with no server.
 
 ```bash
 uv run dev.py build -t graphics-rotating-cube-example-web --preset emscripten-webgpu-release

@@ -60,7 +60,7 @@ sg::data_future<T>                  // typed wrapper: try_get_data() -> cc::opti
 sg::make_ready_completion()         // -> cc::shared_async<cc::unit>, already settled (empty / synchronous downloads)
 sg::bytes_wait_gate                 // deadlock guard: an inline readback is only waitable once its list is SUBMITTED
 // to WAIT for one download, co_await f.bytes() / df.data() — not idle_completion(), which waits for everything else too
-// to BLOCK until a download is delivered, use ctx.block_until_idle() (see epochs), then poll the future
+// to wait for EVERY download at once, co_await ctx.idle_completion() (see epochs), then poll the futures
 // cancellation (dropped list, dropped destination) arrives as cc::async_error::make_cancelled() on completion()
 // sg REQUIRES an installed ambient async scheduler (cc::install_compute_async_scheduler, or a nexus run's)
 ```
@@ -70,7 +70,7 @@ sg::bytes_wait_gate                 // deadlock guard: an inline readback is onl
 ```cpp
 #include <shaped-graphics/types.hh>
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
-sg::thread_model          // single_threaded | multi_threaded (see docs/concepts/threading.md)
+sg::thread_model          // main_thread | single_threaded | multi_threaded — binds all but asyncs, layouts, samplers (docs/concepts/threading.md)
 sg::buffer_usage          // ONE usage named by operation: copy_src/copy_dst/vertex_buffer/index_buffer/
                           //   uniform_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
                           //   accel_structure_{storage,build_input}
@@ -90,12 +90,15 @@ ctx.accepted_shader_formats()                      // span<shader_format const>,
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
+                                                   //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
+ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
+ctx.device_home()                                  // cc::async_scheduler* — where sg's asyncs move before touching the device; main under main_thread
 ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
 ctx.adapter().dedicated_video_memory_bytes         // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
@@ -180,10 +183,10 @@ ctx.is_shut_down()                                 // bool
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>   // wasm + SC_WASM_WEBGPU only
-co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; the node FAILS where there is no WebGPU or no adapter (async_as_result to SKIP)
-sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested
-// webgpu: ctx.execution() == never_block, single_threaded, accepts wgsl only; call it from the thread that requested the device
-//   (a threaded wasm build: the main thread — a test asks for main_thread AND singlethreaded). See backends/webgpu/readme.md
+co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; any thread (it requests on main); FAILS without WebGPU / adapter
+sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested; main only
+// webgpu: ctx.execution() == never_block, main_thread, accepts wgsl only; asyncs + layouts from any thread, the rest on main
+//   (a test body making bound calls asks for main_thread). See backends/webgpu/readme.md
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
@@ -218,7 +221,6 @@ ctx.current_epoch()                     // sg::epoch — epoch new work records 
 ctx.completed_epoch()                   // sg::epoch — latest fully-finished epoch (reclaimable)
 ctx.advance_epoch()                     // void — close current epoch, open next. NEVER waits; bound the depth below
 ctx.process_completed_epochs()          // void — retire finished epochs (free resources, run finalizers)
-ctx.block_until_epochs_in_flight(N)     // void — the PER-FRAME back-pressure wait: park until <= N are in flight
 ctx.is_submission_complete(token)       // bool — has that one command list finished?
 ctx.take_pending_errors()               // -> cc::vector<sg::device_error> — failures that arrived AFTER their call:
                                         //   device_lost | creation_failed | validation. Drain once a frame; entries
@@ -227,26 +229,25 @@ ctx.take_pending_errors()               // -> cc::vector<sg::device_error> — f
 ctx.in_flight_epoch_count()             // int — epochs advanced past but not yet retired; the depth a throttle bounds
 ctx.try_advance_epoch(allowed_in_flight) // bool — advance only if that leaves <= N in flight; DECLINES instead of waiting
 
-// Every "has it finished?" question, without stopping a thread. A node for something already done comes back READY,
+// Every "has it finished?" question, without stopping a thread — sg has no blocking spelling at all. A node for something already done comes back READY,
 // and asking twice for the same target hands back the SAME node. They settle on the backend's own GPU signal —
 // nobody sweeps, advances or waits for them — and as an error once the device is lost or the context shuts down.
 // Threads off: no waiter exists, so a pump sweep settles them, parking only on work the GPU already has.
 ctx.epoch_completion(e)                 // -> cc::shared_async<cc::unit const>  — settles when e's GPU work is done
 ctx.submission_completion(token)        // -> the same, for one command list; not_submitted never settles
-co_await ctx.idle_completion();         // block_until_idle, awaited: submissions, actors, epochs. COLD; retires as it goes,
-                                        //   so never await it while another thread advances the epoch
-co_await ctx.epochs_in_flight_completion(N); // block_until_epochs_in_flight, awaited: settles once <= N are in flight
+co_await ctx.idle_completion();         // submissions done, every transfer actor drained, every epoch retired. COLD;
+                                        //   retires as it goes, so never await it while another thread advances.
+                                        //   A bytes_future SUBMITTED before it is delivered once it settles; one still
+                                        //   in an unsubmitted list is yours to submit.
+co_await ctx.epochs_in_flight_completion(N); // the PER-FRAME back-pressure: settles once <= N are in flight
+// a synchronous caller that may block does so itself: cc::async_blocking_get(ctx.idle_completion())
 future.completion() / timestamp.completion()  // -> the same, for a download and for a GPU timestamp
 
 ctx.execution()                         // sg::execution_model — may_block | never_block; a BACKEND fact, not a knob
                                         //   (dx12_config / vulkan_config::execution report never_block, for tests only)
-ctx.block_until_idle()                  // void — submissions done, every transfer actor drained, every epoch retired.
-                                        //   `block_until_` greps as the complete inventory of where a thread stops.
-                                        //   Asserts unless execution() == may_block. A bytes_future SUBMITTED before it
-                                        //   is delivered after it; one still in an unsubmitted list is yours to submit.
 // command lists cannot span epochs (submit/drop in the epoch opened in — CC_ASSERT-enforced)
 // on multi_threaded backends: create/submit/drop, process_completed_epochs and the completion queries are all
-//   concurrency-safe (any thread); only advance_epoch / block_until_* / shutdown must be externally synchronized
+//   concurrency-safe (any thread); only advancing and shutdown must be externally synchronized
 cmd.created_in_epoch()                  // sg::epoch — the epoch this command list was opened in
 cmd.context()                           // sg::context& — the context that created the list (outlives it); reach it without threading ctx separately
 buf->add_finalizer([]{ ... })           // void — runs after the GPU handle is freed AND no longer in flight
@@ -280,7 +281,7 @@ cmd.copy.buffer_data_region<T>({.src, .dst, .count, .src_offset=0, .dst_offset=0
 // frame path — for bulk streaming/readback). See docs/concepts/{upload,download}.async.md.
 // a download's bytes land only after BOTH the submitted list runs on the GPU and the readback actor copies them.
 // no advance_epoch is needed for that, and advancing does not force it either: the readback actor is what delivers.
-//   co_await future.data() is the async answer, ctx.block_until_idle() the blocking one.
+//   co_await future.data() waits for one, co_await ctx.idle_completion() for all of them.
 //   See docs/concepts/download.inline.md.
 // uploading + downloading + copying the SAME buffer works in ONE list — the access tracker orders them
 //   (see docs/concepts/barriers.md). Self-copy needs non-overlapping ranges.
@@ -325,7 +326,7 @@ t.try_get_ticks()               // -> cc::optional<cc::u64>  — raw GPU tick (p
 t.try_get_seconds()             // -> cc::optional<double>   — tick * (1/frequency) (polls)
 t.completion()                  // -> cc::shared_async<cc::unit const> — settles when the tick lands
 co_await t.ticks()              // -> cc::u64 once it lands; fails if the readback is cancelled
-// to block: ctx.block_until_idle(), then t.try_get_ticks() / t.try_get_seconds()
+// to wait for all of them: co_await ctx.idle_completion(), then t.try_get_ticks() / t.try_get_seconds()
 // normal per-frame usage: poll is_ready() a frame or two later, don't block. Two timestamps around work = its GPU duration.
 ```
 
@@ -524,7 +525,8 @@ sg::swapchain_description       // { native_window window; int buffer_count=2 (>
 sg::native_window               // { window_platform platform; void* display; void* handle; u64 window_id; tg::vec2i client_size }
                                 //   win32: handle=HWND | xlib/xcb: display + window_id | wayland: display + handle
                                 //   .is_valid() states which slots that platform needs; ::from_win32(hwnd) is the shorthand
-                                //   client_size is REQUIRED on wayland (its surface has no size of its own), ignored elsewhere
+                                //   client_size is REQUIRED on wayland and web_canvas (no size of their own), ignored elsewhere
+                                //   web_canvas: handle is a CSS selector string ("#canvas"); wasm only
 sg::present_mode                // vsync (wait for vblank) | immediate (uncapped, may tear)
 ctx.supports_headless_present()   // bool — may a swapchain_description carry a headless_extent here?
                                   //   vulkan: VK_EXT_headless_surface + VK_KHR_swapchain. dx12: always (it emulates)
@@ -546,11 +548,10 @@ sc->format() sc->buffer_count() sc->present_mode() sc->is_hdr_enabled() sc->wind
 ```cpp
 #include <shaped-graphics/binding/sampler.hh>
 sg::sampler                 // { min/mag/mip_filter; address_u/v/w; mip_lod_bias; max_anisotropy;
-                            //   min/max_lod; cc::optional<compare_op> compare; sampler_border_color }  — value type, ==
+                            //   min/max_lod; cc::optional<compare_op> compare }  — value type, ==
                             //   defaults = trilinear, repeat, no anisotropy, no comparison (max_lod = sampler::lod_max)
 sg::sampler_filter          // nearest | linear
-sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge | clamp_border | mirror_clamp_edge
-sg::sampler_border_color    // transparent_black | opaque_black | opaque_white   (clamp_border only)
+sg::sampler_address_mode    // repeat | mirror_repeat | clamp_edge   — no border / mirror-once: WebGPU has neither
 sg::compare_op              // never|less|equal|less_equal|greater|not_equal|greater_equal|always (comparison/shadow sampler)
 // two ways in (see the bind path): STATIC = named_sampler on create_binding_group_layout (baked into the pipeline layout's root sig);
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
@@ -569,6 +570,7 @@ sg::binding                 // { cc::string name; cc::optional<u32> group_index,
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
                             //   cc::optional<pixel_format> storage_format   — readwrite_texture only; WGSL declares it, HLSL does not
+                            //   storage_access storage_access = read_write  — readwrite_texture only: read|write|read_write; WGSL declares it, HLSL leaves the default
                             //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
                             //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
                             //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
@@ -627,6 +629,7 @@ ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
 ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin)
+ctx.uncached.create_compute_pipeline_async(desc)  // -> shared_async<compute_pipeline_handle>; free-threaded; the desc's shader must outlive it (+ _raster_ twin)
 // binding_group IS a per-scope descriptor allocation -> ctx.persistent / ctx.transient (instantiates a group layout):
 ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})  // -> binding_group_handle (validated vs group layout; + try_ twin)
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
@@ -803,8 +806,8 @@ ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO b
 cc::thread_pump_all()                   // -> bool; one cycle of every semantic thread with no OS thread of its own
                                         // sg has NO pump of its own: an unthreaded actor registers itself, so blocking is enough
                                         // one atomic load WITH threads, so call it unconditionally
-// Threading: the async build calls the backend from a pool worker — safe where the backend allows concurrent
-// pipeline creation (dx12 device creates are free-threaded). On single_threaded, install NO pool and drive inline.
+// Threading: free-threaded. Layouts deduplicate under the cache's lock; a build runs on ctx.device_home() where
+// there is one, and on a pool worker otherwise (dx12 / vulkan creates are free-threaded).
 pipeline_cache pc;                                            // standalone use (acquire_* take a context&)
 pc.acquire_binding_group_layout(ctx, bindings);  pc.acquire_pipeline_layout(ctx, {.groups={gl}});  pc.acquire_compute_pipeline(ctx, desc);
 pc.add_default_in_memory_providers(max=4096);  pc.add_binding_group_layout_provider(p);  pc.apply_bookkeeping();
@@ -867,7 +870,9 @@ ctx.routines.tick({.budget_secs = 0.002})  // -> sg::routine_tick_result {initia
 //   Runs the phases on the AMBIENT async scheduler and asserts if none is installed; it participates while driving,
 //   so a cc::singlethreaded_scheduler works and the phases then run inline on the ticking thread.
 //   Budget is advisory PACING: it bounds how long the TICK drives, not how long an initialization takes.
-ctx.routines.tick_until_idle()             // -> the same; unbounded, so a test / tool / loading screen, never a frame path
+co_await ctx.routines.idle_completion()    // -> the same, summed; ticks until nothing is pending, parking between ticks until a
+                                           //    phase settles — never spins a never_block context. Unbounded: a test / tool /
+                                           //    loading screen, never a frame path
 
 #include <shaped-graphics/routine/routine_registry.hh>   // (via context.hh) — the ctx.routines scope; type-keyed access is private to the CRTP
 ctx.routines.clear()                       // void     — waits out ctx.backlog, then drops all (VRAM pressure / context switch); runs automatically on shutdown
