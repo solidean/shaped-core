@@ -151,10 +151,10 @@ A syntax node can be:
         * TODO: string interpolation
     * a hash literal
         * a symbol that starts with #, like #ff00bb
-* an attribute
+* an attribute (TODO: not really a syntax node anymore but processed by the pre-pass)
     * any symbol that starts with "@", like "@builtin"
     * attributes can have arguments started by a fused "(", like "@range(1, 2)" or "@color(#f00)" or "@description("this is a slider")"
-* a keyword
+* a keyword (TODO: also not a syntax node anymore - always an application technically)
     * a symbol from the keyword list
     * keywords have kinds as well (in/as have slightly different syntax rules than the others)
 * an identifier
@@ -173,6 +173,7 @@ A syntax node can be:
         * in "foo a as baz b" the "b" belongs as inline arg to "baz", not to "foo"
     * a list of trailing args
         * arrow arg "-> <node>" (e.g. for trailing return types)
+        * compute arg "=> <node>" (e.g. for lambdas, case)
         * colon arg ": <node>" (e.g. for type ascriptions)
         * in/as arg "in <node>" and "as <node>" (e.g. for loops and casts and renames)
     * a trailing block ":<indent><node>" (only if that is the last : on the line, it starts the parser in block mode for the indented line)
@@ -188,6 +189,11 @@ A syntax node can be:
         * assignment "=" and any op ending in "=" (except comparisons) - so this includes compound assignments
     * this means non-parenthised expressions of the same precedence level stay together here
       this is needed for comparison chains and other nice features
+    * note that a linting pass still errors on most mixed-op stuff at the same precedence
+      so "a and b or c" is parsed and left-associates semantically, but it gives a normal error
+      same for mixing bit-like ops
+      chained comparisons error if they dont form monotonic chains
+      logical connectives error if you have a "not" in non-last position
 * a composite block
     * simply a list of nodes
 
@@ -320,9 +326,66 @@ if x > 0: // kw, inline arg (the "x > 0" expr)
 ```
 
 
-## 
+## Actual Program Structure / AST
 
+So at this point our whole program is in a single syntax tree where each node can have attributes and we only have a small type of nodes:
+* literals (number, paren, quoted, hash)
+* identifier
+* application
+* composite
 
+This makes the whole syntax feel coherent.
+We now define the structure of our program by an interpretation, another transformation of these syntax tree nodes.
+
+This step translates the syntax tree to an AST, giving it concrete structure.
+
+Most declarations are simply applications, often with a trailing block:
+
+```
+struct my_vec2:
+    x: float
+    y: float
+
+enum color:
+    red
+    green
+    blue
+
+fun foo(a: int) -> int:
+    return a + 2
+
+fun baz() => 1 + 2
+
+binding frame:
+    dt: float
+
+let x
+let x : int
+let x = 10 // this is actually assignment top-level and then application inside
+let (x, y) = (1, 2) // same here
+```
+
+Expressions are simply recursive translations.
+Interestingly, "application" is more complex than the target expression type.
+
+Expressions in our AST are:
+* literal
+* identifier
+* call (all operators resolve to calls with special function names)
+* subscript
+* member access ("v.x")
+* return <expr>? / break <expr>? / continue
+* loop (note: for/while are not expressions, but loop + break <expr> is)
+* case (note: if is not an expression)
+
+So it becomes richer here but less complex per entry.
+We also don't have arbitrary attributes anymore.
+Each AST node only supports a narrow subset and everything else is a normal error and ignored.
+
+The we have statements:
+* if/for/while
+* assert/print
+* use/notation
 
 ## Comments
 
@@ -342,6 +405,125 @@ let x = 0 // also valid after something
 
 ```
 
+## Symbol Replacements
+
+We support configurable replacements inside symbol tokens.
+The main intended use is convenient input of unicode-heavy mathematical identifiers.
+
+For example:
+
+```
+notation \phi => φ
+notation \theta => θ
+notation \Delta => Δ
+```
+
+means that:
+
+```
+\phi
+\phi_1
+d\theta
+\Delta_pos
+```
+
+are canonically written as:
+
+```
+φ
+φ_1
+dθ
+Δ_pos
+```
+
+These replacements only operate inside SYMBOL tokens.
+They can therefore never introduce or remove syntactic structure such as operators, parentheses, comments, indentation, etc.
+The replacement system is deliberately not a general recursive string rewrite system.
+We first resolve the replacement definitions themselves recursively.
+
+For example:
+
+```
+notation a => b
+notation b => c
+notation dc => e
+```
+
+is resolved to:
+
+```
+a => c
+b => c
+dc => e
+```
+
+Cycles during this resolution are an error.
+
+So:
+
+```
+a => b
+b => a
+```
+
+is invalid.
+After the replacement table has been resolved, source symbols are replaced in exactly one non-recursive pass.
+We scan the original symbol from left to right.
+At each position we take the longest matching replacement LHS.
+If no replacement matches, the original character / codepoint is kept and we continue.
+All matched segments are then replaced independently using their fully resolved RHS.
+Importantly, replacement output is not scanned again.
+
+For example, given:
+
+```
+a => c
+b => c
+dc => e
+```
+
+the symbol:
+
+```
+da
+```
+
+is segmented as:
+
+```
+d | a
+```
+
+and therefore becomes:
+
+```
+dc
+```
+
+It does NOT become `e`.
+This is intentional.
+Replacement is meant to canonicalize pieces of the spelling that were present in the original source, not to recursively interpret strings created by replacement.
+The parser and semantic stages operate on the canonicalized symbol.
+We still preserve the original source spelling for diagnostics, formatting, source spans, etc.
+Using a replaceable spelling is a normal error / warning.
+
+For example:
+
+```
+let x = \phi
+```
+
+is semantically interpreted exactly as:
+
+```
+let x = φ
+```
+
+but produces a diagnostic with a quickfix to notation `\phi` with `φ`.
+The formatter automatically applies these replacements.
+This means ASCII-friendly spellings can be used for input while formatted source converges towards the canonical notation.
+Replacement rules are allowed to map arbitrary strings to arbitrary strings as long as they stay within SYMBOL tokens.
+The unicode aliases are merely the main intended use case, not a special language feature.
 
 
 ## Notes
@@ -353,3 +535,7 @@ let x = 0 // also valid after something
     * a normal error has recovery logic and in dev/debug mode we can still continue. it is a bit like a warning you have on Werror for production but not for dev. 
         * for example, undelimited string literals are just auto-delimited and we can move on
         * so normal errors are for things the language forbids but where we can make a reasonable interpretation to ease the development process
+
+## TODO
+
+* do we really need :: and namespace support? or is modules completely enough?

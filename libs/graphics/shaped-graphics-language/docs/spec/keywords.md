@@ -11,7 +11,7 @@ Definitions:
 * `const` - real constants
 * `use` - import other modules
 * `module` - declares a module
-* `type` - declares a type alias or a template arg
+* `type` - declares a type alias or a template arg (or denotes the type of types)
 
 Control flow and expressions:
 
@@ -19,6 +19,7 @@ Control flow and expressions:
 * `else` - branching else
 * `for` - looping
 * `while` - looping
+* `loop` - looping
 * `in` - full loop syntax is `for <var> in <a>..<b>:` where `..` is either `..<` or `..=` but never plain `..`
 * `return` - returns from a function
 * `continue` - continue next loop iteration
@@ -31,6 +32,7 @@ Special support:
 
 * `assert` - assertions and test checks
 * `print` - logging, printing, errors, warnings
+* `notation` - for "notation \phi => φ"
 
 (we could provide them as builtin functions with special parsing support BUT they are compiled out in production code so I want it to be visually clear that they are special)
 
