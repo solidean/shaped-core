@@ -7,6 +7,7 @@ refers to a file in a sentence — neither resolved before this existed, so most
 Built from `git ls-files` rather than from a filesystem walk.
 That is not an optimization: a checkout can hold a complete second copy of itself, and a walk would then report
 almost every basename as ambiguous.
+Untracked files that are not ignored are in it, so a file written this session resolves before it is `git add`ed.
 
 The review folder is indexed beside it.
 `review.toml` and the entry files under `entries/` are named as readily as source is, and they are not in

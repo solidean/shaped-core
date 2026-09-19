@@ -1,3 +1,0 @@
-# SGL Specification Index
-
-TODO

@@ -16,6 +16,8 @@ answers/040-x.json    the answers, and the maintainer's comments — server-owne
 rounds/round-1.md     a finalized round's transcript
 log.jsonl             every action, append-only
 .signal               the one-shot mailbox `round --wait` polls, consumed only by a finalize that succeeds
+.served               where this review's server is, while one is up
+.serve.log            what a server started by `restart` printed, since it runs detached
 ```
 
 ## Who writes what
@@ -25,7 +27,7 @@ This split, not locking, is what makes concurrency a non-problem.
 | directory | sole writer |
 |---|---|
 | `entries/`, `attachments/` | the agent |
-| `answers/`, `.signal` | the server |
+| `answers/`, `.signal`, `.served`, `.serve.log` | the server |
 | `changes/`, `review.toml`, `rounds/` | the CLI |
 
 An entry can therefore gain a paragraph while an answer to it is being typed, with no merge algorithm anywhere.
@@ -70,7 +72,8 @@ What it says is that `dev.py example` is the blessed place for things meant to b
 `title` is what the page and the tab show, set by `review title` once the range has actually been read.
 `watermark` is the last finalized round, so the next one is `watermark + 1`.
 `round_heads` is the head each finalized round was read at, one per round, written by `delta --finalize`.
-It is what an answered entry's file references are judged against, since the fixes a land-changes round orders move the paths it named.
+It is what an answered entry's file references are read against, since the fixes a land-changes round orders move the paths it named.
+It refines how such a reference is drawn and never decides whether it is an error: a finalized round's references are lenient with or without a head.
 A round finalized before the field existed is recorded as `""`.
 `sync` and `delta --finalize` recover it from `log.jsonl` — the `init` or `sync` head in force when that round was finalized — and write it here once, so the log is never asked twice.
 Running `sync` with nothing moved is enough to repair an older review.

@@ -194,7 +194,9 @@ _LINT_ROOTS = ("libs", "tools", "docs", ".claude/skills")
 _LINT_ROOT_FILES = ("CLAUDE.md", "README.md", "dev.py")
 
 # Never ours to lint: vendored code, build output, and caches.
-_LINT_EXCLUDED_DIRS = frozenset({"extern", "build", ".venv", "__pycache__", "node_modules", ".git"})
+# `archive` holds text kept verbatim on purpose — an original draft beside the document that replaced it.
+# Linting it would mean editing it, which is the one thing an archive must not have happen to it.
+_LINT_EXCLUDED_DIRS = frozenset({"extern", "build", ".venv", "__pycache__", "node_modules", ".git", "archive"})
 
 
 def lint_roots(root: Path) -> list[Path]:

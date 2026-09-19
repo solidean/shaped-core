@@ -28,11 +28,14 @@ body {
 }
 
 /* Code sets its own line-height. Without this it inherits the body's 1.65, which is right for prose and
-   turns a listing of short lines into a page of gaps. */
+   turns a listing of short lines into a page of gaps.
+   Ligatures are off because a review shows the characters that are there: Cascadia Code draws `..<` as centred
+   dots and `!=` as one glyph, which is a different token to a reader judging a tokenizer. */
 code, pre, kbd, .difflines {
   font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
   font-size: 13px;
   line-height: 1.45;
+  font-variant-ligatures: none;
 }
 
 #shell { display: flex; min-height: 100vh; }

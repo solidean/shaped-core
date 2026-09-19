@@ -77,15 +77,19 @@ class FileProvider:
     this change intends to create, which must *not* resolve, and `old:` for one it removes, which may go either way.
     A single "might not exist" marker would let a stale `new:` sit forever, and stale is what the strictness is for.
 
-    `history` is set for text from a round already answered: the tree at the head that round was read at.
-    Such text named paths as they were then, and a land-changes review moves them — so it is judged against that tree,
-    and a path gone since is drawn as removed rather than reported, without editing an entry the maintainer read.
+    `answered` is set for text from a round already finalized, and such text never raises a problem.
+    Nothing could fix one there: a finalized ask is immutable, and carrying out what it decided is what moves the paths.
+    A `new:` path that exists by now links like any other, and a path that is gone is drawn as removed.
+    `history` is the tree at the head that round was read at, where one is recorded.
+    It says where a path that moved went, and puts the commit into the removed note.
+    A design review carries its decisions out uncommitted and has no such tree, which is why leniency cannot hang on it.
     """
 
     index: RepoIndex
     regions: tuple[str, ...] = (PROSE, CODE, DIFF)
     kind: str = "file"
     seen: set[str] = field(default_factory=set)
+    answered: bool = False
     history: RepoIndex | None = None
     history_rev: str = ""
 
@@ -119,20 +123,23 @@ class FileProvider:
         end_line = int(end) if end else 0
         shown = literal[len(intent) + 1:] if intent != PLAIN else literal
 
-        if self.history is not None:
-            then = self.history.resolve(ref)
-            if then.state == RESOLVED and intent != NEW:
+        if self.answered:
+            then = self.history.resolve(ref) if self.history is not None else None
+            if intent == NEW:
+                # Created since: the decision this text recorded was carried out, so it links like any other path.
+                intent = PLAIN if resolution.state == RESOLVED else NEW
+            elif then is not None and then.state == RESOLVED:
                 resolution = self.index.resolve(then.path)
                 if resolution.state != RESOLVED:
                     return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
                                  note=_gone_since(self.history_rev))
-            elif then.state == MISSING and intent == NEW:
-                intent = PLAIN if resolution.state == RESOLVED else NEW
 
         if resolution.state == AMBIGUOUS:
             listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
-            return Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
-                         label=shown, problem=f"{ref} names {len(resolution.candidates)} files: {listed}")
+            names = f"{ref} names {len(resolution.candidates)} files: {listed}"
+            if self.answered:
+                return Token(text=literal, kind=self.kind, css="ref", regions=self.regions, label=shown, note=names)
+            return Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions, label=shown, problem=names)
 
         if intent == NEW:
             problem = "" if resolution.state == MISSING else f"{ref} already exists, so it is not new any more"
@@ -142,6 +149,9 @@ class FileProvider:
         if resolution.state == MISSING:
             if intent == OLD:
                 return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown)
+            if self.answered:
+                return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
+                             note=_missing_note(self.history, self.history_rev))
             return Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
                          label=shown, problem=f"{ref} is not a file in this repository")
 
@@ -150,6 +160,16 @@ class FileProvider:
             css="ref-old" if intent == OLD else "ref", regions=self.regions,
             href=f"/file/{resolution.path}" + (f"#L{line}" if line else ""),
         )
+
+
+def _missing_note(history: RepoIndex | None, rev: str) -> str:
+    """What an answered reference that resolves nowhere says on hover.
+
+    Reaching here with a tree means the path was not in it either, so "gone since" would be a claim nothing supports.
+    """
+    if history is None:
+        return _gone_since("")
+    return f"not found as of {rev[:8]}, when this was answered, and not found now"
 
 
 def _gone_since(rev: str) -> str:
@@ -176,13 +196,14 @@ class DirProvider:
     Narrowing what counts as a reference would trade a loud false positive for a silent one: a typo'd path
     quietly staying plain text, which is the failure this strictness exists to catch.
     `raw:` is the per-span escape for something that only looks like a reference.
-    `history` is judged exactly as FileProvider's is.
+    `answered` and `history` are judged exactly as FileProvider's are.
     """
 
     index: RepoIndex
     regions: tuple[str, ...] = (PROSE, CODE, DIFF)
     kind: str = "dir"
     seen: set[str] = field(default_factory=set)
+    answered: bool = False
     history: RepoIndex | None = None
     history_rev: str = ""
 
@@ -205,22 +226,26 @@ class DirProvider:
             shown = literal[len(intent) + 1:] if intent != PLAIN else literal
             resolution = self.index.resolve_dir(ref)
 
-            if self.history is not None:
-                then = self.history.resolve_dir(ref)
-                if then.state == RESOLVED and intent != NEW:
+            if self.answered:
+                then = self.history.resolve_dir(ref) if self.history is not None else None
+                if intent == NEW:
+                    intent = PLAIN if resolution.state == RESOLVED else NEW
+                elif then is not None and then.state == RESOLVED:
                     resolution = self.index.resolve_dir(then.path)
                     if resolution.state != RESOLVED:
                         out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions,
                                          label=shown, note=_gone_since(self.history_rev)))
                         continue
-                elif then.state == MISSING and intent == NEW:
-                    intent = PLAIN if resolution.state == RESOLVED else NEW
 
             if resolution.state == AMBIGUOUS:
                 listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
-                out.append(Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
-                                 label=shown,
-                                 problem=f"{ref} names {len(resolution.candidates)} folders: {listed}"))
+                names = f"{ref} names {len(resolution.candidates)} folders: {listed}"
+                if self.answered:
+                    out.append(Token(text=literal, kind=self.kind, css="ref", regions=self.regions, label=shown,
+                                     note=names))
+                else:
+                    out.append(Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions, label=shown,
+                                     problem=names))
                 continue
             if intent == NEW:
                 problem = "" if resolution.state == MISSING else f"{ref} already exists, so it is not new any more"
@@ -230,6 +255,10 @@ class DirProvider:
             if resolution.state == MISSING:
                 if intent == OLD:
                     out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown))
+                    continue
+                if self.answered:
+                    out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
+                                     note=_missing_note(self.history, self.history_rev)))
                     continue
                 out.append(Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
                                  label=shown, problem=f"{ref} is not a folder in this repository"))

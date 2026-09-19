@@ -162,9 +162,10 @@ class Context:
         """Every file reference that does not hold, across the review.
 
         Ambiguous is always the author's to fix, by writing a longer path.
-        Text from a finalized round is judged at the head that round was read at, since the fixes it ordered move paths.
         Unresolved is one too, because the exceptions are marked rather than guessed — `new:` for a file the change
         intends to create, `old:` for one it removes.
+        Text from a finalized round reports nothing: it cannot be edited, and the decisions it recorded move the paths it named.
+        It is read at the head that round was read at where one is recorded — see table.history_for.
         """
         index = review.repo_index(self.repo, paths.root)
         history = review.round_history(self.repo, review.load(paths.config))

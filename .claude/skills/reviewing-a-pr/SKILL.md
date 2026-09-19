@@ -238,6 +238,7 @@ Name it with `title` as usual, and hand it over the same way.
    `uv run review.py status pr-<n>` says whether a server is actually up, which round is next, and what is still open —
    it probes the port rather than trusting the marker, so a killed server reads as down.
    `restart` is for after the *tool's* code changed; entry edits need no restart, since the page reloads itself.
+   It returns once the new server answers, so run it in the foreground rather than backgrounding it like `serve`.
    Exit 0 means sent, 2 means paused, 3 means timed out.
    Do not treat a pause as an answer.
 

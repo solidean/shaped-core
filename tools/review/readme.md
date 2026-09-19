@@ -71,7 +71,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `show <name> [entry]` | an entry with its answers folded in, as plain text — the agent's view; `--history` adds superseded blocks |
 | `status <name>` | where this review stands: whether a server is really up, the round, what is still open |
 | `serve <name>` | the page the review is answered in; non-blocking |
-| `restart <name>` | stop the server and serve again on the same port, after the tool's own code changed |
+| `restart <name>` | stop the server and serve again on the same port, after the tool's own code changed; returns once the new server answers |
 | `stop <name>` | shut that review's server down, from a terminal rather than from the page |
 | `artifact <name> [--write F]` | the exact text the review will publish, out of the draft entry's `## artifact` block |
 | `post <name> --pr N --confirm` | post that text to the PR as one comment; refuses until its ask is answered, and dry-runs without `--confirm` |
@@ -131,7 +131,14 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   An ask that has already been answered cannot be — that is what `follows:` is for.
 - **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
-  Text from a finalized round is judged at the head that round was read at, so a fix that moves a file an answered entry names draws it as removed rather than failing the review.
+  **A reference in a finalized round never fails `validate`**, ambiguity included: a finalized ask is immutable, so nothing could fix it there.
+  Carrying out what the round decided is what breaks it — a `new:` path now exists and links like any other, and a path that is gone is drawn as removed.
+  Where the round's head is on record the text is read against that tree, which follows a file that moved and names the commit on hover.
+  A design review carries its decisions out uncommitted and has no such head, which is why the leniency is the watermark's rather than the tree's.
+  The round still being written keeps every error.
+- **An untracked file resolves, and an ignored one does not.**
+  The index is `git ls-files` with the untracked-but-not-ignored files added, so a file written this session links before it is `git add`ed.
+  Folder references see those files too.
 - **Glossary terms are underlined wherever they are used**, with the definition on hover, from any `prose` block carrying `glossary: true`.
   Whole words only: a term is never drawn inside a longer word.
 - **A folder reference resolves too**, written with a trailing slash — `annotate/` finds `tools/review/lib/annotate`.
@@ -160,6 +167,9 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   input to a synthesis step rather than something to paste unread.
 - **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review
   in this repo is already up.
+- **`restart` returns, and `serve` does not.**
+  It starts the new server as a detached process, waits until that answers on its port, prints the url and exits — so an agent runs it in the foreground.
+  It fails with what the server printed when nothing answers within ten seconds; that output is otherwise in `.serve.log` in the review folder.
 - **The page can close its own server**, with `Close server` in the toolbar, and `review stop <name>` does it from a terminal.
   An agent starts `serve` in the background, so there is no window to interrupt — without either of those the only way out is finding the process.
 - The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
