@@ -68,13 +68,14 @@ For code, we make a few simple max-munch rules:
 * ":" is COLON (used for "denotes", aka type annotations and blocks)
 * "::" is DOUBLE_COLON
 * "," is COMMA
+* "_" is WILDCARD (can be folded into symbol recognition but is a special token)
 * "->" is SINGLE_ARROW (used for return types)
 * "=>" is DOUBLE_ARROW (used for "computes as" in case expressions and properties and lambdas)
 * "//" starts a COMMENT for the rest of the block
 * " is DOUBLE_QUOTED_OPEN/CLOSE (and then usual \ escape rules in between)
 * ' is SINGLE_QUOTED_OPEN/CLOSE (mostly reserved right now)
 * ` is BACK_QUOTED_OPEN/CLOSE (mostly reserved right now)
-* [!+-*/%=<>?&^/]+ is an "operator" token (we max-munch them with special precedence rules later similar to scala. work with whitespace to disambiguate)
+* [!+-*/%=<>?&^|~]+ is an "operator" token (we max-munch them with special precedence rules later similar to scala. work with whitespace to disambiguate)
 * ([{}]) individually are ROUND/SQUARE/CURLY_OPEN/CLOSE tokens
 * there is a special "FUSED" token emitted before DOT, COLON, and the OPEN parens whenever there is no whitespace between the previous token
   the parse uses this to disambiguate "a.b" from "a .b" and from "a . b", which are different. and "a(b)" from "a (b)", which also are
@@ -111,7 +112,7 @@ In the expect end of string mode, we simply tokenize with the code rules, except
 If the result does not have string end as the first token, we emit a normal (non-fatal) error.
 
 Important invariant: tokenized block trees must round-trip. aka we can write a printer that byte-equal prints back the original source from tokenized block trees.
-This also applies 
+
 
 ## Syntax Trees
 
@@ -124,6 +125,7 @@ We impose more rigid syntactic structure later based on context.
 The invariant also means that syntax can be parsed in parallel if desired.
 
 TODO: is the name "syntax tree" ok here or should we change it?
+
 
 
 

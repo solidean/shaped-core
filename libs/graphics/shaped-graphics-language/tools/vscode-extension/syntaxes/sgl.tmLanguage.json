@@ -1,0 +1,221 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Shaped Graphics Language",
+    "scopeName": "source.sgl",
+    "patterns": [
+        { "include": "#comment-block" },
+        { "include": "#multiline-string" },
+        { "include": "#block" }
+    ],
+    "repository": {
+        "block": {
+            "comment": "One block of the block tree: a line plus every following line indented deeper than it. Each while consumes only its own block's indent, so a nested block's indent capture is relative to its parent.",
+            "begin": "^([ \\t]*)(?=\\S)",
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)",
+            "patterns": [
+                { "include": "#comment-block" },
+                { "include": "#multiline-string" },
+                { "include": "#block-child" },
+                { "include": "#code" }
+            ]
+        },
+        "block-child": {
+            "comment": "Needs at least one space past the parent's indent, which also keeps it from re-matching on its parent's own line.",
+            "begin": "\\G([ \\t]+)(?=\\S)",
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)",
+            "patterns": [
+                { "include": "#comment-block" },
+                { "include": "#multiline-string" },
+                { "include": "#block-child" },
+                { "include": "#code" }
+            ]
+        },
+        "multiline-string": {
+            "comment": "A line whose last token is a string opener; it stands in for #block on that line, so it must be listed first. Children are string content; the closer is a quote leading the next sibling line. Both delimiter lines are matched whole, so their code is tokenized through captures. A sibling that does not lead with a quote ends the string zero-width (the 'undelimited' error case).",
+            "begin": "(?:^|\\G)([ \\t]*)((?:[^\"/\\n]|/(?!/)|\"(?:[^\"\\\\\\n]|\\\\.)*\")*)(\")$",
+            "beginCaptures": {
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                },
+                "3": { "name": "string.quoted.double.sgl punctuation.definition.string.begin.sgl" }
+            },
+            "end": "(?:^|\\G)\\1(\")(.*)$|(?:^|\\G)(?!\\1[ \\t]+\\S|[ \\t]*$)",
+            "endCaptures": {
+                "1": { "name": "string.quoted.double.sgl punctuation.definition.string.end.sgl" },
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                }
+            },
+            "contentName": "string.quoted.double.sgl"
+        },
+        "code": {
+            "patterns": [
+                { "include": "#comment" },
+                { "include": "#strings" },
+                { "include": "#arrows-and-types" },
+                { "include": "#declarations" },
+                { "include": "#keywords" },
+                { "include": "#symbols" },
+                { "include": "#operators" },
+                { "include": "#punctuation" }
+            ]
+        },
+        "comment-block": {
+            "comment": "A block that is a single comment token owns its children: they are comment text whatever they hold. It stands in for #block on that line, so it must be listed first.",
+            "name": "comment.line.double-slash.sgl",
+            "begin": "(?:^|\\G)([ \\t]*)(//)",
+            "beginCaptures": {
+                "2": { "name": "punctuation.definition.comment.sgl" }
+            },
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)"
+        },
+        "comment": {
+            "comment": "A comment trailing code ends with its line; the children of that block stay code.",
+            "name": "comment.line.double-slash.sgl",
+            "match": "(//).*$",
+            "captures": {
+                "1": { "name": "punctuation.definition.comment.sgl" }
+            }
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.sgl",
+                    "begin": "\"(?=(?:[^\"\\\\\\n]|\\\\.)*\")",
+                    "beginCaptures": {
+                        "0": { "name": "punctuation.definition.string.begin.sgl" }
+                    },
+                    "end": "\"",
+                    "endCaptures": {
+                        "0": { "name": "punctuation.definition.string.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#string-escape" }
+                    ]
+                },
+                {
+                    "comment": "Undelimited string: an error the compiler recovers from, so keep the body a string and flag the opener.",
+                    "match": "(\")((?:[^\"\\\\\\n]|\\\\.)*\\\\?)$",
+                    "captures": {
+                        "1": { "name": "invalid.illegal.unterminated-string.sgl" },
+                        "2": { "name": "string.quoted.double.sgl" }
+                    }
+                },
+                { "name": "string.quoted.other.backtick.sgl", "match": "`[^`\\n]*`" },
+                { "name": "string.quoted.single.sgl", "match": "(?<![\\w\\-@\\\\'])'(?:[^'\\\\\\n]|\\\\.)*'" }
+            ]
+        },
+        "string-escape": { "name": "constant.character.escape.sgl", "match": "\\\\." },
+        "arrows-and-types": {
+            "patterns": [
+                {
+                    "match": "(->)\\s*([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "captures": {
+                        "1": { "name": "keyword.operator.arrow.sgl" },
+                        "2": { "name": "entity.name.type.sgl" }
+                    }
+                },
+                { "name": "keyword.operator.arrow.sgl", "match": "->|=>(?![!+\\-*/%=<>?&^|~])" },
+                { "name": "keyword.operator.range.sgl", "match": "\\.\\.[<=]" },
+                { "name": "punctuation.separator.namespace.sgl", "match": "::" },
+                {
+                    "comment": "'denotes': a name right after a single colon is a type.",
+                    "match": "(:)[ \\t]*(?!(?:if|else|for|while|in|return|continue|break|case|assert|print|let|const|mut|fun|as|use|module)(?![\\w\\-@\\\\']))([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "captures": {
+                        "1": { "name": "punctuation.separator.annotation.sgl" },
+                        "2": { "name": "entity.name.type.sgl" }
+                    }
+                }
+            ]
+        },
+        "declarations": {
+            "patterns": [
+                {
+                    "match": "(?<![\\w\\-@\\\\'])(fun)[ \\t]+([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "captures": {
+                        "1": { "name": "storage.type.function.sgl" },
+                        "2": { "name": "entity.name.function.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![\\w\\-@\\\\'])(module)[ \\t]+([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "captures": {
+                        "1": { "name": "storage.type.module.sgl" },
+                        "2": { "name": "entity.name.namespace.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![\\w\\-@\\\\'])(struct|enum|binding)[ \\t]+([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "captures": {
+                        "1": { "name": "storage.type.$1.sgl" },
+                        "2": { "name": "entity.name.type.sgl" }
+                    }
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])(?:if|else|for|while|in|return|continue|break|case|as|use)(?![\\w\\-@\\\\'])"
+                },
+                {
+                    "name": "storage.type.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])(?:fun|let|const|struct|enum|binding|module)(?![\\w\\-@\\\\'])"
+                },
+                { "name": "storage.modifier.sgl", "match": "(?<![\\w\\-@\\\\'])mut(?![\\w\\-@\\\\'])" },
+                {
+                    "comment": "Compiled out of production code, so they get a scope of their own to theme.",
+                    "name": "keyword.other.diagnostic.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])(?:assert|print)(?![\\w\\-@\\\\'])"
+                }
+            ]
+        },
+        "symbols": {
+            "comment": "Everything here is one 'symbol' token to the real tokenizer; the split is by shape only. The last rule is unscoped and exists so that a '-' inside a symbol is never seen by #operators.",
+            "patterns": [
+                {
+                    "name": "entity.name.function.decorator.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])@[\\w\\-@\\\\']*"
+                },
+                {
+                    "name": "constant.numeric.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])-?[0-9][\\w\\-@\\\\']*(?:\\.[0-9][\\w\\-@\\\\']*)?"
+                },
+                {
+                    "name": "constant.language.boolean.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])(?:true|false)(?![\\w\\-@\\\\'])"
+                },
+                {
+                    "name": "variable.language.wildcard.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])_(?![\\w\\-@\\\\'])"
+                },
+                {
+                    "name": "entity.name.function.call.sgl",
+                    "match": "(?<![\\w\\-@\\\\'])[\\p{L}_](?:[\\w@\\\\']|-(?!>))*(?=\\()"
+                },
+                { "name": "variable.other.member.sgl", "match": "(?<=\\.)[\\p{L}_](?:[\\w@\\\\']|-(?!>))*" },
+                { "match": "[\\w@\\\\'](?:[\\w@\\\\']|-(?!>))*" }
+            ]
+        },
+        "operators": { "name": "keyword.operator.sgl", "match": "[!+\\-*/%=<>?&^|~]+" },
+        "punctuation": {
+            "patterns": [
+                { "name": "punctuation.accessor.sgl", "match": "\\." },
+                { "name": "punctuation.separator.comma.sgl", "match": "," },
+                { "name": "punctuation.terminator.sgl", "match": ";" },
+                { "name": "punctuation.separator.colon.sgl", "match": ":" },
+                { "name": "punctuation.section.parens.begin.sgl", "match": "\\(" },
+                { "name": "punctuation.section.parens.end.sgl", "match": "\\)" },
+                { "name": "punctuation.section.brackets.begin.sgl", "match": "\\[" },
+                { "name": "punctuation.section.brackets.end.sgl", "match": "\\]" },
+                { "name": "punctuation.section.braces.begin.sgl", "match": "\\{" },
+                { "name": "punctuation.section.braces.end.sgl", "match": "\\}" }
+            ]
+        }
+    }
+}

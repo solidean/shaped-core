@@ -1,0 +1,40 @@
+// highlighting sample, not a language reference
+   the syntax below is a guess at where the spec is heading
+      and this whole nested run is one comment block
+
+@builtin
+struct material:
+    albedo: vec3
+    roughness: float
+
+binding frame-data:
+    view-proj: mat4
+
+enum light-kind:
+    point
+    directional
+
+fun shade(m: material, n: vec3, l: vec3) -> vec3:
+    let n-dot-l = max(dot(n, l), 0.0)
+    let mut color = m.albedo * n-dot-l
+    for i in 0..<4:
+        if i == 2:
+            continue
+        color = color + 0.1 - -1
+    let kind = light-kind::point
+    let _ = case kind:
+        light-kind::point => 1.0
+        _ => 0.0
+    assert n-dot-l >= 0.0
+    print "shade: \"{color}\""
+    print "
+        multi-line strings need no special syntax
+        "quotes" and // slashes are plain content in here
+    "
+    print "undelimited
+    const bias = 0.5
+    if n-dot-l > bias: // a trailing comment ends with its line
+        color = color * 2.0
+    // only a block that is nothing but a comment
+       attaches its children
+    return color

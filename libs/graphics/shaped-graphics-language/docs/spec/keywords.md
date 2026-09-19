@@ -8,6 +8,9 @@ Definitions:
 * `struct` - defines a new structure type
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
+* `const` - real constants
+* `use` - import other modules
+* `module` - declares a module
 
 Control flow and expressions:
 
@@ -20,6 +23,14 @@ Control flow and expressions:
 * `continue` - continue next loop iteration
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
+* `as` - used for naming imports ("use our-materials as mat") and conversions "i as float"
+
+Special support:
+
+* `assert` - assertions and test checks
+* `print` - logging, printing, errors, warnings
+
+(we could provide them as builtin functions with special parsing support BUT they are compiled out in production code so I want it to be visually clear that they are special)
 
 TODO:
 

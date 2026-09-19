@@ -1,0 +1,44 @@
+{
+    "name": "sgl",
+    "displayName": "Shaped Graphics Language",
+    "description": "Syntax highlighting for the Shaped Graphics Language (.sgl).",
+    "version": "0.1.0",
+    "publisher": "shapedcode",
+    "private": true,
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "sgl",
+                "aliases": [
+                    "Shaped Graphics Language",
+                    "SGL",
+                    "sgl"
+                ],
+                "extensions": [
+                    ".sgl"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "sgl",
+                "scopeName": "source.sgl",
+                "path": "./syntaxes/sgl.tmLanguage.json"
+            }
+        ],
+        "configurationDefaults": {
+            "[sgl]": {
+                "editor.insertSpaces": true,
+                "editor.tabSize": 4,
+                "editor.detectIndentation": false
+            }
+        }
+    }
+}
