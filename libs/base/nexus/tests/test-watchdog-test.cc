@@ -1,4 +1,4 @@
-#include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/common/time.hh>
 #include <clean-core/record/scope.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -13,26 +13,28 @@
 namespace
 {
 cc::mutex<int> g_reports = cc::mutex<int>(0);
-std::condition_variable g_reported;
 
 void count_report(double)
 {
     g_reports.lock([](int& n) { ++n; });
-    g_reported.notify_all();
 }
 } // namespace
 
 TEST("watchdog - reports a run that stops making progress, and keeps reporting", exclusive())
 {
-#if CC_HAS_THREADS
     g_reports.lock([](int& n) { n = 0; });
-    auto const watchdog = nx::impl::run_watchdog(0.01, &count_report);
+    auto watchdog = nx::impl::run_watchdog(0.01, &count_report);
 
+    // Driven by poll() as well as by its own thread, because under wasm there is no thread: the host loop polls.
+    // Polling beside a watching thread is harmless, so this one loop covers both.
     // Waits on the reports, never on the clock; the bound only keeps a broken watchdog from hanging the run.
-    CHECK(g_reports.wait_for(g_reported, 60.0, [](int const& n) { return n >= 2; }));
-#else
-    SUCCEED("no second thread to watch from, so a build without threads has no watchdog");
-#endif
+    auto const deadline = cc::current_time_steady_secs() + 60.0;
+    while (g_reports.lock([](int const& n) { return n; }) < 2 && cc::current_time_steady_secs() < deadline)
+    {
+        watchdog.poll();
+        cc::this_thread_sleep_secs(0.005);
+    }
+    CHECK(g_reports.lock([](int const& n) { return n; }) >= 2);
 }
 
 TEST("watchdog - a zero budget watches nothing", exclusive())
