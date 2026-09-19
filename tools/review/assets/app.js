@@ -1229,7 +1229,10 @@ function shortcuts(event) {
     if (document.activeElement) document.activeElement.blur();
     return;
   }
-  const typingNow = ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName);
+  // A clicked radio or checkbox keeps focus, and a letter typed there is still a shortcut rather than text.
+  const active = document.activeElement;
+  const typingNow = active.tagName === "TEXTAREA"
+    || (active.tagName === "INPUT" && !["radio", "checkbox"].includes(active.type));
   if (typingNow) {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       const form = document.activeElement.closest(".ask-form");

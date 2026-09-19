@@ -122,6 +122,9 @@ Three things follow, and they are what a reviewer should actually do differently
   That is the first action of the review, not a later verification step.
   On this repo it usually means: the author is on Linux and only vulkan compiles there, so a Windows box compiles dx12 — or the reverse.
   Everything the author's machine could not parse is where the defects are, and [the `#ifdef` arm rule](#the-ifdef-arm-this-machine-does-not-compile-is-where-the-defect-is) is the general form of it.
+- **wasm is one of those platforms on every box.**
+  The emsdk carries its own node, and `dev.py test --preset emscripten-… --emsdk-path <emsdk>` builds and runs the suite with it.
+  "No browser here" is not a reason to review wasm code by reading alone.
 - **Land the fixes rather than filing them.**
   A compile error is not a finding — it is work, and it is yours.
   File the *pattern* if there is one worth naming, and put the fix in the working tree.
@@ -138,6 +141,19 @@ The review's first ask proposed adding a Windows CI gate, and the answer settled
 ```raw
 CI was red anyways. your task here is to fix the compilation as well. no process changes needed. (it is by design)
 ```
+
+pr-184 is the case for the "run" half rather than the "compile" half.
+The branch was green on its author's four Windows presets, and carried a Linux thread-stack reporter its own header said had never run.
+Running it here, on Linux, found four defects no reading had.
+The manual hang test was undefined behaviour, and the hang-path dump could wait forever.
+The recording it wrote was overwritten a moment later, and every thread's stack came back empty.
+The same review first read the wasm half instead of running it, and the maintainer's answer was:
+
+```raw
+but why did you not build wasm? i thought we have node and deno on this system
+```
+
+Once built, the wasm threads preset reproduced the per-worker stack limit that the review had until then only argued from a standalone probe.
 
 **The corollary for the review artifact:** a red CI is not something to report back, because the author already knows.
 What is worth reporting is what the failures turned out to *be*, which is a different and much shorter list.
