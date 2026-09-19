@@ -105,6 +105,14 @@ A hunk that only moved — a comment removed above it — has its claim miss the
 Superseding it would be permanent, because a superseded change is never re-pointed and a known digest is never re-created, so its lines would stay unaccounted however often `ingest` ran.
 In a `land-changes` review that mark is the evidence: the fix landed, so the hunk it was about is gone.
 
+## Absorbing into a bulk claim
+
+A bulk claim can arrive after the hunks under it already have ids — the ordinary case after `sync`, which ingests the new range hunk by hunk before anyone can say "this merge is main's".
+Left alone, each of those hunks stays live and undischarged, asking to be read, beside a claim that says it need not be.
+So a bulk claim **absorbs** every live change lying wholly inside it that no entry discharges yet: the change records `absorbed_by`, and drops out of the live set.
+A change an entry already discharges keeps its id, because someone decided about it and a later bulk does not overrule that.
+Absorbed is not superseded: the content is still in the range, so it is not evidence that a fix landed.
+
 ## Re-pointing
 
 A change that survives the move keeps its id and gets a **new claim**.
@@ -115,8 +123,8 @@ Gate 1 would then read red for a review that is complete, and nothing could clea
 so every later `ingest` reuses the row rather than replacing it.
 
 So reuse re-points, in `ingest` as well as in `sync`, and both report how many claims moved.
-A superseded change is left alone, since it records what *was* claimed and re-pointing it would bring it back to
-life.
+A superseded or absorbed change is left alone, since it records what *was* claimed and re-pointing it would bring it
+back to life.
 
 ## Discharged is not the same as read
 

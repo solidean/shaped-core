@@ -53,6 +53,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     except review.GitError as e:
         ctx.die(str(e))
 
+    # Before the head moves, since a round with no recorded head was read at one this review has stood at.
+    # Also where a review started by an older tool gets its early rounds' heads back, so it runs even when nothing moved.
+    backfilled = not args.dry_run and cfg.backfill_round_heads(review.heads_at_finalize(paths.log))
+    if backfilled:
+        review.save(paths.config, cfg)
+        print("recovered the heads earlier rounds were read at, from the log")
+
     if new_head == cfg.head and new_base == cfg.base:
         print(f"{cfg.name} is already at {cfg.head[:12]}; nothing moved")
         return
